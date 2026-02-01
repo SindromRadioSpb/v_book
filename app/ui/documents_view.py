@@ -594,3 +594,29 @@ class DocumentsView(QWidget):
                 self.import_files(file_paths)
             else:
                 show_info(self, "Info", "No supported files in drop")
+
+    def highlight_document(self, doc_id: int, sentence_id: int = None):
+        """
+        Highlight and select a specific document in the table (M6 - Concordance navigation).
+
+        Args:
+            doc_id: Document ID to highlight
+            sentence_id: Optional sentence ID (for future text viewer enhancement)
+        """
+        logger.info(f"Highlighting document {doc_id}")
+
+        # Find the row with this doc_id
+        for row in range(self.docs_table.rowCount()):
+            item = self.docs_table.item(row, 0)  # ID column
+            if item and int(item.text()) == doc_id:
+                # Select this row
+                self.docs_table.selectRow(row)
+                # Scroll to make it visible
+                self.docs_table.scrollToItem(item)
+                logger.info(f"Selected document row {row}")
+
+                # TODO M6: Optionally open text viewer and highlight sentence_id
+                # For now, just selecting the row is sufficient
+                break
+        else:
+            logger.warning(f"Document {doc_id} not found in table")

@@ -277,3 +277,76 @@ class TermExtractionWorker(QThread):
                 f"{error[:200]}\n\n"
                 f"Check the logs for more details."
             )
+
+
+class ConcordanceSearchWorker(QThread):
+    """Worker thread for concordance/KWIC search (M6)."""
+
+    results_ready = pyqtSignal(list)  # List of KWICResult
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        project_id: int,
+        query: str,
+        limit: int = 100,
+        offset: int = 0,
+        is_phrase: bool = False,
+        normalize: bool = True
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.query = query
+        self.limit = limit
+        self.offset = offset
+        self.is_phrase = is_phrase
+        self.normalize = normalize
+
+    def run(self):
+        """Run the concordance search."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.concordance_service import ConcordanceService
+
+            db_service = DBService.get_instance()
+            concordance_service = ConcordanceService()
+
+            with db_service.get_session() as session:
+                results = concordance_service.search_concordance(
+                    session,
+                    self.project_id,
+                    self.query,
+                    limit=self.limit,
+                    offset=self.offset,
+                    is_phrase=self.is_phrase,
+                    normalize=self.normalize
+                )
+
+            self.results_ready.emit(results)
+
+        except Exception as e:
+            logger.exception("Concordance search worker error")
+            error_msg = self._make_user_friendly_error(str(e))
+            self.error.emit(error_msg)
+
+    def _make_user_friendly_error(self, error: str) -> str:
+        """Convert technical error to user-friendly message."""
+        error_lower = error.lower()
+
+        if "fts" in error_lower or "match" in error_lower:
+            return (
+                "Search query syntax error.\n\n"
+                "Please check your search query and try again.\n"
+                "For phrases, use quotes: \"exact phrase\""
+            )
+        elif "database" in error_lower or "locked" in error_lower:
+            return (
+                "Database error occurred during search.\n\n"
+                "Please try again. If the problem persists, restart the application."
+            )
+        else:
+            return (
+                f"An error occurred during search:\n\n"
+                f"{error[:200]}\n\n"
+                f"Please try again or check the logs for details."
+            )

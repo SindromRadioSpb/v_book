@@ -69,9 +69,12 @@ class ProjectView(QWidget):
         self.terms_view = TermsView(self.project_id)
         self.tabs.addTab(self.terms_view, "Terms")
 
-        # Concordance tab
+        # Concordance tab (M6)
         self.concordance_view = ConcordanceView(self.project_id)
         self.tabs.addTab(self.concordance_view, "Concordance")
+
+        # Connect concordance navigation to documents view
+        self.concordance_view.navigate_to_document.connect(self.on_navigate_to_document)
 
         # Term Cards tab
         self.term_card_view = TermCardView(self.project_id)
@@ -101,3 +104,19 @@ class ProjectView(QWidget):
     def on_back_clicked(self):
         """Handle back button."""
         self.back_to_dashboard.emit()
+
+    def on_navigate_to_document(self, doc_id: int, sentence_id: int):
+        """
+        Navigate to a specific document from concordance results (M6).
+
+        Args:
+            doc_id: Document ID to show
+            sentence_id: Sentence ID to highlight
+        """
+        logger.info(f"Navigating to document {doc_id}, sentence {sentence_id}")
+
+        # Switch to Documents tab
+        self.tabs.setCurrentWidget(self.documents_view)
+
+        # Highlight the document
+        self.documents_view.highlight_document(doc_id, sentence_id)
