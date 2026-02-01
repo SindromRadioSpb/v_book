@@ -248,7 +248,14 @@ python -m app.main
 
 ## 🚀 M5.2: LLR/Dice Scoring and Ranking Presets (COMPLETE)
 
-**Status:** ✅ IMPLEMENTED & TESTED
+**Status:** ✅ IMPLEMENTED & TESTED & PRODUCTION-READY
+
+### Bug Fix (2026-02-01): Standalone Articles
+- **Problem:** Canonicalizer couldn't handle articles as separate tokens (e.g., "ה ספר")
+- **Root cause:** `strip_prefixes()` requires 3+ chars, so single "ה" token wasn't removed
+- **Solution:** Filter standalone articles/prefixes BEFORE strip_prefixes in canonicalize_hebrew_term
+- **Result:** "בית ה ספר" now clusters correctly with "בית הספר" and "בית ספר"
+- **Tests:** 12 edge cases tested, all passing
 
 ### Features
 - **Association Measures:**

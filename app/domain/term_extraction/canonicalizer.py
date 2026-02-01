@@ -83,9 +83,10 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
     1. Strip nikud and cantillation
     2. Normalize quotes
     3. Normalize whitespace
-    4. Strip prefixes from each token
-    5. Join with underscores
-    6. Lowercase (for case-insensitive clustering)
+    4. Filter standalone articles/prefixes (M5.2 fix)
+    5. Strip prefixes from each remaining token
+    6. Join with underscores
+    7. Lowercase (for case-insensitive clustering)
 
     If lemma_phrase is available, use it as primary key (already normalized).
 
@@ -101,6 +102,8 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
         "בבית ספר" → "בית_ספר"
         "לבית הספר" → "בית_ספר"
         "בית הספר" → "בית_ספר"
+        "בית ה ספר" → "בית_ספר" (standalone article removed)
+        "ה ספר" → "ספר" (standalone article removed)
     """
     # Prefer lemma_phrase if available (most normalized)
     if lemma_phrase:
@@ -118,14 +121,24 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
     # 3. Normalize whitespace
     text = normalize_whitespace(text)
 
-    # 4. Strip prefixes from each token
+    # 4. Split into tokens
     tokens = text.split()
+
+    # 5. Filter standalone articles/prefixes (M5.2 fix for separate articles)
+    # Remove single-char tokens that are prefixes (e.g., "ה", "ב", "ל")
+    # This handles cases where tokenizer separates articles: "ה ספר" → ["ה", "ספר"]
+    tokens = [
+        tok for tok in tokens
+        if not (len(tok) == 1 and tok in HEBREW_PREFIXES)
+    ]
+
+    # 6. Strip prefixes from each remaining token
     tokens = [strip_prefixes(tok) for tok in tokens]
 
-    # 5. Join with underscores (deterministic separator)
+    # 7. Join with underscores (deterministic separator)
     canonical = '_'.join(tokens)
 
-    # 6. Lowercase for case-insensitive clustering (Hebrew doesn't have case, but good practice)
+    # 8. Lowercase for case-insensitive clustering (Hebrew doesn't have case, but good practice)
     canonical = canonical.lower()
 
     # Remove any remaining special chars (punctuation)
