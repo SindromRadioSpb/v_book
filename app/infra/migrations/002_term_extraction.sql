@@ -10,15 +10,8 @@
 -- 1. Extend ngram table for M5+
 -- =================================================================
 
--- Add columns to ngram (if not exists pattern)
--- SQLite doesn't support IF NOT EXISTS for ALTER TABLE, but we handle it via migration tracking
-
-ALTER TABLE ngram ADD COLUMN he_canonical TEXT;
-ALTER TABLE ngram ADD COLUMN lemma_phrase TEXT;
-ALTER TABLE ngram ADD COLUMN source_kind TEXT DEFAULT 'ngram' CHECK(source_kind IN ('ngram', 'np'));
-
--- Update constraint to allow n=2,3,4,5
--- SQLite can't alter constraints, so we recreate via temp table
+-- Update constraint to allow n=2,3,4,5 and add new columns
+-- SQLite can't alter constraints or add columns conditionally, so we recreate via temp table
 CREATE TABLE ngram_new (
   ngram_id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES dict_project(project_id) ON DELETE CASCADE,
