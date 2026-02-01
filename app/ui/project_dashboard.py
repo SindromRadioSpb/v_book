@@ -15,7 +15,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from app.domain.dto import ProjectStats
 from app.ui.models_qt import ProjectListModel
-from app.ui.dialogs import CreateProjectDialog, show_error
+from app.ui.dialogs import CreateProjectDialog, show_error, show_info
 from app.services.project_service import ProjectService
 from app.services.db_service import DBService
 
@@ -48,6 +48,12 @@ class ProjectDashboard(QWidget):
         create_btn.clicked.connect(self.on_create_project)
         header_layout.addWidget(create_btn)
 
+        self.delete_btn = QPushButton("Delete Project")
+        self.delete_btn.clicked.connect(self.on_delete_project)
+        self.delete_btn.setEnabled(False)  # Disabled until selection
+        self.delete_btn.setStyleSheet("QPushButton { color: #d32f2f; }")  # Red text
+        header_layout.addWidget(self.delete_btn)
+
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.load_projects)
         header_layout.addWidget(refresh_btn)
@@ -60,6 +66,7 @@ class ProjectDashboard(QWidget):
         self.project_table.setModel(self.project_model)
         self.project_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.project_table.doubleClicked.connect(self.on_project_double_clicked)
+        self.project_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         # Auto-resize columns
         header = self.project_table.horizontalHeader()
@@ -136,3 +143,78 @@ class ProjectDashboard(QWidget):
                 project_id = self.project_model.projects[row].project_id
                 logger.info(f"Opening project: {project_id}")
                 self.project_selected.emit(project_id)
+
+    def on_selection_changed(self):
+        """Handle selection change - enable/disable Delete button."""
+        selected_indexes = self.project_table.selectedIndexes()
+        self.delete_btn.setEnabled(len(selected_indexes) > 0)
+
+    def on_delete_project(self):
+        """Handle delete project button."""
+        selected_indexes = self.project_table.selectedIndexes()
+        if not selected_indexes:
+            return
+
+        row = selected_indexes[0].row()
+        if row >= len(self.project_model.projects):
+            return
+
+        project = self.project_model.projects[row]
+
+        # Confirmation dialog
+        from PyQt6.QtWidgets import QMessageBox
+
+        reply = QMessageBox.warning(
+            self,
+            "Delete Project",
+            f"Are you sure you want to delete project '{project.name}'?\n\n"
+            f"This will permanently delete:\n"
+            f"- All documents ({project.total_docs})\n"
+            f"- All lemmas ({project.total_lemmas})\n"
+            f"- All n-grams ({project.total_ngrams})\n"
+            f"- All statistics and analysis\n\n"
+            f"This action cannot be undone!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,  # Default to No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Perform deletion
+        try:
+            with self.project_service.db_service.get_session() as session:
+                report = self.project_service.delete_project(session, project.project_id)
+
+                if report.success:
+                    # Show success message
+                    show_info(
+                        self,
+                        "Project Deleted",
+                        f"Project '{report.project_name}' deleted successfully.\n\n"
+                        f"Removed:\n"
+                        f"- {report.corpora_deleted} corpora\n"
+                        f"- {report.documents_deleted} documents\n"
+                        f"- {report.sentences_deleted} sentences\n"
+                        f"- {report.lemmas_deleted} lemmas\n"
+                        f"- {report.ngrams_deleted} n-grams\n"
+                        f"- {report.term_cards_deleted} term cards",
+                    )
+
+                    # Refresh project list
+                    self.load_projects()
+
+                else:
+                    show_error(
+                        self,
+                        "Deletion Failed",
+                        f"Failed to delete project: {report.error_message}",
+                    )
+
+        except Exception as e:
+            logger.exception("Failed to delete project")
+            show_error(
+                self,
+                "Error",
+                f"An error occurred while deleting the project:\n\n{str(e)[:200]}",
+            )

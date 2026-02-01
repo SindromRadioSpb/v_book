@@ -53,3 +53,19 @@ class KWICResult:
     left_context: str
     match: str
     right_context: str
+
+
+@dataclass
+class DeleteReport:
+    """Report of project deletion results."""
+
+    project_id: int
+    project_name: str
+    corpora_deleted: int
+    documents_deleted: int
+    sentences_deleted: int
+    lemmas_deleted: int
+    ngrams_deleted: int
+    term_cards_deleted: int
+    success: bool
+    error_message: Optional[str] = None

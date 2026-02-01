@@ -2,10 +2,20 @@
 import logging
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload
 
-from app.infra.sa_models import DictProject, Library, SourceCorpus
+from app.infra.sa_models import (
+    DictProject,
+    Library,
+    SourceCorpus,
+    SourceDocument,
+    DocumentSentence,
+    Lemma,
+    Ngram,
+    TermCard,
+)
+from app.domain.dto import DeleteReport
 from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
@@ -73,15 +83,126 @@ class ProjectService:
         logger.info(f"Created project: {name} (ID: {project.project_id})")
         return project
 
-    def delete_project(self, session: Session, project_id: int) -> bool:
-        """Delete a project."""
-        project = self.get_project(session, project_id)
-        if project:
+    def delete_project(self, session: Session, project_id: int) -> DeleteReport:
+        """
+        Delete a project and all its related data.
+
+        This will cascade delete:
+        - All corpora
+        - All documents (and their text, sentences)
+        - All lemmas and statistics
+        - All n-grams and statistics
+        - All term cards
+        - All FTS entries
+
+        Args:
+            session: Database session
+            project_id: Project ID to delete
+
+        Returns:
+            DeleteReport with counts of deleted items
+        """
+        try:
+            # Get project
+            project = self.get_project(session, project_id)
+            if not project:
+                return DeleteReport(
+                    project_id=project_id,
+                    project_name="Unknown",
+                    corpora_deleted=0,
+                    documents_deleted=0,
+                    sentences_deleted=0,
+                    lemmas_deleted=0,
+                    ngrams_deleted=0,
+                    term_cards_deleted=0,
+                    success=False,
+                    error_message="Project not found",
+                )
+
+            project_name = project.name
+
+            logger.info(f"Deleting project: {project_name} (ID: {project_id})")
+
+            # Count what will be deleted (for reporting)
+            corpora_count = session.execute(
+                select(func.count()).select_from(SourceCorpus).where(
+                    SourceCorpus.project_id == project_id
+                )
+            ).scalar()
+
+            # Count documents across all corpora
+            documents_count = session.execute(
+                select(func.count())
+                .select_from(SourceDocument)
+                .join(SourceCorpus)
+                .where(SourceCorpus.project_id == project_id)
+            ).scalar()
+
+            # Count sentences across all documents
+            sentences_count = session.execute(
+                select(func.count())
+                .select_from(DocumentSentence)
+                .join(SourceDocument)
+                .join(SourceCorpus)
+                .where(SourceCorpus.project_id == project_id)
+            ).scalar()
+
+            lemmas_count = session.execute(
+                select(func.count()).select_from(Lemma).where(
+                    Lemma.project_id == project_id
+                )
+            ).scalar()
+
+            ngrams_count = session.execute(
+                select(func.count()).select_from(Ngram).where(
+                    Ngram.project_id == project_id
+                )
+            ).scalar()
+
+            term_cards_count = session.execute(
+                select(func.count()).select_from(TermCard).where(
+                    TermCard.project_id == project_id
+                )
+            ).scalar()
+
+            # Delete project (CASCADE will handle all related data)
             session.delete(project)
             session.commit()
-            logger.info(f"Deleted project ID: {project_id}")
-            return True
-        return False
+
+            logger.info(
+                f"Deleted project '{project_name}': "
+                f"{corpora_count} corpora, {documents_count} documents, "
+                f"{sentences_count} sentences, {lemmas_count} lemmas, "
+                f"{ngrams_count} ngrams, {term_cards_count} term cards"
+            )
+
+            return DeleteReport(
+                project_id=project_id,
+                project_name=project_name,
+                corpora_deleted=corpora_count,
+                documents_deleted=documents_count,
+                sentences_deleted=sentences_count,
+                lemmas_deleted=lemmas_count,
+                ngrams_deleted=ngrams_count,
+                term_cards_deleted=term_cards_count,
+                success=True,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to delete project {project_id}")
+            session.rollback()
+            return DeleteReport(
+                project_id=project_id,
+                project_name=project.name if project else "Unknown",
+                corpora_deleted=0,
+                documents_deleted=0,
+                sentences_deleted=0,
+                lemmas_deleted=0,
+                ngrams_deleted=0,
+                term_cards_deleted=0,
+                success=False,
+                error_message=str(e),
+            )
 
     def get_project_corpora(self, session: Session, project_id: int) -> List[SourceCorpus]:
         """Get all corpora for a project."""

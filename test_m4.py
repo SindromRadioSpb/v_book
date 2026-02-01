@@ -282,16 +282,150 @@ def test_reprocessing():
                 pass
 
 
+def test_project_deletion():
+    """Test complete project deletion."""
+    from app.services.db_service import DBService
+    from app.services.project_service import ProjectService
+    from app.services.ingest_service import IngestService
+    from app.services.process_service import ProcessService
+    from pathlib import Path
+    from sqlalchemy import select, func
+    from app.infra.sa_models import DictProject, SourceCorpus, SourceDocument, Lemma
+
+    print("\n" + "="*60)
+    print("TEST 3: Project Deletion")
+    print("="*60)
+
+    # Initialize
+    test_db_path = Path("test_m4.db")
+    if test_db_path.exists():
+        test_db_path.unlink()
+
+    DBService.initialize(test_db_path)
+    db_service = DBService.get_instance()
+    project_service = ProjectService()
+    ingest_service = IngestService()
+    process_service = ProcessService()
+
+    # Create test file
+    test_dir = Path("test_data_m4")
+    test_dir.mkdir(exist_ok=True)
+
+    file1 = test_dir / "doc1.txt"
+    file1.write_text("בית ספר גדול. בית ספר קטן.", encoding='utf-8')
+
+    try:
+        with db_service.get_session() as session:
+            # Create project
+            project = project_service.create_project(session, "Test Project", "Test deletion")
+            corpus = project_service.get_default_corpus(session, project.project_id)
+
+            # Import and process document
+            doc1 = ingest_service.import_document(session, corpus.corpus_id, file1)
+            process_service.process_document(session, doc1.doc_id, use_mock=True)
+
+            print(f"✅ Created project with 1 processed document")
+
+            # Count items before deletion
+            docs_before = session.execute(
+                select(func.count()).select_from(SourceDocument)
+            ).scalar()
+
+            lemmas_before = session.execute(
+                select(func.count()).select_from(Lemma).where(
+                    Lemma.project_id == project.project_id
+                )
+            ).scalar()
+
+            print(f"\n📊 Before deletion:")
+            print(f"   Documents: {docs_before}")
+            print(f"   Lemmas: {lemmas_before}")
+
+            # Delete project
+            print(f"\n🗑️  Deleting project...")
+            report = project_service.delete_project(session, project.project_id)
+
+            if not report.success:
+                print(f"❌ Deletion failed: {report.error_message}")
+                return False
+
+            print(f"✅ Project deleted")
+            print(f"\n📊 Deletion report:")
+            print(f"   Corpora: {report.corpora_deleted}")
+            print(f"   Documents: {report.documents_deleted}")
+            print(f"   Sentences: {report.sentences_deleted}")
+            print(f"   Lemmas: {report.lemmas_deleted}")
+
+            # Verify project is gone
+            project_exists = session.execute(
+                select(func.count()).select_from(DictProject).where(
+                    DictProject.project_id == project.project_id
+                )
+            ).scalar()
+
+            # Verify documents are gone
+            docs_after = session.execute(
+                select(func.count()).select_from(SourceDocument)
+            ).scalar()
+
+            # Verify lemmas are gone
+            lemmas_after = session.execute(
+                select(func.count()).select_from(Lemma).where(
+                    Lemma.project_id == project.project_id
+                )
+            ).scalar()
+
+            print(f"\n🔍 Verification:")
+            print(f"   Project exists: {project_exists == 1}")
+            print(f"   Documents remaining: {docs_after}")
+            print(f"   Lemmas remaining: {lemmas_after}")
+
+            # Create another project to ensure DB is still functional
+            project2 = project_service.create_project(session, "Test Project 2", "Verify DB works")
+            print(f"\n✅ Created new project after deletion (DB is healthy)")
+
+            if project_exists == 0 and docs_after == 0 and lemmas_after == 0:
+                print(f"✅ Project deletion PASSED!")
+                return True
+            else:
+                print(f"❌ Project deletion FAILED!")
+                print(f"   Project should not exist: {project_exists}")
+                print(f"   Documents should be 0: {docs_after}")
+                print(f"   Lemmas should be 0: {lemmas_after}")
+                return False
+
+    finally:
+        # Cleanup
+        import shutil
+        import time
+
+        if test_dir.exists():
+            shutil.rmtree(test_dir)
+
+        # Close database connections before deleting file
+        DBService.shutdown()
+        time.sleep(0.1)
+
+        # Try to delete database file
+        if test_db_path.exists():
+            try:
+                test_db_path.unlink()
+            except PermissionError:
+                logger.warning(f"Could not delete {test_db_path} (file locked)")
+                pass
+
+
 if __name__ == "__main__":
     print("="*60)
-    print("M4 TEST SUITE: Live Update")
+    print("M4 TEST SUITE: Live Update + Project Deletion")
     print("="*60)
 
     test1_pass = test_delta_statistics()
     test2_pass = test_reprocessing()
+    test3_pass = test_project_deletion()
 
     print("\n" + "="*60)
-    if test1_pass and test2_pass:
+    if test1_pass and test2_pass and test3_pass:
         print("✅ ALL M4 TESTS PASSED")
     else:
         print("❌ SOME M4 TESTS FAILED")
@@ -299,6 +433,8 @@ if __name__ == "__main__":
             print("   - Delta statistics: FAILED")
         if not test2_pass:
             print("   - Re-processing: FAILED")
+        if not test3_pass:
+            print("   - Project deletion: FAILED")
     print("="*60)
 
-    sys.exit(0 if (test1_pass and test2_pass) else 1)
+    sys.exit(0 if (test1_pass and test2_pass and test3_pass) else 1)
