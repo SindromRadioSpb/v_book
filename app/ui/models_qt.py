@@ -1,0 +1,56 @@
+"""Qt models for tables and lists."""
+import logging
+from typing import List
+
+from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
+from app.domain.dto import ProjectStats
+
+logger = logging.getLogger(__name__)
+
+
+class ProjectListModel(QAbstractTableModel):
+    """Model for project list table."""
+
+    def __init__(self, projects: List[ProjectStats] = None):
+        super().__init__()
+        self.projects = projects or []
+        self.headers = ["ID", "Name", "Documents", "Processed", "Lemmas", "N-grams"]
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.projects)
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+
+        project = self.projects[index.row()]
+        col = index.column()
+
+        if col == 0:
+            return str(project.project_id)
+        elif col == 1:
+            return project.name
+        elif col == 2:
+            return str(project.total_docs)
+        elif col == 3:
+            return str(project.processed_docs)
+        elif col == 4:
+            return str(project.total_lemmas)
+        elif col == 5:
+            return str(project.total_ngrams)
+
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def update_projects(self, projects: List[ProjectStats]):
+        """Update the project list."""
+        self.beginResetModel()
+        self.projects = projects
+        self.endResetModel()

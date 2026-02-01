@@ -1,0 +1,74 @@
+2026-02-01 02:13:46 - root - INFO - Logging initialized
+2026-02-01 02:13:46 - app.infra.db - INFO - Database initialized at J:/Project_Vibe/V_book/test_data/test.db
+2026-02-01 02:13:46 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 02:13:46 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 02:14:45 - root - INFO - Logging initialized
+2026-02-01 02:14:45 - app.infra.db - INFO - Database initialized at J:/Project_Vibe/V_book/test_data/test.db
+2026-02-01 02:14:45 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 02:14:45 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 02:15:09 - root - INFO - Logging initialized
+2026-02-01 02:15:09 - app.infra.db - INFO - Database initialized at J:/Project_Vibe/V_book/test_data/test.db
+2026-02-01 02:15:10 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 02:15:10 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 02:15:29 - root - INFO - Logging initialized
+2026-02-01 02:15:29 - app.infra.db - INFO - Database initialized at J:/Project_Vibe/V_book/test_data/test.db
+2026-02-01 02:15:29 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 02:15:29 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 02:15:30 - app.infra.db - INFO - Migration 001_init.sql applied successfully
+2026-02-01 02:15:30 - app.services.db_service - INFO - DBService initialized
+2026-02-01 02:15:30 - app.services.project_service - INFO - Created default library
+2026-02-01 02:15:30 - app.services.project_service - INFO - Created project: Test Project 1 (ID: 1)
+2026-02-01 02:15:30 - app.infra.db - INFO - Database connections closed
+2026-02-01 02:15:30 - app.services.db_service - INFO - DBService shutdown
+2026-02-01 02:51:38 - root - INFO - Logging initialized
+2026-02-01 02:51:39 - app.infra.db - INFO - Database initialized at J:\Project_Vibe\V_book\test_data\test.db
+2026-02-01 02:51:39 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 02:51:39 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 02:51:40 - app.infra.db - INFO - Migration 001_init.sql applied successfully
+2026-02-01 02:51:40 - app.services.db_service - INFO - DBService initialized
+2026-02-01 02:51:40 - app.services.project_service - INFO - Created default library
+2026-02-01 02:51:40 - app.services.project_service - INFO - Created project: Test Project 1 (ID: 1)
+2026-02-01 02:51:40 - app.infra.db - INFO - Database connections closed
+2026-02-01 02:51:40 - app.services.db_service - INFO - DBService shutdown
+2026-02-01 03:29:07 - root - INFO - Logging initialized
+2026-02-01 03:29:07 - app.infra.db - INFO - Database initialized at J:/Project_Vibe/V_book/test_data/test_m2.db
+2026-02-01 03:29:07 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 03:29:07 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 03:29:08 - app.infra.db - INFO - Migration 001_init.sql applied successfully
+2026-02-01 03:29:08 - app.services.db_service - INFO - DBService initialized
+2026-02-01 03:29:08 - app.services.project_service - INFO - Created default library
+2026-02-01 03:29:09 - app.services.project_service - INFO - Created project: M2 Test Project (ID: 1)
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - IngestService initialized
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - File hash: d8a9d7551404316c89035403a3dfd28aac4bb75a2d81ee516ce7537145e3ea90
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - Extracting text from: J:/Project_Vibe/V_book/test_data/sample_files/sample_hebrew.txt
+2026-02-01 03:29:09 - app.infra.extractors.txt_extractor - INFO - Extracting text from TXT: J:/Project_Vibe/V_book/test_data/sample_files/sample_hebrew.txt
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - Imported document: sample_hebrew.txt (ID: 1, size: 119 chars, OCR: False)
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - File hash: 285e4821a44c3861e432a602f480117e919d2c9cd301c2362cf7050626233b4c
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - Extracting text from: J:/Project_Vibe/V_book/test_data/sample_files/sample_text2.txt
+2026-02-01 03:29:09 - app.infra.extractors.txt_extractor - INFO - Extracting text from TXT: J:/Project_Vibe/V_book/test_data/sample_files/sample_text2.txt
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - Imported document: sample_text2.txt (ID: 2, size: 50 chars, OCR: False)
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - File hash: d8a9d7551404316c89035403a3dfd28aac4bb75a2d81ee516ce7537145e3ea90
+2026-02-01 03:29:09 - app.services.ingest_service - INFO - Document already exists: sample_hebrew.txt (ID: 1)
+2026-02-01 03:29:09 - app.infra.db - INFO - Database connections closed
+2026-02-01 03:29:09 - app.services.db_service - INFO - DBService shutdown
+2026-02-01 03:41:36 - root - INFO - Logging initialized
+2026-02-01 03:41:36 - app.infra.db - INFO - Database initialized at J:\Project_Vibe\V_book\test_data\test_m2.db
+2026-02-01 03:41:36 - app.infra.db - INFO - Current schema version: 0
+2026-02-01 03:41:36 - app.infra.db - INFO - Applying migration: 001_init.sql
+2026-02-01 03:41:37 - app.infra.db - INFO - Migration 001_init.sql applied successfully
+2026-02-01 03:41:37 - app.services.db_service - INFO - DBService initialized
+2026-02-01 03:41:37 - app.services.project_service - INFO - Created default library
+2026-02-01 03:41:37 - app.services.project_service - INFO - Created project: M2 Test Project (ID: 1)
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - IngestService initialized
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - File hash: d8a9d7551404316c89035403a3dfd28aac4bb75a2d81ee516ce7537145e3ea90
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - Extracting text from: J:\Project_Vibe\V_book\test_data\sample_files\sample_hebrew.txt
+2026-02-01 03:41:37 - app.infra.extractors.txt_extractor - INFO - Extracting text from TXT: J:\Project_Vibe\V_book\test_data\sample_files\sample_hebrew.txt
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - Imported document: sample_hebrew.txt (ID: 1, size: 119 chars, OCR: False)
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - File hash: 285e4821a44c3861e432a602f480117e919d2c9cd301c2362cf7050626233b4c
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - Extracting text from: J:\Project_Vibe\V_book\test_data\sample_files\sample_text2.txt
+2026-02-01 03:41:37 - app.infra.extractors.txt_extractor - INFO - Extracting text from TXT: J:\Project_Vibe\V_book\test_data\sample_files\sample_text2.txt
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - Imported document: sample_text2.txt (ID: 2, size: 50 chars, OCR: False)
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - File hash: d8a9d7551404316c89035403a3dfd28aac4bb75a2d81ee516ce7537145e3ea90
+2026-02-01 03:41:37 - app.services.ingest_service - INFO - Document already exists: sample_hebrew.txt (ID: 1)
+2026-02-01 03:41:37 - app.infra.db - INFO - Database connections closed
+2026-02-01 03:41:37 - app.services.db_service - INFO - DBService shutdown

@@ -1,0 +1,7 @@
+שלום עולם
+זהו קובץ טקסט לדוגמה.
+הוא מכיל טקסט בעברית.
+
+Hello World
+This is a sample text file.
+It contains Hebrew text.
