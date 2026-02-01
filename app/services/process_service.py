@@ -222,9 +222,11 @@ class ProcessService:
                 lemma_sample_sentences,
             )
 
-            # Update document status
+            # Update document status and metrics (Migration 003)
             doc.status = 'processed'
             doc.processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            doc.sentence_count = len(sentences)
+            doc.token_count = total_tokens
             session.commit()
 
             # Update run

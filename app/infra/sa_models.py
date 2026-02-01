@@ -120,6 +120,10 @@ class SourceDocument(Base):
     status = Column(String, nullable=False, default="imported")
     error_message = Column(Text)
 
+    # NLP processing metrics (Migration 003)
+    sentence_count = Column(Integer, nullable=False, default=0)
+    token_count = Column(Integer, nullable=False, default=0)
+
     __table_args__ = (
         UniqueConstraint("corpus_id", "sha256", name="uq_document_corpus_sha256"),
         CheckConstraint(

@@ -236,6 +236,66 @@ def test_beit_sefer_clustering():
                 print(f"❌ FAILED: Preset ordering not deterministic")
                 return False
 
+            # FIX #1: Verify no garbage terms (standalone function tokens)
+            print(f"\n🔍 Checking for garbage terms (FIX #1)...")
+
+            # Check all clusters - none should have standalone function tokens as representative
+            from app.domain.term_extraction.canonicalizer import has_standalone_function_tokens
+
+            garbage_terms = []
+            for cluster in clusters:
+                if has_standalone_function_tokens(cluster.representative_he):
+                    garbage_terms.append(cluster.representative_he)
+
+            if garbage_terms:
+                print(f"❌ FAILED: Found garbage terms with standalone function tokens:")
+                for term in garbage_terms:
+                    print(f"   '{term}'")
+                return False
+            else:
+                print(f"✅ No garbage terms found (no standalone function tokens)")
+
+            # FIX #2: Verify search normalization works
+            print(f"\n🔍 Testing search normalization (FIX #2)...")
+
+            # Search for "בית הספר" (with article on second word)
+            # Should find "בית_ספר" cluster (lemma without article)
+            search_results = term_service.list_term_clusters(
+                session,
+                project.project_id,
+                top_n=20,
+                preset='freq',
+                search="בית הספר"  # With article
+            )
+
+            found_beit_sefer = False
+            for cluster in search_results:
+                if 'בית' in cluster.canonical_key and 'ספר' in cluster.canonical_key:
+                    found_beit_sefer = True
+                    print(f"✅ Search 'בית הספר' found cluster: {cluster.canonical_key}")
+                    break
+
+            if not found_beit_sefer:
+                print(f"❌ FAILED: Search 'בית הספר' did not find 'בית_ספר' cluster")
+                print(f"   Search returned {len(search_results)} clusters:")
+                for cluster in search_results[:5]:
+                    print(f"   - {cluster.representative_he} (canonical: {cluster.canonical_key})")
+                return False
+
+            # Also test article-only search
+            search_results_2 = term_service.list_term_clusters(
+                session,
+                project.project_id,
+                top_n=20,
+                preset='freq',
+                search="ספר"  # Just "book" without article
+            )
+
+            if len(search_results_2) > 0:
+                print(f"✅ Search 'ספר' found {len(search_results_2)} cluster(s)")
+            else:
+                print(f"⚠️  Search 'ספר' found no clusters (may be due to test data)")
+
             # Test re-running (determinism)
             print(f"\n🔁 Re-running extraction to test determinism...")
             report2 = term_service.extract_terms_for_project(

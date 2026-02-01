@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from collections import Counter
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
@@ -28,6 +28,71 @@ from app.services.db_service import DBService
 from app.infra.nlp_engines.base import NLPEngine
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_search_query(query: str) -> List[str]:
+    """
+    Normalize search query and generate search variants for Hebrew term matching.
+
+    Generates multiple normalized variants to handle:
+    - Definite article variations ("הספר" vs "ספר")
+    - Space vs underscore separators ("בית ספר" vs "בית_ספר")
+    - Attached vs standalone articles ("בית הספר" vs "בית ה ספר")
+
+    Args:
+        query: Raw search query from user
+
+    Returns:
+        List of normalized search variants
+
+    Examples:
+        "בית הספר" → ["בית הספר", "בית ספר", "בית_הספר", "בית_ספר"]
+        "הספר" → ["הספר", "ספר", "הספר", "ספר"]
+    """
+    from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+
+    if not query or not query.strip():
+        return []
+
+    # Basic normalization
+    normalized = strip_nikud(query)
+    normalized = strip_cantillation(normalized)
+    normalized = normalize_whitespace(normalized)
+    normalized = normalized.strip()
+
+    variants = set()
+
+    # Original normalized query
+    variants.add(normalized)
+
+    # Underscore version (for canonical_key matching)
+    underscore_version = normalized.replace(' ', '_')
+    variants.add(underscore_version)
+
+    # Article-stripped variants
+    # Remove standalone "ה" tokens
+    tokens = normalized.split()
+    filtered_tokens = [t for t in tokens if t != 'ה']
+    if filtered_tokens != tokens:
+        article_stripped = ' '.join(filtered_tokens)
+        variants.add(article_stripped)
+        variants.add(article_stripped.replace(' ', '_'))
+
+    # Also strip attached articles (הX → X) for each token
+    article_stripped_tokens = []
+    for token in tokens:
+        if token.startswith('ה') and len(token) > 1:
+            # Strip leading ה
+            article_stripped_tokens.append(token[1:])
+        else:
+            article_stripped_tokens.append(token)
+
+    if article_stripped_tokens != tokens:
+        article_stripped_2 = ' '.join(article_stripped_tokens)
+        variants.add(article_stripped_2)
+        variants.add(article_stripped_2.replace(' ', '_'))
+
+    return list(variants)
 
 
 class TermExtractionService:
@@ -611,7 +676,29 @@ class TermExtractionService:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
 
         if search:
-            stmt = stmt.where(TermCluster.representative_he.contains(search))
+            # Generate normalized search variants (handles articles, spaces, etc.)
+            search_variants = normalize_search_query(search)
+
+            if search_variants:
+                # Build OR clause across multiple fields and variants
+                search_conditions = []
+
+                for variant in search_variants:
+                    # Match against representative Hebrew term (display)
+                    search_conditions.append(TermCluster.representative_he.contains(variant))
+
+                    # Match against canonical key (normalized form)
+                    search_conditions.append(TermCluster.canonical_key.contains(variant))
+
+                    # Match against representative lemma (normalized lemma)
+                    if TermCluster.representative_lemma is not None:
+                        search_conditions.append(TermCluster.representative_lemma.contains(variant))
+
+                # Combine with OR (match any variant in any field)
+                stmt = stmt.where(or_(*search_conditions))
+            else:
+                # Fallback: original behavior if normalization fails
+                stmt = stmt.where(TermCluster.representative_he.contains(search))
 
         # Apply ranking preset
         if preset == 'freq':

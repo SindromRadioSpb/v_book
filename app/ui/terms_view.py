@@ -38,13 +38,13 @@ class TermsView(QWidget):
         header_layout.addWidget(title)
         header_layout.addStretch()
 
-        extract_btn = QPushButton("Extract Terms")
-        extract_btn.clicked.connect(self.on_extract)
-        header_layout.addWidget(extract_btn)
+        self.extract_btn = QPushButton("Extract Terms")
+        self.extract_btn.clicked.connect(self.on_extract)
+        header_layout.addWidget(self.extract_btn)
 
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.load_terms)
-        header_layout.addWidget(refresh_btn)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.load_terms)
+        header_layout.addWidget(self.refresh_btn)
 
         layout.addLayout(header_layout)
 
@@ -196,12 +196,16 @@ class TermsView(QWidget):
         np_max_len = self.np_max_len_spin.value()
         min_freq = self.min_freq_spin.value()
 
+        # Disable UI during extraction (prevent QThread lifecycle issues)
+        self.extract_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+
         # Show progress
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate
         self.status_label.setText("Extracting terms...")
 
-        # Create and start worker
+        # Create and start worker (keep strong reference to prevent GC)
         self.extract_worker = TermExtractionWorker(
             project_id=self.project_id,
             enable_ngrams=True,
@@ -225,7 +229,15 @@ class TermsView(QWidget):
     def on_extract_finished(self, report):
         """Handle extraction completion."""
         self.progress_bar.setVisible(False)
-        self.extract_worker = None
+
+        # Re-enable UI
+        self.extract_btn.setEnabled(True)
+        self.refresh_btn.setEnabled(True)
+
+        # Clean up worker properly
+        if self.extract_worker:
+            self.extract_worker.deleteLater()
+            self.extract_worker = None
 
         if report.success:
             msg = f"Term extraction successful!\n\n"
@@ -241,5 +253,14 @@ class TermsView(QWidget):
     def on_extract_error(self, error_msg: str):
         """Handle extraction error."""
         self.progress_bar.setVisible(False)
-        self.extract_worker = None
+
+        # Re-enable UI
+        self.extract_btn.setEnabled(True)
+        self.refresh_btn.setEnabled(True)
+
+        # Clean up worker properly
+        if self.extract_worker:
+            self.extract_worker.deleteLater()
+            self.extract_worker = None
+
         show_error(self, "Error", error_msg)

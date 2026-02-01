@@ -168,27 +168,71 @@ def get_cluster_key(surface_text: str, lemma_phrase: Optional[str] = None) -> st
     return canonicalize_hebrew_term(surface_text, lemma_phrase)
 
 
+def has_standalone_function_tokens(surface_text: str) -> bool:
+    """
+    Check if surface text contains standalone function tokens.
+
+    Standalone function tokens are single-character tokens separated by spaces
+    that match Hebrew prefixes/articles (ה, ב, ל, כ, ו, מ, ש).
+
+    Args:
+        surface_text: Surface form to check (e.g., "ה ספר", "בית ספר")
+
+    Returns:
+        True if contains standalone function tokens
+
+    Examples:
+        "ה ספר" → True (standalone article "ה")
+        "ב בית" → True (standalone prefix "ב")
+        "בית הספר" → False (article attached)
+        "בית ספר" → False (no function tokens)
+    """
+    # Check for space-separated single-char tokens that are prefixes
+    tokens = surface_text.split()
+
+    for token in tokens:
+        if len(token) == 1 and token in HEBREW_PREFIXES:
+            return True
+
+    return False
+
+
 def choose_representative_term(terms: list[dict]) -> str:
     """
     Choose representative term from cluster members.
 
-    Prefers:
-    1. Highest frequency
-    2. Shortest surface form (if frequencies equal)
-    3. Alphabetically first (if still tied)
+    Prefers (in order):
+    1. Terms without standalone function tokens (no "ה ספר", "ב בית", etc.)
+    2. Highest frequency
+    3. Shortest surface form (if frequencies equal)
+    4. Alphabetically first (if still tied)
 
     Args:
         terms: List of dicts with 'surface_text' and 'freq_abs' keys
 
     Returns:
         Representative surface_text
+
+    Examples:
+        Input: [{"surface_text": "ה ספר", "freq_abs": 2}, {"surface_text": "הספר", "freq_abs": 1}]
+        Output: "הספר" (no standalone function tokens, even though lower freq)
     """
     if not terms:
         return ""
 
-    # Sort by: freq desc, length asc, alphabetically
+    # FIRST: Filter out terms with standalone function tokens (garbage terms)
+    valid_terms = [
+        t for t in terms
+        if not has_standalone_function_tokens(t['surface_text'])
+    ]
+
+    # If all terms are invalid (edge case), fall back to original list
+    # (better to show something than nothing, but this shouldn't happen)
+    candidates = valid_terms if valid_terms else terms
+
+    # THEN: Sort by freq desc, length asc, alphabetically
     sorted_terms = sorted(
-        terms,
+        candidates,
         key=lambda t: (-t.get('freq_abs', 0), len(t['surface_text']), t['surface_text'])
     )
 

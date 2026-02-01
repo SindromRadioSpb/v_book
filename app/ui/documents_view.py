@@ -132,9 +132,9 @@ class DocumentsView(QWidget):
 
         # Documents table
         self.docs_table = QTableWidget()
-        self.docs_table.setColumnCount(6)
+        self.docs_table.setColumnCount(8)  # Added Sentences and Tokens columns
         self.docs_table.setHorizontalHeaderLabels([
-            "ID", "File Name", "Size (KB)", "Status", "Imported", "Path"
+            "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens", "Imported", "Path"
         ])
         self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.docs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -245,8 +245,11 @@ class DocumentsView(QWidget):
                     size_kb = doc.file_size_bytes / 1024
                     self.docs_table.setItem(row, 2, QTableWidgetItem(f"{size_kb:.1f}"))
                     self.docs_table.setItem(row, 3, QTableWidgetItem(doc.status))
-                    self.docs_table.setItem(row, 4, QTableWidgetItem(doc.imported_at[:19]))
-                    self.docs_table.setItem(row, 5, QTableWidgetItem(doc.file_path))
+                    # NLP metrics (Migration 003)
+                    self.docs_table.setItem(row, 4, QTableWidgetItem(str(doc.sentence_count)))
+                    self.docs_table.setItem(row, 5, QTableWidgetItem(str(doc.token_count)))
+                    self.docs_table.setItem(row, 6, QTableWidgetItem(doc.imported_at[:19]))
+                    self.docs_table.setItem(row, 7, QTableWidgetItem(doc.file_path))
 
                 self.status_label.setText(f"Total documents: {len(docs)}")
 

@@ -97,6 +97,7 @@ def test_m3():
             file_path=sample_file,
             use_ocr=False
         )
+        doc_id = doc.doc_id  # Save for later use
         print(f"   [+] Document imported (ID: {doc.doc_id})")
         print(f"       - Status: {doc.status}\n")
 
@@ -126,8 +127,25 @@ def test_m3():
             print("   [X] Document processing failed\n")
             return False
 
+    # Check document NLP metrics (Migration 003)
+    print("5.5. Checking document NLP metrics...")
+    with process_service.db_service.get_session() as session:
+        from app.infra.sa_models import SourceDocument
+
+        doc = session.get(SourceDocument, doc_id)
+
+        if doc.sentence_count > 0:
+            print(f"   [+] Sentence count: {doc.sentence_count}")
+        else:
+            print(f"   [X] WARNING: sentence_count is 0 (expected > 0)")
+
+        if doc.token_count > 0:
+            print(f"   [+] Token count: {doc.token_count}")
+        else:
+            print(f"   [X] WARNING: token_count is 0 (expected > 0)")
+
     # Check sentences
-    print("6. Checking stored sentences...")
+    print("\n6. Checking stored sentences...")
     with process_service.db_service.get_session() as session:
         from sqlalchemy import select
         from app.infra.sa_models import DocumentSentence
