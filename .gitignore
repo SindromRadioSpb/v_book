@@ -38,6 +38,8 @@ test_data/logs/
 test_data/*.db
 test_data/*.db-*
 test_m4.db
+test_m4*.db
+test_m4*.db-*
 *.db-journal
 *.db-wal
 *.db-shm
