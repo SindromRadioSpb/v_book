@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(venv/bin/pip install:*)",
-      "Bash(venv/bin/python:*)"
+      "Bash(venv/bin/python:*)",
+      "Bash(venv/bin/pip uninstall:*)"
     ]
   }
 }

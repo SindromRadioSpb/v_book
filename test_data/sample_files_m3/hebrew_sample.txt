@@ -1,0 +1,9 @@
+שלום עולם! זהו טקסט לדוגמה בעברית.
+הטקסט הזה מכיל כמה משפטים פשוטים.
+בית הספר נמצא בעיר.
+הילדים לומדים בבית הספר.
+המורה מלמדת עברית ומתמטיקה.
+
+Hello world! This is a sample text in Hebrew.
+This text contains a few simple sentences.
+The school is located in the city.
