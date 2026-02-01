@@ -21,6 +21,7 @@ from app.infra.sa_models import (
 )
 from app.domain.dto import ExtractReport, ClusterStats
 from app.domain.term_extraction.ngram_extractor import extract_ngrams_from_sentence
+from app.domain.term_extraction.np_extractor import extract_np_chunks_from_sentence
 from app.domain.term_extraction.association_measures import compute_all_measures
 from app.domain.term_extraction.canonicalizer import get_cluster_key, choose_representative_term
 from app.services.db_service import DBService
@@ -72,19 +73,23 @@ class TermExtractionService:
         project_id: int,
         *,
         enable_ngrams: bool = True,
+        include_np: bool = False,
         min_freq: int = 2,
         ngram_ns: Tuple[int, ...] = (2, 3),
+        np_max_len: int = 5,
         overwrite: bool = True,
     ) -> ExtractReport:
         """
-        Extract terms (n-grams + clustering) for a project.
+        Extract terms (n-grams + NP chunks + clustering) for a project.
 
         Args:
             session: DB session
             project_id: Project ID
             enable_ngrams: Extract n-grams
+            include_np: Extract NP chunks (M5.3)
             min_freq: Minimum frequency threshold
             ngram_ns: N-gram sizes (default: bigrams + trigrams)
+            np_max_len: Maximum NP chunk length (2-5, default 5)
             overwrite: Clear existing ngrams before extraction
 
         Returns:
@@ -109,6 +114,13 @@ class TermExtractionService:
                     session, project_id, ngram_ns, min_freq
                 )
 
+            # Extract NP chunks (M5.3)
+            np_chunks_extracted = 0
+            if include_np:
+                np_chunks_extracted = self._extract_np_chunks(
+                    session, project_id, np_max_len, min_freq
+                )
+
             # Cluster terms
             clusters_created = self._cluster_terms(session, project_id)
 
@@ -116,12 +128,13 @@ class TermExtractionService:
 
             logger.info(
                 f"Extraction complete: {ngrams_extracted} ngrams, "
-                f"{clusters_created} clusters"
+                f"{np_chunks_extracted} NP chunks, {clusters_created} clusters"
             )
 
             return ExtractReport(
                 project_id=project_id,
                 ngrams_extracted=ngrams_extracted,
+                np_chunks_extracted=np_chunks_extracted,
                 clusters_created=clusters_created,
                 success=True,
             )
@@ -132,6 +145,7 @@ class TermExtractionService:
             return ExtractReport(
                 project_id=project_id,
                 ngrams_extracted=0,
+                np_chunks_extracted=0,
                 clusters_created=0,
                 success=False,
                 error_message=str(e),
@@ -308,6 +322,143 @@ class TermExtractionService:
         logger.info(f"Stored {ngrams_stored} n-grams (min_freq={min_freq})")
         return ngrams_stored
 
+    def _extract_np_chunks(
+        self,
+        session: Session,
+        project_id: int,
+        np_max_len: int,
+        min_freq: int
+    ) -> int:
+        """
+        Extract NP chunks from processed documents (M5.3).
+
+        Returns:
+            Number of unique NP chunks extracted
+        """
+        logger.info(f"Extracting NP chunks (max_len={np_max_len})")
+
+        # Get all processed documents for project
+        stmt = select(SourceDocument).join(SourceCorpus).where(
+            and_(
+                SourceCorpus.project_id == project_id,
+                SourceDocument.status == 'processed'
+            )
+        )
+        docs = session.execute(stmt).scalars().all()
+
+        if not docs:
+            logger.warning(f"No processed documents found for project {project_id}")
+            return 0
+
+        # Get project to check which engine was used
+        project = session.get(DictProject, project_id)
+        use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
+
+        # Get NLP engine for re-parsing sentences
+        engine = self.get_nlp_engine(use_mock=use_mock)
+
+        # Extract NP chunks from all sentences
+        np_counts = Counter()
+        np_doc_freq = Counter()
+        np_meta = {}  # (surface, n) -> {lemma_phrase, pos_pattern}
+
+        for doc in docs:
+            # Get sentences for document
+            sent_stmt = select(DocumentSentence).where(
+                DocumentSentence.doc_id == doc.doc_id
+            )
+            sentences = session.execute(sent_stmt).scalars().all()
+
+            # Track NPs seen in this doc
+            doc_nps_seen = set()
+
+            for sent in sentences:
+                # Re-parse sentence with NLP to get tokens
+                nlp_sentences = engine.process(sent.text)
+
+                if not nlp_sentences:
+                    continue
+
+                # Process each NLP sentence (usually one)
+                for nlp_sent in nlp_sentences:
+                    # Convert NLP tokens to format expected by extractor
+                    tokens = [
+                        {
+                            'text': token.text,
+                            'lemma': token.lemma,
+                            'pos': token.pos,
+                        }
+                        for token in nlp_sent.tokens
+                    ]
+
+                    # Extract NP chunks from this sentence
+                    np_chunks = extract_np_chunks_from_sentence(
+                        tokens, min_len=2, max_len=np_max_len
+                    )
+
+                    for np in np_chunks:
+                        key = (np['surface_text'], np['n'])
+
+                        # Count frequency
+                        np_counts[key] += 1
+
+                        # Track document frequency
+                        if key not in doc_nps_seen:
+                            np_doc_freq[key] += 1
+                            doc_nps_seen.add(key)
+
+                        # Store metadata
+                        if key not in np_meta:
+                            np_meta[key] = {
+                                'lemma_phrase': np['lemma_phrase'],
+                                'pos_pattern': np['pos_pattern'],
+                            }
+
+        # Filter by min_freq and store in DB
+        nps_stored = 0
+        for (surface_text, n), freq in np_counts.items():
+            if freq < min_freq:
+                continue
+
+            meta = np_meta[(surface_text, n)]
+
+            # Get canonical key
+            canonical_key = get_cluster_key(surface_text, meta['lemma_phrase'])
+
+            # Create Ngram with source_kind='np'
+            ngram = Ngram(
+                project_id=project_id,
+                n=n,
+                surface_text=surface_text,
+                he_canonical=canonical_key,
+                lemma_phrase=meta['lemma_phrase'],
+                source_kind='np',
+                pos_pattern=meta['pos_pattern'],
+            )
+            session.add(ngram)
+            session.flush()  # Get ngram_id
+
+            # Create NgramProjectStat (no association measures for NPs)
+            doc_freq = np_doc_freq[(surface_text, n)]
+
+            stat = NgramProjectStat(
+                project_id=project_id,
+                ngram_id=ngram.ngram_id,
+                freq_abs=freq,
+                doc_freq=doc_freq,
+                pmi_cache=None,  # Not computed for NP chunks
+                tscore_cache=None,
+                llr_cache=None,
+                dice_cache=None,
+            )
+            session.add(stat)
+
+            nps_stored += 1
+
+        session.flush()
+        logger.info(f"Stored {nps_stored} NP chunks (min_freq={min_freq})")
+        return nps_stored
+
     def _cluster_terms(self, session: Session, project_id: int) -> int:
         """
         Cluster terms by canonical key (M5.1).
@@ -429,6 +580,7 @@ class TermExtractionService:
         search: Optional[str] = None,
         preset: str = 'freq',
         min_freq: Optional[int] = None,
+        source_filter: Optional[str] = None,
     ) -> List[ClusterStats]:
         """
         List term clusters with filtering and ranking.
@@ -440,11 +592,19 @@ class TermExtractionService:
             search: Search term (LIKE)
             preset: Ranking preset ('freq', 'strong', 'balanced')
             min_freq: Minimum frequency filter
+            source_filter: Source kind filter ('ngram', 'np', or None for all)
 
         Returns:
             List of ClusterStats
         """
         stmt = select(TermCluster).where(TermCluster.project_id == project_id)
+
+        # Filter by source kind if specified (M5.3)
+        if source_filter:
+            # Join with members to filter by source_kind
+            stmt = stmt.join(TermClusterMember).join(Ngram).where(
+                Ngram.source_kind == source_filter
+            ).distinct()
 
         # Apply filters
         if min_freq:

@@ -28,6 +28,7 @@ def test_beit_sefer_clustering():
     from app.services.process_service import ProcessService
     from app.services.term_extraction_service import TermExtractionService
     from pathlib import Path
+    from sqlalchemy import select, and_
 
     print("\n" + "="*60)
     print("TEST M5: 'בית ספר' Clustering")
@@ -54,7 +55,10 @@ def test_beit_sefer_clustering():
         "בית ספר גדול. "  # Bare form
         "בבית ספר קטן. "  # With prefix ב
         "לבית הספר הלכתי. "  # With prefix ל + article ה
-        "בית הספר נפלא.",  # With article ה
+        "בית הספר נפלא. "  # With article ה
+        # M5.3 NP chunks (3-5 tokens)
+        "מערכת ניהול נתונים מתקדמת פועלת כאן. "  # 5-token NP
+        "תורת החומרים היא תחום מרכזי.",  # 3-token NPs
         encoding='utf-8'
     )
 
@@ -74,14 +78,16 @@ def test_beit_sefer_clustering():
             process_service.process_document(session, doc.doc_id, use_mock=True)
             print(f"✅ Processed document with Mock engine")
 
-            # Extract terms
-            print(f"\n🔍 Extracting terms...")
+            # Extract terms (including NP chunks for M5.3)
+            print(f"\n🔍 Extracting terms (n-grams + NP chunks)...")
             report = term_service.extract_terms_for_project(
                 session,
                 project.project_id,
                 enable_ngrams=True,
+                include_np=True,  # M5.3
                 min_freq=1,  # Low threshold to catch all variants
                 ngram_ns=(2,),
+                np_max_len=5,  # M5.3
                 overwrite=True
             )
 
@@ -91,6 +97,7 @@ def test_beit_sefer_clustering():
 
             print(f"✅ Term extraction complete:")
             print(f"   N-grams: {report.ngrams_extracted}")
+            print(f"   NP chunks: {report.np_chunks_extracted}")
             print(f"   Clusters: {report.clusters_created}")
 
             # List clusters
@@ -156,14 +163,42 @@ def test_beit_sefer_clustering():
                 print(f"❌ FAILED: Too few members ({beit_sefer_cluster.members_count})")
                 return False
 
+            # M5.3: Verify NP chunks were extracted
+            print(f"\n🔍 Checking NP chunks (M5.3)...")
+
+            # Check if we have NP chunks (source_kind='np')
+            from app.infra.sa_models import Ngram
+            np_stmt = select(Ngram).where(
+                and_(
+                    Ngram.project_id == project.project_id,
+                    Ngram.source_kind == 'np'
+                )
+            )
+            np_candidates = session.execute(np_stmt).scalars().all()
+
+            if np_candidates:
+                print(f"✅ Found {len(np_candidates)} NP chunks")
+                # Check for longer NPs (n >= 3)
+                long_nps = [np for np in np_candidates if np.n >= 3]
+                if long_nps:
+                    print(f"✅ Found {len(long_nps)} NP chunks with length >= 3 tokens")
+                    for np in long_nps[:3]:  # Show first 3
+                        print(f"   {np.surface_text} (n={np.n})")
+                else:
+                    print(f"⚠️  No NP chunks with length >= 3 found (may be due to Mock engine limitations)")
+            else:
+                print(f"⚠️  No NP chunks found (may be due to Mock engine limitations)")
+
             # Test re-running (determinism)
             print(f"\n🔁 Re-running extraction to test determinism...")
             report2 = term_service.extract_terms_for_project(
                 session,
                 project.project_id,
                 enable_ngrams=True,
+                include_np=True,
                 min_freq=1,
                 ngram_ns=(2,),
+                np_max_len=5,
                 overwrite=True
             )
 

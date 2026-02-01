@@ -77,6 +77,7 @@ class ExtractReport:
 
     project_id: int
     ngrams_extracted: int
+    np_chunks_extracted: int  # M5.3: NP chunks
     clusters_created: int
     success: bool
     error_message: Optional[str] = None

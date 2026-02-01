@@ -3,7 +3,7 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QSpinBox,
-    QComboBox, QLineEdit, QHeaderView, QProgressBar
+    QComboBox, QLineEdit, QHeaderView, QProgressBar, QCheckBox
 )
 from PyQt6.QtCore import Qt
 
@@ -48,8 +48,36 @@ class TermsView(QWidget):
 
         layout.addLayout(header_layout)
 
+        # Extraction controls (M5.3)
+        extract_controls_layout = QHBoxLayout()
+
+        self.include_np_checkbox = QCheckBox("Include NP chunks")
+        self.include_np_checkbox.setChecked(True)
+        extract_controls_layout.addWidget(self.include_np_checkbox)
+
+        extract_controls_layout.addWidget(QLabel("Max NP length:"))
+        self.np_max_len_spin = QSpinBox()
+        self.np_max_len_spin.setRange(2, 5)
+        self.np_max_len_spin.setValue(5)
+        extract_controls_layout.addWidget(self.np_max_len_spin)
+
+        extract_controls_layout.addWidget(QLabel("Min freq:"))
+        self.min_freq_spin = QSpinBox()
+        self.min_freq_spin.setRange(1, 100)
+        self.min_freq_spin.setValue(2)
+        extract_controls_layout.addWidget(self.min_freq_spin)
+
+        extract_controls_layout.addStretch()
+        layout.addLayout(extract_controls_layout)
+
         # Filters
         filter_layout = QHBoxLayout()
+
+        filter_layout.addWidget(QLabel("Source:"))
+        self.source_combo = QComboBox()
+        self.source_combo.addItems(["All", "N-grams", "NP"])
+        self.source_combo.currentTextChanged.connect(self.load_terms)
+        filter_layout.addWidget(self.source_combo)
 
         filter_layout.addWidget(QLabel("Top:"))
         self.top_n_spin = QSpinBox()
@@ -106,13 +134,22 @@ class TermsView(QWidget):
             preset = self.preset_combo.currentText()
             search = self.search_edit.text().strip() or None
 
+            # Map source combo to filter value (M5.3)
+            source_text = self.source_combo.currentText()
+            source_filter = None
+            if source_text == "N-grams":
+                source_filter = "ngram"
+            elif source_text == "NP":
+                source_filter = "np"
+
             with self.db_service.get_session() as session:
                 clusters = self.term_service.list_term_clusters(
                     session,
                     self.project_id,
                     top_n=top_n,
                     preset=preset,
-                    search=search
+                    search=search,
+                    source_filter=source_filter
                 )
 
                 self.terms_table.setRowCount(len(clusters))
@@ -141,11 +178,12 @@ class TermsView(QWidget):
     def on_extract(self):
         """Handle extract terms button."""
         from PyQt6.QtWidgets import QMessageBox
+        from app.ui.workers import TermExtractionWorker
 
         reply = QMessageBox.question(
             self,
             "Extract Terms",
-            "Extract terms (n-grams + clustering) for this project?\n\n"
+            "Extract terms (n-grams + NP chunks + clustering) for this project?\n\n"
             "This may take a few minutes for large corpora.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -153,36 +191,55 @@ class TermsView(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # For now, run synchronously (can be converted to worker later)
-        try:
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setRange(0, 0)  # Indeterminate
+        # Get extraction parameters from UI
+        include_np = self.include_np_checkbox.isChecked()
+        np_max_len = self.np_max_len_spin.value()
+        min_freq = self.min_freq_spin.value()
 
-            with self.db_service.get_session() as session:
-                report = self.term_service.extract_terms_for_project(
-                    session,
-                    self.project_id,
-                    enable_ngrams=True,
-                    min_freq=2,
-                    ngram_ns=(2, 3),
-                    overwrite=True
-                )
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.status_label.setText("Extracting terms...")
 
-            self.progress_bar.setVisible(False)
+        # Create and start worker
+        self.extract_worker = TermExtractionWorker(
+            project_id=self.project_id,
+            enable_ngrams=True,
+            include_np=include_np,
+            min_freq=min_freq,
+            ngram_ns=(2, 3),
+            np_max_len=np_max_len,
+            overwrite=True,
+        )
 
-            if report.success:
-                show_info(
-                    self,
-                    "Extraction Complete",
-                    f"Term extraction successful!\n\n"
-                    f"N-grams: {report.ngrams_extracted}\n"
-                    f"Clusters: {report.clusters_created}"
-                )
-                self.load_terms()
-            else:
-                show_error(self, "Extraction Failed", report.error_message)
+        self.extract_worker.progress.connect(self.on_extract_progress)
+        self.extract_worker.finished.connect(self.on_extract_finished)
+        self.extract_worker.error.connect(self.on_extract_error)
 
-        except Exception as e:
-            self.progress_bar.setVisible(False)
-            logger.exception("Term extraction failed")
-            show_error(self, "Error", f"Term extraction failed: {e}")
+        self.extract_worker.start()
+
+    def on_extract_progress(self, message: str):
+        """Handle extraction progress updates."""
+        self.status_label.setText(message)
+
+    def on_extract_finished(self, report):
+        """Handle extraction completion."""
+        self.progress_bar.setVisible(False)
+        self.extract_worker = None
+
+        if report.success:
+            msg = f"Term extraction successful!\n\n"
+            msg += f"N-grams: {report.ngrams_extracted}\n"
+            msg += f"NP chunks: {report.np_chunks_extracted}\n"
+            msg += f"Clusters: {report.clusters_created}"
+
+            show_info(self, "Extraction Complete", msg)
+            self.load_terms()
+        else:
+            show_error(self, "Extraction Failed", report.error_message)
+
+    def on_extract_error(self, error_msg: str):
+        """Handle extraction error."""
+        self.progress_bar.setVisible(False)
+        self.extract_worker = None
+        show_error(self, "Error", error_msg)

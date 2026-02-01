@@ -1,7 +1,7 @@
 """Background worker threads."""
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -188,6 +188,92 @@ class ProcessWorker(QThread):
         else:
             return (
                 f"An error occurred during processing:\n\n"
+                f"{error[:200]}\n\n"
+                f"Check the logs for more details."
+            )
+
+
+class TermExtractionWorker(QThread):
+    """Worker thread for term extraction (M5.3)."""
+
+    progress = pyqtSignal(str)  # status message
+    finished = pyqtSignal(object)  # ExtractReport
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        project_id: int,
+        enable_ngrams: bool = True,
+        include_np: bool = False,
+        min_freq: int = 2,
+        ngram_ns: Tuple[int, ...] = (2, 3),
+        np_max_len: int = 5,
+        overwrite: bool = True,
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.enable_ngrams = enable_ngrams
+        self.include_np = include_np
+        self.min_freq = min_freq
+        self.ngram_ns = ngram_ns
+        self.np_max_len = np_max_len
+        self.overwrite = overwrite
+
+    def run(self):
+        """Run the extraction process."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.term_extraction_service import TermExtractionService
+
+            db_service = DBService.get_instance()
+            term_service = TermExtractionService()
+
+            # Emit progress updates
+            if self.enable_ngrams:
+                self.progress.emit("Extracting n-grams...")
+            if self.include_np:
+                self.progress.emit("Extracting NP chunks...")
+
+            with db_service.get_session() as session:
+                report = term_service.extract_terms_for_project(
+                    session,
+                    self.project_id,
+                    enable_ngrams=self.enable_ngrams,
+                    include_np=self.include_np,
+                    min_freq=self.min_freq,
+                    ngram_ns=self.ngram_ns,
+                    np_max_len=self.np_max_len,
+                    overwrite=self.overwrite,
+                )
+
+            self.progress.emit("Clustering terms...")
+            self.finished.emit(report)
+
+        except Exception as e:
+            logger.exception("Term extraction worker error")
+            error_msg = self._make_user_friendly_error(str(e))
+            self.error.emit(error_msg)
+
+    def _make_user_friendly_error(self, error: str) -> str:
+        """Convert technical error to user-friendly message."""
+        error_lower = error.lower()
+
+        if "rollback" in error_lower or "flush" in error_lower:
+            return (
+                "Database error occurred during term extraction.\n\n"
+                "This usually happens when:\n"
+                "- The database is locked by another process\n"
+                "- Terms are already being extracted\n\n"
+                "Please try again. If the problem persists, restart the application."
+            )
+        elif "memory" in error_lower:
+            return (
+                "Out of memory error.\n\n"
+                "Try reducing the corpus size or extracting fewer term types."
+            )
+        else:
+            return (
+                f"An error occurred during term extraction:\n\n"
                 f"{error[:200]}\n\n"
                 f"Check the logs for more details."
             )

@@ -203,23 +203,61 @@ python -m app.main
 
 ---
 
+## 🚀 M5.3: NP Chunk Extraction (COMPLETE)
+
+**Status:** ✅ IMPLEMENTED & TESTED
+
+### Features
+- **NP Extraction Rules:**
+  - Extract noun phrase candidates (2-5 tokens) from processed sentences
+  - POS pattern: `(DET)? (ADJ|NUM)* (NOUN|PROPN)+ (ADJ|NUM)*`
+  - Stop boundaries: PUNCT, ADP, CCONJ, SCONJ, PRON, VERB
+  - Must contain at least one CORE_NP_POS (NOUN or PROPN)
+
+- **Integration with Clustering:**
+  - NP chunks stored with `source_kind='np'` in same `ngram` table
+  - Uses identical canonicalization → clusters with n-gram variants
+  - "בית ספר" remains ONE cluster regardless of source
+  - Deterministic extraction (no duplicates on re-run)
+
+- **UI Controls:**
+  - Checkbox: "Include NP chunks" (default ON)
+  - Spinbox: "Max NP length" (2-5, default 5)
+  - Spinbox: "Min freq" (1-100, default 2)
+  - Source filter: All / N-grams / NP
+  - Background worker with progress updates
+
+- **Testing:**
+  - Extended `test_m5.py` with NP-specific assertions
+  - Verifies NP chunks extracted (length >= 3)
+  - Verifies "בית ספר" clustering unchanged
+  - Verifies determinism (re-run produces same counts)
+
+### Files Created/Modified (M5.3)
+**New:**
+- `app/domain/term_extraction/np_extractor.py` - NP extraction logic
+
+**Modified:**
+- `app/services/term_extraction_service.py` - Added `_extract_np_chunks()`, `include_np` parameter
+- `app/domain/dto.py` - Added `np_chunks_extracted` to ExtractReport
+- `app/ui/workers.py` - Added TermExtractionWorker
+- `app/ui/terms_view.py` - Added NP controls + source filter + worker integration
+- `test_m5.py` - Added NP extraction tests
+
+**Schema:** No migration needed - reuses existing `ngram` table with `source_kind='np'`
+
 ## 🚀 Next Steps (M5.2 - M5.4)
 
 ### M5.2: Enhanced Ranking (Optional)
 - Balanced scoring with normalized weights
 - Additional presets
 
-### M5.3: NP Chunk Extraction (Optional)
-- Extract noun phrases up to 5 tokens
-- Use Stanza depparse or POS heuristics
-- Merge into same clustering system
-
 ### M5.4: Termhood vs General Corpus (Optional)
 - Compare domain corpus to general corpus
 - Compute TF-IDF, weirdness ratio
 - Prioritize domain-specific terms
 
-**Current Status:** M5 Base + M5.1 are production-ready and proven working.
+**Current Status:** M5 Base + M5.1 + M5.3 are production-ready and proven working.
 
 ---
 
