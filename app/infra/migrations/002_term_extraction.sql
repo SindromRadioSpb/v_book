@@ -133,5 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_project_general ON dict_project(is_general_corpus
 -- No schema change needed - just insert clusters with kind='cluster' in service layer
 
 -- =================================================================
+-- Update schema version
+-- =================================================================
+
+UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
+
+-- =================================================================
 -- Migration complete
 -- =================================================================
