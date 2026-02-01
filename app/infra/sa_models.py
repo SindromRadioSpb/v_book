@@ -62,12 +62,18 @@ class DictProject(Base):
     mwe_min_tscore = Column(Float, nullable=False, default=2.0)
     mwe_max_n = Column(Integer, nullable=False, default=3)
 
+    # M5.4: General corpus support for termhood
+    is_general_corpus = Column(Integer, nullable=False, default=0)
+    general_corpus_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL"))
+
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
         UniqueConstraint("library_id", "name", name="uq_project_library_name"),
         CheckConstraint("mwe_max_n IN (2, 3)", name="ck_mwe_max_n"),
+        CheckConstraint("is_general_corpus IN (0, 1)", name="ck_is_general_corpus"),
+        Index("idx_project_general", "is_general_corpus"),
     )
 
     library = relationship("Library", back_populates="projects")
@@ -265,14 +271,20 @@ class Ngram(Base):
     project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
     n = Column(Integer, nullable=False)
     surface_text = Column(String, nullable=False)
+    he_canonical = Column(Text)  # M5: Canonical key for clustering
+    lemma_phrase = Column(Text)  # M5: Lemma representation
+    source_kind = Column(String, nullable=False, default="ngram")  # M5: 'ngram' or 'np'
     pattern_type = Column(String)
     pos_pattern = Column(String)
     created_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
-        CheckConstraint("n IN (2, 3)", name="ck_ngram_n"),
-        UniqueConstraint("project_id", "n", "surface_text", name="uq_ngram_project_n_surface"),
+        CheckConstraint("n IN (2, 3, 4, 5)", name="ck_ngram_n"),
+        CheckConstraint("source_kind IN ('ngram', 'np')", name="ck_ngram_source_kind"),
+        UniqueConstraint("project_id", "n", "surface_text", "source_kind", name="uq_ngram_project_n_surface"),
         Index("idx_ngram_project_surface", "project_id", "n", "surface_text"),
+        Index("idx_ngram_canonical", "project_id", "he_canonical"),
+        Index("idx_ngram_lemma_phrase", "project_id", "lemma_phrase"),
     )
 
 
@@ -308,6 +320,10 @@ class NgramProjectStat(Base):
     doc_freq = Column(Integer, nullable=False, default=0)
     pmi_cache = Column(Float)
     tscore_cache = Column(Float)
+    llr_cache = Column(Float)  # M5: Log-likelihood ratio
+    dice_cache = Column(Float)  # M5: Dice coefficient
+    tfidf = Column(Float)  # M5: TF-IDF score
+    weirdness = Column(Float)  # M5: Weirdness ratio vs general corpus
     sample_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
     updated_at = Column(String, nullable=False, default=utc_now)
 
@@ -315,6 +331,8 @@ class NgramProjectStat(Base):
         CheckConstraint("freq_abs >= 0", name="ck_ngram_proj_freq_abs"),
         CheckConstraint("doc_freq >= 0", name="ck_ngram_proj_doc_freq"),
         Index("idx_ngram_proj_freq", "project_id", "freq_abs", "ngram_id", postgresql_using="btree"),
+        Index("idx_ngram_stat_llr", "project_id", "llr_cache"),
+        Index("idx_ngram_stat_dice", "project_id", "dice_cache"),
     )
 
 
@@ -455,3 +473,53 @@ class TermSearch(Base):
     notes = Column(Text)
 
     __table_args__ = (CheckConstraint("kind IN ('lemma', 'ngram')", name="ck_term_search_kind"),)
+
+
+# -----------------------
+# Term Clusters (M5.1)
+# -----------------------
+
+
+class TermCluster(Base):
+    """Term cluster for canonicalized term grouping (M5.1)."""
+
+    __tablename__ = "term_cluster"
+
+    cluster_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+
+    canonical_key = Column(String, nullable=False)
+    representative_he = Column(Text, nullable=False)
+    representative_lemma = Column(Text)
+
+    freq_abs = Column(Integer, nullable=False, default=0)
+    doc_freq = Column(Integer, nullable=False, default=0)
+    members_count = Column(Integer, nullable=False, default=1)
+
+    best_pmi = Column(Float)
+    best_llr = Column(Float)
+    best_dice = Column(Float)
+    best_tscore = Column(Float)
+
+    tfidf = Column(Float)
+    weirdness = Column(Float)
+
+    source_kinds = Column(String)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "canonical_key", name="uq_cluster_canonical"),
+    )
+
+
+class TermClusterMember(Base):
+    """Term cluster membership (M5.1)."""
+
+    __tablename__ = "term_cluster_member"
+
+    cluster_id = Column(Integer, ForeignKey("term_cluster.cluster_id", ondelete="CASCADE"), primary_key=True)
+    ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
+
+    member_freq_abs = Column(Integer, nullable=False, default=0)
+    member_doc_freq = Column(Integer, nullable=False, default=0)

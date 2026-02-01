@@ -110,6 +110,13 @@ class ProcessService:
 
         # Start processor run
         engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
+
+        # Update project's NLP engine (for term extraction to use same engine)
+        project = session.get(DictProject, project_id)
+        if project:
+            project.nlp_engine = engine.get_name()
+            project.nlp_engine_version = engine.get_version()
+
         run = ProcessorRun(
             project_id=project_id,
             engine=engine.get_name(),

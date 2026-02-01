@@ -12,6 +12,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from app.ui.documents_view import DocumentsView
 from app.ui.dictionary_view import DictionaryView
+from app.ui.terms_view import TermsView
 from app.ui.concordance_view import ConcordanceView
 from app.ui.term_card_view import TermCardView
 from app.ui.export_view import ExportView
@@ -64,10 +65,9 @@ class ProjectView(QWidget):
         # Connect signals: when processing completes, refresh dictionary
         self.documents_view.processing_completed.connect(self.dictionary_view.refresh)
 
-        # MWE tab (M5)
-        mwe_placeholder = QLabel("MWE/Collocations tab (to be implemented in M5)")
-        mwe_placeholder.setStyleSheet("padding: 20px;")
-        self.tabs.addTab(mwe_placeholder, "MWE")
+        # Terms tab (M5: MWE + Clustering)
+        self.terms_view = TermsView(self.project_id)
+        self.tabs.addTab(self.terms_view, "Terms")
 
         # Concordance tab
         self.concordance_view = ConcordanceView(self.project_id)

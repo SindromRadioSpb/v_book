@@ -69,3 +69,31 @@ class DeleteReport:
     term_cards_deleted: int
     success: bool
     error_message: Optional[str] = None
+
+
+@dataclass
+class ExtractReport:
+    """Report of term extraction results (M5)."""
+
+    project_id: int
+    ngrams_extracted: int
+    clusters_created: int
+    success: bool
+    error_message: Optional[str] = None
+
+
+@dataclass
+class ClusterStats:
+    """Term cluster statistics (M5.1)."""
+
+    cluster_id: int
+    canonical_key: str
+    representative_he: str
+    representative_lemma: Optional[str]
+    freq_abs: int
+    doc_freq: int
+    members_count: int
+    best_pmi: Optional[float]
+    best_llr: Optional[float]
+    best_dice: Optional[float]
+    best_tscore: Optional[float]
