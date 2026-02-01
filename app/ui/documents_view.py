@@ -22,8 +22,8 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from app.services.db_service import DBService
 from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
-from app.ui.workers import IngestWorker
-from app.ui.dialogs import show_error, show_info
+from app.ui.workers import IngestWorker, ProcessWorker
+from app.ui.dialogs import show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class DocumentsView(QWidget):
         self.ingest_service = IngestService()
 
         self.current_worker = None
+        self.process_worker = None
 
         self.init_ui()
         self.load_corpus()
@@ -133,6 +134,11 @@ class DocumentsView(QWidget):
         # Action buttons
         action_layout = QHBoxLayout()
         action_layout.addStretch()
+
+        self.process_btn = QPushButton("Process with NLP")
+        self.process_btn.clicked.connect(self.on_process)
+        self.process_btn.setEnabled(False)
+        action_layout.addWidget(self.process_btn)
 
         self.view_text_btn = QPushButton("View Text")
         self.view_text_btn.clicked.connect(self.on_view_text)
@@ -294,8 +300,81 @@ class DocumentsView(QWidget):
     def on_selection_changed(self):
         """Handle table selection change."""
         has_selection = len(self.docs_table.selectedItems()) > 0
+        self.process_btn.setEnabled(has_selection)
         self.view_text_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
+
+    def on_process(self):
+        """Process selected documents with NLP."""
+        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        if not selected_rows:
+            return
+
+        # Get selected document IDs
+        doc_ids = []
+        for row in selected_rows:
+            doc_id = int(self.docs_table.item(row, 0).text())
+            doc_ids.append(doc_id)
+
+        if self.process_worker and self.process_worker.isRunning():
+            show_error(self, "Error", "Processing already in progress")
+            return
+
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Confirm Processing",
+            f"Process {len(doc_ids)} document(s) with NLP?\n\n"
+            "Note: Using Mock engine (rule-based).\n"
+            "For production accuracy, use Stanza in regular Windows Python.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Create worker
+            self.process_worker = ProcessWorker(
+                doc_ids=doc_ids,
+                use_mock=True  # Use Mock engine by default
+            )
+            self.process_worker.progress.connect(self.on_process_progress)
+            self.process_worker.finished.connect(self.on_process_finished)
+            self.process_worker.error.connect(self.on_process_error)
+
+            # Show progress
+            self.progress_bar.setMaximum(len(doc_ids))
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+
+            # Start worker
+            self.process_worker.start()
+
+    def on_process_progress(self, current: int, total: int, doc_name: str):
+        """Handle processing progress update."""
+        self.progress_bar.setValue(current)
+        self.status_label.setText(f"Processing {current}/{total}: {doc_name}")
+
+    def on_process_finished(self, success_count: int, error_count: int):
+        """Handle processing completion."""
+        self.progress_bar.setVisible(False)
+
+        self.status_label.setText(
+            f"Processing complete: {success_count} succeeded, {error_count} failed"
+        )
+
+        # Reload documents to show updated status
+        self.load_documents()
+
+        if error_count > 0:
+            show_warning(
+                self,
+                "Processing Warnings",
+                f"{error_count} document(s) failed to process. Check logs for details."
+            )
+
+    def on_process_error(self, error_msg: str):
+        """Handle processing error."""
+        self.progress_bar.setVisible(False)
+        show_error(self, "Processing Error", error_msg)
 
     def on_view_text(self):
         """View document text."""

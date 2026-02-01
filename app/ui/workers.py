@@ -75,3 +75,56 @@ class IngestWorker(QThread):
         except Exception as e:
             logger.exception("Ingest worker error")
             self.error.emit(str(e))
+
+
+class ProcessWorker(QThread):
+    """Worker thread for NLP document processing."""
+
+    progress = pyqtSignal(int, int, str)  # current, total, doc_name
+    finished = pyqtSignal(int, int)  # success_count, error_count
+    error = pyqtSignal(str)
+
+    def __init__(self, doc_ids: List[int], use_mock: bool = True):
+        super().__init__()
+        self.doc_ids = doc_ids
+        self.use_mock = use_mock
+
+    def run(self):
+        """Run the processing pipeline."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.process_service import ProcessService
+
+            db_service = DBService.get_instance()
+            process_service = ProcessService()
+
+            success_count = 0
+            error_count = 0
+
+            with db_service.get_session() as session:
+                for idx, doc_id in enumerate(self.doc_ids):
+                    # Get document name for progress
+                    from app.infra.sa_models import SourceDocument
+                    doc = session.get(SourceDocument, doc_id)
+                    doc_name = doc.file_name if doc else f"Doc {doc_id}"
+
+                    self.progress.emit(idx + 1, len(self.doc_ids), doc_name)
+
+                    # Process document
+                    success = process_service.process_document(
+                        session,
+                        doc_id,
+                        use_gpu=False,
+                        use_mock=self.use_mock
+                    )
+
+                    if success:
+                        success_count += 1
+                    else:
+                        error_count += 1
+
+            self.finished.emit(success_count, error_count)
+
+        except Exception as e:
+            logger.exception("Process worker error")
+            self.error.emit(str(e))
