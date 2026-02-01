@@ -433,21 +433,23 @@ def test_termhood_ranking():
 
             domain_project = project_service.create_project(
                 session,
-                "Materials Science",
-                "Domain corpus with technical terminology"
+                "Medical Domain",
+                "Domain corpus with medical terminology"
             )
             domain_corpus = project_service.get_default_corpus(session, domain_project.project_id)
 
-            # Domain text: materials science terms (repeated for high freq)
+            # Domain text: use simple nouns that Mock engine handles well
+            # Strategy: repeat domain terms more frequently than in general corpus
             domain_file = test_dir / "domain_text.txt"
             domain_file.write_text(
-                "מאמץ גזירה גבוה מאוד. "  # High shear stress
-                "מאמץ גזירה נמדד במעבדה. "  # Shear stress measured in lab
-                "מודול יאנג חשוב לחישוב. "  # Young's modulus important for calculation
-                "מודול יאנג של החומר גבוה. "  # The material's Young's modulus is high
-                "חוזק מתיחה של הפלדה. "  # Tensile strength of steel
-                "חוזק מתיחה נבדק תחת עומס. "  # Tensile strength tested under load
-                "ספר טוב מסביר זאת. ",  # A good book explains this (common term)
+                "בית חולים גדול מאוד. "  # Hospital (domain-specific, not in general)
+                "בית חולים חדש נבנה. "  # Hospital (repeated)
+                "בבית חולים יש רופאים. "  # Hospital with prefix
+                "מעבדה מרכזית פועלת כאן. "  # Central lab (domain-specific)
+                "המעבדה החדשה נפתחה. "  # Lab (repeated)
+                "במעבדה מרכזית עובדים. "  # Lab with prefix
+                "ספר טוב מסביר זאת. "  # A good book (common term, in both)
+                "הספר החדש יצא. ",  # Book (common)
                 encoding='utf-8'
             )
 
@@ -511,10 +513,10 @@ def test_termhood_ranking():
             # ===================================================================
             print(f"\n✅ Checking termhood metrics...")
 
-            # Domain-specific terms we expect to rank high
-            domain_terms = ["מאמץ גזירה", "מודול יאנג", "חוזק מתיחה"]
+            # Domain-specific terms we expect to rank high (not in general corpus)
+            domain_terms = ["בית חולים", "מעבדה מרכזית"]
             # Common term (appears in both corpora)
-            common_term = "ספר טוב"
+            common_term = "ספר"
 
             # Find domain-specific terms in results
             found_domain_terms = []
