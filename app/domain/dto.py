@@ -85,7 +85,7 @@ class ExtractReport:
 
 @dataclass
 class ClusterStats:
-    """Term cluster statistics (M5.1)."""
+    """Term cluster statistics (M5.1 + M5.4)."""
 
     cluster_id: int
     canonical_key: str
@@ -98,3 +98,7 @@ class ClusterStats:
     best_llr: Optional[float]
     best_dice: Optional[float]
     best_tscore: Optional[float]
+    # M5.4: Termhood metrics vs reference corpus
+    weirdness: Optional[float] = None
+    keyness_llr: Optional[float] = None
+    termhood_score: Optional[float] = None

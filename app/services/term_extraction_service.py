@@ -655,13 +655,30 @@ class TermExtractionService:
             project_id: Project ID
             top_n: Limit results
             search: Search term (LIKE)
-            preset: Ranking preset ('freq', 'strong', 'balanced')
+            preset: Ranking preset ('freq', 'strong', 'balanced', 'termhood')
             min_freq: Minimum frequency filter
             source_filter: Source kind filter ('ngram', 'np', or None for all)
 
         Returns:
             List of ClusterStats
         """
+        # M5.4: Termhood preset requires reference corpus
+        if preset == 'termhood':
+            reference_project_id = self.get_reference_project(session, project_id)
+            if reference_project_id:
+                return self._list_clusters_with_termhood(
+                    session,
+                    project_id,
+                    reference_project_id,
+                    top_n=top_n,
+                    search=search,
+                    min_freq=min_freq,
+                    source_filter=source_filter
+                )
+            else:
+                # No reference set - fall back to freq preset
+                logger.warning(f"Termhood preset requested but no reference project set for {project_id}")
+                preset = 'freq'
         stmt = select(TermCluster).where(TermCluster.project_id == project_id)
 
         # Filter by source kind if specified (M5.3)
@@ -775,3 +792,343 @@ class TermExtractionService:
             })
 
         return members
+
+    # ===================================================================
+    # M5.4: Termhood vs Reference Corpus
+    # ===================================================================
+
+    def set_reference_project(
+        self,
+        session: Session,
+        project_id: int,
+        reference_project_id: Optional[int]
+    ) -> None:
+        """
+        Set the reference (general) corpus for termhood comparison.
+
+        Args:
+            session: DB session
+            project_id: Domain project ID
+            reference_project_id: Reference project ID (or None to clear)
+        """
+        project = session.get(DictProject, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        project.general_corpus_id = reference_project_id
+        session.commit()
+        logger.info(f"Set reference project for {project_id}: {reference_project_id}")
+
+    def get_reference_project(self, session: Session, project_id: int) -> Optional[int]:
+        """
+        Get the reference (general) corpus ID for a project.
+
+        Args:
+            session: DB session
+            project_id: Project ID
+
+        Returns:
+            Reference project ID or None
+        """
+        project = session.get(DictProject, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        return project.general_corpus_id
+
+    def list_projects(self, session: Session) -> List[Tuple[int, str]]:
+        """
+        List all projects for reference selection.
+
+        Args:
+            session: DB session
+
+        Returns:
+            List of (project_id, name) tuples
+        """
+        stmt = select(DictProject.project_id, DictProject.name).order_by(
+            DictProject.name
+        )
+        results = session.execute(stmt).all()
+        return [(r[0], r[1]) for r in results]
+
+    def _get_total_cluster_tokens(self, session: Session, project_id: int) -> int:
+        """
+        Get total tokens in all clusters for a project (N_d or N_r).
+
+        This is the sum of freq_abs across all clusters.
+
+        Args:
+            session: DB session
+            project_id: Project ID
+
+        Returns:
+            Total cluster token count
+        """
+        stmt = select(func.sum(TermCluster.freq_abs)).where(
+            TermCluster.project_id == project_id
+        )
+        result = session.execute(stmt).scalar()
+        return result or 0
+
+    def _compute_weirdness(
+        self,
+        f_d: int,
+        N_d: int,
+        f_r: int,
+        N_r: int
+    ) -> float:
+        """
+        Compute weirdness ratio with smoothing.
+
+        Weirdness = (f_d / N_d) / (f_r / N_r)
+
+        High weirdness (> 1.0) indicates term is more frequent in domain vs reference.
+
+        Args:
+            f_d: Cluster frequency in domain
+            N_d: Total cluster tokens in domain
+            f_r: Cluster frequency in reference
+            N_r: Total cluster tokens in reference
+
+        Returns:
+            Weirdness ratio
+        """
+        # Smoothing to avoid division by zero
+        f_d_s = f_d + 0.5
+        f_r_s = f_r + 0.5
+        N_d_s = N_d + 1.0
+        N_r_s = N_r + 1.0
+
+        weirdness = (f_d_s / N_d_s) / (f_r_s / N_r_s)
+        return weirdness
+
+    def _compute_keyness_llr(
+        self,
+        f_d: int,
+        N_d: int,
+        f_r: int,
+        N_r: int
+    ) -> float:
+        """
+        Compute keyness using log-likelihood ratio (2x2 contingency table).
+
+        Contingency table:
+                   | Domain | Reference |
+        -----------|--------|-----------|
+        Term       |   a    |     c     |
+        Not term   |   b    |     d     |
+
+        where:
+        a = f_d
+        b = N_d - f_d
+        c = f_r
+        d = N_r - f_r
+
+        G2 = 2 * Σ O_ij * ln(O_ij / E_ij)
+
+        Args:
+            f_d: Cluster frequency in domain
+            N_d: Total cluster tokens in domain
+            f_r: Cluster frequency in reference
+            N_r: Total cluster tokens in reference
+
+        Returns:
+            Keyness LLR value (higher = more domain-specific)
+        """
+        import math
+
+        a = f_d
+        b = N_d - f_d
+        c = f_r
+        d = N_r - f_r
+
+        # Total
+        n = a + b + c + d
+
+        if n == 0:
+            return 0.0
+
+        # Expected values
+        e_a = (a + b) * (a + c) / n
+        e_b = (a + b) * (b + d) / n
+        e_c = (c + d) * (a + c) / n
+        e_d = (c + d) * (b + d) / n
+
+        # Compute LLR with safe handling of log(0)
+        def safe_log_term(obs, exp):
+            if obs == 0:
+                return 0.0
+            if exp == 0:
+                return 0.0
+            return obs * math.log(obs / exp)
+
+        llr = 2 * (
+            safe_log_term(a, e_a) +
+            safe_log_term(b, e_b) +
+            safe_log_term(c, e_c) +
+            safe_log_term(d, e_d)
+        )
+
+        return llr
+
+    def _compute_termhood_score(
+        self,
+        weirdness: float,
+        keyness_llr: float,
+        freq: int
+    ) -> float:
+        """
+        Compute composite termhood score for ranking.
+
+        Score = log1p(keyness) * log1p(weirdness) * log1p(freq)
+
+        Combines:
+        - Statistical significance (keyness)
+        - Domain specificity (weirdness)
+        - Frequency evidence (freq)
+
+        Args:
+            weirdness: Weirdness ratio
+            keyness_llr: Keyness LLR
+            freq: Cluster frequency
+
+        Returns:
+            Composite termhood score
+        """
+        import math
+
+        score = (
+            math.log1p(max(0, keyness_llr)) *
+            math.log1p(max(0, weirdness)) *
+            math.log1p(freq)
+        )
+
+        return score
+
+    def _list_clusters_with_termhood(
+        self,
+        session: Session,
+        project_id: int,
+        reference_project_id: int,
+        *,
+        top_n: int = 500,
+        search: Optional[str] = None,
+        min_freq: Optional[int] = None,
+        source_filter: Optional[str] = None,
+    ) -> List[ClusterStats]:
+        """
+        List clusters with termhood metrics vs reference corpus.
+
+        Args:
+            session: DB session
+            project_id: Domain project ID
+            reference_project_id: Reference (general) project ID
+            top_n: Limit results
+            search: Search term
+            min_freq: Minimum frequency filter
+            source_filter: Source kind filter
+
+        Returns:
+            List of ClusterStats with termhood fields populated
+        """
+        from sqlalchemy import alias
+
+        # Get total cluster tokens for both projects
+        N_d = self._get_total_cluster_tokens(session, project_id)
+        N_r = self._get_total_cluster_tokens(session, reference_project_id)
+
+        if N_d == 0:
+            logger.warning(f"No clusters found in domain project {project_id}")
+            return []
+
+        if N_r == 0:
+            logger.warning(f"No clusters found in reference project {reference_project_id}")
+            N_r = 1  # Avoid division by zero, treat as very small reference
+
+        # Alias for reference clusters
+        RefCluster = alias(TermCluster.__table__, name='ref_cluster')
+
+        # Query domain clusters
+        stmt = select(TermCluster).where(TermCluster.project_id == project_id)
+
+        # Filter by source kind if specified
+        if source_filter:
+            stmt = stmt.join(TermClusterMember).join(Ngram).where(
+                Ngram.source_kind == source_filter
+            ).distinct()
+
+        # Apply filters
+        if min_freq:
+            stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        if search:
+            search_variants = normalize_search_query(search)
+            if search_variants:
+                search_conditions = []
+                for variant in search_variants:
+                    search_conditions.append(TermCluster.representative_he.contains(variant))
+                    search_conditions.append(TermCluster.canonical_key.contains(variant))
+                    if TermCluster.representative_lemma is not None:
+                        search_conditions.append(TermCluster.representative_lemma.contains(variant))
+                stmt = stmt.where(or_(*search_conditions))
+            else:
+                stmt = stmt.where(TermCluster.representative_he.contains(search))
+
+        # Execute query to get domain clusters
+        domain_clusters = session.execute(stmt).scalars().all()
+
+        # For each domain cluster, find matching reference cluster and compute termhood
+        results = []
+
+        for d_cluster in domain_clusters:
+            f_d = d_cluster.freq_abs
+
+            # Find matching reference cluster by canonical_key
+            ref_stmt = select(TermCluster).where(
+                and_(
+                    TermCluster.project_id == reference_project_id,
+                    TermCluster.canonical_key == d_cluster.canonical_key
+                )
+            )
+            r_cluster = session.execute(ref_stmt).scalar_one_or_none()
+
+            # Get reference frequency (0 if not found)
+            f_r = r_cluster.freq_abs if r_cluster else 0
+
+            # Compute termhood metrics
+            weirdness = self._compute_weirdness(f_d, N_d, f_r, N_r)
+            keyness_llr = self._compute_keyness_llr(f_d, N_d, f_r, N_r)
+            termhood_score = self._compute_termhood_score(weirdness, keyness_llr, f_d)
+
+            results.append(ClusterStats(
+                cluster_id=d_cluster.cluster_id,
+                canonical_key=d_cluster.canonical_key,
+                representative_he=d_cluster.representative_he,
+                representative_lemma=d_cluster.representative_lemma,
+                freq_abs=d_cluster.freq_abs,
+                doc_freq=d_cluster.doc_freq,
+                members_count=d_cluster.members_count,
+                best_pmi=d_cluster.best_pmi,
+                best_llr=d_cluster.best_llr,
+                best_dice=d_cluster.best_dice,
+                best_tscore=d_cluster.best_tscore,
+                weirdness=weirdness,
+                keyness_llr=keyness_llr,
+                termhood_score=termhood_score,
+            ))
+
+        # Sort by termhood score (deterministic)
+        results.sort(
+            key=lambda c: (
+                -c.termhood_score if c.termhood_score else 0,
+                -c.keyness_llr if c.keyness_llr else 0,
+                -c.weirdness if c.weirdness else 0,
+                -c.doc_freq,
+                -c.freq_abs,
+                c.canonical_key  # Stable tiebreaker
+            )
+        )
+
+        # Limit results
+        return results[:top_n]

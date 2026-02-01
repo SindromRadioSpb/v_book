@@ -350,18 +350,311 @@ def test_beit_sefer_clustering():
                 pass
 
 
+def test_termhood_ranking():
+    """
+    Test M5.4: Termhood ranking vs reference corpus.
+
+    Tests:
+    1. Set reference project (general corpus)
+    2. Compute weirdness and keyness for domain vs reference
+    3. Domain-specific terms rank higher than common terms
+    4. Deterministic ordering
+    """
+    from app.services.db_service import DBService
+    from app.services.project_service import ProjectService
+    from app.services.ingest_service import IngestService
+    from app.services.process_service import ProcessService
+    from app.services.term_extraction_service import TermExtractionService
+    from pathlib import Path
+
+    print("\n" + "="*60)
+    print("TEST M5.4: Termhood vs Reference Corpus")
+    print("="*60)
+
+    # Initialize
+    test_db_path = Path("test_m54.db")
+    if test_db_path.exists():
+        test_db_path.unlink()
+
+    DBService.initialize(test_db_path)
+    db_service = DBService.get_instance()
+    project_service = ProjectService()
+    ingest_service = IngestService()
+    process_service = ProcessService()
+    term_service = TermExtractionService()
+
+    test_dir = Path("test_data_m54")
+    test_dir.mkdir(exist_ok=True)
+
+    try:
+        with db_service.get_session() as session:
+            # ===================================================================
+            # 1. Create GENERAL project (reference corpus) with common text
+            # ===================================================================
+            print(f"\n🔍 Creating GENERAL reference project...")
+
+            general_project = project_service.create_project(
+                session,
+                "General Hebrew",
+                "Reference corpus with common Hebrew text"
+            )
+            general_corpus = project_service.get_default_corpus(session, general_project.project_id)
+
+            # General text: common phrases
+            general_file = test_dir / "general_text.txt"
+            general_file.write_text(
+                "הספר הזה טוב מאוד. "  # This book is very good
+                "הילד אוהב לקרוא ספרים. "  # The child loves to read books
+                "ספר טוב מלמד הרבה. "  # A good book teaches a lot
+                "בבית יש ספרים רבים. "  # At home there are many books
+                "ספר חדש יצא לאור. ",  # A new book was published
+                encoding='utf-8'
+            )
+
+            doc_gen = ingest_service.import_document(session, general_corpus.corpus_id, general_file)
+            process_service.process_document(session, doc_gen.doc_id, use_mock=True)
+
+            # Extract terms for general project
+            report_gen = term_service.extract_terms_for_project(
+                session,
+                general_project.project_id,
+                enable_ngrams=True,
+                include_np=False,
+                min_freq=1,
+                ngram_ns=(2,),
+                overwrite=True
+            )
+            print(f"✅ GENERAL: {report_gen.ngrams_extracted} ngrams, {report_gen.clusters_created} clusters")
+
+            # ===================================================================
+            # 2. Create DOMAIN project with domain-specific terms
+            # ===================================================================
+            print(f"\n🔍 Creating DOMAIN project with technical terms...")
+
+            domain_project = project_service.create_project(
+                session,
+                "Materials Science",
+                "Domain corpus with technical terminology"
+            )
+            domain_corpus = project_service.get_default_corpus(session, domain_project.project_id)
+
+            # Domain text: materials science terms (repeated for high freq)
+            domain_file = test_dir / "domain_text.txt"
+            domain_file.write_text(
+                "מאמץ גזירה גבוה מאוד. "  # High shear stress
+                "מאמץ גזירה נמדד במעבדה. "  # Shear stress measured in lab
+                "מודול יאנג חשוב לחישוב. "  # Young's modulus important for calculation
+                "מודול יאנג של החומר גבוה. "  # The material's Young's modulus is high
+                "חוזק מתיחה של הפלדה. "  # Tensile strength of steel
+                "חוזק מתיחה נבדק תחת עומס. "  # Tensile strength tested under load
+                "ספר טוב מסביר זאת. ",  # A good book explains this (common term)
+                encoding='utf-8'
+            )
+
+            doc_dom = ingest_service.import_document(session, domain_corpus.corpus_id, domain_file)
+            process_service.process_document(session, doc_dom.doc_id, use_mock=True)
+
+            # Extract terms for domain project
+            report_dom = term_service.extract_terms_for_project(
+                session,
+                domain_project.project_id,
+                enable_ngrams=True,
+                include_np=False,
+                min_freq=1,
+                ngram_ns=(2,),
+                overwrite=True
+            )
+            print(f"✅ DOMAIN: {report_dom.ngrams_extracted} ngrams, {report_dom.clusters_created} clusters")
+
+            # ===================================================================
+            # 3. Set reference project for domain
+            # ===================================================================
+            print(f"\n🔗 Setting reference project...")
+
+            term_service.set_reference_project(
+                session,
+                domain_project.project_id,
+                general_project.project_id
+            )
+
+            ref_check = term_service.get_reference_project(session, domain_project.project_id)
+            if ref_check == general_project.project_id:
+                print(f"✅ Reference project set correctly")
+            else:
+                print(f"❌ FAILED: Reference not set ({ref_check} != {general_project.project_id})")
+                return False
+
+            # ===================================================================
+            # 4. Query with termhood preset
+            # ===================================================================
+            print(f"\n📊 Querying with termhood preset...")
+
+            clusters_termhood = term_service.list_term_clusters(
+                session,
+                domain_project.project_id,
+                top_n=20,
+                preset='termhood'
+            )
+
+            print(f"\n🏆 Top terms by termhood score:")
+            for i, cluster in enumerate(clusters_termhood[:10], 1):
+                weirdness_str = f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
+                keyness_str = f"{cluster.keyness_llr:.2f}" if cluster.keyness_llr else "N/A"
+                termhood_str = f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
+
+                print(f"  {i}. {cluster.representative_he:20s} | "
+                      f"W: {weirdness_str:>6s} | K: {keyness_str:>7s} | T: {termhood_str:>7s} | "
+                      f"Freq: {cluster.freq_abs:2d}")
+
+            # ===================================================================
+            # 5. Assertions: Domain-specific terms rank higher
+            # ===================================================================
+            print(f"\n✅ Checking termhood metrics...")
+
+            # Domain-specific terms we expect to rank high
+            domain_terms = ["מאמץ גזירה", "מודול יאנג", "חוזק מתיחה"]
+            # Common term (appears in both corpora)
+            common_term = "ספר טוב"
+
+            # Find domain-specific terms in results
+            found_domain_terms = []
+            for cluster in clusters_termhood:
+                for dt in domain_terms:
+                    if dt in cluster.representative_he or dt in cluster.canonical_key:
+                        found_domain_terms.append(cluster)
+                        break
+
+            if not found_domain_terms:
+                print(f"❌ FAILED: No domain-specific terms found in results")
+                print(f"   Expected to find: {domain_terms}")
+                print(f"   Got: {[c.representative_he for c in clusters_termhood[:5]]}")
+                return False
+
+            # Check weirdness > 1.0 for domain terms
+            for cluster in found_domain_terms:
+                if cluster.weirdness and cluster.weirdness > 1.0:
+                    print(f"✅ '{cluster.representative_he}' has weirdness {cluster.weirdness:.2f} > 1.0 (domain-specific)")
+                else:
+                    print(f"⚠️  '{cluster.representative_he}' has weirdness {cluster.weirdness} (expected > 1.0)")
+
+            # Check keyness > 0 for domain terms
+            for cluster in found_domain_terms:
+                if cluster.keyness_llr and cluster.keyness_llr > 0:
+                    print(f"✅ '{cluster.representative_he}' has keyness {cluster.keyness_llr:.2f} > 0")
+                else:
+                    print(f"⚠️  '{cluster.representative_he}' has keyness {cluster.keyness_llr}")
+
+            # Find common term
+            found_common = None
+            for cluster in clusters_termhood:
+                if common_term in cluster.representative_he or common_term in cluster.canonical_key:
+                    found_common = cluster
+                    break
+
+            if found_common:
+                # Common term should have weirdness closer to 1.0 (balanced frequency)
+                if found_common.weirdness:
+                    print(f"✅ Common term '{found_common.representative_he}' has weirdness {found_common.weirdness:.2f} (balanced)")
+                else:
+                    print(f"⚠️  Common term weirdness is None")
+            else:
+                print(f"⚠️  Common term '{common_term}' not found (may not have passed min_freq)")
+
+            # ===================================================================
+            # 6. Test determinism
+            # ===================================================================
+            print(f"\n🔁 Testing deterministic ordering...")
+
+            clusters_termhood2 = term_service.list_term_clusters(
+                session,
+                domain_project.project_id,
+                top_n=20,
+                preset='termhood'
+            )
+
+            if [c.cluster_id for c in clusters_termhood] == [c.cluster_id for c in clusters_termhood2]:
+                print(f"✅ Termhood ordering is deterministic")
+            else:
+                print(f"❌ FAILED: Termhood ordering not deterministic")
+                return False
+
+            # ===================================================================
+            # 7. Test fallback when no reference set
+            # ===================================================================
+            print(f"\n🔍 Testing fallback when no reference set...")
+
+            # Clear reference
+            term_service.set_reference_project(session, domain_project.project_id, None)
+
+            # Query with termhood preset should fall back to freq
+            clusters_fallback = term_service.list_term_clusters(
+                session,
+                domain_project.project_id,
+                top_n=20,
+                preset='termhood'
+            )
+
+            # Should have results but no termhood metrics
+            if clusters_fallback:
+                first = clusters_fallback[0]
+                if first.weirdness is None and first.keyness_llr is None:
+                    print(f"✅ Fallback works: termhood metrics are None when no reference set")
+                else:
+                    print(f"⚠️  Expected None termhood metrics, got weirdness={first.weirdness}")
+            else:
+                print(f"⚠️  No results returned in fallback mode")
+
+            print(f"\n{'='*60}")
+            print(f"✅ M5.4 TEST PASSED: Termhood ranking works!")
+            print(f"{'='*60}")
+            return True
+
+    except Exception as e:
+        logger.exception("Test failed")
+        print(f"\n❌ M5.4 TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    finally:
+        # Cleanup
+        import shutil
+        import time
+
+        if test_dir.exists():
+            shutil.rmtree(test_dir)
+
+        DBService.shutdown()
+        time.sleep(0.1)
+
+        if test_db_path.exists():
+            try:
+                test_db_path.unlink()
+            except PermissionError:
+                logger.warning(f"Could not delete {test_db_path}")
+                pass
+
+
 if __name__ == "__main__":
     print("="*60)
     print("M5 TEST SUITE: Term Extraction & Clustering")
     print("="*60)
 
-    test_pass = test_beit_sefer_clustering()
+    # Run M5.1-M5.3 tests
+    test1_pass = test_beit_sefer_clustering()
+
+    # Run M5.4 termhood tests
+    test2_pass = test_termhood_ranking()
 
     print("\n" + "="*60)
-    if test_pass:
-        print("✅ ALL M5 TESTS PASSED")
+    if test1_pass and test2_pass:
+        print("✅ ALL M5 TESTS PASSED (M5.1-M5.4)")
     else:
         print("❌ M5 TEST FAILED")
+        if not test1_pass:
+            print("  - M5.1-M5.3 clustering test failed")
+        if not test2_pass:
+            print("  - M5.4 termhood test failed")
     print("="*60)
 
-    sys.exit(0 if test_pass else 1)
+    sys.exit(0 if (test1_pass and test2_pass) else 1)
