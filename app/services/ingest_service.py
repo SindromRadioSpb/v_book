@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -216,9 +216,12 @@ class IngestService:
 
     def delete_document(self, session: Session, doc_id: int) -> bool:
         """
-        Delete a document.
+        Delete a document with delta statistics update.
 
-        Note: This will cascade to document_text and related records.
+        Steps:
+        1. Remove document statistics (M4: delta subtraction)
+        2. Delete document (cascades to text, sentences, etc.)
+        3. Commit transaction
 
         Args:
             session: Database session
@@ -228,9 +231,50 @@ class IngestService:
             True if deleted, False if not found
         """
         doc = session.get(SourceDocument, doc_id)
-        if doc:
+        if not doc:
+            return False
+
+        try:
+            # M4: Remove statistics first (delta subtraction)
+            if doc.status == 'processed':
+                from app.services.process_service import ProcessService
+                process_service = ProcessService()
+                if not process_service.remove_document_stats(session, doc_id):
+                    logger.warning(f"Failed to remove stats for document {doc_id}, continuing with delete")
+                    # Continue anyway - better to delete than leave inconsistent state
+
+            # Delete document (cascades to related records)
             session.delete(doc)
             session.commit()
-            logger.info(f"Deleted document ID: {doc_id}")
+            logger.info(f"Deleted document ID: {doc_id} ({doc.file_name})")
             return True
-        return False
+
+        except Exception as e:
+            logger.exception(f"Failed to delete document {doc_id}")
+            session.rollback()
+            return False
+
+    def bulk_delete(self, session: Session, doc_ids: List[int]) -> Tuple[int, int]:
+        """
+        Delete multiple documents with delta statistics.
+
+        Args:
+            session: Database session
+            doc_ids: List of document IDs to delete
+
+        Returns:
+            Tuple of (success_count, error_count)
+        """
+        success = 0
+        errors = 0
+
+        logger.info(f"Bulk deleting {len(doc_ids)} documents")
+
+        for doc_id in doc_ids:
+            if self.delete_document(session, doc_id):
+                success += 1
+            else:
+                errors += 1
+
+        logger.info(f"Bulk delete complete: {success} succeeded, {errors} failed")
+        return success, errors

@@ -179,3 +179,8 @@ class DictionaryView(QWidget):
             self.status_label.setText(
                 f"Showing {len(filtered)} of {len(self.all_lemmas)} lemmas"
             )
+
+    def refresh(self):
+        """Refresh lemma data from database."""
+        logger.info("Refreshing dictionary view")
+        self.load_lemmas()

@@ -61,6 +61,9 @@ class ProjectView(QWidget):
         self.dictionary_view = DictionaryView(self.project_id)
         self.tabs.addTab(self.dictionary_view, "Dictionary")
 
+        # Connect signals: when processing completes, refresh dictionary
+        self.documents_view.processing_completed.connect(self.dictionary_view.refresh)
+
         # MWE tab (M5)
         mwe_placeholder = QLabel("MWE/Collocations tab (to be implemented in M5)")
         mwe_placeholder.setStyleSheet("padding: 20px;")

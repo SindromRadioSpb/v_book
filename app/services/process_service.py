@@ -388,3 +388,243 @@ class ProcessService:
 
         logger.info(f"Batch processing complete: {success} succeeded, {errors} failed")
         return success, errors
+
+    # ========================================================================
+    # M4: Live Update - Delta Statistics
+    # ========================================================================
+
+    def remove_document_stats(self, session: Session, doc_id: int) -> bool:
+        """
+        Remove document statistics using delta subtraction.
+
+        This is called before deleting a document to maintain accurate
+        project-level statistics.
+
+        Args:
+            session: Database session
+            doc_id: Document ID to remove stats for
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get document to find project_id
+            doc = session.get(SourceDocument, doc_id)
+            if not doc:
+                logger.warning(f"Document {doc_id} not found")
+                return False
+
+            # Get corpus to find project_id
+            from app.infra.sa_models import SourceCorpus
+            corpus = session.get(SourceCorpus, doc.corpus_id)
+            if not corpus:
+                logger.warning(f"Corpus {doc.corpus_id} not found")
+                return False
+
+            project_id = corpus.project_id
+
+            logger.info(f"Removing statistics for document {doc_id} (project {project_id})")
+
+            # Get all doc-level stats for this document
+            stmt = select(LemmaDocStat).where(LemmaDocStat.doc_id == doc_id)
+            doc_stats = session.execute(stmt).scalars().all()
+
+            if not doc_stats:
+                logger.info("No statistics to remove")
+                return True
+
+            # For each lemma, subtract from project stats
+            for doc_stat in doc_stats:
+                # Get project stat
+                proj_stmt = select(LemmaProjectStat).where(
+                    LemmaProjectStat.project_id == project_id,
+                    LemmaProjectStat.lemma_id == doc_stat.lemma_id,
+                )
+                proj_stat = session.execute(proj_stmt).scalar_one_or_none()
+
+                if proj_stat:
+                    # Subtract frequency
+                    proj_stat.freq_abs -= doc_stat.freq_abs
+                    proj_stat.doc_freq -= 1
+                    proj_stat.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+                    # If frequency reaches zero, delete project stat
+                    if proj_stat.freq_abs <= 0 or proj_stat.doc_freq <= 0:
+                        session.delete(proj_stat)
+                        logger.debug(f"Deleted project stat for lemma {doc_stat.lemma_id} (zero frequency)")
+
+                # Delete doc-level stat
+                session.delete(doc_stat)
+
+            session.flush()
+
+            # Delete lemmas that no longer have any project stats
+            # (orphaned lemmas)
+            self._cleanup_orphaned_lemmas(session, project_id)
+
+            logger.info(f"Removed statistics for {len(doc_stats)} lemmas")
+            return True
+
+        except Exception as e:
+            logger.exception(f"Failed to remove document stats for {doc_id}")
+            return False
+
+    def _cleanup_orphaned_lemmas(self, session: Session, project_id: int) -> int:
+        """
+        Delete lemmas that no longer have any project statistics.
+
+        Args:
+            session: Database session
+            project_id: Project ID
+
+        Returns:
+            Number of lemmas deleted
+        """
+        # Find lemmas without project stats
+        from sqlalchemy import and_, exists
+
+        stmt = select(Lemma).where(
+            Lemma.project_id == project_id,
+            ~exists(
+                select(1).where(
+                    and_(
+                        LemmaProjectStat.project_id == project_id,
+                        LemmaProjectStat.lemma_id == Lemma.lemma_id,
+                    )
+                )
+            ),
+        )
+
+        orphaned_lemmas = session.execute(stmt).scalars().all()
+
+        count = 0
+        for lemma in orphaned_lemmas:
+            session.delete(lemma)
+            count += 1
+            logger.debug(f"Deleted orphaned lemma: {lemma.lemma_text}")
+
+        if count > 0:
+            session.flush()
+            logger.info(f"Cleaned up {count} orphaned lemmas")
+
+        return count
+
+    def reprocess_document(
+        self,
+        session: Session,
+        doc_id: int,
+        use_gpu: bool = False,
+        use_mock: bool = False,
+    ) -> bool:
+        """
+        Re-process a document with automatic delta statistics update.
+
+        Steps:
+        1. Check document exists and is processed
+        2. Set status to 'processing'
+        3. Remove old statistics (delta subtraction)
+        4. Delete old sentences
+        5. Run NLP processing again
+        6. Set status to 'processed'
+
+        Args:
+            session: Database session
+            doc_id: Document ID to reprocess
+            use_gpu: Whether to use GPU
+            use_mock: Use mock engine instead of Stanza
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get document
+            doc = session.get(SourceDocument, doc_id)
+            if not doc:
+                logger.error(f"Document {doc_id} not found")
+                return False
+
+            if doc.status not in ('processed', 'failed'):
+                logger.warning(f"Document {doc_id} is not processed (status: {doc.status})")
+                # Allow reprocessing anyway (for failed docs)
+
+            logger.info(f"Re-processing document {doc_id}: {doc.file_name}")
+
+            # Step 1: Set status to 'processing'
+            doc.status = 'processing'
+            session.flush()
+
+            # Step 2: Remove old statistics
+            if not self.remove_document_stats(session, doc_id):
+                logger.error(f"Failed to remove old stats for document {doc_id}")
+                doc.status = 'failed'
+                doc.error_message = "Failed to remove old statistics"
+                session.commit()
+                return False
+
+            # Step 3: Delete old sentences
+            stmt = select(DocumentSentence).where(DocumentSentence.doc_id == doc_id)
+            old_sentences = session.execute(stmt).scalars().all()
+            for sent in old_sentences:
+                session.delete(sent)
+            session.flush()
+            logger.info(f"Deleted {len(old_sentences)} old sentences")
+
+            # Step 4: Run NLP processing
+            # Note: process_document will handle the rest
+            # We need to temporarily reset status to 'imported' so process_document works
+            doc.status = 'imported'
+            doc.processed_at = None
+            session.flush()
+
+            # Process
+            success = self.process_document(session, doc_id, use_gpu=use_gpu, use_mock=use_mock)
+
+            if success:
+                logger.info(f"Document {doc_id} re-processed successfully")
+            else:
+                logger.error(f"Failed to re-process document {doc_id}")
+
+            return success
+
+        except Exception as e:
+            logger.exception(f"Failed to reprocess document {doc_id}")
+            # Set status to failed
+            doc = session.get(SourceDocument, doc_id)
+            if doc:
+                doc.status = 'failed'
+                doc.error_message = f"Re-processing error: {str(e)}"
+                session.commit()
+            return False
+
+    def bulk_reprocess(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        use_gpu: bool = False,
+        use_mock: bool = False,
+    ) -> Tuple[int, int]:
+        """
+        Re-process multiple documents with delta statistics.
+
+        Args:
+            session: Database session
+            doc_ids: List of document IDs
+            use_gpu: Whether to use GPU
+            use_mock: Use mock engine
+
+        Returns:
+            Tuple of (success_count, error_count)
+        """
+        success = 0
+        errors = 0
+
+        logger.info(f"Bulk re-processing {len(doc_ids)} documents")
+
+        for doc_id in doc_ids:
+            if self.reprocess_document(session, doc_id, use_gpu=use_gpu, use_mock=use_mock):
+                success += 1
+            else:
+                errors += 1
+
+        logger.info(f"Bulk re-processing complete: {success} succeeded, {errors} failed")
+        return success, errors

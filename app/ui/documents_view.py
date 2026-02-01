@@ -32,6 +32,7 @@ class DocumentsView(QWidget):
     """Documents view with drag-drop import."""
 
     document_added = pyqtSignal(int)  # Emits doc_id when document is added
+    processing_completed = pyqtSignal()  # Emits when NLP processing is done
 
     def __init__(self, project_id: int):
         super().__init__()
@@ -88,6 +89,33 @@ class DocumentsView(QWidget):
         ocr_layout.addStretch()
         layout.addLayout(ocr_layout)
 
+        # NLP options
+        nlp_layout = QHBoxLayout()
+
+        # Check if Stanza is available
+        self.stanza_available = self._check_stanza_available()
+        self.cuda_available = self._check_cuda_available() if self.stanza_available else False
+
+        # Engine info label
+        if self.stanza_available:
+            engine_label = QLabel(f"✅ Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})")
+            engine_label.setStyleSheet("color: green;")
+        else:
+            engine_label = QLabel("⚠️ Stanza not available - using Mock engine")
+            engine_label.setStyleSheet("color: orange;")
+        nlp_layout.addWidget(engine_label)
+
+        # GPU checkbox (only if CUDA available)
+        if self.cuda_available:
+            self.gpu_checkbox = QCheckBox("Use GPU for NLP")
+            self.gpu_checkbox.setChecked(True)
+            nlp_layout.addWidget(self.gpu_checkbox)
+        else:
+            self.gpu_checkbox = None
+
+        nlp_layout.addStretch()
+        layout.addLayout(nlp_layout)
+
         # Drag-drop hint
         hint = QLabel(
             "💡 Drag and drop files here to import them\n"
@@ -140,6 +168,12 @@ class DocumentsView(QWidget):
         self.process_btn.setEnabled(False)
         action_layout.addWidget(self.process_btn)
 
+        self.reprocess_btn = QPushButton("Re-process")
+        self.reprocess_btn.clicked.connect(self.on_reprocess)
+        self.reprocess_btn.setEnabled(False)
+        self.reprocess_btn.setToolTip("Re-process selected documents with NLP (updates statistics)")
+        action_layout.addWidget(self.reprocess_btn)
+
         self.view_text_btn = QPushButton("View Text")
         self.view_text_btn.clicked.connect(self.on_view_text)
         self.view_text_btn.setEnabled(False)
@@ -156,6 +190,22 @@ class DocumentsView(QWidget):
         self.docs_table.itemSelectionChanged.connect(self.on_selection_changed)
 
         self.setLayout(layout)
+
+    def _check_stanza_available(self):
+        """Check if Stanza is available."""
+        try:
+            import stanza
+            return True
+        except ImportError:
+            return False
+
+    def _check_cuda_available(self):
+        """Check if CUDA is available."""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except ImportError:
+            return False
 
     def load_corpus(self):
         """Load the default corpus for this project."""
@@ -304,6 +354,20 @@ class DocumentsView(QWidget):
         self.view_text_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
 
+        # Enable re-process only for processed documents
+        if has_selection:
+            selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+            # Check if all selected documents are processed
+            all_processed = True
+            for row in selected_rows:
+                status = self.docs_table.item(row, 3).text()  # Column 3 is Status
+                if status not in ('processed', 'failed'):
+                    all_processed = False
+                    break
+            self.reprocess_btn.setEnabled(all_processed)
+        else:
+            self.reprocess_btn.setEnabled(False)
+
     def on_process(self):
         """Process selected documents with NLP."""
         selected_rows = set(item.row() for item in self.docs_table.selectedItems())
@@ -320,13 +384,23 @@ class DocumentsView(QWidget):
             show_error(self, "Error", "Processing already in progress")
             return
 
+        # Determine engine and GPU settings
+        use_mock = not self.stanza_available
+        use_gpu = False
+        if self.stanza_available and self.gpu_checkbox and self.gpu_checkbox.isChecked():
+            use_gpu = True
+
+        # Build confirmation message
         from PyQt6.QtWidgets import QMessageBox
+        if use_mock:
+            engine_info = "Note: Using Mock engine (rule-based).\nFor production accuracy, install Stanza."
+        else:
+            engine_info = f"Using Stanza engine (GPU: {'Yes' if use_gpu else 'No'}).\nThis will provide accurate lemmatization and POS tagging."
+
         reply = QMessageBox.question(
             self,
             "Confirm Processing",
-            f"Process {len(doc_ids)} document(s) with NLP?\n\n"
-            "Note: Using Mock engine (rule-based).\n"
-            "For production accuracy, use Stanza in regular Windows Python.",
+            f"Process {len(doc_ids)} document(s) with NLP?\n\n{engine_info}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -334,7 +408,8 @@ class DocumentsView(QWidget):
             # Create worker
             self.process_worker = ProcessWorker(
                 doc_ids=doc_ids,
-                use_mock=True  # Use Mock engine by default
+                use_mock=use_mock,
+                use_gpu=use_gpu
             )
             self.process_worker.progress.connect(self.on_process_progress)
             self.process_worker.finished.connect(self.on_process_finished)
@@ -364,6 +439,10 @@ class DocumentsView(QWidget):
         # Reload documents to show updated status
         self.load_documents()
 
+        # Emit signal to update other views (e.g., Dictionary)
+        if success_count > 0:
+            self.processing_completed.emit()
+
         if error_count > 0:
             show_warning(
                 self,
@@ -375,6 +454,67 @@ class DocumentsView(QWidget):
         """Handle processing error."""
         self.progress_bar.setVisible(False)
         show_error(self, "Processing Error", error_msg)
+
+    def on_reprocess(self):
+        """Re-process selected documents with NLP (M4: Live Update)."""
+        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        if not selected_rows:
+            return
+
+        # Get selected document IDs
+        doc_ids = []
+        for row in selected_rows:
+            doc_id = int(self.docs_table.item(row, 0).text())
+            doc_ids.append(doc_id)
+
+        if self.process_worker and self.process_worker.isRunning():
+            show_error(self, "Error", "Processing already in progress")
+            return
+
+        # Determine engine and GPU settings
+        use_mock = not self.stanza_available
+        use_gpu = False
+        if self.stanza_available and self.gpu_checkbox and self.gpu_checkbox.isChecked():
+            use_gpu = True
+
+        # Build confirmation message
+        from PyQt6.QtWidgets import QMessageBox
+        if use_mock:
+            engine_info = "Note: Using Mock engine (rule-based)."
+        else:
+            engine_info = f"Using Stanza engine (GPU: {'Yes' if use_gpu else 'No'})."
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Re-processing",
+            f"Re-process {len(doc_ids)} document(s) with NLP?\n\n"
+            f"{engine_info}\n\n"
+            f"This will:\n"
+            f"- Remove old statistics\n"
+            f"- Re-run NLP analysis\n"
+            f"- Update Dictionary with new results",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Create worker (same as process, will handle reprocessing automatically)
+            self.process_worker = ProcessWorker(
+                doc_ids=doc_ids,
+                use_mock=use_mock,
+                use_gpu=use_gpu,
+                is_reprocess=True  # Flag to indicate reprocessing
+            )
+            self.process_worker.progress.connect(self.on_process_progress)
+            self.process_worker.finished.connect(self.on_process_finished)
+            self.process_worker.error.connect(self.on_process_error)
+
+            # Show progress
+            self.progress_bar.setMaximum(len(doc_ids))
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+
+            # Start worker
+            self.process_worker.start()
 
     def on_view_text(self):
         """View document text."""
