@@ -28,3 +28,23 @@ yapproj_gopath/
 **/pkg/mod/
 **/pkg/sumdb/
 **/bin/
+
+# --- HDLE runtime/test artifacts ---
+# logs
+test_data/logs/
+*.log
+
+# sqlite databases (runtime & tests)
+test_data/*.db
+test_data/*.db-*
+test_m4.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# optional: local temp outputs
+*.sqlite
+*.sqlite3
+
+# (keep source data files; ignore only DBs/logs)
+# --------------------------------
