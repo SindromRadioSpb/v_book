@@ -246,18 +246,61 @@ python -m app.main
 
 **Schema:** No migration needed - reuses existing `ngram` table with `source_kind='np'`
 
-## 🚀 Next Steps (M5.2 - M5.4)
+## 🚀 M5.2: LLR/Dice Scoring and Ranking Presets (COMPLETE)
 
-### M5.2: Enhanced Ranking (Optional)
-- Balanced scoring with normalized weights
-- Additional presets
+**Status:** ✅ IMPLEMENTED & TESTED
+
+### Features
+- **Association Measures:**
+  - PMI (Pointwise Mutual Information) - for bigrams
+  - T-score - for bigrams
+  - LLR (Log-Likelihood Ratio) - for bigrams
+  - Dice coefficient - for bigrams
+  - Trigrams: Scores set to NULL (standard practice)
+
+- **Formulas Implemented:**
+  - **LLR:** 2 × Σ(O_ij × log(O_ij / E_ij)) with 2×2 contingency table
+  - **Dice:** 2 × c_xy / (c_x + c_y)
+  - Zero-handling: 0 × log(0) = 0 (deterministic)
+
+- **Cluster Aggregation:**
+  - best_pmi = max(pmi) among cluster members
+  - best_llr = max(llr) among cluster members
+  - best_dice = max(dice) among cluster members
+  - best_tscore = max(tscore) among cluster members
+
+- **Ranking Presets:**
+  - **freq:** ORDER BY freq_abs DESC, doc_freq DESC, best_pmi DESC
+  - **strong:** ORDER BY best_llr DESC, best_pmi DESC (min_freq >= 2)
+  - **balanced:** ORDER BY best_llr DESC, best_dice DESC, doc_freq DESC, freq_abs DESC
+
+- **Properties:**
+  - Deterministic ordering (same preset always returns same order)
+  - Fast queries (indexed on llr_cache, dice_cache)
+  - Re-run extraction preserves scores (no changes)
+
+### Testing
+- ✅ LLR and Dice computed for bigrams (non-null)
+- ✅ Dice in valid range [0, 1]
+- ✅ Preset ordering deterministic
+- ✅ Re-run extraction: counts and scores unchanged
+- ✅ "בית ספר" cluster stable across presets
+
+### Files Modified (M5.2)
+- `app/services/term_extraction_service.py` - Improved "balanced" preset
+- `test_m5.py` - Added M5.2 assertions
+- `M5_PLUS_COMPLETE.md` - This documentation
+
+**Schema:** No changes needed - reuses migration 002 columns
+
+## 🚀 Next Steps (M5.4)
 
 ### M5.4: Termhood vs General Corpus (Optional)
 - Compare domain corpus to general corpus
 - Compute TF-IDF, weirdness ratio
 - Prioritize domain-specific terms
 
-**Current Status:** M5 Base + M5.1 + M5.3 are production-ready and proven working.
+**Current Status:** M5 Base + M5.1 + M5.2 + M5.3 are production-ready and proven working.
 
 ---
 

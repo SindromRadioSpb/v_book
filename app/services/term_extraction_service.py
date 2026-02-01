@@ -626,8 +626,13 @@ class TermExtractionService:
                 TermCluster.best_pmi.desc()
             )
         elif preset == 'balanced':
-            # For now, use freq (weighted scoring requires normalization)
-            stmt = stmt.order_by(TermCluster.freq_abs.desc())
+            # M5.2: Balanced ranking using multiple signals
+            stmt = stmt.order_by(
+                TermCluster.best_llr.desc(),
+                TermCluster.best_dice.desc(),
+                TermCluster.doc_freq.desc(),
+                TermCluster.freq_abs.desc()
+            )
 
         stmt = stmt.limit(top_n)
 

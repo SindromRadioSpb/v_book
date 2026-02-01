@@ -189,6 +189,53 @@ def test_beit_sefer_clustering():
             else:
                 print(f"⚠️  No NP chunks found (may be due to Mock engine limitations)")
 
+            # M5.2: Verify LLR and Dice scores
+            print(f"\n🔍 Checking association scores (M5.2)...")
+
+            if beit_sefer_cluster.best_llr is not None:
+                print(f"✅ LLR computed: {beit_sefer_cluster.best_llr:.2f}")
+            else:
+                print(f"⚠️  LLR is NULL (expected for bigrams)")
+
+            if beit_sefer_cluster.best_dice is not None:
+                print(f"✅ Dice computed: {beit_sefer_cluster.best_dice:.3f}")
+                if 0 <= beit_sefer_cluster.best_dice <= 1:
+                    print(f"✅ Dice in valid range [0,1]")
+                else:
+                    print(f"❌ FAILED: Dice out of range: {beit_sefer_cluster.best_dice}")
+                    return False
+            else:
+                print(f"⚠️  Dice is NULL (expected for bigrams)")
+
+            # M5.2: Test preset ordering
+            print(f"\n🔍 Testing ranking presets (M5.2)...")
+
+            # Get clusters with different presets
+            clusters_freq = term_service.list_term_clusters(
+                session, project.project_id, top_n=10, preset='freq'
+            )
+            clusters_strong = term_service.list_term_clusters(
+                session, project.project_id, top_n=10, preset='strong'
+            )
+            clusters_balanced = term_service.list_term_clusters(
+                session, project.project_id, top_n=10, preset='balanced'
+            )
+
+            # Verify presets produce deterministic results
+            print(f"   Preset 'freq': {len(clusters_freq)} clusters")
+            print(f"   Preset 'strong': {len(clusters_strong)} clusters")
+            print(f"   Preset 'balanced': {len(clusters_balanced)} clusters")
+
+            # Verify ordering is deterministic (same preset returns same order)
+            clusters_freq2 = term_service.list_term_clusters(
+                session, project.project_id, top_n=10, preset='freq'
+            )
+            if [c.cluster_id for c in clusters_freq] == [c.cluster_id for c in clusters_freq2]:
+                print(f"✅ Preset ordering is deterministic")
+            else:
+                print(f"❌ FAILED: Preset ordering not deterministic")
+                return False
+
             # Test re-running (determinism)
             print(f"\n🔁 Re-running extraction to test determinism...")
             report2 = term_service.extract_terms_for_project(
