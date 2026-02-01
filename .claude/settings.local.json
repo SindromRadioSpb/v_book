@@ -3,7 +3,14 @@
     "allow": [
       "Bash(venv/bin/pip install:*)",
       "Bash(venv/bin/python:*)",
-      "Bash(venv/bin/pip uninstall:*)"
+      "Bash(venv/bin/pip uninstall:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git add:*)",
+      "Bash(source .venv/Scripts/activate:*)",
+      "Bash(timeout:*)",
+      "Bash(sqlite3:*)",
+      "Bash(python:*)"
     ]
   }
 }
