@@ -76,7 +76,7 @@ def show_warning(parent, title: str, message: str):
 class TextViewDialog(QDialog):
     """Dialog for viewing document text."""
 
-    def __init__(self, text: str, parent=None):
+    def __init__(self, text: str, parent=None, highlight_text: str = None):
         super().__init__(parent)
         self.setWindowTitle("Document Text")
         self.setMinimumSize(800, 600)
@@ -88,6 +88,26 @@ class TextViewDialog(QDialog):
         text_edit.setPlainText(text)
         text_edit.setReadOnly(True)
         layout.addWidget(text_edit)
+
+        # Apply highlighting if requested
+        if highlight_text:
+            from PyQt6.QtGui import QTextCursor, QTextCharFormat
+            from PyQt6.QtCore import Qt
+
+            cursor = text_edit.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            text_edit.setTextCursor(cursor)
+
+            # Find and highlight the sentence
+            format = QTextCharFormat()
+            format.setBackground(Qt.GlobalColor.yellow)
+
+            if text_edit.find(highlight_text):
+                cursor = text_edit.textCursor()
+                cursor.mergeCharFormat(format)
+
+                # Scroll to the highlighted text
+                text_edit.ensureCursorVisible()
 
         # Stats
         stats_label = QLabel(
