@@ -601,9 +601,9 @@ class DocumentsView(QWidget):
 
         Args:
             doc_id: Document ID to highlight
-            sentence_id: Optional sentence ID (for future text viewer enhancement)
+            sentence_id: Optional sentence ID to highlight in text viewer
         """
-        logger.info(f"Highlighting document {doc_id}")
+        logger.info(f"Highlighting document {doc_id}, sentence {sentence_id}")
 
         # Find the row with this doc_id
         for row in range(self.docs_table.rowCount()):
@@ -615,8 +615,49 @@ class DocumentsView(QWidget):
                 self.docs_table.scrollToItem(item)
                 logger.info(f"Selected document row {row}")
 
-                # TODO M6: Optionally open text viewer and highlight sentence_id
-                # For now, just selecting the row is sufficient
+                # Open text viewer with highlighting (M6 - no placeholder)
+                try:
+                    with self.db_service.get_session() as session:
+                        text = self.ingest_service.get_document_text(session, doc_id)
+                        if text:
+                            # Get sentence text for highlighting if sentence_id provided
+                            highlight_text = None
+                            if sentence_id:
+                                from app.infra.sa_models import DocumentSentence
+                                sentence = session.get(DocumentSentence, sentence_id)
+                                if sentence:
+                                    highlight_text = sentence.text
+                                    logger.info(f"Will highlight: '{highlight_text[:50]}...'")
+
+                            # Open text viewer dialog
+                            from app.ui.dialogs import TextViewDialog
+                            dialog = TextViewDialog(text, self, highlight_text=highlight_text)
+                            dialog.exec()
+                        else:
+                            logger.warning(f"No text available for document {doc_id}")
+                except Exception as e:
+                    logger.exception(f"Failed to open text viewer for document {doc_id}")
+
                 break
         else:
             logger.warning(f"Document {doc_id} not found in table")
+
+    def closeEvent(self, event):
+        """Handle widget close - ensure workers are stopped."""
+        # Stop ingest worker if running
+        if self.current_worker and self.current_worker.isRunning():
+            logger.info("Stopping ingest worker on close")
+            self.current_worker.quit()
+            self.current_worker.wait(1000)
+            if self.current_worker.isRunning():
+                self.current_worker.terminate()
+
+        # Stop process worker if running
+        if self.process_worker and self.process_worker.isRunning():
+            logger.info("Stopping process worker on close")
+            self.process_worker.quit()
+            self.process_worker.wait(1000)
+            if self.process_worker.isRunning():
+                self.process_worker.terminate()
+
+        super().closeEvent(event)

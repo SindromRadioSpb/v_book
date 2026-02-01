@@ -3,6 +3,7 @@ import sys
 import io
 import logging
 import time
+import shutil
 from pathlib import Path
 
 # Fix Unicode on Windows
@@ -308,9 +309,6 @@ def test_concordance_search():
 
     finally:
         # Cleanup
-        import shutil
-        import time
-
         if test_dir.exists():
             shutil.rmtree(test_dir)
 

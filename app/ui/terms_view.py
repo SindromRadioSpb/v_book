@@ -334,3 +334,14 @@ class TermsView(QWidget):
             self.extract_worker = None
 
         show_error(self, "Error", error_msg)
+
+    def closeEvent(self, event):
+        """Handle widget close - ensure worker is stopped."""
+        if self.extract_worker and self.extract_worker.isRunning():
+            logger.info("Stopping term extraction worker on close")
+            self.extract_worker.quit()
+            self.extract_worker.wait(1000)  # Wait up to 1 second
+            if self.extract_worker.isRunning():
+                self.extract_worker.terminate()
+
+        super().closeEvent(event)

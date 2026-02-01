@@ -13,7 +13,7 @@
 --   WHERE sc.project_id = ?
 --
 -- This index speeds up the JOIN from source_document → source_corpus
-CREATE INDEX IF NOT EXISTS idx_doc_corpus FOR project ON source_document(corpus_id, doc_id);
+CREATE INDEX IF NOT EXISTS idx_doc_corpus_project ON source_document(corpus_id, doc_id);
 
 -- Alternative: if we add project_id denormalized to source_document later,
 -- this would be faster, but for now we use the join approach
