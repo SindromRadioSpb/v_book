@@ -144,11 +144,23 @@ def test_delta_statistics():
     finally:
         # Cleanup
         import shutil
+        import time
+
         if test_dir.exists():
             shutil.rmtree(test_dir)
+
+        # Close database connections before deleting file
+        DBService.shutdown()
+        time.sleep(0.1)  # Small delay for Windows to release file handle
+
+        # Try to delete database file
         if test_db_path.exists():
-            DBService._instance = None
-            test_db_path.unlink()
+            try:
+                test_db_path.unlink()
+            except PermissionError:
+                # On Windows, file might still be locked
+                logger.warning(f"Could not delete {test_db_path} (file locked)")
+                pass
 
 
 def test_reprocessing():
@@ -251,11 +263,23 @@ def test_reprocessing():
     finally:
         # Cleanup
         import shutil
+        import time
+
         if test_dir.exists():
             shutil.rmtree(test_dir)
+
+        # Close database connections before deleting file
+        DBService.shutdown()
+        time.sleep(0.1)  # Small delay for Windows to release file handle
+
+        # Try to delete database file
         if test_db_path.exists():
-            DBService._instance = None
-            test_db_path.unlink()
+            try:
+                test_db_path.unlink()
+            except PermissionError:
+                # On Windows, file might still be locked
+                logger.warning(f"Could not delete {test_db_path} (file locked)")
+                pass
 
 
 if __name__ == "__main__":
