@@ -50,3 +50,7 @@ test_m4*.db-*
 
 # (keep source data files; ignore only DBs/logs)
 # --------------------------------
+
+# Claude local settings
+.claude/settings.local.json
+
