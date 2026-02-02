@@ -526,4 +526,152 @@ class TermClusterMember(Base):
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
 
     member_freq_abs = Column(Integer, nullable=False, default=0)
+
+
+# -----------------------
+# M7: Translation Memory
+# -----------------------
+
+
+class TMEntry(Base):
+    """Translation Memory entry with versioning and provenance."""
+
+    __tablename__ = "tm_entry"
+
+    tm_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"))
+    kind = Column(String, nullable=False)  # lemma|ngram|term_cluster|surface
+    src_lang = Column(String, nullable=False)
+    tgt_lang = Column(String, nullable=False)
+    src_text = Column(Text, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    translation = Column(Text, nullable=False)
+    translation_norm = Column(Text)
+    pos = Column(String)
+    domain = Column(String)
+    notes = Column(Text)
+    status = Column(String, nullable=False, default="draft")  # draft|approved|rejected|deprecated
+    confidence = Column(Float)
+    origin = Column(String, nullable=False)  # user_edit|import|mt_accept|mt_auto|merge
+    source_ref = Column(Text)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+    approved_at = Column(String)
+    approved_by = Column(String)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"),
+        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tm_kind"),
+        CheckConstraint("status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tm_status"),
+        CheckConstraint(
+            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge')", name="ck_tm_origin"
+        ),
+        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_tm_confidence"),
+    )
+
+
+class TMEntryHistory(Base):
+    """Translation Memory history for audit trail."""
+
+    __tablename__ = "tm_entry_history"
+
+    hist_id = Column(Integer, primary_key=True)
+    tm_id = Column(Integer, ForeignKey("tm_entry.tm_id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    translation = Column(Text, nullable=False)
+    notes = Column(Text)
+    status = Column(String, nullable=False)
+    origin = Column(String, nullable=False)
+    changed_at = Column(String, nullable=False, default=utc_now)
+    change_kind = Column(String, nullable=False)  # edit|import|merge|revert|approve|reject|deprecate
+
+    __table_args__ = (
+        CheckConstraint(
+            "change_kind IN ('edit', 'import', 'merge', 'revert', 'approve', 'reject', 'deprecate')",
+            name="ck_tm_hist_change_kind",
+        ),
+    )
+
+
+class TMAlias(Base):
+    """Translation Memory aliases for variant matching."""
+
+    __tablename__ = "tm_alias"
+
+    alias_id = Column(Integer, primary_key=True)
+    tm_id = Column(Integer, ForeignKey("tm_entry.tm_id", ondelete="CASCADE"), nullable=False)
+    alias_text = Column(Text, nullable=False)
+    alias_norm = Column(Text, nullable=False)
+
+    __table_args__ = (UniqueConstraint("tm_id", "alias_norm", name="uq_tm_alias"),)
+
+
+class DictSource(Base):
+    """Offline dictionary source metadata."""
+
+    __tablename__ = "dict_source"
+
+    dict_source_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"))
+    name = Column(String, nullable=False)
+    format = Column(String, nullable=False)  # csv|xlsx|json
+    file_path = Column(Text)
+    sha256 = Column(String, nullable=False)
+    created_at = Column(String, nullable=False, default=utc_now)
+    row_count = Column(Integer, nullable=False, default=0)
+    notes = Column(Text)
+
+    __table_args__ = (CheckConstraint("format IN ('csv', 'xlsx', 'json')", name="ck_dict_source_format"),)
+
+
+class DictEntry(Base):
+    """Offline dictionary entry (imported from files)."""
+
+    __tablename__ = "dict_entry"
+
+    dict_entry_id = Column(Integer, primary_key=True)
+    dict_source_id = Column(Integer, ForeignKey("dict_source.dict_source_id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String, nullable=False)  # lemma|ngram|term_cluster|surface
+    src_lang = Column(String, nullable=False)
+    tgt_lang = Column(String, nullable=False)
+    src_text = Column(Text, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    translation = Column(Text, nullable=False)
+    pos = Column(String)
+    domain = Column(String)
+    status = Column(String, nullable=False, default="approved")  # approved|draft|deprecated
+    priority = Column(Integer, nullable=False, default=0)
+    notes = Column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "dict_source_id", "kind", "src_lang", "tgt_lang", "src_norm", "translation", name="uq_dict_entry"
+        ),
+        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_dict_kind"),
+        CheckConstraint("status IN ('approved', 'draft', 'deprecated')", name="ck_dict_status"),
+    )
+
+
+class MTCache(Base):
+    """Machine Translation cache for API results."""
+
+    __tablename__ = "mt_cache"
+
+    cache_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"))
+    provider = Column(String, nullable=False)
+    src_lang = Column(String, nullable=False)
+    tgt_lang = Column(String, nullable=False)
+    request_key = Column(String, nullable=False)
+    src_text = Column(Text, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    glossary_hash = Column(String)
+    translation = Column(Text, nullable=False)
+    confidence = Column(Float)
+    created_at = Column(String, nullable=False, default=utc_now)
+    expires_at = Column(String)
+
+    __table_args__ = (
+        UniqueConstraint("provider", "src_lang", "tgt_lang", "request_key", name="uq_mt_cache_request"),
+    )
     member_doc_freq = Column(Integer, nullable=False, default=0)

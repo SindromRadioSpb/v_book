@@ -58,3 +58,12 @@ test_m4*.db-*
 # Claude local settings
 .claude/settings.local.json
 
+
+# runtime/test databases
+*.db
+*.db-*
+/backups/
+
+# temp
+.timeout*
+
