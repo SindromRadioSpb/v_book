@@ -520,3 +520,73 @@ class TranslationService:
                 )
 
         return results
+
+    def revert_tm_entry(
+        self,
+        session: Session,
+        tm_id: int,
+        target_version: int,
+        actor: str = "system",
+    ) -> bool:
+        """
+        Revert TM entry to a previous version.
+
+        Args:
+            session: SQLAlchemy session
+            tm_id: TM entry ID
+            target_version: Version number to revert to
+            actor: Actor performing revert
+
+        Returns:
+            True if revert successful, False otherwise
+        """
+        from sqlalchemy import select, func
+        from app.infra.sa_models import TMEntry, TMEntryHistory
+
+        # Get current entry
+        entry = session.get(TMEntry, tm_id)
+        if not entry:
+            self.logger.error(f"TM entry {tm_id} not found")
+            return False
+
+        # Get target version from history
+        stmt = select(TMEntryHistory).where(
+            TMEntryHistory.tm_id == tm_id,
+            TMEntryHistory.version == target_version
+        )
+        target_history = session.execute(stmt).scalar()
+
+        if not target_history:
+            self.logger.error(f"Version {target_version} not found for TM entry {tm_id}")
+            return False
+
+        # Get next version number
+        max_version_stmt = select(func.max(TMEntryHistory.version)).where(
+            TMEntryHistory.tm_id == tm_id
+        )
+        max_version = session.execute(max_version_stmt).scalar() or 0
+        next_version = max_version + 1
+
+        # Create history record for current state (before revert)
+        current_history = TMEntryHistory(
+            tm_id=entry.tm_id,
+            version=next_version,
+            translation=entry.translation,
+            notes=entry.notes,
+            status=entry.status,
+            origin=entry.origin,
+            change_kind="revert",
+        )
+        session.add(current_history)
+
+        # Revert entry to target version
+        entry.translation = target_history.translation
+        entry.status = target_history.status
+        entry.origin = "revert"
+        entry.notes = target_history.notes or f"Reverted to v{target_version}"
+        entry.updated_at = utc_now()
+
+        session.commit()
+
+        self.logger.info(f"TM entry {tm_id} reverted to version {target_version}")
+        return True

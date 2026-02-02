@@ -552,7 +552,7 @@ class TMEntry(Base):
     notes = Column(Text)
     status = Column(String, nullable=False, default="draft")  # draft|approved|rejected|deprecated
     confidence = Column(Float)
-    origin = Column(String, nullable=False)  # user_edit|import|mt_accept|mt_auto|merge
+    origin = Column(String, nullable=False)  # user_edit|import|mt_accept|mt_auto|merge|revert
     source_ref = Column(Text)
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
@@ -564,7 +564,7 @@ class TMEntry(Base):
         CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tm_kind"),
         CheckConstraint("status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tm_status"),
         CheckConstraint(
-            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge')", name="ck_tm_origin"
+            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')", name="ck_tm_origin"
         ),
         CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_tm_confidence"),
     )

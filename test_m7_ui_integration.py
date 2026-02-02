@@ -55,12 +55,43 @@ class M7UITestCase(unittest.TestCase):
         DBService.initialize(cls.db_path)
         cls.db_service = DBService.get_instance()
 
-        # Apply M7 migration
+        # Apply M7 migrations
         import sqlite3
-        migration_sql = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
         con = sqlite3.connect(str(cls.db_path))
-        con.executescript(migration_sql)
+
+        # Apply 004 (M7 base schema)
+        migration_004 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        con.executescript(migration_004)
+
+        # Apply 005 (add 'revert' origin)
+        migration_005 = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        con.executescript(migration_005)
+
         con.close()
+
+        # Create test FK structure (Library → DictProject → Lemmas)
+        with cls.db_service.get_session() as session:
+            from app.infra.sa_models import Library, DictProject
+
+            # Create Library
+            library = Library(
+                library_id=1,
+                name="Test Library",
+            )
+            session.add(library)
+            session.flush()
+
+            # Create DictProject
+            project = DictProject(
+                project_id=1,
+                library_id=1,
+                name="Test Project",
+                description="Test",
+                src_lang="he",
+                tgt_lang="ru",
+            )
+            session.add(project)
+            session.commit()
 
     @classmethod
     def tearDownClass(cls):
@@ -306,6 +337,7 @@ class TestTranslationResolveWorker(M7UITestCase):
         """Test worker runs and emits results."""
         from app.ui.workers import TranslationResolveWorker
         from app.infra.sa_models import TMEntry
+        from PyQt6.QtCore import QEventLoop, QTimer
 
         # Create test TM entry
         with self.db_service.get_session() as session:
@@ -334,16 +366,28 @@ class TestTranslationResolveWorker(M7UITestCase):
 
         # Mock signal handler
         results_received = []
+        loop = QEventLoop()
 
         def on_results(results):
             results_received.append(results)
-            worker.quit()
+            loop.quit()
+
+        def on_finished():
+            if not results_received:
+                loop.quit()
 
         worker.results_ready.connect(on_results)
+        worker.finished.connect(on_finished)
+
+        # Set timeout to prevent hanging
+        QTimer.singleShot(5000, loop.quit)
 
         # Run worker
         worker.start()
-        worker.wait(5000)  # Wait up to 5 seconds
+        loop.exec()  # Process events until signal received or timeout
+
+        # Cleanup
+        worker.wait()
 
         # Verify results received
         self.assertEqual(len(results_received), 1)
@@ -377,8 +421,13 @@ class TestStatusFiltering(M7UITestCase):
         """Test draft entries are hidden by default."""
         from app.services.translation_service import TranslationService
         from app.infra.sa_models import TMEntry
+        from app.domain.normalization import normalize_for_tm
 
         tm_service = TranslationService()
+
+        # Use normalization to ensure src_norm matches
+        test_word = "דבר"  # Simple Hebrew word without prefixes
+        normalized = normalize_for_tm("he", test_word, "lemma")
 
         # Create draft entry
         with self.db_service.get_session() as session:
@@ -387,8 +436,8 @@ class TestStatusFiltering(M7UITestCase):
                 kind="lemma",
                 src_lang="he",
                 tgt_lang="ru",
-                src_text="מילה",
-                src_norm="מילה",
+                src_text=test_word,
+                src_norm=normalized.norm,
                 translation="test_draft",  # ASCII for test stability
                 status="draft",
                 origin="user_edit",
@@ -400,7 +449,7 @@ class TestStatusFiltering(M7UITestCase):
         with self.db_service.get_session() as session:
             result = tm_service.resolve_translation(
                 session,
-                src_text="מילה",
+                src_text=test_word,
                 kind="lemma",
                 project_id=None,  # Global scope
                 allow_draft=False,
@@ -411,7 +460,7 @@ class TestStatusFiltering(M7UITestCase):
         with self.db_service.get_session() as session:
             result = tm_service.resolve_translation(
                 session,
-                src_text="מילה",
+                src_text=test_word,
                 kind="lemma",
                 project_id=None,  # Global scope
                 allow_draft=True,
@@ -436,7 +485,7 @@ class TestCoverageCalculation(M7UITestCase):
             for i, lemma_text in enumerate(["בית", "ספר", "גדול", "חדש", "טוב"], start=1):
                 lemma = Lemma(
                     lemma_id=i,
-                    project_id=None,
+                    project_id=1,
                     lemma_text=lemma_text,
                     pos="NOUN",
                 )
@@ -444,7 +493,7 @@ class TestCoverageCalculation(M7UITestCase):
 
                 stat = LemmaProjectStat(
                     lemma_id=i,
-                    project_id=None,
+                    project_id=1,
                     freq_abs=10,
                     doc_freq=1,
                 )
@@ -453,7 +502,7 @@ class TestCoverageCalculation(M7UITestCase):
             # Add TM entries for 2 lemmas (40% coverage)
             for lemma_text, translation in [("בית", "дом"), ("ספר", "книга")]:
                 entry = TMEntry(
-                    project_id=None,
+                    project_id=1,
                     kind="lemma",
                     src_lang="he",
                     tgt_lang="ru",
@@ -467,12 +516,12 @@ class TestCoverageCalculation(M7UITestCase):
 
             session.commit()
 
-        # Calculate coverage (simplified - skip Lemma FK issues)
+        # Calculate coverage
         with self.db_service.get_session() as session:
             # Covered lemmas (count TM entries)
             covered_lemmas = session.execute(
                 select(func.count(TMEntry.tm_id)).where(
-                    TMEntry.project_id.is_(None),
+                    TMEntry.project_id == 1,
                     TMEntry.kind == "lemma",
                     TMEntry.status == "approved",
                 )
