@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from collections import Counter
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
@@ -558,7 +558,12 @@ class TermExtractionService:
         for canonical_key, members in clusters_data.items():
             # Aggregate stats
             total_freq = sum(stat.freq_abs for _, stat in members)
-            total_doc_freq = sum(stat.doc_freq for _, stat in members)
+
+            # DocFreq: Maximum doc_freq among cluster members
+            # This gives a conservative (lower-bound) estimate of documents containing the term
+            # NOTE: Exact count would require ngram_doc_stat table, which is not populated
+            # For variants of same term, max is typically accurate since they appear in similar contexts
+            total_doc_freq = max(stat.doc_freq for _, stat in members)
 
             # Get best scores
             pmis = [stat.pmi_cache for _, stat in members if stat.pmi_cache is not None]
