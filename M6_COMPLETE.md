@@ -334,6 +334,22 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 
 ---
 
+## 📌 Related Fix: Hebrew Prefix Artifacts
+
+**Issue:** Terms table showed standalone article "ה" with space (e.g., "ה ספר" instead of "הספר")
+**Root cause:** Stanza tokenization separates articles → n-gram extraction joins with space
+**Solution:** Post-tokenization normalization merges standalone articles before n-gram/NP extraction
+**Status:** ✅ FIXED (2026-02-02)
+
+**See:** `docs/HEBREW_PREFIX_ARTIFACTS.md` and `HEBREW_PREFIX_FIX_COMPLETE.md` for details.
+
+**Impact on M6:**
+- Concordance search now finds both "הספר" and "ה ספר" (if old data exists)
+- New term extractions will use merged forms
+- No changes to concordance search logic required
+
+---
+
 **Status:** ✅ M6 COMPLETE & TESTED
 **Concordance search:** ✅ PROVEN WORKING
 **Performance:** ✅ FAST (<300ms)

@@ -3,6 +3,8 @@ import logging
 from typing import List, Dict, Set, Tuple
 from collections import Counter
 
+from app.domain.hebrew_utils import merge_standalone_articles
+
 logger = logging.getLogger(__name__)
 
 # POS pattern filters for Hebrew
@@ -61,6 +63,10 @@ def extract_ngrams_from_sentence(
 
         for i in range(len(tokens) - n + 1):
             window = tokens[i:i+n]
+
+            # Merge standalone articles (e.g., "ה" + "ספר" → "הספר")
+            # Fixes tokenization artifacts where definite article is separated
+            window = merge_standalone_articles(window)
 
             # Extract POS pattern
             pos_pattern = tuple(tok['pos'] for tok in window)

@@ -2,6 +2,8 @@
 import logging
 from typing import List, Dict, Set
 
+from app.domain.hebrew_utils import merge_standalone_articles
+
 logger = logging.getLogger(__name__)
 
 # Stop POS tags - these terminate NP candidates
@@ -114,6 +116,10 @@ def extract_np_chunks_from_sentence(
                 # Validate NP composition
                 if not _is_valid_np_span(pos_tags):
                     continue
+
+                # Merge standalone articles (e.g., "ה" + "ספר" → "הספר")
+                # Fixes tokenization artifacts where definite article is separated
+                span_tokens = merge_standalone_articles(span_tokens)
 
                 # Build surface and lemma forms
                 surface_tokens = [tok['text'] for tok in span_tokens]
