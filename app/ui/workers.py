@@ -350,3 +350,80 @@ class ConcordanceSearchWorker(QThread):
                 f"{error[:200]}\n\n"
                 f"Please try again or check the logs for details."
             )
+
+
+class TranslationResolveWorker(QThread):
+    """Worker thread for batch translation resolution (M7)."""
+
+    results_ready = pyqtSignal(dict)  # dict[(src_text, kind)] -> TranslationResult
+    progress = pyqtSignal(int, int)  # current, total
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        items: List[Tuple[str, str]],  # [(src_text, kind), ...]
+        project_id: int,
+        src_lang: str = "he",
+        tgt_lang: str = "ru",
+        allow_draft: bool = False,
+    ):
+        super().__init__()
+        self.items = items
+        self.project_id = project_id
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+        self.allow_draft = allow_draft
+        self._cancelled = False
+
+    def run(self):
+        """Run batch translation resolution."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.translation_service import TranslationService
+
+            db_service = DBService.get_instance()
+            translation_service = TranslationService()
+
+            with db_service.get_session() as session:
+                # Bulk resolve for performance (no N+1 queries)
+                results = translation_service.bulk_resolve(
+                    session,
+                    self.items,
+                    src_lang=self.src_lang,
+                    tgt_lang=self.tgt_lang,
+                    project_id=self.project_id,
+                    allow_draft=self.allow_draft,
+                )
+
+                # Check for cancellation
+                if self._cancelled:
+                    logger.info("Translation resolve cancelled")
+                    return
+
+                # Emit results
+                self.results_ready.emit(results)
+
+        except Exception as e:
+            logger.exception("Translation resolve worker error")
+            error_msg = self._make_user_friendly_error(str(e))
+            self.error.emit(error_msg)
+
+    def cancel(self):
+        """Request cancellation of the worker."""
+        self._cancelled = True
+
+    def _make_user_friendly_error(self, error: str) -> str:
+        """Convert technical error to user-friendly message."""
+        error_lower = error.lower()
+
+        if "database" in error_lower or "locked" in error_lower:
+            return (
+                "Database error occurred during translation resolution.\n\n"
+                "Please try again. If the problem persists, restart the application."
+            )
+        else:
+            return (
+                f"An error occurred during translation:\n\n"
+                f"{error[:200]}\n\n"
+                f"Check the logs for details."
+            )

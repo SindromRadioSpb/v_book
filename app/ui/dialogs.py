@@ -123,3 +123,90 @@ class TextViewDialog(QDialog):
         layout.addWidget(close_btn)
 
         self.setLayout(layout)
+
+
+class WhyTranslationDialog(QDialog):
+    """M7: Dialog showing translation explainability."""
+
+    def __init__(self, translation_result, src_text: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Why Translation: {src_text}")
+        self.setMinimumWidth(500)
+
+        layout = QVBoxLayout()
+
+        # Source text
+        layout.addWidget(QLabel(f"<b>Source:</b> {src_text}"))
+        layout.addWidget(QLabel(""))  # Spacer
+
+        # Translation
+        translation = translation_result.translation or "(no translation)"
+        layout.addWidget(QLabel(f"<b>Translation:</b> {translation}"))
+        layout.addWidget(QLabel(""))
+
+        # Provenance information
+        info_layout = QVBoxLayout()
+
+        # Source
+        source_display = {
+            "tm": "Translation Memory (User Override)",
+            "dict": "Offline Dictionary",
+            "mt_cache": "Machine Translation (Cached)",
+            "mt": "Machine Translation (Live)",
+            "none": "No Translation Found"
+        }.get(translation_result.source, translation_result.source)
+        info_layout.addWidget(QLabel(f"<b>Source:</b> {source_display}"))
+
+        # Status
+        if translation_result.status:
+            status_display = translation_result.status.capitalize()
+            info_layout.addWidget(QLabel(f"<b>Status:</b> {status_display}"))
+
+        # Origin
+        if translation_result.origin:
+            origin_display = {
+                "user_edit": "Manual User Edit",
+                "import": "Imported from Dictionary",
+                "mt_accept": "MT Suggestion (Accepted)",
+                "mt_auto": "MT Automatic",
+                "merge": "Merged Entry"
+            }.get(translation_result.origin, translation_result.origin)
+            info_layout.addWidget(QLabel(f"<b>Origin:</b> {origin_display}"))
+
+        # Matched on
+        if translation_result.matched_on:
+            info_layout.addWidget(QLabel(f"<b>Matched On:</b> {translation_result.matched_on}"))
+
+        # Match key used
+        if translation_result.match_key_used:
+            info_layout.addWidget(QLabel(f"<b>Match Key:</b> {translation_result.match_key_used}"))
+
+        # Dictionary source
+        if translation_result.dict_source_name:
+            info_layout.addWidget(QLabel(f"<b>Dictionary:</b> {translation_result.dict_source_name}"))
+
+        # MT provider
+        if translation_result.provider:
+            info_layout.addWidget(QLabel(f"<b>MT Provider:</b> {translation_result.provider}"))
+
+        # Confidence
+        if translation_result.confidence is not None:
+            info_layout.addWidget(QLabel(f"<b>Confidence:</b> {translation_result.confidence:.2%}"))
+
+        # TM ID
+        if translation_result.tm_id:
+            info_layout.addWidget(QLabel(f"<b>TM Entry ID:</b> {translation_result.tm_id}"))
+
+        # Notes
+        if translation_result.notes:
+            info_layout.addWidget(QLabel(f"<b>Notes:</b> {translation_result.notes}"))
+
+        layout.addLayout(info_layout)
+        layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+        self.setLayout(layout)

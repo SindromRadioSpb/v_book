@@ -102,3 +102,24 @@ class ClusterStats:
     weirdness: Optional[float] = None
     keyness_llr: Optional[float] = None
     termhood_score: Optional[float] = None
+    # M7: Translation
+    translation: Optional[str] = None
+    translation_source: Optional[str] = None  # tm|dict|mt_cache|mt|none
+    translation_status: Optional[str] = None  # approved|draft
+
+
+@dataclass
+class TranslationResultDTO:
+    """M7 Translation result for UI layer."""
+
+    translation: Optional[str] = None
+    source: str = "none"  # tm|dict|mt_cache|mt|none
+    status: Optional[str] = None  # approved|draft|rejected|deprecated
+    confidence: Optional[float] = None
+    origin: Optional[str] = None  # user_edit|import|mt_accept|mt_auto
+    matched_on: Optional[str] = None  # src_norm|alias_norm|variant_norm
+    match_key_used: Optional[str] = None
+    provider: Optional[str] = None  # MT provider name
+    dict_source_name: Optional[str] = None
+    tm_id: Optional[int] = None
+    notes: Optional[str] = None

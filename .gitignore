@@ -67,3 +67,17 @@ test_m4*.db-*
 # temp
 .timeout*
 
+
+# m7 smoke/debug scripts (local)
+_m7_smoke_*.py
+debug_status_workflow.py
+smoke_check_m7.py
+test_norm.py
+
+_m7_smoke_02_norm.py
+_m7_smoke_03_tm_lookup.py
+_m7_smoke_04_precedence.py
+_m7_smoke_05_bulk.py
+debug_status_workflow.py
+smoke_check_m7.py
+test_norm.py
