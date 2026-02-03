@@ -230,6 +230,60 @@ class ExtractionWorker(QThread):
             self.error.emit(str(e))
 
 
+class ProjectTermExtractionWorker(QThread):
+    """Worker for extracting terms for entire project."""
+
+    finished = pyqtSignal(object)  # ExtractReport
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)  # Progress message
+
+    def __init__(
+        self,
+        project_id: int,
+        enable_ngrams: bool = True,
+        include_np: bool = False,
+        min_freq: int = 2,
+        ngram_ns: tuple = (2, 3),
+        np_max_len: int = 5,
+        overwrite: bool = True,
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.enable_ngrams = enable_ngrams
+        self.include_np = include_np
+        self.min_freq = min_freq
+        self.ngram_ns = ngram_ns
+        self.np_max_len = np_max_len
+        self.overwrite = overwrite
+
+    def run(self):
+        """Extract terms for project."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.term_extraction_service import TermExtractionService
+
+            db_service = DBService.get_instance()
+            extraction_service = TermExtractionService()
+
+            with db_service.get_session() as session:
+                report = extraction_service.extract_terms_for_project(
+                    session,
+                    self.project_id,
+                    enable_ngrams=self.enable_ngrams,
+                    include_np=self.include_np,
+                    min_freq=self.min_freq,
+                    ngram_ns=self.ngram_ns,
+                    np_max_len=self.np_max_len,
+                    overwrite=self.overwrite,
+                )
+
+                self.finished.emit(report)
+
+        except Exception as e:
+            logger.exception("Project term extraction worker error")
+            self.error.emit(str(e))
+
+
 class ConcordanceSearchWorker(QThread):
     """Worker thread for concordance/KWIC search (M6)."""
 
