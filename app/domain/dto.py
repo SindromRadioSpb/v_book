@@ -201,3 +201,63 @@ class TermClusterCoverageRow:
     freq_abs: int
     doc_freq: int
     termhood_score: Optional[float]
+
+
+# ============================================================================
+# P3: Dictionary Import DTOs
+# ============================================================================
+
+
+@dataclass
+class ImportRow:
+    """P3: Parsed row from import file."""
+
+    row_index: int
+    kind: str
+    src_lang: str
+    tgt_lang: str
+    src_text: str
+    translation: str
+    pos: Optional[str] = None
+    domain: Optional[str] = None
+    status: str = "approved"
+    priority: Optional[int] = None
+    notes: Optional[str] = None
+    aliases: Optional[List[str]] = None  # Additional src_text variants
+
+
+@dataclass
+class ImportInvalidRow:
+    """P3: Invalid row details."""
+
+    row_index: int
+    reason: str
+
+
+@dataclass
+class ImportConflict:
+    """P3: Conflict details."""
+
+    row_index: int
+    src_text: str
+    src_norm: str
+    existing_translation: str
+    incoming_translation: str
+    action_taken: str  # "skipped", "overwritten", "kept_both"
+
+
+@dataclass
+class ImportReport:
+    """P3: Import operation report."""
+
+    total: int
+    added: int
+    updated: int
+    skipped: int
+    conflicts: int
+    invalid: int
+    invalid_rows: List[ImportInvalidRow]
+    conflict_details: List[ImportConflict]
+    dict_source_id: Optional[int]
+    sha256: str
+    elapsed_ms: float

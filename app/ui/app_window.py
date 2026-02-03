@@ -11,6 +11,7 @@ from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
 from app.ui.translation_management_panel import TranslationManagementPanel
 from app.ui.coverage_panel import CoveragePanel
+from app.ui.import_wizard import ImportWizard
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ class AppWindow(QMainWindow):
         verification_action.triggered.connect(self.open_verification)
         tools_menu.addAction(verification_action)
 
+        # Import Dictionary
+        import_action = QAction("&Import Dictionary...", self)
+        import_action.setShortcut("Ctrl+Shift+I")
+        import_action.triggered.connect(self.open_import_wizard)
+        tools_menu.addAction(import_action)
+
         # Premium menu
         premium_menu = menubar.addMenu("&Premium")
 
@@ -84,6 +91,18 @@ class AppWindow(QMainWindow):
         # Add to stack and show
         self.stack.addWidget(verification_panel)
         self.stack.setCurrentWidget(verification_panel)
+
+    def open_import_wizard(self):
+        """Open import wizard."""
+        logger.info("Opening import wizard")
+
+        # Create import wizard
+        import_wizard = ImportWizard()
+        import_wizard.back_requested.connect(self.back_to_dashboard)
+
+        # Add to stack and show
+        self.stack.addWidget(import_wizard)
+        self.stack.setCurrentWidget(import_wizard)
 
     def open_translation_management(self):
         """Open translation management panel."""

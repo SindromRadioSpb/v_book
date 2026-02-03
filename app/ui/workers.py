@@ -823,3 +823,80 @@ class CoverageWorker(QThread):
     def cancel(self):
         """Cancel the calculation."""
         self._cancelled = True
+
+
+class ImportWorker(QThread):
+    """P3: Worker for importing dictionaries (non-blocking)."""
+
+    progress = pyqtSignal(int, int)  # (current, total)
+    log_message = pyqtSignal(str)  # Log message for UI
+    import_complete = pyqtSignal(object)  # ImportReport
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        file_path: str,
+        project_id: Optional[int],
+        scope: str,
+        on_conflict: str,
+        normalize_mode: str,
+        default_kind: str,
+        default_status: str,
+        force_reimport: bool = False,
+    ):
+        super().__init__()
+        self.file_path = file_path
+        self.project_id = project_id
+        self.scope = scope
+        self.on_conflict = on_conflict
+        self.normalize_mode = normalize_mode
+        self.default_kind = default_kind
+        self.default_status = default_status
+        self.force_reimport = force_reimport
+        self._cancelled = False
+
+    def run(self):
+        """Run import operation."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.dictionary_import_service import DictionaryImportService
+
+            db_service = DBService.get_instance()
+            import_service = DictionaryImportService()
+
+            self.log_message.emit(f"Starting import: {self.file_path}")
+            self.log_message.emit(f"Scope: {self.scope}, Conflict policy: {self.on_conflict}")
+
+            with db_service.get_session() as session:
+                report = import_service.import_dictionary(
+                    session,
+                    self.file_path,
+                    project_id=self.project_id,
+                    scope=self.scope,
+                    on_conflict=self.on_conflict,
+                    normalize_mode=self.normalize_mode,
+                    default_kind=self.default_kind,
+                    default_status=self.default_status,
+                    progress_cb=lambda cur, tot: self.progress.emit(cur, tot),
+                    cancel_flag=lambda: self._cancelled,
+                    force_reimport=self.force_reimport,
+                )
+
+            if not self._cancelled:
+                self.log_message.emit("Import completed successfully!")
+                self.log_message.emit(
+                    f"Added: {report.added}, Updated: {report.updated}, "
+                    f"Skipped: {report.skipped}, Invalid: {report.invalid}"
+                )
+                self.import_complete.emit(report)
+
+        except InterruptedError:
+            self.log_message.emit("Import cancelled by user")
+        except Exception as e:
+            logger.exception("Import error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the import."""
+        self._cancelled = True
+        self.log_message.emit("Cancelling import...")
