@@ -225,6 +225,9 @@ class TranslationManagementPanel(QWidget):
         self.table_view.setSortingEnabled(False)  # Server-side sorting only
         self.table_view.horizontalHeader().setStretchLastSection(True)
 
+        # P2 FIX: Connect dataChanged signal to save inline edits
+        self.model.dataChanged.connect(self.on_translation_edited)
+
         # Column widths
         self.table_view.setColumnWidth(0, 60)   # ID
         self.table_view.setColumnWidth(1, 100)  # Kind
@@ -485,6 +488,52 @@ class TranslationManagementPanel(QWidget):
             self.worker.terminate()
             self.worker.wait()
         event.accept()
+
+    def on_translation_edited(self, top_left, bottom_right, roles):
+        """P2 FIX: Handle inline edit of translation - save to DB.
+
+        Args:
+            top_left: Top-left index of changed cells
+            bottom_right: Bottom-right index of changed cells
+            roles: Roles that changed
+        """
+        # Check if Translation column was edited (col 3)
+        if top_left.column() != 3:
+            return
+
+        row = top_left.row()
+        entry = self.model.get_entry(row)
+
+        if not entry:
+            return
+
+        new_translation = entry.translation
+
+        if not new_translation or not new_translation.strip():
+            return  # Don't save empty translations
+
+        try:
+            from app.services.translation_admin_service import TranslationAdminService
+            service = TranslationAdminService()
+            db_service = DBService.get_instance()
+
+            with db_service.get_session() as session:
+                # Save translation using service (creates history automatically)
+                service.update_translation(
+                    session,
+                    tm_id=entry.tm_id,
+                    translation=new_translation.strip(),
+                )
+
+            logger.info(f"Saved translation for TM entry {entry.tm_id}: {new_translation.strip()}")
+
+        except Exception as e:
+            logger.error(f"Failed to save translation for TM entry {entry.tm_id}: {e}", exc_info=True)
+            QMessageBox.warning(
+                self,
+                "Save Error",
+                f"Failed to save translation:\n{str(e)}"
+            )
 
     def on_back(self):
         """Handle back button click."""
