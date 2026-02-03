@@ -1,14 +1,19 @@
 """Terms view - MWE extraction and clustering (M5+)."""
 import logging
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QLabel, QSpinBox,
-    QComboBox, QLineEdit, QHeaderView, QProgressBar, QCheckBox
+    QTableView, QLabel, QSpinBox,
+    QComboBox, QLineEdit, QHeaderView, QProgressBar, QCheckBox, QMenu
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QModelIndex
+from PyQt6.QtGui import QAction
 
 from app.services.term_extraction_service import TermExtractionService
-from app.ui.dialogs import show_error, show_info
+from app.services.translation_service import TranslationService
+from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
+from app.ui.models_qt import TermClusterTableModel
+from app.ui.workers import TranslationResolveWorker
 from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
@@ -22,7 +27,9 @@ class TermsView(QWidget):
         self.project_id = project_id
         self.term_service = TermExtractionService()
         self.db_service = DBService.get_instance()
+        self.translation_service = TranslationService()
         self.extract_worker = None
+        self.translation_worker: Optional[TranslationResolveWorker] = None
 
         self.init_ui()
         self.load_terms()
@@ -108,19 +115,28 @@ class TermsView(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
-        # Terms table (M5.4: added Weirdness, Keyness, Termhood)
-        self.terms_table = QTableWidget()
-        self.terms_table.setColumnCount(11)
-        self.terms_table.setHorizontalHeaderLabels([
-            "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
-            "Weirdness", "Keyness", "Termhood"
-        ])
-        self.terms_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.terms_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Terms table (M7 P1: converted to QTableView + TermClusterTableModel)
+        self.terms_model = TermClusterTableModel()
+        self.terms_table = QTableView()
+        self.terms_table.setModel(self.terms_model)
+        self.terms_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        # M7 P1: Enable editing for Translation column
+        self.terms_table.setEditTriggers(
+            QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
+        )
+        self.terms_table.setSortingEnabled(True)
+
+        # M7 P1: Context menu for "Why?" action
+        self.terms_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.terms_table.customContextMenuRequested.connect(self.on_context_menu)
 
         header = self.terms_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Term
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Lemma
+        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Translation
+
+        # M7 P1: Connect dataChanged to save handler
+        self.terms_model.dataChanged.connect(self.on_translation_edited)
 
         layout.addWidget(self.terms_table)
 
@@ -213,33 +229,13 @@ class TermsView(QWidget):
                     source_filter=source_filter
                 )
 
-                self.terms_table.setRowCount(len(clusters))
-
-                for row, cluster in enumerate(clusters):
-                    self.terms_table.setItem(row, 0, QTableWidgetItem(cluster.representative_he))
-                    self.terms_table.setItem(row, 1, QTableWidgetItem(cluster.representative_lemma or ""))
-                    self.terms_table.setItem(row, 2, QTableWidgetItem(str(cluster.freq_abs)))
-                    self.terms_table.setItem(row, 3, QTableWidgetItem(str(cluster.doc_freq)))
-                    self.terms_table.setItem(row, 4, QTableWidgetItem(str(cluster.members_count)))
-
-                    pmi_text = f"{cluster.best_pmi:.2f}" if cluster.best_pmi else "N/A"
-                    llr_text = f"{cluster.best_llr:.2f}" if cluster.best_llr else "N/A"
-                    dice_text = f"{cluster.best_dice:.3f}" if cluster.best_dice else "N/A"
-
-                    self.terms_table.setItem(row, 5, QTableWidgetItem(pmi_text))
-                    self.terms_table.setItem(row, 6, QTableWidgetItem(llr_text))
-                    self.terms_table.setItem(row, 7, QTableWidgetItem(dice_text))
-
-                    # M5.4: Termhood columns
-                    weirdness_text = f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
-                    keyness_text = f"{cluster.keyness_llr:.2f}" if cluster.keyness_llr else "N/A"
-                    termhood_text = f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
-
-                    self.terms_table.setItem(row, 8, QTableWidgetItem(weirdness_text))
-                    self.terms_table.setItem(row, 9, QTableWidgetItem(keyness_text))
-                    self.terms_table.setItem(row, 10, QTableWidgetItem(termhood_text))
+                # M7 P1: Update model with clusters
+                self.terms_model.update_clusters(clusters)
 
                 self.status_label.setText(f"Showing {len(clusters)} term clusters")
+
+                # M7 P1: Start translation worker
+                self.start_translation_worker(clusters)
 
         except Exception as e:
             logger.exception("Failed to load terms")
@@ -335,8 +331,185 @@ class TermsView(QWidget):
 
         show_error(self, "Error", error_msg)
 
+    def start_translation_worker(self, clusters: list):
+        """M7 P1: Start worker to resolve translations for term clusters."""
+        if not clusters:
+            return
+
+        # Cancel previous worker if running
+        if self.translation_worker and self.translation_worker.isRunning():
+            self.translation_worker.quit()
+            self.translation_worker.wait(1000)
+
+        # Build items for worker: (src_text, kind)
+        items = [(cluster.representative_he, "term_cluster") for cluster in clusters]
+
+        # Create and start worker
+        self.translation_worker = TranslationResolveWorker(
+            items=items,
+            project_id=self.project_id,
+            src_lang="he",
+            tgt_lang="ru",
+            allow_draft=False,
+        )
+
+        self.translation_worker.results_ready.connect(self.on_translation_results)
+        self.translation_worker.error.connect(self.on_translation_error)
+        self.translation_worker.start()
+
+        logger.info(f"Started translation worker for {len(items)} term clusters")
+
+    def on_translation_results(self, results: dict):
+        """M7 P1: Handle translation results from worker."""
+        logger.info(f"Received {len(results)} translation results")
+
+        # Update model with results
+        self.terms_model.update_translations(results)
+
+        # Clean up worker
+        if self.translation_worker:
+            self.translation_worker.deleteLater()
+            self.translation_worker = None
+
+    def on_translation_error(self, error_msg: str):
+        """M7 P1: Handle translation worker error."""
+        logger.error(f"Translation worker error: {error_msg}")
+        show_error(self, "Translation Error", f"Failed to load translations: {error_msg}")
+
+        # Clean up worker
+        if self.translation_worker:
+            self.translation_worker.deleteLater()
+            self.translation_worker = None
+
+    def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
+        """M7 P1: Handle inline edit of translation - save to TM."""
+        # Check if Translation column was edited (col 11)
+        if top_left.column() != 11:
+            return
+
+        row = top_left.row()
+        cluster = self.terms_model.clusters[row]
+
+        # Get new translation value
+        new_translation = cluster.translation
+
+        if not new_translation or not new_translation.strip():
+            return  # Don't save empty translations
+
+        try:
+            with self.db_service.get_session() as session:
+                # Save to TM
+                from app.infra.sa_models import TMEntry, TermCluster
+                from datetime import datetime
+                from sqlalchemy import select
+
+                # Get cluster canonical_key from database
+                stmt = select(TermCluster).where(
+                    TermCluster.project_id == self.project_id,
+                    TermCluster.representative_he == cluster.representative_he,
+                )
+                db_cluster = session.execute(stmt).scalar()
+
+                if not db_cluster:
+                    logger.error(f"Could not find cluster for {cluster.representative_he}")
+                    return
+
+                canonical_key = db_cluster.canonical_key
+
+                # Check if TM entry exists
+                stmt = select(TMEntry).where(
+                    TMEntry.project_id == self.project_id,
+                    TMEntry.kind == "term_cluster",
+                    TMEntry.src_norm == canonical_key,
+                )
+                existing = session.execute(stmt).scalar()
+
+                if existing:
+                    # Update existing
+                    existing.translation = new_translation.strip()
+                    existing.status = "approved"  # User edit → approved
+                    existing.origin = "user_edit"
+                    existing.updated_at = datetime.now()
+                else:
+                    # Create new TM entry
+                    tm_entry = TMEntry(
+                        project_id=self.project_id,
+                        kind="term_cluster",
+                        src_lang="he",
+                        tgt_lang="ru",
+                        src_text=cluster.representative_he,
+                        src_norm=canonical_key,
+                        translation=new_translation.strip(),
+                        status="approved",  # User edit → approved
+                        origin="user_edit",
+                        source_ref="terms_view_inline_edit",
+                    )
+                    session.add(tm_entry)
+
+                session.commit()
+
+                # Update status in model to "approved"
+                cluster.translation_status = "approved"
+                status_idx = self.terms_model.index(row, 13)  # Status column
+                self.terms_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
+
+                logger.info(f"Saved TM entry for term: {cluster.representative_he} -> {new_translation.strip()}")
+
+        except Exception as e:
+            logger.exception("Failed to save TM entry")
+            show_error(self, "Save Error", f"Failed to save translation: {e}")
+
+    def on_context_menu(self, pos):
+        """M7 P1: Show context menu with 'Why?' action."""
+        index = self.terms_table.indexAt(pos)
+        if not index.isValid():
+            return
+
+        row = index.row()
+        cluster = self.terms_model.clusters[row]
+
+        # Create menu
+        menu = QMenu(self)
+
+        # "Why?" action - show explainability
+        why_action = QAction("Why this translation?", self)
+        why_action.triggered.connect(lambda: self.show_why_dialog(row))
+        menu.addAction(why_action)
+
+        # Show menu
+        menu.exec(self.terms_table.viewport().mapToGlobal(pos))
+
+    def show_why_dialog(self, row: int):
+        """M7 P1: Show WhyTranslationDialog for a term cluster."""
+        cluster = self.terms_model.clusters[row]
+
+        # Get translation result from model
+        translation_result = self.terms_model.translation_results.get(row)
+
+        if not translation_result:
+            # If no result yet, create a minimal one
+            from app.services.translation_service import TranslationResult
+            translation_result = TranslationResult(
+                translation=cluster.translation or "(no translation)",
+                source="unknown",
+                status=cluster.translation_status or "unknown",
+            )
+
+        # Show dialog
+        dialog = WhyTranslationDialog(translation_result, cluster.representative_he, self)
+        dialog.exec()
+
     def closeEvent(self, event):
-        """Handle widget close - ensure worker is stopped."""
+        """Handle widget close - ensure workers are stopped."""
+        # M7 P1: Stop translation worker
+        if self.translation_worker and self.translation_worker.isRunning():
+            logger.info("Stopping translation worker on close")
+            self.translation_worker.quit()
+            self.translation_worker.wait(1000)
+            if self.translation_worker.isRunning():
+                self.translation_worker.terminate()
+
+        # Stop extraction worker
         if self.extract_worker and self.extract_worker.isRunning():
             logger.info("Stopping term extraction worker on close")
             self.extract_worker.quit()
