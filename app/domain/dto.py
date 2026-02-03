@@ -123,3 +123,81 @@ class TranslationResultDTO:
     dict_source_name: Optional[str] = None
     tm_id: Optional[int] = None
     notes: Optional[str] = None
+
+
+# ============================================================================
+# P2: Translation Management & QA/Coverage DTOs
+# ============================================================================
+
+@dataclass
+class TMEntryDTO:
+    """P2: TM Entry for management panel."""
+
+    tm_id: int
+    project_id: Optional[int]  # None = global
+    kind: str  # lemma|ngram|term_cluster|surface
+    src_lang: str
+    tgt_lang: str
+    src_text: str
+    src_norm: str
+    translation: str
+    translation_norm: Optional[str]
+    pos: Optional[str]
+    domain: Optional[str]
+    notes: Optional[str]
+    status: str  # draft|approved|rejected|deprecated
+    confidence: Optional[float]
+    origin: str  # user_edit|import|mt_accept|mt_auto|merge
+    source_ref: Optional[str]
+    created_at: str
+    updated_at: str
+    approved_at: Optional[str]
+    approved_by: Optional[str]
+
+
+@dataclass
+class TMHistoryDTO:
+    """P2: TM History entry."""
+
+    hist_id: int
+    tm_id: int
+    version: int
+    translation: str
+    notes: Optional[str]
+    status: str
+    origin: str
+    changed_at: str
+    change_kind: str  # edit|import|merge|revert|approve|reject|deprecate
+
+
+@dataclass
+class CoverageMetrics:
+    """P2: Coverage metrics for lemmas or term clusters."""
+
+    total: int
+    covered: int
+    uncovered: int
+    coverage_pct: float
+
+
+@dataclass
+class LemmaCoverageRow:
+    """P2: Untranslated lemma row."""
+
+    lemma_id: int
+    lemma_text: str
+    pos: Optional[str]
+    freq_abs: int
+    doc_freq: int
+
+
+@dataclass
+class TermClusterCoverageRow:
+    """P2: Untranslated term cluster row."""
+
+    cluster_id: int
+    representative_he: str
+    canonical_key: str
+    freq_abs: int
+    doc_freq: int
+    termhood_score: Optional[float]

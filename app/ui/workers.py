@@ -3,7 +3,7 @@ import logging
 import json
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -655,3 +655,171 @@ class P1VerificationWorker(QThread):
             md.append("❌ **TM entries did NOT persist through re-extraction/restart.**\n")
 
         return "\n".join(md)
+
+
+# ============================================================================
+# P2: Translation Management & Coverage Workers
+# ============================================================================
+
+class TMSearchWorker(QThread):
+    """P2: Worker for searching TM entries (non-blocking)."""
+
+    results_ready = pyqtSignal(list, int)  # (entries: List[TMEntryDTO], total_count: int)
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)  # status message
+
+    def __init__(
+        self,
+        filters: Dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        super().__init__()
+        self.filters = filters
+        self.limit = limit
+        self.offset = offset
+        self._cancelled = False
+
+    def run(self):
+        """Execute search."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.translation_admin_service import TranslationAdminService
+
+            self.progress.emit("Searching TM entries...")
+
+            db_service = DBService.get_instance()
+            admin_service = TranslationAdminService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                # Get entries
+                entries = admin_service.search_tm_entries(
+                    session,
+                    filters=self.filters,
+                    limit=self.limit,
+                    offset=self.offset,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Get total count
+                total_count = admin_service.count_tm_entries(
+                    session,
+                    filters=self.filters,
+                )
+
+                if not self._cancelled:
+                    self.results_ready.emit(entries, total_count)
+
+        except Exception as e:
+            logger.exception("TM search error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the search."""
+        self._cancelled = True
+
+
+class CoverageWorker(QThread):
+    """P2: Worker for computing coverage metrics (non-blocking)."""
+
+    results_ready = pyqtSignal(dict)  # {metrics, untranslated_lemmas, untranslated_clusters}
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)  # status message
+
+    def __init__(
+        self,
+        project_id: int,
+        include_draft: bool = False,
+        untranslated_limit: int = 100,
+        lemma_order: str = "freq",
+        cluster_order: str = "termhood",
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.include_draft = include_draft
+        self.untranslated_limit = untranslated_limit
+        self.lemma_order = lemma_order
+        self.cluster_order = cluster_order
+        self._cancelled = False
+
+    def run(self):
+        """Execute coverage calculation."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.coverage_service import CoverageService
+
+            self.progress.emit("Computing coverage metrics...")
+
+            db_service = DBService.get_instance()
+            coverage_service = CoverageService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                # Compute lemma coverage
+                self.progress.emit("Computing lemma coverage...")
+                lemma_metrics = coverage_service.compute_lemma_coverage(
+                    session,
+                    self.project_id,
+                    include_draft=self.include_draft,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Compute term cluster coverage
+                self.progress.emit("Computing term cluster coverage...")
+                cluster_metrics = coverage_service.compute_termcluster_coverage(
+                    session,
+                    self.project_id,
+                    include_draft=self.include_draft,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Get untranslated lemmas
+                self.progress.emit("Fetching untranslated lemmas...")
+                untranslated_lemmas = coverage_service.list_untranslated_lemmas(
+                    session,
+                    self.project_id,
+                    limit=self.untranslated_limit,
+                    order_by=self.lemma_order,
+                    include_draft=self.include_draft,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Get untranslated clusters
+                self.progress.emit("Fetching untranslated term clusters...")
+                untranslated_clusters = coverage_service.list_untranslated_termclusters(
+                    session,
+                    self.project_id,
+                    limit=self.untranslated_limit,
+                    order_by=self.cluster_order,
+                    include_draft=self.include_draft,
+                )
+
+                if not self._cancelled:
+                    results = {
+                        "lemma_metrics": lemma_metrics,
+                        "cluster_metrics": cluster_metrics,
+                        "untranslated_lemmas": untranslated_lemmas,
+                        "untranslated_clusters": untranslated_clusters,
+                    }
+                    self.results_ready.emit(results)
+
+        except Exception as e:
+            logger.exception("Coverage calculation error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the calculation."""
+        self._cancelled = True

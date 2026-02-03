@@ -331,3 +331,106 @@ class TermClusterTableModel(QAbstractTableModel):
     def get_translation_result(self, row: int):
         """M7: Get cached TranslationResult for Why dialog."""
         return self.translation_results.get(row)
+
+
+# ============================================================================
+# P2: Translation Management Table Model
+# ============================================================================
+
+class TranslationManagementTableModel(QAbstractTableModel):
+    """P2: Model for Translation Management panel."""
+
+    def __init__(self, entries: List = None):
+        super().__init__()
+        from app.domain.dto import TMEntryDTO
+        self.entries: List[TMEntryDTO] = entries or []
+        self.headers = [
+            "ID", "Kind", "Source", "Translation", "Status",
+            "Scope", "Origin", "Source Ref", "Updated"
+        ]
+        self.total_count = 0  # Total matching entries (for pagination)
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.entries)
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+
+        entry = self.entries[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
+            if col == 0:
+                return str(entry.tm_id)
+            elif col == 1:
+                return entry.kind
+            elif col == 2:
+                return entry.src_text
+            elif col == 3:
+                return entry.translation
+            elif col == 4:
+                return entry.status
+            elif col == 5:
+                return "Global" if entry.project_id is None else f"Project {entry.project_id}"
+            elif col == 6:
+                return entry.origin
+            elif col == 7:
+                return entry.source_ref or ""
+            elif col == 8:
+                # Show just date part of updated_at
+                if entry.updated_at:
+                    return entry.updated_at.split("T")[0]
+                return ""
+
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def flags(self, index):
+        """P2: Translation column editable."""
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        flags = super().flags(index)
+
+        # Column 3 (Translation) is editable
+        if index.column() == 3:
+            flags |= Qt.ItemFlag.ItemIsEditable
+
+        return flags
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        """P2: Handle inline edit of translation."""
+        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+            return False
+
+        if index.column() == 3:  # Translation column
+            # Update DTO
+            entry = self.entries[index.row()]
+            entry.translation = value
+
+            # Emit data changed
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
+            return True
+
+        return False
+
+    def update_entries(self, entries: List, total_count: int):
+        """Update the entry list and total count."""
+        self.beginResetModel()
+        self.entries = entries
+        self.total_count = total_count
+        self.endResetModel()
+
+    def get_entry(self, row: int):
+        """Get entry at row."""
+        if 0 <= row < len(self.entries):
+            return self.entries[row]
+        return None
