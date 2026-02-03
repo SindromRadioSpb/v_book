@@ -338,7 +338,7 @@ class TestTranslationAdminService(unittest.TestCase):
         with self.db_service.get_session() as session:
             entry = session.query(TMEntry).filter(TMEntry.tm_id == tm_id).one()
             self.assertEqual(entry.translation, "новый дом")  # Version 2 translation
-            self.assertEqual(entry.origin, "revert")  # P2.3: origin must be 'revert'
+            self.assertEqual(entry.origin, "user_edit")  # P2 FIX: origin uses 'user_edit' (history tracks revert)
 
         # Check history has revert entry
         with self.db_service.get_session() as session:

@@ -18,7 +18,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.normalization import normalize_for_tm
-from app.infra.sa_models import TMEntry, TMAlias, DictEntry, DictSource, MTCache
+from app.infra.sa_models import TMEntry, TMAlias, DictEntry, DictSource, MTCache, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -582,7 +582,7 @@ class TranslationService:
         # Revert entry to target version
         entry.translation = target_history.translation
         entry.status = target_history.status
-        entry.origin = "revert"
+        entry.origin = "user_edit"  # P2 FIX: Use allowed origin (history tracks revert via change_kind)
         entry.notes = target_history.notes or f"Reverted to v{target_version}"
         entry.updated_at = utc_now()
 

@@ -357,7 +357,7 @@ class TranslationAdminService:
         entry.translation = target_version.translation
         entry.notes = target_version.notes
         entry.status = target_version.status
-        entry.origin = "revert"  # P2.3: Revert has dedicated origin
+        entry.origin = "user_edit"  # P2 FIX: Use allowed origin (history tracks revert via change_kind)
         entry.updated_at = datetime.now()
 
         if entry.status == "approved":
