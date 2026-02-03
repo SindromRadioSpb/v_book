@@ -227,7 +227,7 @@ class P1VerificationService:
         if cluster:
             items.append(TestItem(
                 kind="term_cluster",
-                src_text=cluster.representative,
+                src_text=cluster.representative_he,
                 src_norm=cluster.canonical_key,
                 item_id=cluster.cluster_id,
                 priority=3,

@@ -49,17 +49,43 @@ python test_m7.py
 8. Verifies TM entries still resolve post-restart
 9. Generates MD + JSON reports
 
-**Running P1 verification:**
+### P1.1 UI Panel (Premium - Recommended for Non-Technical Users)
+
+**How to access:**
+1. Launch HDLE application
+2. Click menu: **Tools → Verification (P1 Scenario 7)**
+3. Select database (or use current production DB)
+4. Select project (or "Global" for all projects)
+5. Click "▶ Run P1 Scenario 7"
+
+**Features:**
+- ✅ Non-blocking UI (uses background worker)
+- ✅ Real-time progress bar and log output
+- ✅ Cancel button (can stop mid-run)
+- ✅ Open Report button (opens report directory)
+- ✅ Copy Summary button (copies results to clipboard)
+- ✅ Status badges: PASS / PARTIAL / SKIPPED / FAIL
+
+**Screenshot guide:**
+1. DB section shows production DB path (read-only)
+2. Project dropdown lists all available projects
+3. Run button starts verification (green)
+4. Progress bar shows 0-100% with phase updates
+5. Log output shows real-time messages
+6. Status badge updates with final result
+
+**Note:** UI always runs on snapshot - your production DB is never modified.
+
+### P1.2 Headless CLI (Automation/CI)
 
 ```bash
-# Headless CLI (recommended for automation)
+# Activate environment
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+
+# Run verification
 python -m app.tools.p1_verify --db your_db.db
 python -m app.tools.p1_verify --db your_db.db --project-id 1
 python -m app.tools.p1_verify --db your_db.db --out-dir ./my_reports
-
-# Autotests (unit tests for P1 service)
-python test_p1_verification.py
 ```
 
 **Exit codes:**
@@ -67,16 +93,84 @@ python test_p1_verification.py
 - `1` = FAIL (critical failure)
 - `2` = SKIPPED (no processed data found)
 
-**Reports generated:**
-- `runtime/verifications/p1/<timestamp>/P1_SCENARIO_7_REPORT.md` - Human-readable report
-- `runtime/verifications/p1/<timestamp>/P1_SCENARIO_7_REPORT.json` - Machine-readable data
+### P1.3 Unit Tests
 
-**✅ Pass criteria:**
-- Exit code 0 (PASS or PARTIAL)
-- All 3 phases show 100% success rate in report
-- TM entries persist through re-extraction and restart
+```bash
+# P1 service unit tests (6 tests)
+python test_p1_verification.py
 
-**Note:** P1 verification uses snapshot-by-default - your production database is never modified. The snapshot is created in the output directory.
+# Expected: 6/6 PASS
+```
+
+### P1.4 E2E Test with Real Term Clusters
+
+```bash
+# E2E test using real term extraction pipeline
+python test_p1_e2e_termclusters.py
+
+# Expected: 3/3 PASS
+# - Fixture has term clusters (not empty)
+# - P1 verification NOT SKIPPED
+# - Full report generated with PASS status
+```
+
+**What E2E test does:**
+1. Builds fixture DB with real Hebrew text
+2. Runs term extraction pipeline (same as production)
+3. Verifies term_clusters created (≥1)
+4. Runs P1 verification on fixture
+5. Asserts PASS (not SKIPPED)
+6. Generates report in `runtime/fixtures/termcluster/<timestamp>/`
+
+### P1.5 CI Gate (Automated Testing)
+
+**Running all tests locally:**
+
+```powershell
+# Windows PowerShell
+.\scripts\ci_run_tests.ps1
+
+# Linux/macOS/Git Bash
+./scripts/ci_run_tests.sh
+```
+
+**What CI runs:**
+1. `test_m7.py` - M7 core functionality
+2. `test_m7_ui_integration.py` - M7 UI integration (13 tests)
+3. `test_m7_normalization.py` - M7 normalization contract (60 tests)
+4. `test_p1_verification.py` - P1 unit tests (6 tests)
+5. `test_p1_e2e_termclusters.py` - P1 E2E with real pipeline (3 tests)
+
+**CI configuration:**
+- GitHub Actions: `.github/workflows/ci.yml`
+- Runs on push to `main` or `develop`
+- Runs on pull requests to `main`
+- Tests on Ubuntu + Windows, Python 3.11 + 3.12
+- Uses headless mode: `QT_QPA_PLATFORM=offscreen`
+
+**✅ Pass criteria (CI gate):**
+- All tests PASS
+- Exit code 0
+- No SKIPPED tests in E2E
+
+### P1.6 Reports
+
+**Report locations:**
+- UI runs: `runtime/verifications/p1/<timestamp>/`
+- CLI runs: `runtime/verifications/p1/<timestamp>/` or custom `--out-dir`
+- E2E tests: `runtime/fixtures/termcluster/<timestamp>/`
+
+**Report files:**
+- `P1_SCENARIO_7_REPORT.md` - Human-readable Markdown
+- `P1_SCENARIO_7_REPORT.json` - Machine-readable JSON
+
+**Report contents:**
+- Environment (source DB, snapshot path, SHA256, project ID)
+- Test items (kind, src_text, src_norm)
+- Seeded TM entries (tm_id, translation, src_norm)
+- Phase results (pre/post-extraction, post-restart)
+- Failures (if any) with expected vs actual
+- Summary (status, duration, final verdict)
 
 ---
 
