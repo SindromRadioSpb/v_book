@@ -304,8 +304,8 @@ class TermClusterTableModel(QAbstractTableModel):
             results: dict[(src_text, kind)] -> TranslationResult
         """
         for row, cluster in enumerate(self.clusters):
-            # Use canonical_key for matching (since that's what normalization produces)
-            key = (cluster.canonical_key, "term_cluster")
+            # Use representative_he for matching (worker uses it as key)
+            key = (cluster.representative_he, "term_cluster")
             if key in results:
                 tr_result = results[key]
 

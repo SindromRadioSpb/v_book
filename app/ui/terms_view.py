@@ -414,13 +414,16 @@ class TermsView(QWidget):
                     logger.error(f"Could not find cluster for {cluster.representative_he}")
                     return
 
-                canonical_key = db_cluster.canonical_key
+                # Normalize representative_he to match what TranslationResolveWorker uses
+                from app.domain.normalization.normalizer import normalize_for_tm
+                normalized = normalize_for_tm("he", cluster.representative_he, "term_cluster")
+                src_norm = normalized.norm
 
                 # Check if TM entry exists
                 stmt = select(TMEntry).where(
                     TMEntry.project_id == self.project_id,
                     TMEntry.kind == "term_cluster",
-                    TMEntry.src_norm == canonical_key,
+                    TMEntry.src_norm == src_norm,
                 )
                 existing = session.execute(stmt).scalar()
 
@@ -438,7 +441,7 @@ class TermsView(QWidget):
                         src_lang="he",
                         tgt_lang="ru",
                         src_text=cluster.representative_he,
-                        src_norm=canonical_key,
+                        src_norm=src_norm,
                         translation=new_translation.strip(),
                         status="approved",  # User edit → approved
                         origin="user_edit",
