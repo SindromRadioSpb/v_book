@@ -86,3 +86,5 @@ smoke_check_m7.py
 test_norm.py
 
 *settings.local.json
+# Debug files
+debug_*.txt
