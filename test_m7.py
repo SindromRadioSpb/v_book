@@ -61,12 +61,13 @@ test_cases = [
 test1_pass = True
 for text, expected_norm in test_cases:
     m5_key = canonicalize_hebrew_term(text)
-    m7_result = normalize_text("he", text, "surface", "strict")
+    # M5 compatibility REQUIRED for lemma/term_cluster per contract
+    m7_result = normalize_text("he", text, "lemma", "strict")
 
     match = (m5_key == m7_result.norm == expected_norm)
     status = "✅" if match else "❌"
 
-    print(f"  {status} '{text}' → M5: {m5_key}, M7: {m7_result.norm}, Expected: {expected_norm}")
+    print(f"  {status} '{text}' → M5: {m5_key}, M7 (lemma): {m7_result.norm}, Expected: {expected_norm}")
 
     if not match:
         test1_pass = False

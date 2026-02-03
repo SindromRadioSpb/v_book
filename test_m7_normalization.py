@@ -21,6 +21,8 @@ class TestNormalizationStrictMode(unittest.TestCase):
         """Simple word without prefixes should remain unchanged."""
         result = normalize_for_tm("he", "דבר", "lemma")
         self.assertEqual(result.norm, "דבר")
+        # Load-bearing: verify strict mode is default
+        self.assertEqual(result.mode, "strict")
 
     def test_02_definite_article_he_stripped(self):
         """Definite article ה should be stripped."""
@@ -129,6 +131,7 @@ class TestNormalizationCompatMode(unittest.TestCase):
         """Ngrams should NOT strip prefixes (compat mode)."""
         result = normalize_for_tm("he", "הבית", "ngram", mode="compat")
         self.assertEqual(result.norm, "הבית")
+        # Load-bearing: verify compat mode respected
         self.assertEqual(result.mode, "compat")
 
     def test_22_ngram_preserve_ve_prefix(self):
