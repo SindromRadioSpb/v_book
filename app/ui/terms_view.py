@@ -244,7 +244,7 @@ class TermsView(QWidget):
     def on_extract(self):
         """Handle extract terms button."""
         from PyQt6.QtWidgets import QMessageBox
-        from app.ui.workers import TermExtractionWorker
+        from app.ui.workers import ExtractionWorker
 
         reply = QMessageBox.question(
             self,
@@ -272,7 +272,7 @@ class TermsView(QWidget):
         self.status_label.setText("Extracting terms...")
 
         # Create and start worker (keep strong reference to prevent GC)
-        self.extract_worker = TermExtractionWorker(
+        self.extract_worker = ExtractionWorker(
             project_id=self.project_id,
             enable_ngrams=True,
             include_np=include_np,
