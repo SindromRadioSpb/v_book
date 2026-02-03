@@ -268,6 +268,11 @@ class TranslationManagementPanel(QWidget):
 
         actions_layout.addStretch()
 
+        self.cancel_btn = QPushButton("✕ Cancel Search")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.on_cancel_search)
+        actions_layout.addWidget(self.cancel_btn)
+
         layout.addLayout(actions_layout)
 
         # Status bar
@@ -341,6 +346,7 @@ class TranslationManagementPanel(QWidget):
 
         self.current_filters = self.build_filters()
         self.status_label.setText("Searching...")
+        self.cancel_btn.setEnabled(True)
 
         # Start worker
         db_service = DBService.get_instance()
@@ -352,6 +358,7 @@ class TranslationManagementPanel(QWidget):
         )
         self.worker.results_ready.connect(self.on_search_results)
         self.worker.error.connect(self.on_search_error)
+        self.worker.finished.connect(lambda: self.cancel_btn.setEnabled(False))
         self.worker.start()
 
     def on_search_results(self, entries: List[TMEntryDTO], total_count: int):
@@ -462,6 +469,24 @@ class TranslationManagementPanel(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to revert:\n{str(e)}")
             logger.error(f"Revert error: {e}", exc_info=True)
+
+    def on_cancel_search(self):
+        """Cancel ongoing search."""
+        if self.worker and self.worker.isRunning():
+            logger.info("Canceling search worker")
+            self.worker.terminate()
+            self.worker.wait()
+            self.worker = None
+            self.status_label.setText("Search canceled")
+            self.cancel_btn.setEnabled(False)
+
+    def closeEvent(self, event):
+        """Handle panel close - stop workers."""
+        if self.worker and self.worker.isRunning():
+            logger.info("Stopping TM search worker on panel close")
+            self.worker.terminate()
+            self.worker.wait()
+        event.accept()
 
     def on_back(self):
         """Handle back button click."""

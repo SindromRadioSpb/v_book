@@ -27,6 +27,16 @@ python test_p1_verification.py
 
 # P1 E2E Tests (Real Term Clusters)
 python test_p1_e2e_termclusters.py
+
+# P2 Service Tests
+python test_p2_translation_admin_service.py
+python test_p2_coverage_service.py
+
+# P2 Model Tests
+python test_p2_translation_management_model.py
+
+# P2 UI Smoke Tests
+python test_p2_ui_smoke.py
 ```
 
 **Windows (PowerShell):**
@@ -62,7 +72,43 @@ Duration: <duration> ms
 Report: runtime/verifications/p1/<timestamp>/P1_SCENARIO_7_REPORT.json
 ```
 
-### 3. Artifact Requirements
+### 3. P2 Premium Workflow Quality Gates
+
+P2 adds Translation Management and QA/Coverage features. All tests must pass:
+
+```bash
+# P2 Service Tests (13 tests)
+python test_p2_translation_admin_service.py  # 7 tests: CRUD, status workflow, revert
+python test_p2_coverage_service.py           # 6 tests: metrics, query count guards
+
+# P2 Model Tests (12 tests)
+python test_p2_translation_management_model.py  # Qt model, inline editing
+
+# P2 UI Smoke Tests (6 tests)
+python test_p2_ui_smoke.py  # Panel instantiation, imports
+```
+
+**P2 Critical Contracts:**
+- **Revert contract**: `origin="revert"` (NOT "user_edit")
+- **Change_kind mapping**: `approved → "approve"`, `rejected → "reject"`, `deprecated → "deprecate"`
+- **Query count ceilings**:
+  - Coverage computation: ≤ 3 queries
+  - Untranslated lists: ≤ 5 queries
+- **Status workflow**: Approve sets `approved_at`/`approved_by`, Reject/Deprecate clears them
+- **Worker cleanup**: Cancel buttons functional, `closeEvent` stops workers
+
+**P2 Test Requirements:**
+- All 31 P2 tests PASS
+- Query counters verify no N+1 queries
+- Headless Qt tests compatible (QT_QPA_PLATFORM=offscreen)
+- No runtime DB files committed
+
+**Schema Requirements:**
+- Schema version ≥ 6 (includes P2 migration 006_p2_add_revert_origin.sql)
+- `tm_entry.origin` CHECK constraint includes 'revert'
+- `tm_entry_history.change_kind` CHECK constraint includes 'revert'
+
+### 4. Artifact Requirements
 
 The following artifacts must be generated and preserved:
 
@@ -117,22 +163,28 @@ JSON report must include:
 }
 ```
 
-### 4. Schema Verification
+### 5. Schema Verification
 
 Before running tests, verify database schema is up to date:
 
 ```bash
-# Check schema version (must be >= 5 for M7 support)
+# Check schema version (must be >= 6 for P2 support, >= 5 for M7)
 sqlite3 hdle.db "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1;"
 ```
 
 **Required Tables:**
-- `tm_entry` - Translation Memory entries
-- `dict_source` - Dictionary sources
-- `dict_entry` - Dictionary entries
-- `mt_cache` - Machine Translation cache
+- `tm_entry` - Translation Memory entries (M7)
+- `tm_entry_history` - TM version history (M7)
+- `dict_source` - Dictionary sources (M7)
+- `dict_entry` - Dictionary entries (M7)
+- `mt_cache` - Machine Translation cache (M7)
 
-### 5. Code Quality Standards
+**Required Migrations:**
+- `004_m7_translation_memory.sql` - M7 base schema
+- `005_m7_add_revert_origin.sql` - Add 'revert' to tm_entry_history.origin
+- `006_p2_add_revert_origin.sql` - Add 'revert' to tm_entry.origin (P2)
+
+### 6. Code Quality Standards
 
 - No linter errors (`pylint`, `flake8`)
 - No type errors (`mypy` if type hints are used)
@@ -140,13 +192,14 @@ sqlite3 hdle.db "SELECT version FROM schema_version ORDER BY version DESC LIMIT 
 - No deprecated API usage
 - Proper error handling (no bare `except:`)
 
-### 6. Documentation Updates
+### 7. Documentation Updates
 
 When adding new features or changing behavior:
 - Update relevant documentation files
 - Add usage examples to M7_SMOKE_CHECK.md if user-facing
 - Update docstrings for modified functions
 - Document any new configuration options
+- P2: Update docs/P2_PREMIUM_WORKFLOW.md and docs/P2_TESTS.md
 
 ### 7. Git Standards
 

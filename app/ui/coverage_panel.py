@@ -73,6 +73,11 @@ class CoveragePanel(QWidget):
         refresh_btn.clicked.connect(self.load_coverage)
         options_layout.addWidget(refresh_btn)
 
+        self.cancel_btn = QPushButton("✕ Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.on_cancel_coverage)
+        options_layout.addWidget(self.cancel_btn)
+
         options_layout.addStretch()
         layout.addLayout(options_layout)
 
@@ -211,6 +216,7 @@ class CoveragePanel(QWidget):
             return
 
         self.status_label.setText("Loading coverage data...")
+        self.cancel_btn.setEnabled(True)
 
         include_draft = self.include_draft_check.isChecked()
         lemma_order = self.lemma_order_combo.currentText()
@@ -226,6 +232,7 @@ class CoveragePanel(QWidget):
         )
         self.worker.results_ready.connect(self.on_coverage_results)
         self.worker.error.connect(self.on_coverage_error)
+        self.worker.finished.connect(lambda: self.cancel_btn.setEnabled(False))
         self.worker.start()
 
     def on_coverage_results(self, results: dict):
@@ -278,6 +285,24 @@ class CoveragePanel(QWidget):
         """Handle coverage error."""
         self.status_label.setText(f"Error: {error_msg}")
         logger.error(f"Coverage error: {error_msg}")
+
+    def on_cancel_coverage(self):
+        """Cancel ongoing coverage calculation."""
+        if self.worker and self.worker.isRunning():
+            logger.info("Canceling coverage worker")
+            self.worker.terminate()
+            self.worker.wait()
+            self.worker = None
+            self.status_label.setText("Coverage calculation canceled")
+            self.cancel_btn.setEnabled(False)
+
+    def closeEvent(self, event):
+        """Handle panel close - stop workers."""
+        if self.worker and self.worker.isRunning():
+            logger.info("Stopping coverage worker on panel close")
+            self.worker.terminate()
+            self.worker.wait()
+        event.accept()
 
     def on_back(self):
         """Handle back button click."""
