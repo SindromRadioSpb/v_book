@@ -608,7 +608,6 @@ class TermExtractionService:
                     cluster_id=cluster.cluster_id,
                     ngram_id=ngram.ngram_id,
                     member_freq_abs=stat.freq_abs,
-                    member_doc_freq=stat.doc_freq,
                 )
                 session.add(member)
 
