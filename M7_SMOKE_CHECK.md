@@ -32,6 +32,54 @@ python test_m7.py
 
 Если любой из шагов падает — **остановись** и исправь проблему перед ручным smoke-check.
 
+---
+
+## P1 Premium: Automated Scenario 7 Verification
+
+**Purpose:** Automated verification that TM entries persist through re-extraction and database restarts (Scenario 7).
+
+**What it does:**
+1. Creates a snapshot copy of your database (never modifies production DB)
+2. Selects 3 test items (term_cluster, multiword lemma, single lemma)
+3. Seeds TM entries with strict normalization
+4. Verifies TM entries resolve correctly pre-extraction
+5. Simulates re-extraction/reindex
+6. Verifies TM entries still resolve post-extraction
+7. Simulates database restart
+8. Verifies TM entries still resolve post-restart
+9. Generates MD + JSON reports
+
+**Running P1 verification:**
+
+```bash
+# Headless CLI (recommended for automation)
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+python -m app.tools.p1_verify --db your_db.db
+python -m app.tools.p1_verify --db your_db.db --project-id 1
+python -m app.tools.p1_verify --db your_db.db --out-dir ./my_reports
+
+# Autotests (unit tests for P1 service)
+python test_p1_verification.py
+```
+
+**Exit codes:**
+- `0` = PASS or PARTIAL (all or some tests passed)
+- `1` = FAIL (critical failure)
+- `2` = SKIPPED (no processed data found)
+
+**Reports generated:**
+- `runtime/verifications/p1/<timestamp>/P1_SCENARIO_7_REPORT.md` - Human-readable report
+- `runtime/verifications/p1/<timestamp>/P1_SCENARIO_7_REPORT.json` - Machine-readable data
+
+**✅ Pass criteria:**
+- Exit code 0 (PASS or PARTIAL)
+- All 3 phases show 100% success rate in report
+- TM entries persist through re-extraction and restart
+
+**Note:** P1 verification uses snapshot-by-default - your production database is never modified. The snapshot is created in the output directory.
+
+---
+
 **Purpose:** Manual verification that M7 core functionality works correctly.
 
 **Prerequisites:**

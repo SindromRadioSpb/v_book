@@ -64,6 +64,9 @@ test_m4*.db-*
 *.db-*
 /backups/
 
+# P1 verification reports
+runtime/
+
 # temp
 .timeout*
 
