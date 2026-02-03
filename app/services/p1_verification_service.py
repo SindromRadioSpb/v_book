@@ -296,6 +296,17 @@ class P1VerificationService:
         Returns:
             List of SeededTM
         """
+        # Clean up old P1_TEST entries to avoid UNIQUE constraint conflicts
+        from sqlalchemy import delete
+        stmt = delete(TMEntry).where(
+            TMEntry.project_id == project_id,
+            TMEntry.source_ref == "p1_verification"
+        )
+        result = session.execute(stmt)
+        if result.rowcount > 0:
+            logger.info(f"Cleaned up {result.rowcount} old P1_TEST entries")
+        session.commit()
+
         seeded = []
 
         for i, item in enumerate(items):
