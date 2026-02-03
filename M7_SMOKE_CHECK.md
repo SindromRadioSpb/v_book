@@ -725,3 +725,72 @@ with db.get_session() as session:
 - This should NOT happen - check tm_entry CASCADE rules
 - Verify re-extraction doesn't DELETE from tm_entry table
 - TM table is independent of term_cluster table
+
+---
+
+## P3 Automated Verification Gate
+
+**Purpose:** Production-safe automated verification of P3 import/export/conflict functionality.
+
+**What it does:**
+1. Creates a snapshot copy of your database (never modifies production DB)
+2. Runs 8 comprehensive verification steps:
+   - CSV Import (2-column format)
+   - CSV Import (full format with headers)
+   - XLSX Import
+   - Conflict Policies (skip, overwrite)
+   - Chunk Commit + Cancel behavior
+   - SHA256 Deduplication
+   - CSV Injection Protection
+   - Resolve Sanity (dict → TM override precedence)
+3. Generates JSON + Markdown reports
+4. Returns correct exit codes (0=PASS, 1=FAIL, 2=SKIPPED)
+
+### Windows PowerShell
+
+```powershell
+# Run P3 verification test suite
+$env:QT_QPA_PLATFORM="offscreen"
+.\.venv\Scripts\python.exe test_p3_verification.py
+
+# Run all P3 tests including regression
+powershell.exe -ExecutionPolicy Bypass -File scripts\run_p3_verify.ps1
+```
+
+### Bash (macOS/Linux/Git-Bash)
+
+```bash
+# Run P3 verification test suite
+export QT_QPA_PLATFORM=offscreen
+source .venv/bin/activate
+python test_p3_verification.py
+
+# Run all P3 tests including regression
+bash scripts/run_p3_verify.sh  # (if created)
+```
+
+### CLI Tool
+
+```bash
+# Run on production DB (creates snapshot automatically)
+python -m app.tools.p3_verify
+
+# Or specify custom DB
+python -m app.tools.p3_verify --db path/to/your.db --project-id 1
+
+# Output directory
+python -m app.tools.p3_verify --out-dir runtime/verifications/p3/custom
+```
+
+**✅ Pass criteria:**
+- `test_p3_verification.py`: Core verification tests pass
+- `test_p3_dictionary_import_csv.py`: All CSV import tests pass (5/5)
+- `test_p3_dictionary_import_xlsx.py`: All XLSX import tests pass (3/3)
+- `test_p3_conflict_policies.py`: All conflict tests pass (5/5)
+- `test_p3_export_csv_injection.py`: All injection protection tests pass (3/3)
+- No regressions in M7 or P1 tests
+
+**Reports:**
+- `runtime/verifications/p3/<timestamp>/P3_VERIFICATION_REPORT.json`
+- `runtime/verifications/p3/<timestamp>/P3_VERIFICATION_REPORT.md`
+
