@@ -349,9 +349,7 @@ class TranslationManagementPanel(QWidget):
         self.cancel_btn.setEnabled(True)
 
         # Start worker
-        db_service = DBService.get_instance()
         self.worker = TMSearchWorker(
-            db_service=db_service,
             filters=self.current_filters,
             limit=100,
             offset=0,

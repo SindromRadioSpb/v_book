@@ -222,9 +222,7 @@ class CoveragePanel(QWidget):
         lemma_order = self.lemma_order_combo.currentText()
         cluster_order = self.cluster_order_combo.currentText()
 
-        db_service = DBService.get_instance()
         self.worker = CoverageWorker(
-            db_service=db_service,
             project_id=self.project_id,
             include_draft=include_draft,
             lemma_order=lemma_order,
