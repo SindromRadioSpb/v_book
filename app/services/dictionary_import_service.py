@@ -357,6 +357,10 @@ class DictionaryImportService:
         invalid_rows: List[ImportInvalidRow] = []
         conflict_details: List[ImportConflict] = []
 
+        # Track processed entries within this batch (for conflict detection)
+        # Key: (kind, src_lang, tgt_lang, src_norm, translation)
+        processed_batch: set = set()
+
         for idx, row in enumerate(parsed_rows):
             # Check cancel
             if cancel_flag and cancel_flag():
@@ -375,7 +379,8 @@ class DictionaryImportService:
 
             # Normalize src_text (ALWAYS strict for dict_entry key)
             try:
-                src_norm = normalize_for_tm(row.src_lang, row.src_text, row.kind, mode="strict")
+                src_norm_result = normalize_for_tm(row.src_lang, row.src_text, row.kind, mode="strict")
+                src_norm = src_norm_result.norm
             except Exception as e:
                 invalid_rows.append(ImportInvalidRow(row.row_index, f"Normalization error: {e}"))
                 counters["invalid"] += 1
@@ -391,6 +396,7 @@ class DictionaryImportService:
                 default_status,
                 counters,
                 conflict_details,
+                processed_batch,
             )
 
             # Process aliases (each alias is a separate entry)
@@ -400,7 +406,8 @@ class DictionaryImportService:
                         continue
 
                     try:
-                        alias_norm = normalize_for_tm(row.src_lang, alias, row.kind, mode="strict")
+                        alias_norm_result = normalize_for_tm(row.src_lang, alias, row.kind, mode="strict")
+                        alias_norm = alias_norm_result.norm
                     except Exception as e:
                         logger.warning(f"Alias normalization failed: {alias}, error: {e}")
                         continue
@@ -430,6 +437,7 @@ class DictionaryImportService:
                         default_status,
                         counters,
                         conflict_details,
+                        processed_batch,
                     )
 
             # Chunk commit
@@ -496,6 +504,7 @@ class DictionaryImportService:
         default_status: str,
         counters: dict,
         conflict_details: List[ImportConflict],
+        processed_batch: set,
     ) -> None:
         """Process single entry with conflict policy.
 
@@ -508,13 +517,35 @@ class DictionaryImportService:
             default_status: Default status
             counters: Counters dict to update
             conflict_details: Conflict details list to append
+            processed_batch: Set of already processed (kind, src_lang, tgt_lang, src_norm, translation) tuples
         """
         # Check for existing entry (UNIQUE constraint: dict_source_id, kind, src_lang, tgt_lang, src_norm, translation)
         # For dict_entry, the conflict key is: (dict_source_id, kind, src_lang, tgt_lang, src_norm, translation)
         # Wait, that includes translation in UNIQUE, so same src_norm with different translation is NOT a conflict per DB.
         # But per business logic, we want to detect when src_norm already exists (regardless of translation).
 
+        # Track entry in batch for duplicate detection
+        batch_key = (row.kind, row.src_lang, row.tgt_lang, src_norm, row.translation)
+
+        # Check if exact duplicate in batch
+        if batch_key in processed_batch:
+            # Exact duplicate, skip
+            counters["skipped"] += 1
+            return
+
+        # Check if same src_norm exists in batch (conflict)
+        batch_conflict_key = (row.kind, row.src_lang, row.tgt_lang, src_norm)
+        has_batch_conflict = any(
+            (k, sl, tl, sn) == batch_conflict_key
+            for (k, sl, tl, sn, trans) in processed_batch
+        )
+
         # Query existing entries with same (dict_source_id, kind, src_lang, tgt_lang, src_norm)
+        # This will find both committed and uncommitted (in session) entries
+        # Force flush to make uncommitted entries visible to query
+        if has_batch_conflict:
+            session.flush()
+
         existing = (
             session.query(DictEntry)
             .filter(
@@ -537,7 +568,6 @@ class DictionaryImportService:
                 src_text=row.src_text,
                 src_norm=src_norm,
                 translation=row.translation,
-                translation_norm=None,  # Not normalized in current implementation
                 pos=row.pos,
                 domain=row.domain,
                 status=row.status or default_status,
@@ -546,12 +576,14 @@ class DictionaryImportService:
             )
             session.add(entry)
             counters["added"] += 1
+            # Track in batch to prevent exact duplicates
+            processed_batch.add(batch_key)
         else:
-            # Conflict exists
+            # Conflict exists (same src_norm)
             counters["conflicts"] += 1
 
             if existing.translation == row.translation:
-                # Same translation, skip duplicate
+                # Exact duplicate (same src_norm AND translation), skip
                 conflict_details.append(
                     ImportConflict(
                         row_index=row.row_index,
@@ -563,6 +595,8 @@ class DictionaryImportService:
                     )
                 )
                 counters["skipped"] += 1
+                # Still track in batch to prevent duplicate processing
+                processed_batch.add(batch_key)
                 return
 
             # Different translation - apply conflict policy
@@ -581,6 +615,7 @@ class DictionaryImportService:
 
             elif on_conflict == "overwrite":
                 # Update existing entry
+                old_translation = existing.translation
                 existing.translation = row.translation
                 existing.pos = row.pos or existing.pos
                 existing.domain = row.domain or existing.domain
@@ -588,12 +623,17 @@ class DictionaryImportService:
                 existing.priority = row.priority if row.priority is not None else existing.priority
                 existing.notes = row.notes or existing.notes
 
+                # Update batch tracking (remove old key, add new key)
+                old_batch_key = (row.kind, row.src_lang, row.tgt_lang, src_norm, old_translation)
+                processed_batch.discard(old_batch_key)
+                processed_batch.add(batch_key)
+
                 conflict_details.append(
                     ImportConflict(
                         row_index=row.row_index,
                         src_text=row.src_text,
                         src_norm=src_norm,
-                        existing_translation=existing.translation,
+                        existing_translation=old_translation,
                         incoming_translation=row.translation,
                         action_taken="overwritten",
                     )
@@ -611,7 +651,6 @@ class DictionaryImportService:
                     src_text=row.src_text,
                     src_norm=src_norm,
                     translation=row.translation,
-                    translation_norm=None,
                     pos=row.pos,
                     domain=row.domain,
                     status=row.status or default_status,
@@ -631,3 +670,5 @@ class DictionaryImportService:
                     )
                 )
                 counters["added"] += 1
+                # Track in batch
+                processed_batch.add(batch_key)

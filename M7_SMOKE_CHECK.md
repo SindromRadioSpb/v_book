@@ -174,6 +174,197 @@ python test_p1_e2e_termclusters.py
 
 ---
 
+## P3 Premium: Dictionary Import + Export
+
+**Purpose:** Automated and manual verification of dictionary import wizard, conflict policies, and CSV injection protection.
+
+### P3.1 Automated Gate Tests
+
+**Run before manual testing:**
+
+```bash
+# Activate environment
+source .venv/bin/activate  # or .venv\Scripts\activate.ps1 on Windows
+
+# P3 test suite (all must PASS)
+python test_p3_dictionary_import_csv.py       # 6 tests: CSV import
+python test_p3_dictionary_import_xlsx.py      # 3 tests: XLSX import (if openpyxl available)
+python test_p3_conflict_policies.py           # 5 tests: skip/overwrite/keep_both
+python test_p3_export_csv_injection.py        # 3 tests: CSV injection protection
+python test_p3_scenario7_gate.py              # 2 tests: Automated Scenario 7 gate
+python test_p3_import_wizard_smoke.py         # 3 tests: Wizard UI instantiation
+
+# Regression tests (verify P3 didn't break P1/M7)
+python test_m7_normalization.py               # 60 tests: Normalization contract
+python test_m7.py                             # M7 core functionality
+python test_p1_verification.py                # 6 tests: P1 verification service
+```
+
+**✅ Pass criteria:**
+- All P3 tests PASS (unittest outputs `OK`)
+- All regression tests still PASS
+- No runtime files committed to git
+- Exit code 0 for all tests
+
+**What each test verifies:**
+
+- **test_p3_dictionary_import_csv.py:**
+  - 2-column CSV format (he, ru)
+  - Full CSV format with headers (kind, src_lang, tgt_lang, etc.)
+  - Aliases handling (creates separate dict_entry rows)
+  - SHA256 deduplication (same file not re-imported)
+  - Cancel flag (cooperative cancellation + rollback)
+  - Chunk commit (commits every 200 rows)
+
+- **test_p3_dictionary_import_xlsx.py:**
+  - 2-column XLSX format
+  - Full XLSX format with headers
+  - SHA256 deduplication for XLSX
+  - (Skipped if openpyxl not installed)
+
+- **test_p3_conflict_policies.py:**
+  - skip: Duplicate entries skipped
+  - overwrite: Existing entries updated
+  - keep_both_as_variants: Both entries kept as separate rows
+  - Duplicate with same translation always skipped
+
+- **test_p3_export_csv_injection.py:**
+  - CSV export sanitizes dangerous prefixes (= + - @) with ' prefix
+  - JSON export does NOT sanitize (not needed)
+  - sanitize_csv_cell unit test
+
+- **test_p3_scenario7_gate.py:**
+  - Creates fixture DB with term_clusters
+  - Runs P1 verification service
+  - Asserts PASS/PARTIAL with all phases passing
+  - Verifies P3 import creates valid data for P1 verification
+
+- **test_p3_import_wizard_smoke.py:**
+  - Headless UI instantiation (no crashes)
+  - All wizard components initialized
+  - Scope toggle works (global/project)
+  - Back button signal emitted
+
+### P3.2 Manual Import Wizard Test
+
+**Prerequisites:**
+- P3.1 automated tests PASS
+- Test database with at least one project
+
+**How to test:**
+
+1. **Launch Application:**
+   ```bash
+   python -m app.main
+   ```
+
+2. **Open Import Wizard:**
+   - Menu: **Tools → Import Dictionary...**
+   - Shortcut: `Ctrl+Shift+I`
+
+3. **Test 2-Column CSV Import:**
+   - Create test CSV:
+     ```csv
+     בית,дом
+     ספר,книга
+     שולחן,стол
+     ```
+   - Click "Browse" and select CSV file
+   - Scope: **Global**
+   - Conflict Policy: **skip**
+   - Normalize Mode: **strict**
+   - Click "▶ Run Import"
+   - **Expected:** Progress bar 0→100%, log shows "Added 3 entries", green status badge "✓ Completed"
+
+4. **Test Re-Import (SHA256 Dedup):**
+   - Click "Browse" and select same CSV file
+   - Click "▶ Run Import"
+   - **Expected:** Log shows "File already imported (SHA256 match), skipping", status "✓ Completed", 0 entries added
+
+5. **Test Full Format CSV:**
+   - Create test CSV:
+     ```csv
+     kind,src_lang,tgt_lang,src_text,translation,pos,domain,status
+     lemma,he,ru,בית,дом,NOUN,general,approved
+     term_cluster,he,ru,בית הספר,школа,,education,approved
+     ```
+   - Import with same settings
+   - **Expected:** 2 entries added, log shows details
+
+6. **Test Conflict Policies:**
+   - Create CSV with duplicate:
+     ```csv
+     בית,здание
+     ```
+   - Test each policy:
+     - **skip:** Entry skipped, log shows conflict
+     - **overwrite:** Entry updated with new translation
+     - **keep_both_as_variants:** Both entries kept as separate rows
+
+7. **Test Cancel:**
+   - Create large CSV (500+ rows)
+   - Click "▶ Run Import"
+   - Click "✕ Cancel" mid-import
+   - **Expected:** Import stops, log shows "Cancelled", no entries committed (rollback)
+
+8. **Test CSV Export with Injection Protection:**
+   - Create TM entry with dangerous value:
+     ```python
+     # In Python console
+     from app.infra.sa_models import TMEntry
+     entry = TMEntry(
+         project_id=None, kind="lemma", src_lang="he", tgt_lang="ru",
+         src_text="=2+2", src_norm="=2+2", translation="+危险",
+         status="approved", origin="user_edit"
+     )
+     session.add(entry)
+     session.commit()
+     ```
+   - Export TM to CSV (use export service or future UI)
+   - Open CSV in Excel/LibreOffice
+   - **Expected:** Values prefixed with ' (e.g., `'=2+2`, `'+危险`), no formula execution
+
+**✅ Pass criteria (manual):**
+- Import wizard opens without errors
+- 2-column and full format CSV both import
+- SHA256 dedup prevents re-import
+- All conflict policies work correctly
+- Cancel stops import and rolls back
+- Exported CSV neutralizes injection attempts
+
+### P3.3 Troubleshooting
+
+**"ImportWizard crashes on startup"**
+- Check QT_QPA_PLATFORM environment variable (set to 'offscreen' for headless)
+- Verify PyQt6 installed: `pip show PyQt6`
+- Check logs for missing database initialization
+
+**"CSV import fails with 'Invalid format'"**
+- Verify CSV is UTF-8 encoded
+- Check for correct number of columns (2 for simple, 8+ for full format)
+- Ensure no empty required fields (src_text, translation)
+
+**"SHA256 dedup not working"**
+- Check dict_source table has sha256 column
+- Verify force_reimport=False (default)
+- Different scope (global vs project) allows re-import
+
+**"Conflict policy 'keep_both' creates only one entry"**
+- Check that translations are different (same translation always skipped)
+- Verify UNIQUE constraint: (dict_source_id, kind, src_lang, tgt_lang, src_norm, translation)
+
+**"Cancel doesn't stop import"**
+- Verify cancel_flag is cooperative (not terminate())
+- Check chunk size (200 rows) - cancel happens between chunks
+- Ensure worker.cancel() sets flag correctly
+
+**"Excel executes formulas from exported CSV"**
+- Check that sanitize_csv_cell() prefixes dangerous chars (= + - @) with '
+- Verify export service uses sanitization on all text fields
+- Note: JSON export should NOT sanitize
+
+---
+
 **Purpose:** Manual verification that M7 core functionality works correctly.
 
 **Prerequisites:**
