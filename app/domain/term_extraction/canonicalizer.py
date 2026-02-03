@@ -75,7 +75,7 @@ def strip_prefixes(word: str) -> str:
     return word
 
 
-def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = None) -> str:
+def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = None, strip_prefixes_enabled: bool = True, joiner: str = "_") -> str:
     """
     Create canonical key for Hebrew term clustering.
 
@@ -84,15 +84,18 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
     2. Normalize quotes
     3. Normalize whitespace
     4. Filter standalone articles/prefixes (M5.2 fix)
-    5. Strip prefixes from each remaining token
-    6. Join with underscores
+    5. Strip prefixes from each remaining token (if strip_prefixes_enabled)
+    6. Join with specified joiner (default: underscores)
     7. Lowercase (for case-insensitive clustering)
+    8. Remove punctuation but KEEP numbers and Latin letters
 
     If lemma_phrase is available, use it as primary key (already normalized).
 
     Args:
         surface_text: Surface form (e.g., "בבית ספר")
         lemma_phrase: Lemma form if available (e.g., "בית ספר")
+        strip_prefixes_enabled: Whether to strip Hebrew prefixes (default: True for M5 compat)
+        joiner: String to join tokens (default: "_" for strict, " " for compat)
 
     Returns:
         Canonical key (e.g., "בית_ספר")
@@ -104,6 +107,7 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
         "בית הספר" → "בית_ספר"
         "בית ה ספר" → "בית_ספר" (standalone article removed)
         "ה ספר" → "ספר" (standalone article removed)
+        "דף 123" → "דף_123" (numbers preserved)
     """
     # Prefer lemma_phrase if available (most normalized)
     if lemma_phrase:
@@ -132,17 +136,20 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
         if not (len(tok) == 1 and tok in HEBREW_PREFIXES)
     ]
 
-    # 6. Strip prefixes from each remaining token
-    tokens = [strip_prefixes(tok) for tok in tokens]
+    # 6. Strip prefixes from each remaining token (if enabled)
+    if strip_prefixes_enabled:
+        tokens = [strip_prefixes(tok) for tok in tokens]
 
-    # 7. Join with underscores (deterministic separator)
-    canonical = '_'.join(tokens)
+    # 7. Join with specified joiner (deterministic separator)
+    canonical = joiner.join(tokens)
 
     # 8. Lowercase for case-insensitive clustering (Hebrew doesn't have case, but good practice)
     canonical = canonical.lower()
 
-    # Remove any remaining special chars (punctuation)
-    canonical = re.sub(r'[^\u0590-\u05FF_]', '', canonical)
+    # Remove punctuation but KEEP Hebrew, numbers, Latin letters, joiner, and spaces
+    # CRITICAL: DO NOT remove numbers (0-9) or Latin letters (a-zA-Z)
+    allowed_pattern = r'[^\u0590-\u05FF0-9a-zA-Z_\s]'
+    canonical = re.sub(allowed_pattern, '', canonical)
 
     return canonical
 

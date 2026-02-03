@@ -28,6 +28,7 @@ class NormalizedText:
     raw: str  # Original input
     clean: str  # Cleaned (nikud/cantillation removed, whitespace normalized)
     norm: str  # Normalized key for exact match
+    mode: str = "strict"  # Normalization mode used (strict|compat)
     canonical_key: Optional[str] = None  # For term_cluster compatibility
     warnings: List[str] = None  # Normalization warnings
 
@@ -60,7 +61,7 @@ def normalize_text(lang: str, text: str, kind: str, mode: str = "strict") -> Nor
     """
     if not text or not text.strip():
         return NormalizedText(
-            raw=text or "", clean="", norm="", warnings=["Empty or whitespace-only text"]
+            raw=text or "", clean="", norm="", mode=mode, warnings=["Empty or whitespace-only text"]
         )
 
     warnings = []
@@ -76,15 +77,20 @@ def normalize_text(lang: str, text: str, kind: str, mode: str = "strict") -> Nor
     # For non-Hebrew, norm = lowercase clean text
     norm = clean.lower()
 
-    return NormalizedText(raw=text, clean=clean, norm=norm, warnings=warnings)
+    return NormalizedText(raw=text, clean=clean, norm=norm, mode=mode, warnings=warnings)
 
 
 def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> NormalizedText:
     """
-    Hebrew-specific normalization using M5 canonicalizer.
+    Hebrew-specific normalization with strict M5 compatibility.
 
-    IMPORTANT: Reuses canonicalize_hebrew_term() to ensure compatibility
-    with existing canonical_key values in term_cluster table.
+    Contract (see M7_NORMALIZATION_CONTRACT.md):
+    - strict + lemma/term_cluster: strip prefixes, use _ joiner (M5 canonical_key)
+    - strict + ngram/surface: NO prefix stripping, use _ joiner
+    - compat + ngram/surface: NO prefix stripping, use space joiner (user-friendly)
+    - compat + lemma/term_cluster: strip prefixes, use _ joiner (M5 compat)
+
+    Preserves numbers, Latin letters, and meaningful content.
     """
     raw = text
 
@@ -98,22 +104,31 @@ def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> N
 
     if not clean:
         return NormalizedText(
-            raw=raw, clean="", norm="", warnings=["Text became empty after normalization"]
+            raw=raw, clean="", norm="", mode=mode, warnings=["Text became empty after normalization"]
         )
 
-    # Step 3: Generate normalized key using M5's canonicalizer
-    # This ensures TM lookups will match existing canonical_keys
-    canonical_key = canonicalize_hebrew_term(clean)
+    # Step 3: Generate normalized key based on mode and kind
+    # Contract: prefix stripping ONLY for lemma/term_cluster, NEVER for ngram/surface
 
-    # For term_cluster kind, we'll use DB's canonical_key directly
-    # But for surface/lemma/ngram, we compute it here
-    norm = canonical_key
+    # Determine if prefix stripping should be applied
+    # Per contract: ONLY lemma and term_cluster get prefix stripping
+    if kind in ("lemma", "term_cluster"):
+        strip_prefixes = True
+        joiner = "_"  # M5 canonical format
+    else:  # ngram, surface
+        strip_prefixes = False
+        # Joiner depends on mode
+        joiner = " " if mode == "compat" else "_"
 
-    # Mode-specific adjustments
-    if mode == "compat":
-        # Compat mode: could generate additional variant keys
-        # For now, keep same as strict (variants handled via tm_alias table)
-        pass
+    # Generate normalized key
+    norm = canonicalize_hebrew_term(clean, strip_prefixes_enabled=strip_prefixes, joiner=joiner)
+
+    # Canonical key always uses M5 format (for term_cluster compatibility)
+    if kind == "term_cluster" or (kind == "lemma" and mode == "strict"):
+        canonical_key = norm  # Already in M5 format
+    else:
+        # For ngram/surface, generate M5-compatible canonical_key separately
+        canonical_key = canonicalize_hebrew_term(clean, strip_prefixes_enabled=True, joiner="_")
 
     # Validate no garbage tokens
     if "_" in norm:
@@ -122,7 +137,9 @@ def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> N
         if any(t in {"ה", "ב", "ל", "כ", "מ", "ו", "ש"} for t in tokens):
             warnings.append(f"Normalized key contains standalone prefix tokens: {norm}")
 
-    return NormalizedText(raw=raw, clean=clean, norm=norm, canonical_key=canonical_key, warnings=warnings)
+    return NormalizedText(
+        raw=raw, clean=clean, norm=norm, mode=mode, canonical_key=canonical_key, warnings=warnings
+    )
 
 
 def normalize_for_tm(

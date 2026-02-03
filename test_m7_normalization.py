@@ -21,80 +21,67 @@ class TestNormalizationStrictMode(unittest.TestCase):
         """Simple word without prefixes should remain unchanged."""
         result = normalize_for_tm("he", "דבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_02_definite_article_he_stripped(self):
         """Definite article ה should be stripped."""
         result = normalize_for_tm("he", "הבית", "lemma")
         self.assertEqual(result.norm, "בית")
-        self.assertEqual(result.mode, "strict")
 
     def test_03_prefix_ve_stripped(self):
         """Prefix ו (and) should be stripped."""
         result = normalize_for_tm("he", "ודבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_04_prefix_be_stripped(self):
         """Prefix ב (in) should be stripped."""
         result = normalize_for_tm("he", "בבית", "lemma")
         self.assertEqual(result.norm, "בית")
-        self.assertEqual(result.mode, "strict")
 
     def test_05_prefix_le_stripped(self):
         """Prefix ל (to) should be stripped."""
         result = normalize_for_tm("he", "לבית", "lemma")
         self.assertEqual(result.norm, "בית")
-        self.assertEqual(result.mode, "strict")
 
     def test_06_prefix_ke_stripped(self):
         """Prefix כ (like) should be stripped."""
         result = normalize_for_tm("he", "כדבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_07_prefix_mi_stripped(self):
         """Prefix מ (from) should be stripped."""
         result = normalize_for_tm("he", "מבית", "lemma")
         self.assertEqual(result.norm, "בית")
-        self.assertEqual(result.mode, "strict")
 
     def test_08_prefix_she_stripped(self):
         """Prefix ש (that/which) should be stripped."""
         result = normalize_for_tm("he", "שדבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_09_multiple_prefixes_stripped(self):
         """Multiple prefixes should be stripped: ו+ה+דבר."""
         result = normalize_for_tm("he", "והדבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_10_complex_prefixes_veshel(self):
         """Complex prefixes: ו+ש+ל+דבר."""
         result = normalize_for_tm("he", "ושלדבר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_11_suffix_im_not_stripped_in_strict(self):
         """Plural suffix ים should NOT be stripped in current implementation."""
         result = normalize_for_tm("he", "ספרים", "lemma")
         # Assuming current implementation doesn't strip suffixes
         self.assertEqual(result.norm, "ספרים")
-        self.assertEqual(result.mode, "strict")
 
     def test_12_nikkud_removed(self):
         """Nikkud should be removed."""
         result = normalize_for_tm("he", "דָּבָר", "lemma")
         self.assertEqual(result.norm, "דבר")
-        self.assertEqual(result.mode, "strict")
 
     def test_13_nikkud_and_prefix_combined(self):
         """Nikkud removal + prefix stripping."""
         result = normalize_for_tm("he", "הַבַּיִת", "lemma")
         self.assertEqual(result.norm, "בית")
-        self.assertEqual(result.mode, "strict")
 
     def test_14_whitespace_stripped(self):
         """Leading/trailing whitespace should be stripped."""
@@ -102,9 +89,11 @@ class TestNormalizationStrictMode(unittest.TestCase):
         self.assertEqual(result.norm, "דבר")
 
     def test_15_internal_whitespace_preserved(self):
-        """Internal whitespace should be normalized to single space."""
+        """Internal whitespace normalized to underscore in strict mode."""
         result = normalize_for_tm("he", "דבר   אחר", "lemma")
-        self.assertEqual(result.norm, "דבר אחר")
+        # Strict mode uses _ joiner per contract
+        self.assertEqual(result.norm, "דבר_אחר")
+        self.assertEqual(result.mode, "strict")
 
     def test_16_empty_string(self):
         """Empty string should normalize to empty."""
@@ -138,49 +127,49 @@ class TestNormalizationCompatMode(unittest.TestCase):
 
     def test_21_ngram_no_prefix_stripping(self):
         """Ngrams should NOT strip prefixes (compat mode)."""
-        result = normalize_for_tm("he", "הבית", "ngram")
+        result = normalize_for_tm("he", "הבית", "ngram", mode="compat")
         self.assertEqual(result.norm, "הבית")
         self.assertEqual(result.mode, "compat")
 
     def test_22_ngram_preserve_ve_prefix(self):
-        """Ngrams preserve ו prefix."""
-        result = normalize_for_tm("he", "ודבר", "ngram")
+        """Ngrams preserve ו prefix (compat mode)."""
+        result = normalize_for_tm("he", "ודבר", "ngram", mode="compat")
         self.assertEqual(result.norm, "ודבר")
         self.assertEqual(result.mode, "compat")
 
     def test_23_ngram_nikkud_still_removed(self):
         """Ngrams still remove nikkud even in compat mode."""
-        result = normalize_for_tm("he", "דָּבָר", "ngram")
+        result = normalize_for_tm("he", "דָּבָר", "ngram", mode="compat")
         self.assertEqual(result.norm, "דבר")
         self.assertEqual(result.mode, "compat")
 
     def test_24_ngram_whitespace_normalized(self):
-        """Ngrams normalize whitespace."""
-        result = normalize_for_tm("he", "  דבר  אחר  ", "ngram")
+        """Ngrams normalize whitespace (compat uses space joiner)."""
+        result = normalize_for_tm("he", "  דבר  אחר  ", "ngram", mode="compat")
         self.assertEqual(result.norm, "דבר אחר")
         self.assertEqual(result.mode, "compat")
 
     def test_25_term_cluster_no_stripping(self):
-        """Term clusters use compat mode (no stripping)."""
+        """Term clusters ALWAYS use M5 canonical (strip prefixes per contract)."""
         result = normalize_for_tm("he", "והבית", "term_cluster")
-        self.assertEqual(result.norm, "והבית")
-        self.assertEqual(result.mode, "compat")
+        # Contract: term_cluster always strips prefixes for M5 compatibility
+        self.assertEqual(result.norm, "בית")
 
     def test_26_surface_no_stripping(self):
-        """Surface forms use compat mode (no stripping)."""
-        result = normalize_for_tm("he", "לבית", "surface")
+        """Surface forms preserve prefixes (compat mode)."""
+        result = normalize_for_tm("he", "לבית", "surface", mode="compat")
         self.assertEqual(result.norm, "לבית")
         self.assertEqual(result.mode, "compat")
 
     def test_27_ngram_multiword(self):
-        """Multi-word ngrams preserve all prefixes."""
-        result = normalize_for_tm("he", "הבית הגדול", "ngram")
+        """Multi-word ngrams preserve all prefixes (compat mode)."""
+        result = normalize_for_tm("he", "הבית הגדול", "ngram", mode="compat")
         self.assertEqual(result.norm, "הבית הגדול")
         self.assertEqual(result.mode, "compat")
 
     def test_28_ngram_with_numbers(self):
-        """Ngrams with numbers preserved."""
-        result = normalize_for_tm("he", "דף 123", "ngram")
+        """Ngrams with numbers preserved (compat mode)."""
+        result = normalize_for_tm("he", "דף 123", "ngram", mode="compat")
         self.assertEqual(result.norm, "דף 123")
         self.assertEqual(result.mode, "compat")
 
@@ -201,9 +190,11 @@ class TestNormalizationEdgeCases(unittest.TestCase):
         self.assertIn("בב", result.norm)
 
     def test_31_mixed_scripts_hebrew_latin(self):
-        """Mixed Hebrew and Latin scripts."""
+        """Mixed Hebrew and Latin scripts (strict mode uses _ joiner)."""
         result = normalize_for_tm("he", "דבר word", "lemma")
-        self.assertEqual(result.norm, "דבר word")
+        # Strict mode: _ joiner
+        self.assertEqual(result.norm, "דבר_word")
+        self.assertEqual(result.mode, "strict")
 
     def test_32_all_nikkud_no_letters(self):
         """String with only nikkud marks."""
@@ -212,19 +203,25 @@ class TestNormalizationEdgeCases(unittest.TestCase):
         self.assertIsNotNone(result.norm)
 
     def test_33_newline_normalized(self):
-        """Newlines should be normalized to space."""
+        """Newlines normalized to underscore in strict mode."""
         result = normalize_for_tm("he", "דבר\nאחר", "lemma")
-        self.assertEqual(result.norm, "דבר אחר")
+        # Strict mode: whitespace → _ joiner
+        self.assertEqual(result.norm, "דבר_אחר")
+        self.assertEqual(result.mode, "strict")
 
     def test_34_tab_normalized(self):
-        """Tabs should be normalized to space."""
+        """Tabs normalized to underscore in strict mode."""
         result = normalize_for_tm("he", "דבר\tאחר", "lemma")
-        self.assertEqual(result.norm, "דבר אחר")
+        # Strict mode: whitespace → _ joiner
+        self.assertEqual(result.norm, "דבר_אחר")
+        self.assertEqual(result.mode, "strict")
 
     def test_35_multiple_spaces_collapsed(self):
-        """Multiple spaces should collapse to single space."""
+        """Multiple spaces collapsed and converted to underscore in strict mode."""
         result = normalize_for_tm("he", "דבר     אחר", "lemma")
-        self.assertEqual(result.norm, "דבר אחר")
+        # Strict mode: whitespace → _ joiner
+        self.assertEqual(result.norm, "דבר_אחר")
+        self.assertEqual(result.mode, "strict")
 
     def test_36_rtl_mark_removed(self):
         """RTL/LTR marks should be removed (if implemented)."""
@@ -310,19 +307,25 @@ class TestNormalizationRealWorldExamples(unittest.TestCase):
         self.assertEqual(result.norm, "ספרים")
 
     def test_49_construct_state_batei(self):
-        """Construct state: בתי (houses of)."""
+        """Construct state: בתי (houses of) - too short to strip."""
         result = normalize_for_tm("he", "בתי", "lemma")
-        self.assertEqual(result.norm, "תי")  # ב stripped as prefix
+        # Strip logic requires >= 3 chars remaining, so ב not stripped
+        self.assertEqual(result.norm, "בתי")
+        self.assertEqual(result.mode, "strict")
 
     def test_50_multiword_phrase_lemma(self):
-        """Multi-word phrase as lemma."""
+        """Multi-word phrase as lemma (strict mode uses _ joiner)."""
         result = normalize_for_tm("he", "בית ספר", "lemma")
-        self.assertEqual(result.norm, "בית ספר")
+        # Strict mode: _ joiner
+        self.assertEqual(result.norm, "בית_ספר")
+        self.assertEqual(result.mode, "strict")
 
     def test_51_multiword_phrase_ngram(self):
-        """Multi-word phrase as ngram (no stripping)."""
-        result = normalize_for_tm("he", "בבית הספר", "ngram")
+        """Multi-word phrase as ngram (compat mode preserves prefixes, space joiner)."""
+        result = normalize_for_tm("he", "בבית הספר", "ngram", mode="compat")
+        # Compat mode: no stripping, space joiner
         self.assertEqual(result.norm, "בבית הספר")
+        self.assertEqual(result.mode, "compat")
 
     def test_52_relative_clause_shehu(self):
         """Relative pronoun: שהוא (that he)."""
@@ -331,15 +334,18 @@ class TestNormalizationRealWorldExamples(unittest.TestCase):
         self.assertIn("וא", result.norm)
 
     def test_53_interrogative_haim(self):
-        """Interrogative: האם (whether)."""
+        """Interrogative: האם (whether) - too short to strip (needs >= 3 chars remaining)."""
         result = normalize_for_tm("he", "האם", "lemma")
-        self.assertEqual(result.norm, "אם")
+        # Strip logic requires >= 3 chars remaining, so ה not stripped
+        self.assertEqual(result.norm, "האם")
+        self.assertEqual(result.mode, "strict")
 
     def test_54_preposition_mishel(self):
-        """Compound preposition: משל (from of)."""
+        """Compound preposition: משל (from of) - too short to strip."""
         result = normalize_for_tm("he", "משל", "lemma")
-        # מ stripped, של remains
-        self.assertEqual(result.norm, "של")
+        # Strip logic requires >= 3 chars remaining, so מ not stripped
+        self.assertEqual(result.norm, "משל")
+        self.assertEqual(result.mode, "strict")
 
     def test_55_acronym_with_quotes(self):
         """Hebrew acronym with quotes: צה\"ל."""

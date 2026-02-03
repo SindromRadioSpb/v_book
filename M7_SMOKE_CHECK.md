@@ -1,5 +1,37 @@
 # M7 Translation Memory - Smoke Check
 
+## Automated Gate (обязательно перед ручными сценариями)
+
+Выполни эти автопроверки **перед** разделом «Test Scenarios». Они должны завершиться успешно (exit code 0).
+
+### Windows PowerShell
+```powershell
+# из корня репозитория
+.\.venv\Scripts\Activate.ps1
+
+python test_m7_ui_integration.py
+python test_m7_normalization.py
+python smoke_check_m7.py
+python test_m7.py
+```
+
+### Bash (macOS/Linux/Git-Bash)
+```bash
+source .venv/bin/activate
+python test_m7_ui_integration.py
+python test_m7_normalization.py
+python smoke_check_m7.py
+python test_m7.py
+```
+
+**✅ Pass criteria:**
+- `test_m7_ui_integration.py`: все тесты PASS (unittest выводит `OK`)
+- `test_m7_normalization.py`: все тесты PASS (unittest выводит `OK`)
+- `smoke_check_m7.py`: общий итог PASSED и exit code 0
+- `test_m7.py`: общий итог PASSED и exit code 0
+
+Если любой из шагов падает — **остановись** и исправь проблему перед ручным smoke-check.
+
 **Purpose:** Manual verification that M7 core functionality works correctly.
 
 **Prerequisites:**
