@@ -9,6 +9,8 @@ from PyQt6.QtGui import QAction
 from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
+from app.ui.translation_management_panel import TranslationManagementPanel
+from app.ui.coverage_panel import CoveragePanel
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,21 @@ class AppWindow(QMainWindow):
         verification_action.triggered.connect(self.open_verification)
         tools_menu.addAction(verification_action)
 
+        # Premium menu
+        premium_menu = menubar.addMenu("&Premium")
+
+        # Translation Management
+        tm_action = QAction("&Translation Management", self)
+        tm_action.setShortcut("Ctrl+Shift+T")
+        tm_action.triggered.connect(self.open_translation_management)
+        premium_menu.addAction(tm_action)
+
+        # QA/Coverage (requires project context)
+        coverage_action = QAction("&QA / Coverage", self)
+        coverage_action.setShortcut("Ctrl+Shift+C")
+        coverage_action.triggered.connect(self.open_coverage)
+        premium_menu.addAction(coverage_action)
+
     def open_verification(self):
         """Open verification panel."""
         logger.info("Opening verification panel")
@@ -67,6 +84,49 @@ class AppWindow(QMainWindow):
         # Add to stack and show
         self.stack.addWidget(verification_panel)
         self.stack.setCurrentWidget(verification_panel)
+
+    def open_translation_management(self):
+        """Open translation management panel."""
+        logger.info("Opening translation management panel")
+
+        # Create panel (global TM by default)
+        tm_panel = TranslationManagementPanel(project_id=None)
+        tm_panel.back_requested.connect(self.back_to_dashboard)
+
+        # Add to stack and show
+        self.stack.addWidget(tm_panel)
+        self.stack.setCurrentWidget(tm_panel)
+
+    def open_coverage(self):
+        """Open coverage panel."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Coverage requires project context
+        # Check if we're in a project view
+        current_widget = self.stack.currentWidget()
+        project_id = None
+
+        if hasattr(current_widget, 'project_id'):
+            project_id = current_widget.project_id
+
+        if project_id is None:
+            QMessageBox.information(
+                self,
+                "Project Required",
+                "QA/Coverage requires a project context.\n\n"
+                "Please open a project first, then access Premium → QA/Coverage."
+            )
+            return
+
+        logger.info(f"Opening coverage panel for project {project_id}")
+
+        # Create panel
+        coverage_panel = CoveragePanel(project_id)
+        coverage_panel.back_requested.connect(self.back_to_dashboard)
+
+        # Add to stack and show
+        self.stack.addWidget(coverage_panel)
+        self.stack.setCurrentWidget(coverage_panel)
 
     def open_project(self, project_id: int):
         """Open a project view."""
