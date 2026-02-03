@@ -35,6 +35,7 @@ class AppWindow(QMainWindow):
         # Create dashboard
         self.dashboard = ProjectDashboard()
         self.dashboard.project_selected.connect(self.open_project)
+        self.dashboard.verification_requested.connect(self.open_verification)
         self.stack.addWidget(self.dashboard)
 
         # Show dashboard initially

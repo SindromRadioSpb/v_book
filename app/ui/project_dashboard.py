@@ -26,6 +26,7 @@ class ProjectDashboard(QWidget):
     """Dashboard showing all projects."""
 
     project_selected = pyqtSignal(int)  # Emits project_id
+    verification_requested = pyqtSignal()  # Emits when verification button clicked
 
     def __init__(self):
         super().__init__()
@@ -43,6 +44,24 @@ class ProjectDashboard(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header_layout.addWidget(title)
         header_layout.addStretch()
+
+        # Verification button (P1 Premium)
+        verification_btn = QPushButton("🔍 P1 Verification")
+        verification_btn.setToolTip("Open P1 Scenario 7 verification panel (Ctrl+Shift+V)")
+        verification_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        verification_btn.clicked.connect(self.on_open_verification)
+        header_layout.addWidget(verification_btn)
 
         create_btn = QPushButton("Create Project")
         create_btn.clicked.connect(self.on_create_project)
@@ -148,6 +167,11 @@ class ProjectDashboard(QWidget):
         """Handle selection change - enable/disable Delete button."""
         selected_indexes = self.project_table.selectedIndexes()
         self.delete_btn.setEnabled(len(selected_indexes) > 0)
+
+    def on_open_verification(self):
+        """Handle verification button click."""
+        logger.info("Verification button clicked")
+        self.verification_requested.emit()
 
     def on_delete_project(self):
         """Handle delete project button."""
