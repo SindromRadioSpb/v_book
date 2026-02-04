@@ -14,11 +14,13 @@
 **Status:** ✅ All deliverables complete, tests passing
 **Commits:** 5079598, c7cb3f8, c0a3acf, 4447e3c
 
-### M9: Export Center 🚧 IN PROGRESS
+### M9: Export Center ✅ COMPLETE
 
-**Patches:** 5-7 complete (7/12 total, 58%)
-**Status:** ✅ XLSX + TBX/TMX + UI complete, final tests in progress
-**Tests:** 15/15 passing (test_m9.py)
+**Patches:** 5-8 complete (8/12 total, 67%)
+**Status:** ✅ All deliverables complete, tests passing, documented
+**Tests:** 18/18 passing (15 comprehensive + 3 regression)
+**Anti-Flake:** 20x verification (NO FLAKES)
+**Commits:** a7026cc, 9fc4227, db2fcb7, [final]
 
 **Deliverables:**
 - Migration 005 (curation fields)
@@ -282,9 +284,60 @@ test_15_xml_atomic_write ... ok
 
 ---
 
+## PATCH 8: M9 Tests + Documentation ✅ COMPLETE
+
+**Deliverables:**
+- ✅ 20x anti-flake verification: 20/20 PASS (NO FLAKES)
+- ✅ CSV injection regression verified: 3/3 PASS
+- ✅ M9_COMPLETE.md milestone documentation
+- ✅ ITERATION_1_REPORT.md updated
+
+**Anti-Flake Results:**
+```
+20/20 runs: 15/15 tests passing
+Average: 0.633s per run
+Range: 0.533s - 2.838s
+Total: 12.66s
+Result: NO FLAKES
+```
+
+**Regression Verification:**
+- test_p3_export_csv_injection.py: 3/3 PASS
+- CSV injection protection: VERIFIED
+
+**Total M9 Test Coverage:**
+- test_m9.py: 15 comprehensive tests
+- test_p3_export_csv_injection.py: 3 regression tests
+- Total: 18 tests, all passing
+
+**Status:** ✅ M9 milestone COMPLETE
+
+---
+
+## M9 Milestone Summary
+
+**Status:** ✅ **COMPLETE**
+**Date:** 2026-02-04
+**Patches:** 5-8 (4 patches)
+
+**Achievements:**
+- 5 export formats implemented (CSV, JSON, XLSX, TBX, TMX)
+- M8 curation integration (approved_only, pinned_translation)
+- Worker pattern for non-blocking operations
+- Multi-sheet Excel with statistics
+- XML standards compliance (TBX, TMX 1.4)
+- Full UI with progress/cancel support
+- 18 tests passing (15 + 3 regression)
+- 20x anti-flake verification (NO FLAKES)
+- Complete documentation (UI DoD + M9_COMPLETE)
+
+**Ready for M10: Packaging + QA**
+
+---
+
 ## Next Steps
 
-### PATCH 8: M9 Tests + Documentation (NEXT)
+### PATCH 9: M10 Auto-Backup Before Migrations (NEXT)
 
 ### PATCH 7: ExportView UI Wiring
 
