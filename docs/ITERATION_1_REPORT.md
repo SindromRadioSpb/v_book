@@ -330,6 +330,16 @@ Result: NO FLAKES
 - 18 tests passing (15 + 3 regression)
 - 20x anti-flake verification (NO FLAKES)
 - Complete documentation (UI DoD + M9_COMPLETE)
+- Real-project smoke test runner (11 export scenarios)
+
+**Testing & Quality:**
+- **Unit/Integration Tests:** test_m9.py (15 tests)
+- **Regression Tests:** test_p3_export_csv_injection.py (3 tests)
+- **Real-Project Smoke Test:** `python -m app.tools.smoke_export_center` (11 scenarios)
+  - Tests all export formats on production database
+  - Validates CSV, JSON, XLSX, TBX (4 variants), TMX (4 variants)
+  - Coverage warnings for sparse data
+  - See: [SMOKE_EXPORT_CENTER_REAL_PROJECT.md](SMOKE_EXPORT_CENTER_REAL_PROJECT.md)
 
 **Ready for M10: Packaging + QA**
 

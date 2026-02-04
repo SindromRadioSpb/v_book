@@ -15,7 +15,7 @@ from pathlib import Path
 
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
-from app.infra.sa_models import TermCluster, TermAlias, StopwordSet, StopwordItem, DocumentSentence, Document
+from app.infra.sa_models import TermCluster, TermAlias, StopwordSet, StopwordItem, DocumentSentence, SourceDocument
 
 
 class TestM8TermCuration(unittest.TestCase):
@@ -45,11 +45,22 @@ class TestM8TermCuration(unittest.TestCase):
             cls.project_id = project.project_id
 
             # Create test document for sentence references
-            doc = Document(
+            # Note: SourceDocument requires corpus_id, so we need to create a corpus first
+            from app.infra.sa_models import SourceCorpus
+            corpus = SourceCorpus(
                 project_id=cls.project_id,
+                name="test_corpus",
+                description="Test corpus for M8"
+            )
+            session.add(corpus)
+            session.flush()
+
+            doc = SourceDocument(
+                corpus_id=corpus.corpus_id,
+                file_path="test_doc.txt",
                 file_name="test_doc.txt",
-                doc_hash="test_hash_m8",
-                lang="he",
+                file_ext=".txt",
+                sha256="test_hash_m8_sha256",
             )
             session.add(doc)
             session.commit()
