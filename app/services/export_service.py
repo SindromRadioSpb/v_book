@@ -366,7 +366,7 @@ class ExportService:
                 .all()
             )
 
-            # For lemmas, try to get translation from TM
+            # For lemmas, try to get translation from TM and frequency from stats
             for lemma in lemmas:
                 # Look up translation in TM
                 tm_entry = (
@@ -379,8 +379,20 @@ class ExportService:
                     .first()
                 )
 
+                # Look up frequency from LemmaProjectStat
+                from app.infra.sa_models import LemmaProjectStat
+                lemma_stat = (
+                    session.query(LemmaProjectStat)
+                    .filter(
+                        LemmaProjectStat.project_id == project_id,
+                        LemmaProjectStat.lemma_id == lemma.lemma_id,
+                    )
+                    .first()
+                )
+
                 translation = tm_entry.translation if tm_entry else ""
                 status = tm_entry.status if tm_entry else "untranslated"
+                frequency = lemma_stat.freq_abs if lemma_stat else ""
 
                 ws_dict.append([
                     lemma.lemma_text or "",
@@ -388,7 +400,7 @@ class ExportService:
                     status,
                     "lemma",
                     lemma.pos or "",
-                    lemma.freq_abs or "",
+                    frequency,
                     "",
                 ])
                 row_count += 1
