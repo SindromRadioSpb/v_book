@@ -893,7 +893,7 @@ class P3VerificationService:
 
                 if dict_hit and tm_hit:
                     return VerificationStep(
-                        name="Resolve Sanity (dict → TM override)",
+                        name="Resolve Sanity (dict > TM override)",
                         status="PASS",
                         elapsed_ms=elapsed_ms,
                         details={
@@ -906,7 +906,7 @@ class P3VerificationService:
                     )
                 else:
                     return VerificationStep(
-                        name="Resolve Sanity (dict → TM override)",
+                        name="Resolve Sanity (dict > TM override)",
                         status="FAIL",
                         elapsed_ms=elapsed_ms,
                         details={
@@ -923,7 +923,7 @@ class P3VerificationService:
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
             return VerificationStep(
-                name="Resolve Sanity (dict → TM override)",
+                name="Resolve Sanity (dict > TM override)",
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},

@@ -66,9 +66,9 @@ def main():
 
     # Check if source DB exists
     if not Path(args.db).exists():
-        print(f"❌ Database not found: {args.db}")
+        print(f"[ERROR] Database not found: {args.db}")
         print("")
-        print("💡 Hint: Specify database path with --db option")
+        print("Hint: Specify database path with --db option")
         print(f"   Example: python -m app.tools.p3_verify --db path/to/your.db")
         print("")
         print("Exit code: 2 (SKIPPED)")
@@ -92,16 +92,16 @@ def main():
     print("")
 
     # Create snapshot
-    print("📸 Creating snapshot...")
+    print("[*] Creating snapshot...")
     service = P3VerificationService()
 
     try:
         snapshot_path, snapshot_sha256 = service.create_snapshot(args.db, str(out_dir))
-        print(f"✅ Snapshot created: {snapshot_path}")
+        print(f"[OK] Snapshot created: {snapshot_path}")
         print(f"   SHA256: {snapshot_sha256}")
         print("")
     except Exception as e:
-        print(f"❌ Failed to create snapshot: {e}")
+        print(f"[ERROR] Failed to create snapshot: {e}")
         return 1
 
     # Initialize DBService with snapshot
@@ -111,7 +111,7 @@ def main():
         db_service = DBService.get_instance()
 
         # Run verification
-        print("🔍 Running verification suite...")
+        print("[*] Running verification suite...")
         print("")
 
         with db_service.get_session() as session:
@@ -124,7 +124,7 @@ def main():
 
         # Print step results
         for step in report.steps:
-            status_icon = "✅" if step.status == "PASS" else "❌" if step.status == "FAIL" else "⏭️"
+            status_icon = "[PASS]" if step.status == "PASS" else "[FAIL]" if step.status == "FAIL" else "[SKIP]"
             print(f"{status_icon} {step.name}: {step.status} ({step.elapsed_ms:.2f}ms)")
             if step.error:
                 print(f"   Error: {step.error}")
@@ -146,17 +146,17 @@ def main():
         with open(md_path, 'w', encoding='utf-8') as f:
             f.write(report.to_markdown())
 
-        print(f"📄 Reports written:")
+        print(f"[*] Reports written:")
         print(f"   JSON: {json_path}")
         print(f"   MD:   {md_path}")
         print("")
 
         # Return exit code
         if report.overall_status == "PASS":
-            print("✅ Verification PASSED")
+            print("[OK] Verification PASSED")
             return 0
         else:
-            print("❌ Verification FAILED")
+            print("[FAIL] Verification FAILED")
             return 1
 
     finally:
