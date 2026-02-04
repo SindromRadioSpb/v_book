@@ -329,6 +329,286 @@ class TestM9ExportCenter(unittest.TestCase):
 
         print("[OK] Empty project export handled gracefully")
 
+    # ========================================================================
+    # Test 9-10: TBX Export
+    # ========================================================================
+
+    def test_09_tbx_export_creates_valid_xml(self):
+        """Test TBX export creates valid parseable XML."""
+        output_path = os.path.join(self.temp_dir, "test_export.tbx")
+
+        with self.db_service.get_session() as session:
+            count = self.service.export_tbx(
+                session, output_path, project_id=self.project_id, approved_only=False
+            )
+
+        # File should exist
+        self.assertTrue(os.path.exists(output_path))
+        self.assertGreater(count, 0)
+
+        # Parse XML
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        # Check structure
+        self.assertEqual(root.tag, "tbx")
+        text_elem = root.find("text")
+        self.assertIsNotNone(text_elem)
+        body_elem = text_elem.find("body")
+        self.assertIsNotNone(body_elem)
+
+        # Check termEntry exists
+        term_entries = body_elem.findall("termEntry")
+        self.assertGreater(len(term_entries), 0, "Should have at least one termEntry")
+
+        # Check langSet structure
+        first_entry = term_entries[0]
+        langsets = first_entry.findall("langSet")
+        self.assertGreater(len(langsets), 0, "Should have at least one langSet")
+
+        # Hebrew langSet should exist - check xml:lang attribute
+        he_langset = None
+        for langset in langsets:
+            if langset.get("{http://www.w3.org/XML/1998/namespace}lang") == "he":
+                he_langset = langset
+                break
+        self.assertIsNotNone(he_langset, "Should have Hebrew langSet")
+
+        print(f"[OK] TBX created: {count} term entries, {len(term_entries)} in XML")
+
+    def test_10_tbx_approved_only_filter(self):
+        """Test TBX approved_only parameter filters correctly."""
+        # We have 2 approved clusters and 3 auto in setup
+        approved_path = os.path.join(self.temp_dir, "test_approved.tbx")
+        all_path = os.path.join(self.temp_dir, "test_all.tbx")
+
+        with self.db_service.get_session() as session:
+            approved_count = self.service.export_tbx(
+                session, approved_path, project_id=self.project_id, approved_only=True
+            )
+
+            all_count = self.service.export_tbx(
+                session, all_path, project_id=self.project_id, approved_only=False
+            )
+
+        # Approved should be subset of all
+        self.assertLess(approved_count, all_count, "Approved count should be less than all")
+        self.assertEqual(approved_count, 2, "Should have exactly 2 approved terms")
+        self.assertEqual(all_count, 5, "Should have 5 total terms")
+
+        print(f"[OK] TBX filter: {approved_count} approved, {all_count} total")
+
+    # ========================================================================
+    # Test 11-12: TMX Export
+    # ========================================================================
+
+    def test_11_tmx_export_creates_valid_xml(self):
+        """Test TMX export creates valid parseable XML."""
+        output_path = os.path.join(self.temp_dir, "test_export.tmx")
+
+        with self.db_service.get_session() as session:
+            count = self.service.export_tmx(
+                session, output_path, project_id=self.project_id
+            )
+
+        # File should exist
+        self.assertTrue(os.path.exists(output_path))
+        self.assertGreater(count, 0)
+
+        # Parse XML
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        # Check structure
+        self.assertEqual(root.tag, "tmx")
+        self.assertEqual(root.get("version"), "1.4")
+
+        header = root.find("header")
+        self.assertIsNotNone(header)
+        self.assertEqual(header.get("srclang"), "he")
+
+        body = root.find("body")
+        self.assertIsNotNone(body)
+
+        # Check TU exists
+        tus = body.findall("tu")
+        self.assertGreater(len(tus), 0, "Should have at least one TU")
+
+        # Check TUV structure
+        first_tu = tus[0]
+        tuvs = first_tu.findall("tuv")
+        self.assertGreaterEqual(len(tuvs), 1, "Should have at least one TUV (source)")
+
+        # Check seg exists
+        seg = first_tu.find(".//seg")
+        self.assertIsNotNone(seg, "Should have seg element")
+
+        print(f"[OK] TMX created: {count} TUs, {len(tus)} in XML")
+
+    def test_12_tmx_pinned_translations_included(self):
+        """Test TMX includes pinned translations with prop marker."""
+        # Add a pinned translation to a term cluster
+        with self.db_service.get_session() as session:
+            from app.services.term_card_service import TermCardService
+            card_service = TermCardService()
+
+            # Get first cluster and pin a translation
+            clusters = session.query(TermCluster).filter(
+                TermCluster.project_id == self.project_id
+            ).limit(1).all()
+
+            if clusters:
+                cluster = clusters[0]
+                card_service.pin_translation(session, cluster.cluster_id, "пиннед", "ru")
+                session.commit()
+
+        output_path = os.path.join(self.temp_dir, "test_pinned.tmx")
+
+        with self.db_service.get_session() as session:
+            count = self.service.export_tmx(
+                session, output_path, project_id=self.project_id, include_pinned=True
+            )
+
+        # Parse and check for pinned prop
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        body = root.find("body")
+        tus = body.findall("tu")
+
+        # Find TU with prop type="source" text="pinned"
+        pinned_tu = None
+        for tu in tus:
+            prop = tu.find("prop[@type='source']")
+            if prop is not None and prop.text == "pinned":
+                pinned_tu = tu
+                break
+
+        self.assertIsNotNone(pinned_tu, "Should have TU with pinned prop")
+
+        print("[OK] TMX pinned translations included with prop marker")
+
+    # ========================================================================
+    # Test 13: XML Escaping
+    # ========================================================================
+
+    def test_13_xml_escaping_special_characters(self):
+        """Test XML export handles special characters correctly."""
+        # Add TM entry with special characters
+        with self.db_service.get_session() as session:
+            special_entry = TMEntry(
+                project_id=self.project_id,
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="<test> & 'quotes' \"double\"",
+                src_norm="test_special",
+                translation="<тест> & 'кавычки' \"двойные\"",
+                status="approved",
+                origin="import",
+            )
+            session.add(special_entry)
+            session.commit()
+
+        # Export TMX
+        output_path = os.path.join(self.temp_dir, "test_escaping.tmx")
+
+        with self.db_service.get_session() as session:
+            self.service.export_tmx(session, output_path, project_id=self.project_id)
+
+        # Parse XML (should not crash)
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        # Find the seg with our special text
+        segs = root.findall(".//seg")
+        texts = [seg.text for seg in segs if seg.text]
+
+        # Should contain our special characters (they will be automatically escaped by ET)
+        found_source = any("<test> & 'quotes' \"double\"" in text for text in texts)
+        self.assertTrue(found_source, "Should find source text with special chars")
+
+        print("[OK] XML escaping handles special characters")
+
+    # ========================================================================
+    # Test 14: TBX Pinned Translation
+    # ========================================================================
+
+    def test_14_tbx_pinned_translation_export(self):
+        """Test TBX exports pinned translations in Russian langSet."""
+        # Add pinned translation to approved cluster
+        with self.db_service.get_session() as session:
+            from app.services.term_card_service import TermCardService
+            card_service = TermCardService()
+
+            # Get approved cluster and pin translation
+            cluster = session.query(TermCluster).filter(
+                TermCluster.project_id == self.project_id,
+                TermCluster.curation_status == "approved"
+            ).first()
+
+            if cluster:
+                card_service.pin_translation(session, cluster.cluster_id, "закреплённый", "ru")
+                session.commit()
+                cluster_id = cluster.cluster_id
+
+        output_path = os.path.join(self.temp_dir, "test_tbx_pinned.tbx")
+
+        with self.db_service.get_session() as session:
+            self.service.export_tbx(
+                session, output_path, project_id=self.project_id,
+                approved_only=True, include_pinned=True
+            )
+
+        # Parse and verify Russian langSet exists with pinned term
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        body = root.find(".//body")
+        term_entries = body.findall("termEntry")
+
+        # Find termEntry with Russian langSet - check xml:lang attribute
+        found_ru = False
+        for entry in term_entries:
+            langsets = entry.findall("langSet")
+            for langset in langsets:
+                if langset.get("{http://www.w3.org/XML/1998/namespace}lang") == "ru":
+                    term_elem = langset.find(".//term")
+                    if term_elem is not None and "закреплённый" in (term_elem.text or ""):
+                        found_ru = True
+                        break
+            if found_ru:
+                break
+
+        self.assertTrue(found_ru, "Should find Russian langSet with pinned translation")
+
+        print("[OK] TBX exports pinned translations")
+
+    # ========================================================================
+    # Test 15: Atomic Write for XML
+    # ========================================================================
+
+    def test_15_xml_atomic_write(self):
+        """Test XML export uses atomic write (no temp files left)."""
+        output_path = os.path.join(self.temp_dir, "test_atomic_xml.tbx")
+
+        with self.db_service.get_session() as session:
+            self.service.export_tbx(session, output_path, project_id=self.project_id)
+
+        # File should exist
+        self.assertTrue(os.path.exists(output_path))
+
+        # No temp files should remain
+        temp_files = [f for f in os.listdir(self.temp_dir) if f.endswith('.tmp')]
+        self.assertEqual(len(temp_files), 0, "No temp files should remain")
+
+        print("[OK] XML atomic write verified")
+
 
 def run_anti_flake_verification(repeat_count=20):
     """Run tests multiple times to verify stability."""

@@ -13,6 +13,8 @@ import csv
 import json
 import os
 import tempfile
+import xml.etree.ElementTree as ET
+from datetime import datetime
 from typing import Optional, List, BinaryIO
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -537,3 +539,238 @@ class ExportService:
             except:
                 pass
             raise e
+
+    # ========================================================================
+    # M9: TBX Export (TermBase eXchange)
+    # ========================================================================
+
+    def export_tbx(
+        self,
+        session: Session,
+        path: str,
+        *,
+        project_id: int,
+        approved_only: bool = True,
+        include_pinned: bool = True,
+    ) -> int:
+        """Export term clusters to TBX (TermBase eXchange) XML format.
+
+        Args:
+            session: Database session
+            path: Output TBX file path
+            project_id: Project ID to export
+            approved_only: Export only approved terms (default True)
+            include_pinned: Include pinned translations (default True)
+
+        Returns:
+            Number of term entries exported
+
+        Note: Uses language codes he/ru (ISO 639-1)
+        """
+        # Query term clusters
+        query = session.query(TermCluster).filter(TermCluster.project_id == project_id)
+
+        if approved_only:
+            query = query.filter(TermCluster.curation_status == "approved")
+
+        # Stable order for determinism
+        query = query.order_by(TermCluster.canonical_key, TermCluster.cluster_id)
+        clusters = query.all()
+
+        # Build TBX XML
+        def write_tbx(f: BinaryIO):
+            # Root element
+            tbx = ET.Element("tbx", {
+                "type": "TBX-Basic",
+                "style": "dca",
+                "xml:lang": "he"
+            })
+
+            # Text element
+            text = ET.SubElement(tbx, "text")
+            body = ET.SubElement(text, "body")
+
+            count = 0
+            for cluster in clusters:
+                # Create termEntry for each cluster
+                term_entry = ET.SubElement(body, "termEntry", {"id": f"c{cluster.cluster_id}"})
+
+                # Hebrew langSet
+                langset_he = ET.SubElement(term_entry, "langSet", {"xml:lang": "he"})
+                tig_he = ET.SubElement(langset_he, "tig")
+                term_he = ET.SubElement(tig_he, "term")
+                term_he.text = self._sanitize_xml_text(cluster.representative_he)
+
+                # Russian langSet (if translation exists)
+                translation = None
+                if include_pinned and cluster.pinned_translation:
+                    translation = cluster.pinned_translation
+
+                if translation:
+                    langset_ru = ET.SubElement(term_entry, "langSet", {"xml:lang": "ru"})
+                    tig_ru = ET.SubElement(langset_ru, "tig")
+                    term_ru = ET.SubElement(tig_ru, "term")
+                    term_ru.text = self._sanitize_xml_text(translation)
+
+                count += 1
+
+            # Write to file
+            tree = ET.ElementTree(tbx)
+            ET.indent(tree, space="  ")  # Pretty print
+            tree.write(f, encoding="utf-8", xml_declaration=True)
+
+            return count
+
+        # Atomic write
+        result = self._atomic_write_with_result(path, write_tbx)
+
+        logger.info(f"Exported TBX to {path} ({result} term entries)")
+        return result
+
+    # ========================================================================
+    # M9: TMX Export (Translation Memory eXchange)
+    # ========================================================================
+
+    def export_tmx(
+        self,
+        session: Session,
+        path: str,
+        *,
+        project_id: int,
+        include_draft: bool = False,
+        include_pinned: bool = True,
+    ) -> int:
+        """Export TM entries to TMX (Translation Memory eXchange) XML format.
+
+        Args:
+            session: Database session
+            path: Output TMX file path
+            project_id: Project ID to export
+            include_draft: Include draft status entries (default False)
+            include_pinned: Include pinned translations from term clusters (default True)
+
+        Returns:
+            Number of translation units exported
+
+        Note: Uses language codes he/ru (ISO 639-1)
+        """
+        # Query TM entries
+        query = session.query(TMEntry).filter(TMEntry.project_id == project_id)
+
+        if not include_draft:
+            query = query.filter(TMEntry.status.in_(["approved", "rejected", "deprecated"]))
+
+        # Stable order for determinism
+        query = query.order_by(TMEntry.src_text, TMEntry.tm_id)
+        tm_entries = query.all()
+
+        # Get pinned translations from term clusters if requested
+        pinned_entries = []
+        if include_pinned:
+            clusters_with_pinned = (
+                session.query(TermCluster)
+                .filter(
+                    TermCluster.project_id == project_id,
+                    TermCluster.pinned_translation.isnot(None)
+                )
+                .order_by(TermCluster.representative_he)
+                .all()
+            )
+            pinned_entries = [(c.representative_he, c.pinned_translation) for c in clusters_with_pinned]
+
+        # Build TMX XML
+        def write_tmx(f: BinaryIO):
+            # Root element
+            tmx = ET.Element("tmx", {"version": "1.4"})
+
+            # Header
+            header = ET.SubElement(tmx, "header", {
+                "creationtool": "V_book",
+                "creationtoolversion": "1.0",
+                "datatype": "plaintext",
+                "segtype": "sentence",
+                "adminlang": "en",
+                "srclang": "he",
+                "o-tmf": "unknown"
+            })
+
+            # Body
+            body = ET.SubElement(tmx, "body")
+
+            count = 0
+
+            # Add TM entries
+            for entry in tm_entries:
+                tu = ET.SubElement(body, "tu")
+
+                # Source (Hebrew)
+                tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
+                seg_he = ET.SubElement(tuv_he, "seg")
+                seg_he.text = self._sanitize_xml_text(entry.src_text)
+
+                # Target (Russian)
+                if entry.translation:
+                    tuv_ru = ET.SubElement(tu, "tuv", {"xml:lang": "ru"})
+                    seg_ru = ET.SubElement(tuv_ru, "seg")
+                    seg_ru.text = self._sanitize_xml_text(entry.translation)
+
+                count += 1
+
+            # Add pinned translations as separate TUs with prop
+            for src_he, trans_ru in pinned_entries:
+                tu = ET.SubElement(body, "tu")
+
+                # Add property to mark as pinned
+                prop = ET.SubElement(tu, "prop", {"type": "source"})
+                prop.text = "pinned"
+
+                # Source (Hebrew)
+                tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
+                seg_he = ET.SubElement(tuv_he, "seg")
+                seg_he.text = self._sanitize_xml_text(src_he)
+
+                # Target (Russian)
+                tuv_ru = ET.SubElement(tu, "tuv", {"xml:lang": "ru"})
+                seg_ru = ET.SubElement(tuv_ru, "seg")
+                seg_ru.text = self._sanitize_xml_text(trans_ru)
+
+                count += 1
+
+            # Write to file
+            tree = ET.ElementTree(tmx)
+            ET.indent(tree, space="  ")  # Pretty print
+            tree.write(f, encoding="utf-8", xml_declaration=True)
+
+            return count
+
+        # Atomic write
+        result = self._atomic_write_with_result(path, write_tmx)
+
+        logger.info(f"Exported TMX to {path} ({result} translation units)")
+        return result
+
+    def _sanitize_xml_text(self, text: Optional[str]) -> str:
+        """Sanitize text for XML content.
+
+        Removes invalid XML characters and ensures safe encoding.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Sanitized text safe for XML
+        """
+        if not text:
+            return ""
+
+        # Remove null bytes and other invalid XML characters
+        # Valid XML chars: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+        sanitized = []
+        for char in str(text):
+            code = ord(char)
+            if (code == 0x09 or code == 0x0A or code == 0x0D or
+                (0x20 <= code <= 0xD7FF) or
+                (0xE000 <= code <= 0xFFFD)):
+                sanitized.append(char)
+
+        return "".join(sanitized)

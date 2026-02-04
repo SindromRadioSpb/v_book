@@ -14,6 +14,12 @@
 **Status:** ✅ All deliverables complete, tests passing
 **Commits:** 5079598, c7cb3f8, c0a3acf, 4447e3c
 
+### M9: Export Center 🚧 IN PROGRESS
+
+**Patches:** 5-6 complete (6/12 total, 50%)
+**Status:** ✅ XLSX + TBX/TMX export complete, UI wiring in progress
+**Tests:** 15/15 passing (test_m9.py)
+
 **Deliverables:**
 - Migration 005 (curation fields)
 - TermCardService (13 methods, 650 lines)
@@ -108,10 +114,7 @@ Schema Version: 5 (M8 migration applied)
 
 ---
 
-## M9: Export Center 🚧 IN PROGRESS
-
-**Patches:** 5-8 (next 4 patches)
-**Start Date:** 2026-02-04
+## M9: Export Center Implementation
 
 ### Design Decisions (Pre-Implementation)
 
@@ -196,28 +199,62 @@ def escape_csv_formula(value):
 
 ---
 
+## PATCH 5: XLSX Multi-Sheet Export ✅ COMPLETE
+
+**Deliverables:**
+- ✅ Extended ExportService with `export_xlsx()` method
+- ✅ Dictionary sheet: Source, Translation, Status, Origin, Frequency (5 columns)
+- ✅ Statistics sheet: 12 aggregate metrics
+- ✅ Atomic file writing via `_atomic_write_with_result()`
+- ✅ test_m9.py: 8 tests covering XLSX functionality
+- ✅ openpyxl compatibility verified
+
+**Test Results:**
+```
+test_01_xlsx_export_creates_file ... ok
+test_02_xlsx_has_two_sheets ... ok
+test_03_xlsx_dictionary_sheet_structure ... ok
+test_04_xlsx_statistics_sheet_content ... ok
+test_05_xlsx_atomic_write ... ok
+test_06_csv_injection_protection_maintained ... ok
+test_07_export_service_existing_methods_still_work ... ok
+test_08_xlsx_empty_project ... ok
+```
+
+**Status:** ✅ All tests passing (8/8)
+
+---
+
+## PATCH 6: TBX + TMX XML Export ✅ COMPLETE
+
+**Deliverables:**
+- ✅ `export_tbx()`: TermBase eXchange format from term_cluster
+- ✅ `export_tmx()`: Translation Memory eXchange format from tm_entry
+- ✅ `_sanitize_xml_text()`: XML character validation
+- ✅ M8 integration: approved_only filter, pinned_translation support
+- ✅ Language codes: he/ru (ISO 639-1)
+- ✅ XML escaping and validation
+- ✅ Atomic file writing
+- ✅ test_m9.py: 7 additional tests covering TBX/TMX functionality
+
+**Test Results:**
+```
+test_09_tbx_export_creates_valid_xml ... ok
+test_10_tbx_approved_only_filter ... ok
+test_11_tmx_export_creates_valid_xml ... ok
+test_12_tmx_pinned_translations_included ... ok
+test_13_xml_escaping_special_characters ... ok
+test_14_tbx_pinned_translation_export ... ok
+test_15_xml_atomic_write ... ok
+```
+
+**Status:** ✅ All tests passing (15/15 total, 7 new)
+
+---
+
 ## Next Steps
 
-### PATCH 5: XLSX Multi-Sheet Export (NEXT)
-
-**Deliverables:**
-- Extend ExportService with `export_xlsx()`
-- Sheet "Dictionary": Source, Translation, Status, Origin, Frequency
-- Sheet "Statistics": 8-15 aggregate rows
-- Atomic file writing
-- test_m9.py: Verify sheets, headers, openpyxl compatibility
-
-**Estimated:** 2-3 hours
-
-### PATCH 6: TBX + TMX XML Export
-
-**Deliverables:**
-- `export_tbx()`: TermBase eXchange format
-- `export_tmx()`: Translation Memory eXchange format
-- XML escaping and validation
-- test_m9.py: Parse XML, verify structure
-
-**Estimated:** 3-4 hours
+### PATCH 7: ExportView UI Wiring (NEXT)
 
 ### PATCH 7: ExportView UI Wiring
 
@@ -258,4 +295,4 @@ def escape_csv_formula(value):
 ---
 
 **Last Updated:** 2026-02-04
-**Status:** M9 baseline established, ready to proceed with PATCH 5
+**Status:** PATCH 5-6 complete (XLSX + TBX/TMX), ready to proceed with PATCH 7 (UI wiring)
