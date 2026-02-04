@@ -954,3 +954,86 @@ class ImportWorker(QThread):
         """Cancel the import."""
         self._cancelled = True
         self.log_message.emit("Cancelling import...")
+
+
+class ExportWorker(QThread):
+    """M9: Worker for exporting data in various formats (non-blocking)."""
+
+    progress = pyqtSignal(str)  # Progress message
+    export_complete = pyqtSignal(int, str)  # (entry_count, file_path)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        project_id: int,
+        file_path: str,
+        format_type: str,  # "csv", "json", "xlsx", "tbx", "tmx"
+        **export_options
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.file_path = file_path
+        self.format_type = format_type.lower()
+        self.export_options = export_options
+        self._cancelled = False
+
+    def run(self):
+        """Run export operation."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.export_service import ExportService
+
+            db_service = DBService.get_instance()
+            export_service = ExportService()
+
+            self.progress.emit(f"Starting {self.format_type.upper()} export...")
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                # Call appropriate export method based on format
+                if self.format_type == "csv":
+                    count = export_service.export_csv(
+                        session, self.file_path, project_id=self.project_id
+                    )
+                elif self.format_type == "json":
+                    count = export_service.export_json(
+                        session, self.file_path, project_id=self.project_id
+                    )
+                elif self.format_type == "xlsx":
+                    count = export_service.export_xlsx(
+                        session, self.file_path, project_id=self.project_id
+                    )
+                elif self.format_type == "tbx":
+                    # TBX options: approved_only, include_pinned
+                    count = export_service.export_tbx(
+                        session,
+                        self.file_path,
+                        project_id=self.project_id,
+                        approved_only=self.export_options.get("approved_only", True),
+                        include_pinned=self.export_options.get("include_pinned", True),
+                    )
+                elif self.format_type == "tmx":
+                    # TMX options: include_draft, include_pinned
+                    count = export_service.export_tmx(
+                        session,
+                        self.file_path,
+                        project_id=self.project_id,
+                        include_draft=self.export_options.get("include_draft", False),
+                        include_pinned=self.export_options.get("include_pinned", True),
+                    )
+                else:
+                    raise ValueError(f"Unknown format type: {self.format_type}")
+
+                if not self._cancelled:
+                    self.progress.emit("Export completed successfully!")
+                    self.export_complete.emit(count, self.file_path)
+
+        except Exception as e:
+            logger.exception("Export worker error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the export."""
+        self._cancelled = True

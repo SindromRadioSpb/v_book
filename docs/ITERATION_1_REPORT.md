@@ -16,8 +16,8 @@
 
 ### M9: Export Center 🚧 IN PROGRESS
 
-**Patches:** 5-6 complete (6/12 total, 50%)
-**Status:** ✅ XLSX + TBX/TMX export complete, UI wiring in progress
+**Patches:** 5-7 complete (7/12 total, 58%)
+**Status:** ✅ XLSX + TBX/TMX + UI complete, final tests in progress
 **Tests:** 15/15 passing (test_m9.py)
 
 **Deliverables:**
@@ -252,9 +252,39 @@ test_15_xml_atomic_write ... ok
 
 ---
 
+## PATCH 7: ExportView UI Wiring ✅ COMPLETE
+
+**Deliverables:**
+- ✅ Replaced placeholder ExportView with functional implementation
+- ✅ Format selection: CSV / JSON / XLSX / TBX / TMX (radio buttons)
+- ✅ Export options: approved_only, include_draft, include_pinned (checkboxes)
+- ✅ Worker pattern: ExportWorker for background operations
+- ✅ Progress bar and cancel button
+- ✅ File dialog for save location (QFileDialog.getSaveFileName)
+- ✅ Overwrite confirmation (QMessageBox.question)
+- ✅ Error handling and user feedback (QMessageBox)
+- ✅ Resource cleanup (closeEvent handler)
+- ✅ UI_DOD_M9_EXPORT_CENTER.md documentation
+
+**Implementation:**
+- app/ui/export_view.py: 272 lines (full implementation)
+- app/ui/workers.py: Added ExportWorker class (88 lines)
+- docs/UI_DOD_M9_EXPORT_CENTER.md: Full DoD documentation
+
+**UI/UX Compliance:**
+- No fixed container sizes
+- Minimum heights on buttons only (40px)
+- Clear labeling and tooltips
+- Worker pattern for non-blocking operations
+- Progress indication and cancel support
+
+**Status:** ✅ UI complete and documented
+
+---
+
 ## Next Steps
 
-### PATCH 7: ExportView UI Wiring (NEXT)
+### PATCH 8: M9 Tests + Documentation (NEXT)
 
 ### PATCH 7: ExportView UI Wiring
 
