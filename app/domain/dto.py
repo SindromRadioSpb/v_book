@@ -261,3 +261,36 @@ class ImportReport:
     dict_source_id: Optional[int]
     sha256: str
     elapsed_ms: float
+
+
+@dataclass
+class TermCardDTO:
+    """M8: Term card with curation metadata."""
+
+    cluster_id: int
+    project_id: int
+    canonical_key: str
+    representative_he: str
+    representative_lemma: Optional[str]
+    freq_abs: int
+    doc_freq: int
+    members_count: int
+    best_pmi: Optional[float]
+    best_llr: Optional[float]
+    best_dice: Optional[float]
+    best_tscore: Optional[float]
+    tfidf: Optional[float]
+    weirdness: Optional[float]
+    source_kinds: Optional[str]
+    curation_status: str  # auto/needs_review/approved/rejected
+    pinned_translation: Optional[str]
+    pinned_translation_lang: Optional[str]
+    pinned_example_sent_id: Optional[int]
+    pinned_example_text: Optional[str]
+    curation_notes: Optional[str]
+    curated_at: Optional[str]
+    curated_by: Optional[str]
+    aliases: List[str]  # Variant forms
+    is_stopword: bool
+    created_at: str
+    updated_at: str

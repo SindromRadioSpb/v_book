@@ -485,7 +485,7 @@ class TermSearch(Base):
 
 
 class TermCluster(Base):
-    """Term cluster for canonicalized term grouping (M5.1)."""
+    """Term cluster for canonicalized term grouping (M5.1 + M8 curation)."""
 
     __tablename__ = "term_cluster"
 
@@ -512,8 +512,18 @@ class TermCluster(Base):
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 
+    # M8: Term Curation fields
+    curation_status = Column(String, nullable=False, default='auto')  # auto/needs_review/approved/rejected
+    pinned_translation = Column(Text)
+    pinned_translation_lang = Column(String, default='ru')
+    pinned_example_sent_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    curation_notes = Column(Text)
+    curated_at = Column(String)
+    curated_by = Column(String)
+
     __table_args__ = (
         UniqueConstraint("project_id", "canonical_key", name="uq_cluster_canonical"),
+        CheckConstraint("curation_status IN ('auto', 'needs_review', 'approved', 'rejected')", name="ck_curation_status"),
     )
 
 
