@@ -196,10 +196,26 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Check some expected metrics exist
         metrics = {ws.cell(row=i, column=1).value for i in range(2, ws.max_row + 1)}
-        expected_metrics = {"Project Name", "Project ID", "Documents", "Lemmas (Unique Words)"}
+        expected_metrics = {
+            "Project Name", "Project ID", "Documents",
+            "Lemmas (Unique Words)", "Lemmas with Translation",
+            "Lemma Coverage (%)", "TM Approval Rate (%)", "Term Approval Rate (%)",
+            "TM Entries per Lemma (%)"
+        }
 
         for expected in expected_metrics:
             self.assertIn(expected, metrics, f"Missing metric: {expected}")
+
+        # Verify that coverage metrics are bounded [0, 100]
+        for i in range(2, ws.max_row + 1):
+            metric_name = ws.cell(row=i, column=1).value
+            value = ws.cell(row=i, column=2).value
+            if metric_name and ("Coverage (%)" in str(metric_name) or "Approval Rate (%)" in str(metric_name)):
+                # Extract percentage value
+                if isinstance(value, str) and value.endswith("%"):
+                    pct_value = float(value.rstrip("%"))
+                    self.assertGreaterEqual(pct_value, 0.0, f"{metric_name} should be >= 0%")
+                    self.assertLessEqual(pct_value, 100.0, f"{metric_name} should be <= 100%")
 
         print(f"[OK] Statistics sheet: {ws.max_row - 1} metrics")
 

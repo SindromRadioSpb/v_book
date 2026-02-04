@@ -331,15 +331,28 @@ Result: NO FLAKES
 - 20x anti-flake verification (NO FLAKES)
 - Complete documentation (UI DoD + M9_COMPLETE)
 - Real-project smoke test runner (11 export scenarios)
+- **Metrics improvement:** Precise, verifiable coverage metrics (PATCH 9)
 
 **Testing & Quality:**
-- **Unit/Integration Tests:** test_m9.py (15 tests)
+- **Unit/Integration Tests:** test_m9.py (15 tests), test_stats_service.py (7 tests)
 - **Regression Tests:** test_p3_export_csv_injection.py (3 tests)
 - **Real-Project Smoke Test:** `python -m app.tools.smoke_export_center` (11 scenarios)
   - Tests all export formats on production database
   - Validates CSV, JSON, XLSX, TBX (4 variants), TMX (4 variants)
   - Coverage warnings for sparse data
   - See: [SMOKE_EXPORT_CENTER_REAL_PROJECT.md](SMOKE_EXPORT_CENTER_REAL_PROJECT.md)
+
+**Metrics & Statistics (PATCH 9):**
+- **Problem:** "Translation Coverage: 112.5%" (impossible for coverage metric)
+- **Solution:** Created StatsService with explicit, bounded metrics
+- **New metrics:**
+  - Lemma Coverage (%) [0-100] - % of lemmas with translations
+  - TM Approval Rate (%) [0-100] - % of TM entries approved
+  - Term Approval Rate (%) [0-100] - % of term clusters approved
+  - TM Entries per Lemma (%) [unbounded] - density metric (can exceed 100%)
+- **Before:** Ambiguous "Translation Coverage: 112.5%"
+- **After:** Explicit "Lemma Coverage: 87.5%" + "TM Entries per Lemma: 112.5%"
+- See: [METRICS_TRANSLATION_COVERAGE.md](METRICS_TRANSLATION_COVERAGE.md), [M9_METRICS_IMPROVEMENT.md](M9_METRICS_IMPROVEMENT.md)
 
 **Ready for M10: Packaging + QA**
 

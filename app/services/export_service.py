@@ -23,6 +23,7 @@ from app.infra.sa_models import (
     TMEntry, DictEntry, DictSource, TermCluster,
     Lemma, DictProject, SourceDocument
 )
+from app.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
@@ -429,54 +430,30 @@ class ExportService:
             for cell in ws_stats[1]:
                 cell.font = Font(bold=True)
 
-            # Get project info
-            project = session.query(DictProject).filter(DictProject.project_id == project_id).first()
+            # Compute project statistics using StatsService
+            stats_service = StatsService()
+            stats = stats_service.compute_project_stats(session, project_id)
 
-            # Get statistics
-            # Note: SourceDocument uses corpus_id, not project_id
-            # For now, just use 0 as doc count (M9 focus is on exports, not doc stats)
-            doc_count = 0
-
-            tm_count = session.query(func.count(TMEntry.tm_id)).filter(
-                TMEntry.project_id == project_id
-            ).scalar() or 0
-
-            tm_approved_count = session.query(func.count(TMEntry.tm_id)).filter(
-                TMEntry.project_id == project_id,
-                TMEntry.status == "approved"
-            ).scalar() or 0
-
-            lemma_count = session.query(func.count(Lemma.lemma_id)).filter(
-                Lemma.project_id == project_id
-            ).scalar() or 0
-
-            term_count = session.query(func.count(TermCluster.cluster_id)).filter(
-                TermCluster.project_id == project_id
-            ).scalar() or 0
-
-            term_approved_count = session.query(func.count(TermCluster.cluster_id)).filter(
-                TermCluster.project_id == project_id,
-                TermCluster.curation_status == "approved"
-            ).scalar() or 0
-
-            dict_entry_count = session.query(func.count(DictEntry.dict_entry_id)).join(
-                DictSource
-            ).filter(DictSource.project_id == project_id).scalar() or 0
-
-            # Write statistics
+            # Write statistics rows
             stats_rows = [
-                ["Project Name", project.name if project else "Unknown"],
-                ["Project ID", project_id],
-                ["Documents", doc_count],
-                ["Lemmas (Unique Words)", lemma_count],
-                ["Term Clusters", term_count],
-                ["Terms Approved", term_approved_count],
-                ["TM Entries", tm_count],
-                ["TM Approved", tm_approved_count],
-                ["Dictionary Entries", dict_entry_count],
+                ["Project Name", stats.project_name],
+                ["Project ID", stats.project_id],
+                ["Documents", stats.document_count],
+                ["Lemmas (Unique Words)", stats.lemma_count],
+                ["Lemmas with Translation", stats.lemmas_with_translation_count],
+                ["Term Clusters", stats.term_cluster_count],
+                ["Terms Approved", stats.term_approved_count],
+                ["TM Entries", stats.tm_entry_count],
+                ["TM Approved", stats.tm_approved_count],
+                ["Dictionary Entries", stats.dict_entry_count],
                 ["", ""],
-                ["Translation Coverage", f"{(tm_approved_count / max(lemma_count, 1) * 100):.1f}%"],
-                ["Term Curation Coverage", f"{(term_approved_count / max(term_count, 1) * 100):.1f}%"],
+                # Coverage metrics (0-100%)
+                ["Lemma Coverage (%)", f"{stats.lemma_coverage_pct:.1f}%"],
+                ["TM Approval Rate (%)", f"{stats.tm_approval_rate_pct:.1f}%"],
+                ["Term Approval Rate (%)", f"{stats.term_approval_rate_pct:.1f}%"],
+                ["", ""],
+                # Density metrics (can exceed 100%)
+                ["TM Entries per Lemma (%)", f"{stats.tm_entries_per_lemma_pct:.1f}%"],
             ]
 
             for row in stats_rows:
