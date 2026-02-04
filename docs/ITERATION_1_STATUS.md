@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-04
 **Goal:** Complete Core Roadmap (M8-M10) to production-grade premium level
-**Current Progress:** **2/12 patches complete** (17%)
+**Current Progress:** **4/12 patches complete** (33%)
 
 ---
 
@@ -48,37 +48,62 @@ test_m8_basic.py: Ran 8 tests in 0.179s OK
 Schema version: 5 (M8 migration applied)
 ```
 
+### PATCH 3: M8 UI wiring (TermCardView)
+**Status:** ✅ COMPLETE
+**Time:** ~2 hours
+
+**Deliverables:**
+- ✅ TermCardView fully implemented (617 lines, replaced placeholder)
+- ✅ TermCardTableModel for review queue (75 lines)
+- ✅ All UI actions wired to TermCardService
+- ✅ Card display with all metadata
+- ✅ Status workflow (auto/needs_review/approved/rejected)
+- ✅ Alias management (add/remove)
+- ✅ Stopword actions (toggle on/off)
+- ✅ Pin/unpin translation
+- ✅ Review queue navigation (prev/next/click)
+- ✅ Filtering (status/order/min freq)
+- ✅ UI_DOD_M8_TERM_CURATION.md documentation
+- ✅ Committed (SHA: c7cb3f8)
+
+**Evidence:**
+```
+app/ui/term_card_view.py: 617 lines (full implementation)
+app/ui/models_qt.py: Added TermCardTableModel
+docs/UI_DOD_M8_TERM_CURATION.md: DoD checklist verified
+```
+
+### PATCH 4: M8 tests (test_m8.py)
+**Status:** ✅ COMPLETE
+**Time:** ~1.5 hours
+
+**Deliverables:**
+- ✅ test_m8.py comprehensive suite (730 lines, 15 tests)
+- ✅ All tests PASS (15/15)
+- ✅ Anti-flake verification (20x PASS, NO FLAKES)
+- ✅ M8_COMPLETE.md milestone report
+- ✅ Committed (SHA: c0a3acf)
+
+**Evidence:**
+```
+test_m8.py: 15/15 tests PASS
+Anti-flake: 20/20 iterations PASS
+Total M8 coverage: 23 tests (basic + comprehensive)
+docs/M8_COMPLETE.md: Full milestone documentation
+```
+
 ---
 
 ## 🚧 In Progress
 
 Currently working on Iteration 1, which consists of 12 patches across 3 milestones:
-- **M8: Term Curation** (PATCH 2-4) - Backend complete, UI pending
-- **M9: Export Center** (PATCH 5-8) - Not started
+- **M8: Term Curation** (PATCH 2-4) - ✅ **COMPLETE**
+- **M9: Export Center** (PATCH 5-8) - 🔶 In progress
 - **M10: Packaging + QA** (PATCH 9-12) - Not started
 
 ---
 
 ## 📋 Remaining Patches
-
-### M8: Term Curation (2 patches remaining)
-
-**PATCH 3: M8 UI wiring (TermCardView)**
-- Status: 🔶 PENDING
-- Estimated: 2-3 hours
-- Deliverables:
-  - Wire TermCardView to TermCardService
-  - Implement UI actions (status, alias, stopword, pin)
-  - Review queue navigation
-  - UI_DOD_M8_TERM_CURATION.md
-
-**PATCH 4: M8 tests (test_m8.py)**
-- Status: 🔶 PENDING
-- Estimated: 1-2 hours
-- Deliverables:
-  - Comprehensive test_m8.py (>=10 tests)
-  - 20x anti-flake verification
-  - M8_COMPLETE.md
 
 ### M9: Export Center (4 patches)
 
@@ -154,12 +179,18 @@ Currently working on Iteration 1, which consists of 12 patches across 3 mileston
 
 ## Time Estimates
 
-**Completed:** ~3 hours (PATCH 0-2)
-**Remaining:** ~20-27 hours (PATCH 3-12)
-**Total Iteration 1:** ~23-30 hours
+**Completed:** ~6.5 hours (PATCH 0-4)
+- PATCH 0: ~1 hour (baseline)
+- PATCH 1: 0 hours (skipped)
+- PATCH 2: ~2 hours (M8 backend)
+- PATCH 3: ~2 hours (M8 UI)
+- PATCH 4: ~1.5 hours (M8 tests)
+
+**Remaining:** ~17-22 hours (PATCH 5-12)
+**Total Iteration 1:** ~23.5-28.5 hours
 
 **Breakdown:**
-- M8 completion: 3-5 hours (2 patches)
+- M8 completion: ✅ Done (6.5 hours)
 - M9 full implementation: 9-11 hours (4 patches)
 - M10 full implementation: 8-11 hours (4 patches)
 
@@ -199,11 +230,12 @@ Currently working on Iteration 1, which consists of 12 patches across 3 mileston
 
 ## Next Steps
 
-**Option 1: Continue Sequential (Recommended)**
-1. PATCH 3: M8 UI wiring (2-3 hours)
-2. PATCH 4: M8 tests + docs (1-2 hours)
-3. PATCH 5-8: M9 implementation (9-11 hours)
-4. PATCH 9-12: M10 implementation (8-11 hours)
+**Current: Continue Sequential (Recommended)**
+1. ✅ PATCH 3: M8 UI wiring (DONE)
+2. ✅ PATCH 4: M8 tests + docs (DONE)
+3. 🔶 PATCH 5: M9 XLSX multi-sheet export (NEXT)
+4. PATCH 6-8: M9 TBX/TMX + UI + tests (8-9 hours)
+5. PATCH 9-12: M10 implementation (8-11 hours)
 
 **Option 2: Fast-track Export Formats**
 1. Skip M8 UI for now (placeholder remains)
@@ -223,7 +255,8 @@ Currently working on Iteration 1, which consists of 12 patches across 3 mileston
 
 **Mitigations:**
 - ✅ Baseline established (no regressions)
-- ✅ PATCH 2 validated with 8/8 tests passing
+- ✅ M8 fully tested (23/23 tests passing)
+- ✅ Anti-flake verification (20x PASS)
 - ✅ Evidence-based approach (examined schema before changes)
 - ✅ Incremental commits (safety net)
 
@@ -262,7 +295,7 @@ Currently working on Iteration 1, which consists of 12 patches across 3 mileston
 
 ---
 
-**Status:** ✅ **ON TRACK** - 2/12 patches complete, no blockers, all tests passing
+**Status:** ✅ **ON TRACK** - 4/12 patches complete (33%), M8 milestone DONE
 
 **Last Updated:** 2026-02-04
-**Next Patch:** PATCH 3 (M8 UI wiring) or user-directed priority
+**Next Patch:** PATCH 5 (M9 XLSX multi-sheet export)
