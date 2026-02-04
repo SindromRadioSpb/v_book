@@ -342,7 +342,9 @@ Result: NO FLAKES
   - Coverage warnings for sparse data
   - See: [SMOKE_EXPORT_CENTER_REAL_PROJECT.md](SMOKE_EXPORT_CENTER_REAL_PROJECT.md)
 
-**Metrics & Statistics (PATCH 9):**
+**Metrics & Statistics (PATCH 9-10):**
+
+**PATCH 9: Metrics Improvement (COMPLETE)**
 - **Problem:** "Translation Coverage: 112.5%" (impossible for coverage metric)
 - **Solution:** Created StatsService with explicit, bounded metrics
 - **New metrics:**
@@ -353,6 +355,33 @@ Result: NO FLAKES
 - **Before:** Ambiguous "Translation Coverage: 112.5%"
 - **After:** Explicit "Lemma Coverage: 87.5%" + "TM Entries per Lemma: 112.5%"
 - See: [METRICS_TRANSLATION_COVERAGE.md](METRICS_TRANSLATION_COVERAGE.md), [M9_METRICS_IMPROVEMENT.md](M9_METRICS_IMPROVEMENT.md)
+
+**PATCH 10: Metrics Hardening - Catalog (IN PROGRESS)**
+- **Objective:** Premium-quality metrics governance and documentation
+- **Completed:**
+  - ✅ Comprehensive metrics inventory (17 total metrics)
+  - ✅ Created [METRICS_CATALOG.md](METRICS_CATALOG.md) - single source of truth
+  - ✅ Documented ALL metrics with:
+    - Metric IDs (M001-M030)
+    - Types (TEXT, COUNT, RATE_0_100, DENSITY)
+    - Formulas (exact SQL/computation)
+    - Scope, filters, bounds, invariants
+    - Source tables and dependencies
+    - Usage locations (XLSX, UI)
+  - ✅ Defined deterministic ordering for XLSX Statistics
+  - ✅ Established governance rules for metric lifecycle
+- **Metrics Inventory:**
+  - 2 Identifiers (Project Name, Project ID)
+  - 7 Counts (Documents, Lemmas, Lemmas with Translation, Terms, TM, Dict)
+  - 3 Coverage/Rate metrics (Lemma Coverage, TM/Term Approval Rates) [0-100]
+  - 1 Density metric (TM per Lemma) [unbounded]
+  - 3 Blank separators (formatting)
+- **Remaining (Future):**
+  - Metrics Registry implementation (code)
+  - Deterministic fixture project seed tool
+  - Extended test coverage with fixture data
+  - Smoke runner validation updates
+- **Status:** Catalog COMPLETE and committed (362a858)
 
 **Ready for M10: Packaging + QA**
 
