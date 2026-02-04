@@ -434,30 +434,48 @@ class ExportService:
             stats_service = StatsService()
             stats = stats_service.compute_project_stats(session, project_id)
 
-            # Write statistics rows
-            stats_rows = [
-                ["Project Name", stats.project_name],
-                ["Project ID", stats.project_id],
-                ["Documents", stats.document_count],
-                ["Lemmas (Unique Words)", stats.lemma_count],
-                ["Lemmas with Translation", stats.lemmas_with_translation_count],
-                ["Term Clusters", stats.term_cluster_count],
-                ["Terms Approved", stats.term_approved_count],
-                ["TM Entries", stats.tm_entry_count],
-                ["TM Approved", stats.tm_approved_count],
-                ["Dictionary Entries", stats.dict_entry_count],
-                ["", ""],
-                # Coverage metrics (0-100%)
-                ["Lemma Coverage (%)", f"{stats.lemma_coverage_pct:.1f}%"],
-                ["TM Approval Rate (%)", f"{stats.tm_approval_rate_pct:.1f}%"],
-                ["Term Approval Rate (%)", f"{stats.term_approval_rate_pct:.1f}%"],
-                ["", ""],
-                # Density metrics (can exceed 100%)
-                ["TM Entries per Lemma (%)", f"{stats.tm_entries_per_lemma_pct:.1f}%"],
-            ]
+            # Get metrics registry for deterministic ordering
+            from app.services.metrics_registry import get_registry, MetricType
+            registry = get_registry()
 
-            for row in stats_rows:
-                ws_stats.append(row)
+            # Convert stats dataclass to dict for lookups
+            stats_dict = {
+                "project_name": stats.project_name,
+                "project_id": stats.project_id,
+                "document_count": stats.document_count,
+                "lemma_count": stats.lemma_count,
+                "lemmas_with_translation_count": stats.lemmas_with_translation_count,
+                "term_cluster_count": stats.term_cluster_count,
+                "term_approved_count": stats.term_approved_count,
+                "tm_entry_count": stats.tm_entry_count,
+                "tm_approved_count": stats.tm_approved_count,
+                "dict_entry_count": stats.dict_entry_count,
+                "lemma_coverage_pct": stats.lemma_coverage_pct,
+                "tm_approval_rate_pct": stats.tm_approval_rate_pct,
+                "term_approval_rate_pct": stats.term_approval_rate_pct,
+                "tm_entries_per_lemma_pct": stats.tm_entries_per_lemma_pct,
+            }
+
+            # Write statistics rows in registry-defined order
+            for spec in registry.get_ordered_specs():
+                if spec.type == MetricType.SEPARATOR:
+                    ws_stats.append(["", ""])
+                else:
+                    value = stats_dict.get(spec.key)
+                    if value is None:
+                        continue  # Skip if not in stats
+
+                    # Format value based on type
+                    if spec.type == MetricType.TEXT:
+                        formatted_value = str(value)
+                    elif spec.type == MetricType.COUNT:
+                        formatted_value = int(value)
+                    elif spec.type in (MetricType.RATE_0_100, MetricType.DENSITY):
+                        formatted_value = f"{value:.1f}%"
+                    else:
+                        formatted_value = str(value)
+
+                    ws_stats.append([spec.label, formatted_value])
 
             # Auto-size columns
             ws_stats.column_dimensions['A'].width = 30
