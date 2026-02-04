@@ -74,6 +74,10 @@ class SmokeRunner:
         # Coverage tracking
         self.coverage_warnings: List[str] = []
 
+        # Metrics validation tracking
+        self.metrics_validation_passed = None
+        self.metrics_validation_errors: List[str] = []
+
     def setup(self):
         """Initialize database and services."""
         from app.services.db_service import DBService
@@ -354,6 +358,79 @@ class SmokeRunner:
         # TUs can be 0, but structure must be valid
         # (smoke test accepts empty results)
 
+    def validate_metrics(self):
+        """Validate project metrics against MetricsRegistry."""
+        logger.info("=" * 70)
+        logger.info("METRICS VALIDATION")
+        logger.info("=" * 70)
+
+        try:
+            from app.services.stats_service import StatsService
+            from app.services.metrics_registry import get_registry
+
+            stats_service = StatsService()
+            registry = get_registry()
+
+            with self.db_service.get_session() as session:
+                # Compute stats
+                stats = stats_service.compute_project_stats(session, self.project_id)
+
+                # Convert to dict
+                metrics = {
+                    "project_name": stats.project_name,
+                    "project_id": stats.project_id,
+                    "document_count": stats.document_count,
+                    "lemma_count": stats.lemma_count,
+                    "lemmas_with_translation_count": stats.lemmas_with_translation_count,
+                    "term_cluster_count": stats.term_cluster_count,
+                    "term_approved_count": stats.term_approved_count,
+                    "tm_entry_count": stats.tm_entry_count,
+                    "tm_approved_count": stats.tm_approved_count,
+                    "dict_entry_count": stats.dict_entry_count,
+                    "lemma_coverage_pct": stats.lemma_coverage_pct,
+                    "tm_approval_rate_pct": stats.tm_approval_rate_pct,
+                    "term_approval_rate_pct": stats.term_approval_rate_pct,
+                    "tm_entries_per_lemma_pct": stats.tm_entries_per_lemma_pct,
+                }
+
+                # Validate bounds
+                try:
+                    registry.validate_bounds(metrics)
+                    logger.info("[OK] Bounds validation passed")
+                except ValueError as e:
+                    self.metrics_validation_errors.append(f"Bounds validation failed: {e}")
+                    logger.error(f"[FAIL] Bounds validation: {e}")
+
+                # Validate invariants
+                try:
+                    registry.validate_invariants(metrics)
+                    logger.info("[OK] Invariant validation passed")
+                except ValueError as e:
+                    self.metrics_validation_errors.append(f"Invariant validation failed: {e}")
+                    logger.error(f"[FAIL] Invariant validation: {e}")
+
+                # Check catalog consistency
+                ordered_specs = registry.get_ordered_specs()
+                if len(ordered_specs) != 17:
+                    self.metrics_validation_errors.append(
+                        f"Catalog inconsistency: Expected 17 specs, got {len(ordered_specs)}"
+                    )
+                    logger.error(f"[FAIL] Catalog has {len(ordered_specs)} specs (expected 17)")
+                else:
+                    logger.info(f"[OK] Catalog has 17 specs")
+
+                # Log key metrics
+                logger.info(f"Lemma Coverage: {stats.lemma_coverage_pct:.1f}%")
+                logger.info(f"TM Approval Rate: {stats.tm_approval_rate_pct:.1f}%")
+                logger.info(f"Term Approval Rate: {stats.term_approval_rate_pct:.1f}%")
+
+                self.metrics_validation_passed = len(self.metrics_validation_errors) == 0
+
+        except Exception as e:
+            self.metrics_validation_errors.append(f"Metrics validation exception: {e}")
+            logger.error(f"[FAIL] Metrics validation exception: {e}")
+            self.metrics_validation_passed = False
+
     def run_all(self):
         """Run all test cases and print summary."""
         logger.info("=" * 70)
@@ -363,6 +440,9 @@ class SmokeRunner:
         for i, test_case in enumerate(self.test_cases, 1):
             logger.info(f"[{i}/{len(self.test_cases)}] {test_case.format_name}: {test_case.file_name}")
             self.run_test_case(test_case)
+
+        # Validate metrics
+        self.validate_metrics()
 
         # Print summary
         logger.info("=" * 70)
@@ -396,10 +476,26 @@ class SmokeRunner:
                 logger.warning(f"⚠️  {warning}")
             logger.info("Note: Empty data warnings are expected for smoke tests on sparse projects.")
 
+        # Print metrics validation results
+        if self.metrics_validation_passed is not None:
+            logger.info("=" * 70)
+            logger.info("METRICS VALIDATION RESULT")
+            logger.info("=" * 70)
+            if self.metrics_validation_passed:
+                logger.info("[OK] Metrics validation PASSED")
+            else:
+                logger.error("[FAIL] Metrics validation FAILED")
+                for error in self.metrics_validation_errors:
+                    logger.error(f"  - {error}")
+
         logger.info("=" * 70)
 
+        # Final result includes both exports and metrics
         if failed > 0:
-            logger.error("FINAL RESULT: ❌ FAIL")
+            logger.error("FINAL RESULT: ❌ FAIL (exports)")
+            return 1
+        elif self.metrics_validation_passed is False:
+            logger.error("FINAL RESULT: ❌ FAIL (metrics validation)")
             return 1
         else:
             logger.info("FINAL RESULT: ✅ PASS")
