@@ -434,3 +434,70 @@ class TranslationManagementTableModel(QAbstractTableModel):
         if 0 <= row < len(self.entries):
             return self.entries[row]
         return None
+
+
+# ============================================================================
+# M8: Term Card Table Model
+# ============================================================================
+
+class TermCardTableModel(QAbstractTableModel):
+    """M8: Model for term card review queue."""
+
+    def __init__(self, cards: List = None):
+        super().__init__()
+        from app.domain.dto import TermCardDTO
+        self.cards: List[TermCardDTO] = cards or []
+        self.headers = [
+            "Term", "Lemma", "Freq", "DocFreq", "Status",
+            "Translation", "Aliases", "Stopword"
+        ]
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.cards)
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+
+        card = self.cards[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return card.representative_he
+            elif col == 1:
+                return card.representative_lemma or ""
+            elif col == 2:
+                return str(card.freq_abs)
+            elif col == 3:
+                return str(card.doc_freq)
+            elif col == 4:
+                return card.curation_status
+            elif col == 5:
+                return card.pinned_translation or ""
+            elif col == 6:
+                return ", ".join(card.aliases) if card.aliases else ""
+            elif col == 7:
+                return "Yes" if card.is_stopword else "No"
+
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def update_cards(self, cards: List):
+        """Update the card list."""
+        self.beginResetModel()
+        self.cards = cards
+        self.endResetModel()
+
+    def get_card(self, row: int):
+        """Get card at row."""
+        if 0 <= row < len(self.cards):
+            return self.cards[row]
+        return None
