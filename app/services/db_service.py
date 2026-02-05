@@ -42,6 +42,58 @@ class DBService:
         """Create a new database session."""
         return self.db_manager.get_session()
 
+    def recover_from_crash(self) -> int:
+        """
+        Detect and recover from unclean shutdown.
+
+        Finds all ProcessorRun with status='running' and:
+        1. Update status to 'failed'
+        2. Set finished_at to current time
+        3. Create RunError with reason 'Recovered after unclean shutdown'
+
+        Returns:
+            Number of runs recovered
+        """
+        from app.infra.sa_models import ProcessorRun, RunError
+        from datetime import datetime, timezone
+
+        with self.get_session() as session:
+            # Find all running jobs (explicit ORDER BY for determinism)
+            running_runs = (
+                session.query(ProcessorRun)
+                .filter(ProcessorRun.status == "running")
+                .order_by(ProcessorRun.run_id)
+                .all()
+            )
+
+            if not running_runs:
+                logger.debug("No crash recovery needed")
+                return 0
+
+            logger.warning(
+                f"Found {len(running_runs)} unfinished runs - recovering..."
+            )
+
+            for run in running_runs:
+                run.status = "failed"
+                run.finished_at = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%fZ"
+                )
+
+                # Create error record
+                error = RunError(
+                    run_id=run.run_id,
+                    doc_id=None,
+                    stage="crash_recovery",
+                    message="Process terminated unexpectedly - recovered on restart",
+                )
+                session.add(error)
+
+            session.commit()
+            logger.info(f"Recovered {len(running_runs)} runs")
+
+            return len(running_runs)
+
     @classmethod
     def shutdown(cls) -> None:
         """Shutdown the database service."""

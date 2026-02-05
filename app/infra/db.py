@@ -43,7 +43,7 @@ class DatabaseManager:
         return self.SessionLocal()
 
     def apply_migrations(self) -> None:
-        """Apply SQL migrations from the migrations folder."""
+        """Apply SQL migrations from the migrations folder with automatic backup."""
         migrations_dir = Path(__file__).parent / "migrations"
         if not migrations_dir.exists():
             logger.warning(f"Migrations directory not found: {migrations_dir}")
@@ -64,25 +64,69 @@ class DatabaseManager:
 
         logger.info(f"Current schema version: {current_version}")
 
-        # Apply migrations
-        for sql_file in sql_files:
-            migration_version = self._extract_version(sql_file.name)
-            if migration_version <= current_version:
-                logger.debug(f"Skipping migration {sql_file.name} (already applied)")
-                continue
+        # Determine pending migrations
+        pending_migrations = [
+            sql_file
+            for sql_file in sql_files
+            if self._extract_version(sql_file.name) > current_version
+        ]
 
-            logger.info(f"Applying migration: {sql_file.name}")
-            sql_content = sql_file.read_text(encoding="utf-8")
+        if not pending_migrations:
+            logger.debug("No pending migrations")
+            return
 
-            # Execute migration using raw DBAPI connection (supports triggers)
-            raw_conn = self.engine.raw_connection()
-            try:
-                cursor = raw_conn.cursor()
-                cursor.executescript(sql_content)
-                raw_conn.commit()
-                logger.info(f"Migration {sql_file.name} applied successfully")
-            finally:
-                raw_conn.close()
+        # NEW: Acquire migration lock to prevent concurrent migrations
+        from app.infra.process_lock import ProcessLock
+
+        lock_path = self.db_path.parent / "migrate.lock"
+
+        try:
+            with ProcessLock(lock_path, timeout_seconds=30):
+                # NEW: Create backup BEFORE applying migrations
+                from app.services.backup_service import BackupService
+
+                backup_service = BackupService()
+
+                target_version = self._extract_version(pending_migrations[-1].name)
+                reason = f"pre_migration_{current_version}_to_{target_version}"
+
+                try:
+                    backup_info = backup_service.create_migration_backup(
+                        self.db_path, reason
+                    )
+                    logger.info(f"Migration backup created: {backup_info.backup_path}")
+                except Exception as e:
+                    logger.error(f"Backup failed: {e}")
+                    raise RuntimeError(
+                        f"Cannot proceed with migration - backup failed: {e}"
+                    ) from e
+
+                # Apply migrations
+                for sql_file in pending_migrations:
+                    migration_version = self._extract_version(sql_file.name)
+                    logger.info(f"Applying migration: {sql_file.name}")
+                    sql_content = sql_file.read_text(encoding="utf-8")
+
+                    # Execute migration using raw DBAPI connection (supports triggers)
+                    raw_conn = self.engine.raw_connection()
+                    try:
+                        cursor = raw_conn.cursor()
+                        cursor.executescript(sql_content)
+                        raw_conn.commit()
+                        logger.info(f"Migration {sql_file.name} applied successfully")
+                    finally:
+                        raw_conn.close()
+
+                # NEW: Cleanup old backups (retention policy)
+                backup_dir = self.db_path.parent / "backups"
+                backup_service.cleanup_old_backups(
+                    backup_dir, max_count=10, max_age_days=30
+                )
+
+        except RuntimeError as e:
+            # Lock acquisition or backup failure
+            logger.error(f"Migration aborted: {e}")
+            raise
 
     @staticmethod
     def _extract_version(filename: str) -> int:

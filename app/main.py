@@ -45,6 +45,12 @@ def main():
         DBService.initialize(db_path)
         logger.info("Database initialized")
 
+        # Crash recovery (mark unfinished runs as failed)
+        db_service = DBService.get_instance()
+        recovered_count = db_service.recover_from_crash()
+        if recovered_count > 0:
+            logger.warning(f"Crash recovery: marked {recovered_count} runs as failed")
+
         # Create Qt application
         app = QApplication(sys.argv)
         app.setApplicationName("HDLE Premium")
