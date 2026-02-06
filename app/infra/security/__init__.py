@@ -1,12 +1,13 @@
 """Security module for HDLE Premium.
 
-Provides input sanitization, validation, and security utilities.
+Provides input sanitization, validation, cryptography, and credential storage.
 
 Usage:
     from app.infra.security import (
         sanitize_fts5_query,
         validate_file_size,
         validate_path_security,
+        CredentialStore,
         PathSecurityError,
     )
 
@@ -20,6 +21,11 @@ Usage:
     # Sanitize for logging
     from app.infra.security import sanitize_for_log
     logger.info(f"User search: {sanitize_for_log(user_query)}")
+
+    # Store credentials securely
+    store = CredentialStore()
+    store.set_credential("api_key", "secret", storage=my_dict)
+    api_key = store.get_credential("api_key", storage=my_dict)
 """
 
 # Exceptions
@@ -50,6 +56,16 @@ from .validator import (
     is_system_path,
 )
 
+# Cryptography
+from .crypto import (
+    generate_key,
+    encrypt,
+    decrypt,
+)
+
+# Credential Storage
+from .credentials import CredentialStore
+
 # Policy constants (commonly needed)
 from .policy import (
     MAX_DOCUMENT_SIZE,
@@ -78,6 +94,12 @@ __all__ = [
     "validate_query_complexity",
     "is_unc_path",
     "is_system_path",
+    # Cryptography
+    "generate_key",
+    "encrypt",
+    "decrypt",
+    # Credential Storage
+    "CredentialStore",
     # Policy constants
     "MAX_DOCUMENT_SIZE",
     "MAX_DICTIONARY_SIZE",
