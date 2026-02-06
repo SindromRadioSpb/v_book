@@ -66,6 +66,9 @@ from .crypto import (
 # Credential Storage
 from .credentials import CredentialStore
 
+# Audit Logging
+from .audit import AuditLogger
+
 # Policy constants (commonly needed)
 from .policy import (
     MAX_DOCUMENT_SIZE,
@@ -100,6 +103,8 @@ __all__ = [
     "decrypt",
     # Credential Storage
     "CredentialStore",
+    # Audit Logging
+    "AuditLogger",
     # Policy constants
     "MAX_DOCUMENT_SIZE",
     "MAX_DICTIONARY_SIZE",
