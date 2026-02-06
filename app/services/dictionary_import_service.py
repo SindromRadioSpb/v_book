@@ -19,6 +19,14 @@ from sqlalchemy.orm import Session
 from app.domain.dto import ImportRow, ImportReport, ImportInvalidRow, ImportConflict
 from app.domain.normalization import normalize_for_tm
 from app.infra.sa_models import DictSource, DictEntry
+from app.infra.security import (
+    validate_file_size,
+    validate_path_security,
+    sanitize_for_log,
+    MAX_DICTIONARY_SIZE,
+    ValidationError,
+    PathSecurityError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -298,14 +306,43 @@ class DictionaryImportService:
         if scope == "global" and project_id is not None:
             raise ValueError("project_id must be None for global scope")
 
+        # Convert to Path for validation
+        path_obj = Path(path)
+
+        # Security: Validate path safety (block UNC, system dirs, resolve symlinks)
+        try:
+            safe_path = validate_path_security(path_obj, operation="dictionary import")
+        except PathSecurityError as e:
+            logger.warning(
+                f"Path security check failed: {sanitize_for_log(str(path_obj))}, "
+                f"reason={e.reason}"
+            )
+            raise ValueError(f"File path not allowed: {e.reason}")
+
+        # Security: Validate file size to prevent DoS
+        if not safe_path.exists():
+            raise ValueError(f"File not found: {path}")
+
+        try:
+            validate_file_size(safe_path, MAX_DICTIONARY_SIZE, file_type="dictionary")
+        except ValidationError as e:
+            logger.warning(
+                f"File size limit exceeded: {sanitize_for_log(path_obj.name)}, "
+                f"size={e.value}"
+            )
+            raise ValueError(f"Dictionary file too large: {e.value} bytes")
+
         # Compute SHA256
-        sha256 = self.compute_sha256(path)
+        sha256 = self.compute_sha256(str(safe_path))
 
         # Check dedup
         if not force_reimport:
             existing = self._check_sha256_exists(session, sha256, project_id)
             if existing:
-                logger.info(f"File already imported (sha256={sha256[:8]}...), skipping")
+                logger.info(
+                    f"File already imported: {sanitize_for_log(path_obj.name)} "
+                    f"(sha256={sha256[:8]}...), skipping"
+                )
                 return ImportReport(
                     total=0,
                     added=0,
@@ -321,7 +358,7 @@ class DictionaryImportService:
                 )
 
         # Detect format
-        path_obj = Path(path)
+        # Note: path_obj already created during path security validation
         if path_obj.suffix.lower() == ".csv":
             fmt = "csv"
         elif path_obj.suffix.lower() in [".xlsx", ".xls"]:

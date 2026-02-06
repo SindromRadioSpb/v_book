@@ -11,6 +11,14 @@ from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus
 from app.infra.util.hashing import sha256_file
 from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor
 from app.services.db_service import DBService
+from app.infra.security import (
+    validate_file_size,
+    validate_path_security,
+    sanitize_for_log,
+    MAX_DOCUMENT_SIZE,
+    ValidationError,
+    PathSecurityError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +83,7 @@ class IngestService:
             return text, ocr_used
 
         except Exception as e:
-            logger.exception(f"Text extraction failed for {file_path}")
+            logger.exception(f"Text extraction failed for {sanitize_for_log(str(file_path))}")
             raise RuntimeError(f"Failed to extract text: {e}")
 
     def import_document(
@@ -110,6 +118,26 @@ class IngestService:
         if not file_path.exists():
             raise ValueError(f"File not found: {file_path}")
 
+        # Security: Validate path safety (block UNC, system dirs, resolve symlinks)
+        try:
+            safe_path = validate_path_security(file_path, operation="document import")
+        except PathSecurityError as e:
+            logger.warning(
+                f"Path security check failed: {sanitize_for_log(str(file_path))}, "
+                f"reason={e.reason}"
+            )
+            raise ValueError(f"File path not allowed: {e.reason}")
+
+        # Security: Validate file size to prevent DoS
+        try:
+            validate_file_size(safe_path, MAX_DOCUMENT_SIZE, file_type="document")
+        except ValidationError as e:
+            logger.warning(
+                f"File size limit exceeded: {sanitize_for_log(file_path.name)}, "
+                f"size={e.value}"
+            )
+            raise ValueError(f"File too large: {e.value} bytes")
+
         if not self.is_supported(file_path):
             raise ValueError(f"Unsupported file type: {file_path.suffix}")
 
@@ -134,11 +162,11 @@ class IngestService:
             return existing
 
         # Extract text
-        logger.info(f"Extracting text from: {file_path}")
+        logger.info(f"Extracting text from: {sanitize_for_log(file_path.name)}")
         raw_text, ocr_used = self.extract_text_from_file(file_path, use_ocr=use_ocr)
 
         if not raw_text.strip():
-            logger.warning(f"No text extracted from: {file_path}")
+            logger.warning(f"No text extracted from: {sanitize_for_log(file_path.name)}")
 
         # Get file metadata
         file_stat = file_path.stat()
@@ -204,7 +232,7 @@ class IngestService:
                 doc = self.import_document(session, corpus_id, file_path, use_ocr=use_ocr)
                 results.append((file_path, doc, None))
             except Exception as e:
-                logger.exception(f"Failed to import {file_path}")
+                logger.exception(f"Failed to import {sanitize_for_log(file_path.name)}")
                 results.append((file_path, None, str(e)))
 
         return results

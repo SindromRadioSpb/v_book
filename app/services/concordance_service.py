@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.domain.dto import KWICResult
 from app.services.db_service import DBService
+from app.infra.security import (
+    validate_query_complexity,
+    sanitize_fts5_query,
+    sanitize_for_log,
+    QueryComplexityError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +79,10 @@ def normalize_hebrew_search(query: str) -> List[str]:
         return list(variants)
 
     except Exception as e:
-        logger.exception(f"Failed to normalize search query: {query}, error={str(e)}")
+        from app.infra.security import sanitize_for_log
+        logger.exception(
+            f"Failed to normalize search query: {sanitize_for_log(query)}, error={str(e)}"
+        )
         # Fallback: return original query as single variant
         return [query.strip()] if query.strip() else []
 
@@ -102,7 +111,7 @@ class ConcordanceService:
         Args:
             session: DB session
             project_id: Project ID to filter results
-            query: Search query
+            query: Search query (user input - will be sanitized)
             limit: Maximum results to return
             offset: Pagination offset
             is_phrase: Treat query as exact phrase
@@ -114,23 +123,41 @@ class ConcordanceService:
         if not query or not query.strip():
             return []
 
+        # Security: Validate query complexity to prevent DoS
+        try:
+            validate_query_complexity(query)
+        except QueryComplexityError as e:
+            logger.warning(
+                f"Query complexity limit exceeded: user_query={sanitize_for_log(query)}, "
+                f"reason={e.reason}"
+            )
+            # Return empty results (graceful degradation)
+            return []
+
         # Build FTS5 query
         if normalize and not is_phrase:
             # Generate variants for article matching
+            # Note: variants are internally generated from user input,
+            # but the variant generation itself is safe (no special chars injection)
             variants = normalize_hebrew_search(query)
             if not variants:
                 return []
 
             # Build OR query: "variant1" OR "variant2" OR ...
+            # Variants are already normalized and safe to quote
             fts_query = ' OR '.join(f'"{v}"' for v in variants)
         elif is_phrase:
-            # Exact phrase match
-            fts_query = f'"{query.strip()}"'
+            # Exact phrase match - sanitize to prevent FTS5 injection
+            # Note: sanitize_fts5_query() already wraps in quotes
+            fts_query = sanitize_fts5_query(query, strict=True)
         else:
-            # Raw query (no normalization)
-            fts_query = query.strip()
+            # Raw query (no normalization) - MUST sanitize for security
+            fts_query = sanitize_fts5_query(query, strict=True)
 
-        logger.info(f"Concordance search: project={project_id}, query={fts_query}, limit={limit}")
+        logger.info(
+            f"Concordance search: project={project_id}, "
+            f"user_query={sanitize_for_log(query)}, limit={limit}"
+        )
 
         try:
             # FTS5 query with snippet() for KWIC
@@ -187,8 +214,8 @@ class ConcordanceService:
 
         except Exception as e:
             logger.exception(
-                f"Concordance search failed: project={project_id}, query={fts_query}, "
-                f"error={str(e)}"
+                f"Concordance search failed: project={project_id}, "
+                f"user_query={sanitize_for_log(query)}, error={str(e)}"
             )
             # Return empty list for graceful degradation
             # UI layer will show "No results" rather than crashing
