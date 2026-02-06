@@ -16,12 +16,12 @@ project_root = Path.cwd()
 block_cipher = None
 
 a = Analysis(
-    ['app/main.py'],
+    [str(project_root / 'app' / 'main.py')],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
         # Bundle SQL migrations (required for DB initialization)
-        ('app/infra/migrations/*.sql', 'app/infra/migrations/'),
+        (str(project_root / 'app' / 'infra' / 'migrations' / '*.sql'), 'app/infra/migrations/'),
     ],
     hiddenimports=[
         # PyQt6
