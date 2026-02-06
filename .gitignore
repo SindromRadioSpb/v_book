@@ -5,7 +5,8 @@ __pycache__/
 *.so
 *.egg-info/
 dist/
-build/
+build/*
+!build/v_book.spec
 .pytest_cache/
 .mypy_cache/
 
