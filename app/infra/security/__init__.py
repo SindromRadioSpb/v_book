@@ -69,6 +69,9 @@ from .credentials import CredentialStore
 # Audit Logging
 from .audit import AuditLogger
 
+# Rate Limiting
+from .rate_limiter import RateLimiter, get_import_limiter, get_export_limiter
+
 # Policy constants (commonly needed)
 from .policy import (
     MAX_DOCUMENT_SIZE,
@@ -105,6 +108,10 @@ __all__ = [
     "CredentialStore",
     # Audit Logging
     "AuditLogger",
+    # Rate Limiting
+    "RateLimiter",
+    "get_import_limiter",
+    "get_export_limiter",
     # Policy constants
     "MAX_DOCUMENT_SIZE",
     "MAX_DICTIONARY_SIZE",

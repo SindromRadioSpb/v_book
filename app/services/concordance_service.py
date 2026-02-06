@@ -13,6 +13,7 @@ from app.infra.security import (
     sanitize_fts5_query,
     sanitize_for_log,
     QueryComplexityError,
+    AuditLogger,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,9 @@ class ConcordanceService:
         if not query or not query.strip():
             return []
 
+        # Initialize audit logger
+        audit = AuditLogger(session)
+
         # Security: Validate query complexity to prevent DoS
         try:
             validate_query_complexity(query)
@@ -131,6 +135,18 @@ class ConcordanceService:
                 f"Query complexity limit exceeded: user_query={sanitize_for_log(query)}, "
                 f"reason={e.reason}"
             )
+
+            # Audit: Log BLOCK event
+            audit.log_event(
+                event_type="fts5_query",
+                outcome="BLOCK",
+                operation="concordance_search",
+                resource_type="query",
+                resource_id=sanitize_for_log(query),
+                reason=e.reason,
+                project_id=project_id,
+            )
+
             # Return empty results (graceful degradation)
             return []
 
@@ -210,6 +226,18 @@ class ConcordanceService:
                 ))
 
             logger.info(f"Concordance search returned {len(results)} results")
+
+            # Audit: Log ALLOW event (successful search)
+            audit.log_event(
+                event_type="fts5_query",
+                outcome="ALLOW",
+                operation="concordance_search",
+                resource_type="query",
+                resource_id=sanitize_for_log(query),
+                project_id=project_id,
+                details={"result_count": len(results), "limit": limit},
+            )
+
             return results
 
         except Exception as e:
@@ -217,6 +245,18 @@ class ConcordanceService:
                 f"Concordance search failed: project={project_id}, "
                 f"user_query={sanitize_for_log(query)}, error={str(e)}"
             )
+
+            # Audit: Log FAIL event (search exception)
+            audit.log_event(
+                event_type="fts5_query",
+                outcome="FAIL",
+                operation="concordance_search",
+                resource_type="query",
+                resource_id=sanitize_for_log(query),
+                reason=str(e)[:100],
+                project_id=project_id,
+            )
+
             # Return empty list for graceful degradation
             # UI layer will show "No results" rather than crashing
             return []

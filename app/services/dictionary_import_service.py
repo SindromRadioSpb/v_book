@@ -26,6 +26,8 @@ from app.infra.security import (
     MAX_DICTIONARY_SIZE,
     ValidationError,
     PathSecurityError,
+    AuditLogger,
+    get_import_limiter,
 )
 
 logger = logging.getLogger(__name__)
@@ -300,6 +302,11 @@ class DictionaryImportService:
         """
         start_time = time.time()
 
+        # Rate limiting: Check import rate limit
+        rate_limiter = get_import_limiter()
+        with rate_limiter.check_limit("dictionary_import"):
+            pass  # Rate limit check passed
+
         # Validate scope
         if scope == "project" and project_id is None:
             raise ValueError("project_id required for project scope")
@@ -309,6 +316,9 @@ class DictionaryImportService:
         # Convert to Path for validation
         path_obj = Path(path)
 
+        # Initialize audit logger
+        audit = AuditLogger(session)
+
         # Security: Validate path safety (block UNC, system dirs, resolve symlinks)
         try:
             safe_path = validate_path_security(path_obj, operation="dictionary import")
@@ -317,6 +327,18 @@ class DictionaryImportService:
                 f"Path security check failed: {sanitize_for_log(str(path_obj))}, "
                 f"reason={e.reason}"
             )
+
+            # Audit: Log BLOCK event
+            audit.log_event(
+                event_type="file_import",
+                outcome="BLOCK",
+                operation="import_dictionary",
+                resource_type="file",
+                resource_id=sanitize_for_log(str(path_obj)),
+                reason=e.reason,
+                project_id=project_id,
+            )
+
             raise ValueError(f"File path not allowed: {e.reason}")
 
         # Security: Validate file size to prevent DoS
@@ -330,6 +352,19 @@ class DictionaryImportService:
                 f"File size limit exceeded: {sanitize_for_log(path_obj.name)}, "
                 f"size={e.value}"
             )
+
+            # Audit: Log BLOCK event
+            audit.log_event(
+                event_type="file_import",
+                outcome="BLOCK",
+                operation="import_dictionary",
+                resource_type="file",
+                resource_id=sanitize_for_log(path_obj.name),
+                reason="FILE_TOO_LARGE",
+                details={"size_bytes": e.value, "max_bytes": MAX_DICTIONARY_SIZE},
+                project_id=project_id,
+            )
+
             raise ValueError(f"Dictionary file too large: {e.value} bytes")
 
         # Compute SHA256
@@ -490,6 +525,26 @@ class DictionaryImportService:
         logger.info(
             f"Import complete: {counters['added']} added, {counters['updated']} updated, "
             f"{counters['skipped']} skipped, {counters['invalid']} invalid in {elapsed_ms:.1f}ms"
+        )
+
+        # Audit: Log ALLOW event (successful dictionary import)
+        audit.log_event(
+            event_type="file_import",
+            outcome="ALLOW",
+            operation="import_dictionary",
+            resource_type="file",
+            resource_id=sanitize_for_log(path_obj.name),
+            duration_ms=elapsed_ms,
+            details={
+                "total_rows": total_rows,
+                "added": counters['added'],
+                "updated": counters['updated'],
+                "skipped": counters['skipped'],
+                "invalid": counters['invalid'],
+                "conflicts": counters['conflicts'],
+                "dict_source_id": dict_source.dict_source_id,
+            },
+            project_id=project_id,
         )
 
         return ImportReport(

@@ -1,0 +1,47 @@
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:54 знак:39
++ Run-Test "test_m1.py" "M1: Foundation & Storage"
++                                       ~
+Амперсанд (&) не разрешен. Оператор & зарезервирован для будущих версий. Добавьте двойные кавычки до и после амперсанда
+ ("&"), чтобы передать его как строку.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:114 знак:63
++     $statusIcon = if ($_.Status -eq "PASS") { "в?"" } else { "в?-" }
++                                                               ~~~~~~
+Непредвиденная лексема "в?-" }
+    $markdown += "`n" в выражении или операторе.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:23
++     $markdown += "`n| $statusIcon $($_.Test) | $($_.File) | $($_.Stat ...
++                       ~~~~~~~~~~~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:35
++     $markdown += "`n| $statusIcon $($_.Test) | $($_.File) | $($_.Stat ...
++                                   ~~
+Непредвиденная лексема "$(" в выражении или операторе.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:48
++     $markdown += "`n| $statusIcon $($_.Test) | $($_.File) | $($_.Stat ...
++                                                ~~~~~~~~~~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:61
++ ... wn += "`n| $statusIcon $($_.Test) | $($_.File) | $($_.Status) | $($_. ...
++                                                      ~~~~~~~~~~~~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:76
++ ... sIcon $($_.Test) | $($_.File) | $($_.Status) | $($_.Duration) | $($_. ...
++                                                    ~~~~~~~~~~~~~~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:93
++ ... est) | $($_.File) | $($_.Status) | $($_.Duration) | $($_.ExitCode) |"
++                                                         ~~~~~~~~~~~~~~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:115 знак:109
++ ... est) | $($_.File) | $($_.Status) | $($_.Duration) | $($_.ExitCode) |"
++                                                                         ~
+Выражения допускаются только в качестве первого элемента конвейера.
+J:\Project_Vibe\V_book\run_baseline_tests.ps1:123 знак:8
++ - [OK] PyQt6
++        ~~~~~
+Непредвиденная лексема "PyQt6" в выражении или операторе.
+Выданы сообщения не обо всех ошибках синтаксического анализа.  Исправьте перечисленные в сообщениях ошибки и повторите 
+попытку.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : AmpersandNotAllowed
+ 

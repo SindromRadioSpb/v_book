@@ -1,0 +1,33 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "J:\Project_Vibe\V_book\app\tools\p3_verify.py", line 167, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "J:\Project_Vibe\V_book\app\tools\p3_verify.py", line 128, in main
+    print(f"{status_icon} {step.name}: {step.status} ({step.elapsed_ms:.2f}ms)")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Win10_Game_OS\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1251.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 28: character maps to <undefined>
+================================================================================
+P3 VERIFICATION GATE
+================================================================================
+Source DB: tmplv90lez8.db
+Project ID: 1
+Output Dir: runtime\verifications\p3\20260204_022555
+
+[*] Creating snapshot...
+[OK] Snapshot created: runtime\verifications\p3\20260204_022555\snapshot.db
+   SHA256: 6a821282d4e2af8af956c15cdcb70be7fc0e387450aabd10a68bbf2c90549630
+
+[*] Running verification suite...
+
+[PASS] CSV Import (2-column): PASS (98.19ms)
+[PASS] CSV Import (full format): PASS (23.77ms)
+[PASS] XLSX Import: PASS (345.75ms)
+[PASS] Conflict Policies: PASS (70.31ms)
+[PASS] Chunk Commit + Cancel: PASS (299.90ms)
+[PASS] SHA256 Dedup: PASS (28.74ms)
+[PASS] CSV Injection Protection: PASS (22.68ms)

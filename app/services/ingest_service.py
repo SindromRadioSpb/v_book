@@ -18,6 +18,7 @@ from app.infra.security import (
     MAX_DOCUMENT_SIZE,
     ValidationError,
     PathSecurityError,
+    AuditLogger,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,9 @@ class IngestService:
         if not file_path.exists():
             raise ValueError(f"File not found: {file_path}")
 
+        # Initialize audit logger
+        audit = AuditLogger(session)
+
         # Security: Validate path safety (block UNC, system dirs, resolve symlinks)
         try:
             safe_path = validate_path_security(file_path, operation="document import")
@@ -126,6 +130,17 @@ class IngestService:
                 f"Path security check failed: {sanitize_for_log(str(file_path))}, "
                 f"reason={e.reason}"
             )
+
+            # Audit: Log BLOCK event
+            audit.log_event(
+                event_type="file_import",
+                outcome="BLOCK",
+                operation="import_document",
+                resource_type="file",
+                resource_id=sanitize_for_log(str(file_path)),
+                reason=e.reason,
+            )
+
             raise ValueError(f"File path not allowed: {e.reason}")
 
         # Security: Validate file size to prevent DoS
@@ -136,6 +151,18 @@ class IngestService:
                 f"File size limit exceeded: {sanitize_for_log(file_path.name)}, "
                 f"size={e.value}"
             )
+
+            # Audit: Log BLOCK event
+            audit.log_event(
+                event_type="file_import",
+                outcome="BLOCK",
+                operation="import_document",
+                resource_type="file",
+                resource_id=sanitize_for_log(file_path.name),
+                reason="FILE_TOO_LARGE",
+                details={"size_bytes": e.value, "max_bytes": MAX_DOCUMENT_SIZE},
+            )
+
             raise ValueError(f"File too large: {e.value} bytes")
 
         if not self.is_supported(file_path):
@@ -202,6 +229,21 @@ class IngestService:
         logger.info(
             f"Imported document: {doc.file_name} "
             f"(ID: {doc.doc_id}, size: {len(raw_text)} chars, OCR: {ocr_used})"
+        )
+
+        # Audit: Log ALLOW event (successful import)
+        audit.log_event(
+            event_type="file_import",
+            outcome="ALLOW",
+            operation="import_document",
+            resource_type="file",
+            resource_id=sanitize_for_log(file_path.name),
+            details={
+                "doc_id": doc.doc_id,
+                "file_size_bytes": doc.file_size_bytes,
+                "text_length": len(raw_text),
+                "ocr_used": ocr_used,
+            },
         )
 
         return doc

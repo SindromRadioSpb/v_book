@@ -24,35 +24,13 @@ from app.infra.sa_models import (
     Lemma, DictProject, SourceDocument
 )
 from app.services.stats_service import StatsService
+from app.infra.security import sanitize_csv_cell, sanitize_xml_text, get_export_limiter
 
 logger = logging.getLogger(__name__)
 
 
 class ExportService:
     """Service for exporting TM and dictionary data."""
-
-    def sanitize_csv_cell(self, value: Optional[str]) -> str:
-        """Sanitize cell value for CSV export to prevent injection.
-
-        CSV injection rule:
-        If value starts with = + - @ then prefix with single quote '
-
-        Args:
-            value: Cell value
-
-        Returns:
-            Sanitized value
-        """
-        if not value:
-            return ""
-
-        value_str = str(value)
-
-        # Check if starts with dangerous characters
-        if value_str and value_str[0] in ("=", "+", "-", "@"):
-            return f"'{value_str}"
-
-        return value_str
 
     def export_tm_csv(
         self,
@@ -73,6 +51,11 @@ class ExportService:
         Returns:
             Number of entries exported
         """
+        # Rate limiting: Check export rate limit
+        rate_limiter = get_export_limiter()
+        with rate_limiter.check_limit("export_tm_csv"):
+            pass  # Rate limit check passed
+
         # Build query
         query = session.query(TMEntry)
 
@@ -117,24 +100,24 @@ class ExportService:
                 writer.writerow([
                     entry.tm_id,
                     entry.project_id if entry.project_id is not None else "",
-                    self.sanitize_csv_cell(entry.kind),
-                    self.sanitize_csv_cell(entry.src_lang),
-                    self.sanitize_csv_cell(entry.tgt_lang),
-                    self.sanitize_csv_cell(entry.src_text),
-                    self.sanitize_csv_cell(entry.src_norm),
-                    self.sanitize_csv_cell(entry.translation),
-                    self.sanitize_csv_cell(entry.translation_norm),
-                    self.sanitize_csv_cell(entry.pos),
-                    self.sanitize_csv_cell(entry.domain),
-                    self.sanitize_csv_cell(entry.notes),
-                    self.sanitize_csv_cell(entry.status),
+                    sanitize_csv_cell(entry.kind),
+                    sanitize_csv_cell(entry.src_lang),
+                    sanitize_csv_cell(entry.tgt_lang),
+                    sanitize_csv_cell(entry.src_text),
+                    sanitize_csv_cell(entry.src_norm),
+                    sanitize_csv_cell(entry.translation),
+                    sanitize_csv_cell(entry.translation_norm),
+                    sanitize_csv_cell(entry.pos),
+                    sanitize_csv_cell(entry.domain),
+                    sanitize_csv_cell(entry.notes),
+                    sanitize_csv_cell(entry.status),
                     entry.confidence if entry.confidence is not None else "",
-                    self.sanitize_csv_cell(entry.origin),
-                    self.sanitize_csv_cell(entry.source_ref),
+                    sanitize_csv_cell(entry.origin),
+                    sanitize_csv_cell(entry.source_ref),
                     str(entry.created_at),
                     str(entry.updated_at),
                     str(entry.approved_at) if entry.approved_at else "",
-                    self.sanitize_csv_cell(entry.approved_by),
+                    sanitize_csv_cell(entry.approved_by),
                 ])
 
         logger.info(f"Exported {len(entries)} TM entries to {path}")
@@ -223,6 +206,11 @@ class ExportService:
         Returns:
             Number of entries exported
         """
+        # Rate limiting: Check export rate limit
+        rate_limiter = get_export_limiter()
+        with rate_limiter.check_limit("export_dict_csv"):
+            pass
+
         # Build query
         query = session.query(DictEntry)
 
@@ -261,18 +249,18 @@ class ExportService:
                 writer.writerow([
                     entry.dict_entry_id,
                     entry.dict_source_id,
-                    self.sanitize_csv_cell(entry.kind),
-                    self.sanitize_csv_cell(entry.src_lang),
-                    self.sanitize_csv_cell(entry.tgt_lang),
-                    self.sanitize_csv_cell(entry.src_text),
-                    self.sanitize_csv_cell(entry.src_norm),
-                    self.sanitize_csv_cell(entry.translation),
-                    self.sanitize_csv_cell(entry.translation_norm),
-                    self.sanitize_csv_cell(entry.pos),
-                    self.sanitize_csv_cell(entry.domain),
-                    self.sanitize_csv_cell(entry.status),
+                    sanitize_csv_cell(entry.kind),
+                    sanitize_csv_cell(entry.src_lang),
+                    sanitize_csv_cell(entry.tgt_lang),
+                    sanitize_csv_cell(entry.src_text),
+                    sanitize_csv_cell(entry.src_norm),
+                    sanitize_csv_cell(entry.translation),
+                    sanitize_csv_cell(entry.translation_norm),
+                    sanitize_csv_cell(entry.pos),
+                    sanitize_csv_cell(entry.domain),
+                    sanitize_csv_cell(entry.status),
                     entry.priority if entry.priority is not None else "",
-                    self.sanitize_csv_cell(entry.notes),
+                    sanitize_csv_cell(entry.notes),
                 ])
 
         logger.info(f"Exported {len(entries)} dict entries to {path}")
@@ -606,7 +594,7 @@ class ExportService:
                 langset_he = ET.SubElement(term_entry, "langSet", {"xml:lang": "he"})
                 tig_he = ET.SubElement(langset_he, "tig")
                 term_he = ET.SubElement(tig_he, "term")
-                term_he.text = self._sanitize_xml_text(cluster.representative_he)
+                term_he.text = sanitize_xml_text(cluster.representative_he)
 
                 # Russian langSet (if translation exists)
                 translation = None
@@ -617,7 +605,7 @@ class ExportService:
                     langset_ru = ET.SubElement(term_entry, "langSet", {"xml:lang": "ru"})
                     tig_ru = ET.SubElement(langset_ru, "tig")
                     term_ru = ET.SubElement(tig_ru, "term")
-                    term_ru.text = self._sanitize_xml_text(translation)
+                    term_ru.text = sanitize_xml_text(translation)
 
                 count += 1
 
@@ -713,13 +701,13 @@ class ExportService:
                 # Source (Hebrew)
                 tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
                 seg_he = ET.SubElement(tuv_he, "seg")
-                seg_he.text = self._sanitize_xml_text(entry.src_text)
+                seg_he.text = sanitize_xml_text(entry.src_text)
 
                 # Target (Russian)
                 if entry.translation:
                     tuv_ru = ET.SubElement(tu, "tuv", {"xml:lang": "ru"})
                     seg_ru = ET.SubElement(tuv_ru, "seg")
-                    seg_ru.text = self._sanitize_xml_text(entry.translation)
+                    seg_ru.text = sanitize_xml_text(entry.translation)
 
                 count += 1
 
@@ -734,12 +722,12 @@ class ExportService:
                 # Source (Hebrew)
                 tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
                 seg_he = ET.SubElement(tuv_he, "seg")
-                seg_he.text = self._sanitize_xml_text(src_he)
+                seg_he.text = sanitize_xml_text(src_he)
 
                 # Target (Russian)
                 tuv_ru = ET.SubElement(tu, "tuv", {"xml:lang": "ru"})
                 seg_ru = ET.SubElement(tuv_ru, "seg")
-                seg_ru.text = self._sanitize_xml_text(trans_ru)
+                seg_ru.text = sanitize_xml_text(trans_ru)
 
                 count += 1
 
@@ -756,28 +744,3 @@ class ExportService:
         logger.info(f"Exported TMX to {path} ({result} translation units)")
         return result
 
-    def _sanitize_xml_text(self, text: Optional[str]) -> str:
-        """Sanitize text for XML content.
-
-        Removes invalid XML characters and ensures safe encoding.
-
-        Args:
-            text: Input text
-
-        Returns:
-            Sanitized text safe for XML
-        """
-        if not text:
-            return ""
-
-        # Remove null bytes and other invalid XML characters
-        # Valid XML chars: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
-        sanitized = []
-        for char in str(text):
-            code = ord(char)
-            if (code == 0x09 or code == 0x0A or code == 0x0D or
-                (0x20 <= code <= 0xD7FF) or
-                (0xE000 <= code <= 0xFFFD)):
-                sanitized.append(char)
-
-        return "".join(sanitized)

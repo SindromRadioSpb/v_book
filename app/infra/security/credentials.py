@@ -15,6 +15,8 @@ Security:
 import base64
 import keyring
 from typing import Optional, Dict
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from .crypto import generate_key, encrypt, decrypt
 from .policy import CREDENTIAL_KEY_MAX_LENGTH, CREDENTIAL_VALUE_MAX_LENGTH
@@ -31,15 +33,26 @@ class CredentialStore:
     Secure credential storage with OS keyring + encrypted database.
 
     Usage:
+        # With database storage (production)
+        with db_service.get_session() as session:
+            store = CredentialStore(session)
+            store.set_credential("openai_api_key", "sk-...")
+            api_key = store.get_credential("openai_api_key")
+
+        # With in-memory storage (testing)
         store = CredentialStore()
-        store.set_credential("openai_api_key", "sk-...")
-        api_key = store.get_credential("openai_api_key")
-        store.delete_credential("openai_api_key")
+        storage = {}
+        store.set_credential("test_key", "value", storage=storage)
     """
 
-    def __init__(self):
-        """Initialize credential store and ensure master key exists."""
+    def __init__(self, db_session: Optional[Session] = None):
+        """Initialize credential store and ensure master key exists.
+
+        Args:
+            db_session: Database session for DB storage (None for in-memory only)
+        """
         self._master_key: Optional[bytes] = None
+        self._db_session = db_session
         self._ensure_master_key()
 
     def _ensure_master_key(self) -> None:
@@ -185,13 +198,33 @@ class CredentialStore:
         if storage is not None:
             # In-memory storage (for testing or config)
             storage[key] = encrypted_value
+        elif self._db_session is not None:
+            # Database storage (production)
+            try:
+                sql = text("""
+                    INSERT INTO credentials (key, encrypted_value)
+                    VALUES (:key, :encrypted_value)
+                    ON CONFLICT(key) DO UPDATE SET
+                        encrypted_value = :encrypted_value,
+                        updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now')
+                """)
+
+                self._db_session.execute(sql, {
+                    'key': key,
+                    'encrypted_value': encrypted_value,
+                })
+                self._db_session.commit()
+
+            except Exception as e:
+                self._db_session.rollback()
+                raise CredentialStoreError(
+                    f"Failed to store credential in database: {e}",
+                    operation="set_credential",
+                )
         else:
-            # TODO: Store in database
-            # db.execute("INSERT OR REPLACE INTO credentials (key, encrypted_value) VALUES (?, ?)",
-            #            (key, encrypted_value))
-            raise NotImplementedError(
-                "Database credential storage not yet implemented. "
-                "Pass 'storage' dict for in-memory mode."
+            raise ValueError(
+                "Either 'storage' dict or db_session must be provided. "
+                "Initialize CredentialStore with db_session for database storage."
             )
 
     def get_credential(
@@ -216,13 +249,22 @@ class CredentialStore:
         if storage is not None:
             # In-memory storage
             encrypted_value = storage.get(key)
+        elif self._db_session is not None:
+            # Database storage (production)
+            try:
+                sql = text("SELECT encrypted_value FROM credentials WHERE key = :key")
+                result = self._db_session.execute(sql, {'key': key}).fetchone()
+                encrypted_value = result[0] if result else None
+
+            except Exception as e:
+                raise CredentialStoreError(
+                    f"Failed to retrieve credential from database: {e}",
+                    operation="get_credential",
+                )
         else:
-            # TODO: Retrieve from database
-            # row = db.execute("SELECT encrypted_value FROM credentials WHERE key = ?", (key,)).fetchone()
-            # encrypted_value = row[0] if row else None
-            raise NotImplementedError(
-                "Database credential storage not yet implemented. "
-                "Pass 'storage' dict for in-memory mode."
+            raise ValueError(
+                "Either 'storage' dict or db_session must be provided. "
+                "Initialize CredentialStore with db_session for database storage."
             )
 
         if encrypted_value is None:
@@ -252,13 +294,24 @@ class CredentialStore:
                 del storage[key]
                 return True
             return False
+        elif self._db_session is not None:
+            # Database storage (production)
+            try:
+                sql = text("DELETE FROM credentials WHERE key = :key")
+                result = self._db_session.execute(sql, {'key': key})
+                self._db_session.commit()
+                return result.rowcount > 0
+
+            except Exception as e:
+                self._db_session.rollback()
+                raise CredentialStoreError(
+                    f"Failed to delete credential from database: {e}",
+                    operation="delete_credential",
+                )
         else:
-            # TODO: Delete from database
-            # result = db.execute("DELETE FROM credentials WHERE key = ?", (key,))
-            # return result.rowcount > 0
-            raise NotImplementedError(
-                "Database credential storage not yet implemented. "
-                "Pass 'storage' dict for in-memory mode."
+            raise ValueError(
+                "Either 'storage' dict or db_session must be provided. "
+                "Initialize CredentialStore with db_session for database storage."
             )
 
     @staticmethod
