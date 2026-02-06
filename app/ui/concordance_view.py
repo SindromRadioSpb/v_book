@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from app.ui.workers import ConcordanceSearchWorker
 from app.ui.dialogs import show_error
 from app.services.db_service import DBService
+from app.infra.security import validate_query_complexity, QueryComplexityError
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,28 @@ class ConcordanceView(QWidget):
 
         if not query:
             show_error(self, "Search Error", "Please enter a search query")
+            return
+
+        # UI-layer validation: Check query complexity before starting search
+        try:
+            validate_query_complexity(query)
+        except QueryComplexityError as e:
+            # Show user-friendly error message
+            error_messages = {
+                "LENGTH_EXCEEDED": f"Query is too long (max 500 characters).\n\nPlease shorten your search query.",
+                "WILDCARD_LIMIT": f"Too many wildcards (*) in query (max 5).\n\nPlease reduce the number of wildcards.",
+                "OPERATOR_LIMIT": f"Too many search operators (AND/OR/NOT/NEAR) in query (max 10).\n\nPlease simplify your query.",
+                "PARENTHESES_DEPTH": f"Query has too many nested parentheses (max 10 levels).\n\nPlease simplify the query structure.",
+                "UNBALANCED_PARENTHESES": f"Parentheses are not balanced.\n\nPlease check that every '(' has a matching ')'.",
+            }
+
+            error_msg = error_messages.get(
+                e.reason,
+                f"Query is too complex: {e.reason}\n\nPlease simplify your search."
+            )
+
+            show_error(self, "Query Validation Error", error_msg)
+            logger.warning(f"Query validation failed: {e.reason}, query_length={len(query)}")
             return
 
         # Get parameters

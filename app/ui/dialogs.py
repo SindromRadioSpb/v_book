@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QMessageBox,
 )
+from app.infra.security import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class CreateProjectDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         create_btn = QPushButton("Create")
-        create_btn.clicked.connect(self.accept)
+        create_btn.clicked.connect(self.on_create)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
         button_layout.addStretch()
@@ -49,6 +50,49 @@ class CreateProjectDialog(QDialog):
         layout.addLayout(button_layout)
 
         self.setLayout(layout)
+
+    def on_create(self):
+        """Validate and create project."""
+        name = self.name_edit.text().strip()
+        description = self.desc_edit.toPlainText().strip()
+
+        # UI-layer validation: Check project name
+        if not name:
+            QMessageBox.warning(self, "Validation Error", "Project name cannot be empty.")
+            return
+
+        if len(name) > 255:
+            QMessageBox.warning(
+                self,
+                "Validation Error",
+                "Project name is too long (max 255 characters).\n\nPlease use a shorter name."
+            )
+            return
+
+        # Check for problematic characters (basic validation)
+        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        if any(char in name for char in forbidden_chars):
+            QMessageBox.warning(
+                self,
+                "Validation Error",
+                f"Project name contains forbidden characters.\n\n"
+                f"Please avoid: {' '.join(forbidden_chars)}"
+            )
+            return
+
+        if len(description) > 10000:
+            QMessageBox.warning(
+                self,
+                "Validation Error",
+                "Description is too long (max 10,000 characters).\n\nPlease shorten the description."
+            )
+            return
+
+        # Log validated input (sanitized)
+        logger.info(f"Creating project: {sanitize_for_log(name)}")
+
+        # Accept dialog
+        self.accept()
 
     def get_data(self):
         """Get the entered data."""

@@ -32,6 +32,13 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.services.db_service import DBService
 from app.ui.workers import ImportWorker
+from app.infra.security import (
+    validate_file_size,
+    validate_path_security,
+    MAX_DICTIONARY_SIZE,
+    ValidationError,
+    PathSecurityError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +224,49 @@ class ImportWizard(QWidget):
         if not Path(file_path).exists():
             QMessageBox.warning(self, "File Not Found", f"File not found: {file_path}")
             return
+
+        # UI-layer validation: Check file path security and size
+        path_obj = Path(file_path)
+
+        try:
+            # Validate path security (blocks UNC, system dirs, resolves symlinks)
+            safe_path = validate_path_security(path_obj, operation="dictionary import")
+        except PathSecurityError as e:
+            error_messages = {
+                "UNC_PATH": "Network paths (UNC) are not allowed.\n\nPlease copy the file to a local directory first.",
+                "SYSTEM_DIRECTORY": "Cannot import from system directories.\n\nPlease select a file from your user directories.",
+                "RESOLVE_FAILED": f"Cannot access file path.\n\n{str(e)}",
+            }
+
+            error_msg = error_messages.get(
+                e.reason,
+                f"File path security check failed: {e.reason}"
+            )
+
+            QMessageBox.critical(self, "Path Security Error", error_msg)
+            logger.warning(f"Path security check failed: {e.reason}, path={file_path}")
+            return
+
+        try:
+            # Validate file size (10 MB limit for dictionaries)
+            validate_file_size(safe_path, MAX_DICTIONARY_SIZE, file_type="dictionary")
+        except ValidationError as e:
+            file_size_mb = safe_path.stat().st_size / 1024 / 1024
+            max_size_mb = MAX_DICTIONARY_SIZE / 1024 / 1024
+
+            QMessageBox.critical(
+                self,
+                "File Too Large",
+                f"Dictionary file is too large: {file_size_mb:.1f} MB\n\n"
+                f"Maximum allowed size: {max_size_mb:.0f} MB\n\n"
+                f"Please reduce the file size or split it into smaller files."
+            )
+            logger.warning(f"File size limit exceeded: {file_size_mb:.1f} MB > {max_size_mb:.0f} MB")
+            return
+
+        # Log validation success
+        self.log_output.appendPlainText(f"✓ File path validated")
+        self.log_output.appendPlainText(f"✓ File size: {safe_path.stat().st_size / 1024:.1f} KB")
 
         # Get scope
         if self.scope_global_radio.isChecked():
