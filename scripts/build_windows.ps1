@@ -82,15 +82,20 @@ Write-Host ""
 # Verify output
 Write-Host "[5/5] Verifying build..." -ForegroundColor Yellow
 
-if (-not (Test-Path "dist\HDLE_Premium.exe")) {
-    Write-Host "ERROR: Expected executable not found: dist\HDLE_Premium.exe" -ForegroundColor Red
+if (-not (Test-Path "dist\HDLE_Premium\HDLE_Premium.exe")) {
+    Write-Host "ERROR: Expected executable not found: dist\HDLE_Premium\HDLE_Premium.exe" -ForegroundColor Red
+    Write-Host "Note: Using onedir mode (not onefile) to avoid torch_cpu.dll extraction failure" -ForegroundColor Yellow
     exit 1
 }
 
-$exeSize = (Get-Item "dist\HDLE_Premium.exe").Length
+$exeSize = (Get-Item "dist\HDLE_Premium\HDLE_Premium.exe").Length
 $exeSizeMB = [math]::Round($exeSize / 1MB, 2)
 
-Write-Host "✓ Executable verified: dist\HDLE_Premium.exe ($exeSizeMB MB)" -ForegroundColor Green
+$distSize = (Get-ChildItem -Path "dist\HDLE_Premium" -Recurse | Measure-Object -Property Length -Sum).Sum
+$distSizeMB = [math]::Round($distSize / 1MB, 2)
+
+Write-Host "OK Executable verified: dist\HDLE_Premium\HDLE_Premium.exe ($exeSizeMB MB)" -ForegroundColor Green
+Write-Host "OK Distribution folder: dist\HDLE_Premium\ ($distSizeMB MB total)" -ForegroundColor Green
 Write-Host ""
 
 # Summary
@@ -98,16 +103,20 @@ Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host "           BUILD SUCCESSFUL                  " -ForegroundColor Green
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Executable location:" -ForegroundColor White
-Write-Host "  $PWD\dist\HDLE_Premium.exe" -ForegroundColor Cyan
+Write-Host "Distribution folder:" -ForegroundColor White
+Write-Host "  $PWD\dist\HDLE_Premium\" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "File size: $exeSizeMB MB" -ForegroundColor White
+Write-Host "Executable:" -ForegroundColor White
+Write-Host "  $PWD\dist\HDLE_Premium\HDLE_Premium.exe" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Total size: $distSizeMB MB" -ForegroundColor White
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor White
-Write-Host "  1. Test the executable on this machine" -ForegroundColor Gray
-Write-Host "  2. Test on a clean Windows VM (no Python installed)" -ForegroundColor Gray
-Write-Host "  3. Build installer with Inno Setup (see BUILD_WINDOWS_INSTALLER.md)" -ForegroundColor Gray
+Write-Host "  1. Run smoke test: .\scripts\run_packaged_smoke.ps1" -ForegroundColor Gray
+Write-Host "  2. Deploy to target location (e.g., M:\Soft\V_book\HDLE_Premium\)" -ForegroundColor Gray
+Write-Host "  3. Test on a clean Windows VM (no Python installed)" -ForegroundColor Gray
+Write-Host "  4. Build installer with Inno Setup (see BUILD_WINDOWS_INSTALLER.md)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "To run the executable:" -ForegroundColor White
-Write-Host "  .\dist\HDLE_Premium.exe" -ForegroundColor Cyan
+Write-Host "  .\dist\HDLE_Premium\HDLE_Premium.exe" -ForegroundColor Cyan
 Write-Host ""

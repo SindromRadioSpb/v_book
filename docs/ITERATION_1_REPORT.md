@@ -477,8 +477,9 @@ Result: NO FLAKES
 **Implementation Details:**
 
 **PyInstaller Configuration:**
-- **Bundle:** Standalone .exe (~45 MB)
-- **Included:** PyQt6, SQLAlchemy, psutil, all services, migrations
+- **Mode:** Onedir (not onefile) - prevents `torch_cpu.dll` extraction failure on startup
+- **Bundle:** Distribution folder `dist\HDLE_Premium\` with all dependencies in-place
+- **Included:** PyQt6, SQLAlchemy, psutil, PyTorch (torch_cpu.dll), all services, migrations
 - **Excluded:** Stanza models (downloaded on first run), tkinter, matplotlib
 - **Hidden Imports:** PyQt6.sip, sqlalchemy.dialects.sqlite, all service modules
 - **UPX:** Disabled (prevents antivirus false positives)
@@ -487,7 +488,8 @@ Result: NO FLAKES
 **Build Script:**
 - **Location:** `scripts/build_windows.ps1`
 - **Features:** Auto-activate venv, install PyInstaller if missing, clean build, verify output
-- **Output:** `dist\HDLE_Premium.exe`
+- **Output:** `dist\HDLE_Premium\HDLE_Premium.exe` (folder structure)
+- **Smoke Test:** `scripts/run_packaged_smoke.ps1` - automated startup verification
 
 **Inno Setup Installer:**
 - **Location:** `installer/installer.iss`
@@ -511,6 +513,9 @@ Result: NO FLAKES
 - Ready for build verification (run `.\scripts\build_windows.ps1`)
 - Requires Inno Setup for installer compilation (docs provided)
 - Regression tests: Passed (see PATCH 12)
+
+**Technical Notes:**
+- **Onedir mode:** Required to avoid PyTorch `torch_cpu.dll` decompression errors at runtime (onefile mode fails with "decompression return code -1"). All dependencies now extracted on disk, eliminating runtime extraction failures.
 
 **Known Limitations:**
 - **Inno Setup:** Not in PATH on current machine (installation instructions in docs)

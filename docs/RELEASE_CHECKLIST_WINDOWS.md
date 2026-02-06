@@ -24,8 +24,9 @@ cd J:\Project_Vibe\V_book
 
 **Verify:**
 - [ ] Build completes without errors
-- [ ] `dist\HDLE_Premium.exe` exists
-- [ ] File size ~45 MB
+- [ ] `dist\HDLE_Premium\HDLE_Premium.exe` exists
+- [ ] Distribution folder `dist\HDLE_Premium\` contains all dependencies
+- [ ] Run smoke test: `.\scripts\run_packaged_smoke.ps1`
 
 ### 2. Build Installer
 
