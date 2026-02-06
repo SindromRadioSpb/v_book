@@ -57,10 +57,8 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,  # CRITICAL: Use onedir mode (not onefile) to avoid torch_cpu.dll extraction failure
     name='HDLE_Premium',
     debug=False,
     bootloader_ignore_signals=False,
@@ -75,4 +73,15 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # TODO: Add icon if available
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='HDLE_Premium',
 )

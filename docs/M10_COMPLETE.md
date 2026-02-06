@@ -189,12 +189,12 @@ dir $env:LOCALAPPDATA\HDLE\backups\
 **Test:**
 ```powershell
 # 1. Start app and begin processing (e.g., NLP import)
-.\dist\HDLE_Premium.exe
+.\dist\HDLE_Premium\HDLE_Premium.exe
 
 # 2. Force-kill app (Task Manager → End Task)
 
 # 3. Restart app
-.\dist\HDLE_Premium.exe
+.\dist\HDLE_Premium\HDLE_Premium.exe
 
 # 4. Check logs
 notepad $env:LOCALAPPDATA\HDLE\logs\hdle_YYYYMMDD.log
@@ -228,7 +228,7 @@ print(f'Found {len(snapshots)} snapshots')
 .\scripts\build_windows.ps1
 
 # Run executable
-.\dist\HDLE_Premium.exe
+.\dist\HDLE_Premium\HDLE_Premium.exe
 ```
 
 **Expected:**

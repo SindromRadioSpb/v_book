@@ -59,8 +59,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Main executable
-Source: "dist\HDLE_Premium.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Application files (onedir mode - entire distribution folder)
+Source: "dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; NOTE: User data (database, logs, backups) is stored in:
 ; %LOCALAPPDATA%\HDLE\

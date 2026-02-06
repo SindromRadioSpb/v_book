@@ -81,8 +81,8 @@ The standalone executable is built using PyInstaller with a custom spec file.
 1. Activates virtual environment
 2. Checks/installs PyInstaller
 3. Cleans previous build artifacts
-4. Runs `pyinstaller build/v_book.spec`
-5. Verifies output: `dist\HDLE_Premium.exe`
+4. Runs `pyinstaller build/v_book.spec` (onedir mode)
+5. Verifies output: `dist\HDLE_Premium\HDLE_Premium.exe`
 
 **Expected output:**
 ```
@@ -108,7 +108,8 @@ This may take several minutes...
 ✓ Executable built successfully
 
 [5/5] Verifying build...
-✓ Executable verified: dist\HDLE_Premium.exe (45.2 MB)
+✓ Executable verified: dist\HDLE_Premium\HDLE_Premium.exe
+✓ Distribution folder: dist\HDLE_Premium\ (total size)
 
 ============================================
            BUILD SUCCESSFUL
@@ -117,15 +118,26 @@ This may take several minutes...
 
 **Build time:** 2-5 minutes (depending on hardware)
 
-**Output:**
-- `dist\HDLE_Premium.exe` - Standalone executable (~45 MB)
+**Output (onedir mode):**
+- `dist\HDLE_Premium\` - Distribution folder containing:
+  - `HDLE_Premium.exe` - Main executable
+  - Qt6 plugins, PyTorch libraries, SQLAlchemy, etc.
+  - All dependencies in-place (no extraction at runtime)
+
+**Note:** Using onedir (not onefile) to avoid `torch_cpu.dll` extraction failures on startup.
 
 ### Step 2: Test Standalone Executable (Optional but Recommended)
 
 Before creating the installer, test the executable on the development machine:
 
 ```powershell
-.\dist\HDLE_Premium.exe
+.\dist\HDLE_Premium\HDLE_Premium.exe
+```
+
+Or run automated smoke test:
+
+```powershell
+.\scripts\run_packaged_smoke.ps1
 ```
 
 **Expected behavior:**
@@ -198,7 +210,8 @@ installer\output\HDLE_Premium_Setup.exe
    - Launch app after installation
 
 4. **Verify installation:**
-   - App installed to: `C:\Program Files\HDLE\HDLE_Premium.exe`
+   - App installed to: `C:\Program Files\HDLE\` (folder with all dependencies)
+   - Main executable: `C:\Program Files\HDLE\HDLE_Premium.exe`
    - Start menu shortcut: Start → HDLE Premium
    - Desktop shortcut (if selected)
 
@@ -269,10 +282,15 @@ installer\output\HDLE_Premium_Setup.exe
 ```
 J:\Project_Vibe\V_book\
 ├── build/
-│   ├── v_book.spec              # PyInstaller spec file
+│   ├── v_book.spec              # PyInstaller spec file (onedir mode)
 │   └── HDLE_Premium/            # PyInstaller build cache (auto-generated)
 ├── dist/
-│   └── HDLE_Premium.exe         # Standalone executable (45 MB)
+│   └── HDLE_Premium/            # Distribution folder (onedir mode)
+│       ├── HDLE_Premium.exe     # Main executable
+│       ├── Qt6/                 # Qt plugins and libraries
+│       ├── torch/               # PyTorch libraries (torch_cpu.dll, etc.)
+│       ├── sqlalchemy/          # SQLAlchemy and dependencies
+│       └── ... (all dependencies in-place)
 ├── installer/
 │   ├── installer.iss            # Inno Setup script
 │   └── output/
@@ -361,7 +379,7 @@ excludes=[
 ### Upgrade Behavior
 
 **What gets replaced:**
-- ✅ Executable: `C:\Program Files\HDLE\HDLE_Premium.exe`
+- ✅ Application folder: `C:\Program Files\HDLE\` (entire folder)
 
 **What survives:**
 - ✅ Database: `%LOCALAPPDATA%\HDLE\hdle.db`
@@ -406,11 +424,17 @@ excludes=[
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
 ```
 
-**Error:** `Unable to open file "dist\HDLE_Premium.exe"`
+**Error:** `Unable to open file "dist\HDLE_Premium\HDLE_Premium.exe"`
 
 **Solution:** Run PyInstaller build first (`.\scripts\build_windows.ps1`).
 
 ### App Crashes on Launch
+
+**Error:** `Failed to extract torch\lib\torch_cpu.dll: decompression resulted in return code -1`
+
+**Root cause:** PyInstaller onefile mode fails to decompress large PyTorch DLL files at runtime.
+
+**Solution:** Already implemented - using onedir mode (`exclude_binaries=True` in spec). This keeps all files extracted on disk, avoiding runtime decompression.
 
 **Error:** DLL load failures
 
@@ -418,6 +442,7 @@ excludes=[
 1. Rebuild with `--clean` flag
 2. Check that all PyQt6 dependencies are installed
 3. Test on development machine first
+4. Verify using onedir mode (not onefile)
 
 **Error:** `sqlite3.OperationalError: unable to open database file`
 
