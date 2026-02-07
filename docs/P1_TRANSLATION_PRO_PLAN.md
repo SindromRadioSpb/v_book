@@ -1,8 +1,19 @@
 # P1 Translation Pro - Implementation Plan
 
-**Status:** PATCH-P1-T04 (MT Cache + Circuit Breaker + Rate Limiter)
+**Status:** PATCH-P1-T05 (GlossaryBuilderService) → task_4_MT_local (Local MT Providers)
 **Date:** 2026-02-07
 **Owner:** Staff Engineer/Architect
+
+**Updated Plan:**
+```
+✅ P1-T00 through P1-T04 (COMPLETE)
+🔜 P1-T05: GlossaryBuilderService (3-5 days)
+🔥 task_4_MT_local: Local MT Providers (2-3 weeks, HIGH PRIORITY)
+⏭️  P1-T07: Term Extraction Pro
+⏭️  P1-T08: Hardening + DoD Evidence
+```
+
+**Note:** P1-T06 (MT Cache migration) merged into P1-T04 - no separate migration needed.
 
 ---
 
@@ -520,12 +531,255 @@ status = self._rate_limiter.get_status("deepl")
 
 ---
 
-## PATCH-P1-T05: UI Integration (FUTURE)
+## PATCH-P1-T05: GlossaryBuilderService (IN PROGRESS)
 
-- Settings UI for provider configuration
-- Provider status dashboard (success rate, latency, circuit breaker state)
-- Cache metrics (hit rate, size)
-- Glossary sync UI
+### Overview
+
+Builds canonical glossary payload from approved terms for MT provider chain.
+
+**Goals:**
+1. Extract approved terms from database (status='approved')
+2. Build canonical glossary format (deterministic, stable sort)
+3. Compute glossary_hash (SHA256) for cache keying
+4. Provide provider-specific adapters (DeepL, Google, Microsoft formats)
+5. Handle conflicts (duplicate source terms with different targets)
+
+### Canonical Glossary Format
+
+**Data Structure:**
+```python
+@dataclass
+class GlossaryEntry:
+    source_term: str          # Original source term
+    target_term: str          # Approved translation
+    canonical_key: str        # Normalized key for dedup (lowercase, strip)
+    priority_score: float     # Higher = more important (default: 1.0)
+
+@dataclass
+class CanonicalGlossary:
+    entries: List[GlossaryEntry]
+    source_lang: str          # e.g., "he" (Hebrew)
+    target_lang: str          # e.g., "ru" (Russian)
+    glossary_hash: str        # SHA256 of deterministic JSON
+    total_entries: int
+    truncated: bool           # True if hit provider limit
+    size_bytes: int           # Estimate for provider payload
+```
+
+**Deterministic Sorting:**
+1. Sort by `canonical_key` (stable tie-breaker)
+2. If duplicate keys → select highest priority_score
+3. If same priority → select first by source_term alphabetically
+
+**Glossary Hash Computation:**
+```python
+def compute_glossary_hash(canonical: CanonicalGlossary) -> str:
+    """Compute deterministic hash for cache keying.
+
+    Formula: SHA256(JSON with sorted keys)
+    """
+    payload = {
+        "source_lang": canonical.source_lang,
+        "target_lang": canonical.target_lang,
+        "entries": [
+            {"source": e.source_term, "target": e.target_term}
+            for e in canonical.entries
+        ]
+    }
+    # Sort keys for determinism
+    json_str = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(json_str.encode('utf-8')).hexdigest()
+```
+
+### Provider-Specific Adapters
+
+**DeepL Format:**
+```python
+def to_deepl_format(canonical: CanonicalGlossary) -> Dict:
+    """Convert to DeepL glossary format.
+
+    DeepL supports TSV format: source\ttarget\n
+    Max entries: 5000 (configurable)
+    """
+    entries_tsv = "\n".join(
+        f"{e.source_term}\t{e.target_term}"
+        for e in canonical.entries[:5000]
+    )
+    return {
+        "format": "tsv",
+        "entries": entries_tsv,
+        "source_lang": canonical.source_lang.upper(),
+        "target_lang": canonical.target_lang.upper(),
+    }
+```
+
+**Microsoft Translator Format:**
+```python
+def to_microsoft_format(canonical: CanonicalGlossary) -> Dict:
+    """Convert to Microsoft Custom Translator format.
+
+    Microsoft supports dictionary (parallel arrays)
+    Max entries: 10000 (configurable)
+    """
+    return {
+        "translations": [
+            {
+                "from": e.source_term,
+                "to": e.target_term
+            }
+            for e in canonical.entries[:10000]
+        ]
+    }
+```
+
+**LibreTranslate Format:**
+```python
+def to_libretranslate_format(canonical: CanonicalGlossary) -> Dict:
+    """LibreTranslate does not support glossaries natively.
+
+    Return empty dict, provider will skip glossary.
+    """
+    return {}
+```
+
+### Conflict Resolution Policy
+
+**Scenario:** Same source_term with multiple target_terms
+
+**Policy:**
+1. Group by canonical_key (normalized source_term)
+2. Within group: select entry with highest priority_score
+3. If same priority: select first alphabetically by source_term (stable)
+4. Log warning: "Glossary conflict: '{source}' has multiple targets, selected '{target}'"
+
+**Example:**
+```python
+# Input terms:
+# - "כלב" → "собака" (priority: 2.0)
+# - "כלב" → "пёс" (priority: 1.0)
+
+# After conflict resolution:
+# - "כלב" → "собака" (selected, higher priority)
+```
+
+### Integration with TranslationService
+
+**Usage in Provider Chain:**
+```python
+# In TranslationService._translate_via_provider_chain()
+
+# Build glossary once per request
+glossary_service = GlossaryBuilderService(session)
+canonical = glossary_service.build_canonical_glossary(
+    src_lang="he",
+    tgt_lang="ru",
+    project_id=project_id
+)
+
+# Compute hash for cache key
+glossary_hash = canonical.glossary_hash
+
+# Convert to provider format
+if provider.supports_glossary:
+    provider_glossary = glossary_service.to_provider_format(
+        canonical,
+        provider_id=provider.provider_id
+    )
+    request.glossary = provider_glossary
+else:
+    request.glossary = None
+    logger.info(f"Provider {provider.provider_id} does not support glossaries")
+```
+
+### Settings Keys
+
+**Added Settings:**
+- `mt/glossary/max_entries_default` (int, default: `5000`) - Default max entries
+- `mt/glossary/max_entries_deepl` (int, default: `5000`) - DeepL-specific limit
+- `mt/glossary/max_entries_microsoft` (int, default: `10000`) - Microsoft-specific limit
+
+### Database Query
+
+**Query approved terms:**
+```sql
+SELECT source_term, target_term, priority_score
+FROM tm_entry
+WHERE status = 'approved'
+  AND src_lang = ?
+  AND tgt_lang = ?
+  AND (project_id = ? OR project_id IS NULL)
+ORDER BY priority_score DESC, source_term ASC
+```
+
+### Tests
+
+**File:** `tests/test_p1_glossary_builder.py` (5-8 tests)
+
+**Test Coverage:**
+1. `test_build_canonical_glossary_deterministic` - Same inputs → same hash
+2. `test_conflict_resolution_priority` - Higher priority wins
+3. `test_conflict_resolution_stable_sort` - Same priority → alphabetical
+4. `test_to_deepl_format` - TSV format correct
+5. `test_to_microsoft_format` - JSON format correct
+6. `test_truncation_at_max_entries` - Respects provider limits
+7. `test_empty_glossary_graceful` - No approved terms → empty glossary
+8. `test_glossary_hash_changes_on_content_change` - Hash invalidation
+
+### Deliverables
+
+- ✅ `app/services/glossary_builder_service.py` (new file)
+- ✅ Tests: `tests/test_p1_glossary_builder.py` (5-8 tests)
+- ✅ Integration: Update `TranslationService._translate_via_provider_chain()`
+- ✅ Documentation: Update this section
+
+---
+
+## task_4_MT_local: Local MT Providers (PLANNED - HIGH PRIORITY)
+
+### Overview
+
+Add offline-capable local MT providers (NLLB + Seamless M4T) integrated into existing provider chain.
+
+**Models:**
+- Primary: `facebook/nllb-200-distilled-1.3B` (CC-BY-NC 4.0, internal use OK)
+- Fallback: `facebook/seamless-m4t-v2-large` (CC-BY-NC 4.0, internal use OK)
+
+**Language Pair:** Hebrew (`heb_Hebr`) → Russian (`rus_Cyrl`)
+
+**Architecture:**
+- Worker-based inference (no UI blocking)
+- Sentence segmentation (NLLB quality degrades on long inputs)
+- Glossary postprocess (uses approved terms from P1-T05)
+- Full integration with existing cache/circuit breaker/rate limiter
+
+**Dependencies:**
+- ✅ BaseProvider contract (P1-T01)
+- ✅ Provider chain (P1-T03)
+- ✅ Circuit breaker + rate limiter (P1-T04)
+- ✅ MT cache (P1-T04)
+- 🔜 **GlossaryBuilderService (P1-T05)** - REQUIRED for glossary postprocess
+
+**Implementation Plan:** See `task_4_MT_local.md` for detailed 10-PATCH breakdown
+
+**Estimated Timeline:** 2-3 weeks after P1-T05 complete
+
+---
+
+## PATCH-P1-T07: Term Extraction Pro (FUTURE)
+
+- Term extraction presets (PMI, LLR, Dice, Keyness, Weirdness)
+- Reference corpus selection UI
+- Explainability: "Why ranked #1?"
+- Reproducibility (preset_version + config → stable results)
+
+---
+
+## PATCH-P1-T08: Hardening + DoD Evidence (FUTURE)
+
+- Edge case handling (no providers, misconfigured keys, huge glossaries)
+- Performance verification (cache hit rate >80%, latency budgets)
+- UI DoD evidence documentation
+- Final integration tests
 
 ---
 

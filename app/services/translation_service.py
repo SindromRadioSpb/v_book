@@ -680,12 +680,29 @@ class TranslationService:
         if not trace_id:
             trace_id = str(uuid.uuid4())
 
+        # PATCH-P1-T05: Build canonical glossary from approved terms
+        from app.services.glossary_builder_service import GlossaryBuilderService
+
+        glossary_service = GlossaryBuilderService(session)
+        canonical_glossary = glossary_service.build_canonical_glossary(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            project_id=None  # TODO: Get from context/args if needed
+        )
+        glossary_hash = canonical_glossary.glossary_hash
+
+        logger.info(
+            f"Built canonical glossary: {canonical_glossary.total_entries} entries, "
+            f"hash={glossary_hash[:8]}..., truncated={canonical_glossary.truncated}"
+        )
+
         # Build TranslationRequest (provider format)
         request = TranslationRequest(
             source_text=src_text,
             source_lang=src_lang,
             target_lang=tgt_lang,
-            glossary=glossary,
+            glossary=glossary,  # Will be replaced per-provider below
+            glossary_hash=glossary_hash,
             trace_id=trace_id,
             allow_fallback=allow_fallback,
         )
@@ -778,6 +795,25 @@ class TranslationService:
                     })
                     self._log_translation_completed(trace_id, index, 0, provider_id)
                     return self._map_provider_result_to_service(cached_result)
+
+            # PATCH-P1-T05: Convert canonical glossary to provider-specific format
+            if canonical_glossary.total_entries > 0:
+                provider_glossary = glossary_service.to_provider_format(
+                    canonical_glossary,
+                    provider_id=provider_id
+                )
+                if provider_glossary:
+                    request.glossary = provider_glossary
+                    logger.debug(
+                        f"Provider {provider_id}: Using glossary with "
+                        f"{canonical_glossary.total_entries} entries"
+                    )
+                else:
+                    request.glossary = None
+                    logger.debug(f"Provider {provider_id}: Glossary not supported")
+            else:
+                request.glossary = None
+                logger.debug("No approved terms for glossary")
 
             # Measure latency
             start = time.perf_counter()
