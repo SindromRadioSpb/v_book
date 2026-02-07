@@ -94,7 +94,11 @@ class ProjectView(QWidget):
             with self.project_service.db_service.get_session() as session:
                 project = self.project_service.get_project(session, self.project_id)
                 if project:
-                    self.project_title.setText(f"Project: {project.name}")
+                    # Add 🌐 marker for reference corpus projects
+                    if project.is_general_corpus:
+                        self.project_title.setText(f"Project: 🌐 {project.name}")
+                    else:
+                        self.project_title.setText(f"Project: {project.name}")
                 else:
                     self.project_title.setText("Project not found")
         except Exception as e:

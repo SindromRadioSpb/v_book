@@ -38,6 +38,7 @@ class DocumentsView(QWidget):
         super().__init__()
         self.project_id = project_id
         self.corpus_id = None
+        self.is_reference_corpus = False  # Track if this is a reference corpus
 
         self.db_service = DBService.get_instance()
         self.project_service = ProjectService()
@@ -50,7 +51,7 @@ class DocumentsView(QWidget):
         self.load_corpus()
         self.load_documents()
 
-        # Enable drag and drop
+        # Enable drag and drop (will check is_reference_corpus in dragEnterEvent)
         self.setAcceptDrops(True)
 
     def init_ui(self):
@@ -65,14 +66,14 @@ class DocumentsView(QWidget):
         header_layout.addStretch()
 
         # Add files button
-        add_btn = QPushButton("Add Files...")
-        add_btn.clicked.connect(self.on_add_files)
-        header_layout.addWidget(add_btn)
+        self.add_btn = QPushButton("Add Files...")
+        self.add_btn.clicked.connect(self.on_add_files)
+        header_layout.addWidget(self.add_btn)
 
         # Add folder button
-        add_folder_btn = QPushButton("Add Folder...")
-        add_folder_btn.clicked.connect(self.on_add_folder)
-        header_layout.addWidget(add_folder_btn)
+        self.add_folder_btn = QPushButton("Add Folder...")
+        self.add_folder_btn.clicked.connect(self.on_add_folder)
+        header_layout.addWidget(self.add_folder_btn)
 
         # Refresh button
         refresh_btn = QPushButton("Refresh")
@@ -117,18 +118,18 @@ class DocumentsView(QWidget):
         layout.addLayout(nlp_layout)
 
         # Drag-drop hint
-        hint = QLabel(
+        self.hint_label = QLabel(
             "💡 Drag and drop files here to import them\n"
             "Supported formats: .txt, .docx, .pdf"
         )
-        hint.setStyleSheet(
+        self.hint_label.setStyleSheet(
             "padding: 10px; "
             "background-color: #f0f0f0; "
             "border: 2px dashed #ccc; "
             "border-radius: 5px;"
         )
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.hint_label)
 
         # Documents table
         self.docs_table = QTableWidget()
@@ -211,12 +212,21 @@ class DocumentsView(QWidget):
         """Load the default corpus for this project."""
         try:
             with self.db_service.get_session() as session:
+                # Get project to check is_general_corpus flag
+                project = self.project_service.get_project(session, self.project_id)
+                if project:
+                    self.is_reference_corpus = bool(project.is_general_corpus)
+
                 corpus = self.project_service.get_default_corpus(session, self.project_id)
                 if corpus:
                     self.corpus_id = corpus.corpus_id
-                    logger.info(f"Loaded corpus: {corpus.name} (ID: {corpus.corpus_id})")
+                    logger.info(f"Loaded corpus: {corpus.name} (ID: {corpus.corpus_id}, Reference: {self.is_reference_corpus})")
                 else:
                     logger.error(f"No corpus found for project {self.project_id}")
+
+                # Update UI for reference corpus
+                if self.is_reference_corpus:
+                    self._configure_reference_corpus_ui()
         except Exception as e:
             logger.exception("Failed to load corpus")
             show_error(self, "Error", f"Failed to load corpus: {e}")
@@ -257,8 +267,40 @@ class DocumentsView(QWidget):
             logger.exception("Failed to load documents")
             show_error(self, "Error", f"Failed to load documents: {e}")
 
+    def _configure_reference_corpus_ui(self):
+        """Configure UI for reference corpus (read-only documents)."""
+        # Disable import buttons
+        self.add_btn.setEnabled(False)
+        self.add_btn.setToolTip("Cannot add documents to reference corpus (read-only)")
+        self.add_folder_btn.setEnabled(False)
+        self.add_folder_btn.setToolTip("Cannot add documents to reference corpus (read-only)")
+
+        # Update hint label
+        self.hint_label.setText(
+            "ℹ️ This is a Reference Corpus (read-only documents)\n"
+            "You can browse documents, extract terms, and manage translations,\n"
+            "but cannot add or remove documents"
+        )
+        self.hint_label.setStyleSheet(
+            "padding: 10px; "
+            "background-color: #e3f2fd; "
+            "border: 2px solid #2196F3; "
+            "border-radius: 5px;"
+        )
+
     def on_add_files(self):
         """Handle add files button."""
+        # Block for reference corpus
+        if self.is_reference_corpus:
+            show_warning(
+                self,
+                "Reference Corpus",
+                "Cannot add documents to reference corpus.\n\n"
+                "Reference corpora are read-only for document operations.\n"
+                "You can still browse documents and manage translations."
+            )
+            return
+
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Files",
@@ -271,6 +313,17 @@ class DocumentsView(QWidget):
 
     def on_add_folder(self):
         """Handle add folder button."""
+        # Block for reference corpus
+        if self.is_reference_corpus:
+            show_warning(
+                self,
+                "Reference Corpus",
+                "Cannot add documents to reference corpus.\n\n"
+                "Reference corpora are read-only for document operations.\n"
+                "You can still browse documents and manage translations."
+            )
+            return
+
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "Select Folder"
@@ -577,11 +630,28 @@ class DocumentsView(QWidget):
     # Drag and drop handlers
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter event."""
+        # Block drag-drop for reference corpus
+        if self.is_reference_corpus:
+            event.ignore()
+            return
+
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent):
         """Handle drop event."""
+        # Block drag-drop for reference corpus
+        if self.is_reference_corpus:
+            show_warning(
+                self,
+                "Reference Corpus",
+                "Cannot add documents to reference corpus.\n\n"
+                "Reference corpora are read-only for document operations.\n"
+                "You can still browse documents and manage translations."
+            )
+            event.ignore()
+            return
+
         mime_data: QMimeData = event.mimeData()
         if mime_data.hasUrls():
             file_paths = []
