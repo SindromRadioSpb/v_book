@@ -193,16 +193,52 @@ def _worker_main(
 
 
 def _load_ctranslate2_model(model_path: str):
-    """Load CTranslate2 model."""
+    """Load CTranslate2 model with tokenizer.
+
+    Returns:
+        dict: {"translator": ctranslate2.Translator, "tokenizer": AutoTokenizer}
+    """
     try:
         import ctranslate2
     except ImportError:
         raise WorkerError("ctranslate2 not installed")
 
     try:
+        from transformers import NllbTokenizer
+    except ImportError:
+        raise WorkerError("transformers not installed (needed for tokenization)")
+
+    try:
+        # Load CTranslate2 translator
         translator = ctranslate2.Translator(model_path, device="cpu")
-        return translator
+
+        # Load tokenizer for proper tokenization/detokenization
+        # CTranslate2 models don't include tokenizer files, so we load from HuggingFace
+        model_name = Path(model_path).name
+
+        # Infer HuggingFace model ID from path
+        # e.g., "facebook_nllb-200-distilled-1.3B_ctranslate2" -> "facebook/nllb-200-distilled-1.3B"
+        if "nllb-200-distilled-1.3B" in model_name:
+            hf_model_id = "facebook/nllb-200-distilled-1.3B"
+        elif "nllb" in model_name.lower():
+            hf_model_id = "facebook/nllb-200-distilled-1.3B"  # Default to this
+        elif "seamless" in model_name.lower():
+            hf_model_id = "facebook/seamless-m4t-v2-large"
+        else:
+            raise WorkerError(f"Cannot determine HuggingFace model ID for: {model_name}")
+
+        # Load tokenizer from HuggingFace (will be cached locally)
+        tokenizer = NllbTokenizer.from_pretrained(
+            hf_model_id,
+            src_lang="eng_Latn",  # Default source language
+        )
+
+        return {"translator": translator, "tokenizer": tokenizer}
+    except WorkerError:
+        raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise WorkerError(f"Failed to load CTranslate2 model: {e}")
 
 
@@ -227,33 +263,57 @@ def _load_transformers_model(model_path: str, model_id: str):
 
 
 def _translate_ctranslate2(
-    translator,
+    model_dict: dict,
     text: str,
     source_lang: str,
     target_lang: str,
 ) -> str:
-    """Translate text using CTranslate2."""
-    try:
-        import ctranslate2
-    except ImportError:
-        raise WorkerError("ctranslate2 not installed")
+    """Translate text using CTranslate2 with proper tokenization.
 
-    # Tokenize input
-    # Note: For NLLB, language codes are embedded in tokenization
-    # Example: "heb_Hebr" → Hebrew, "rus_Cyrl" → Russian
-    # For now, simple whitespace tokenization (proper tokenizer needed in production)
-    tokens = text.split()
+    Args:
+        model_dict: Dict with "translator" and "tokenizer"
+        text: Input text
+        source_lang: Source language code (e.g., "eng_Latn")
+        target_lang: Target language code (e.g., "heb_Hebr")
 
-    # Translate
+    Returns:
+        Translated text
+    """
+    translator = model_dict["translator"]
+    tokenizer = model_dict["tokenizer"]
+
+    # Set source language for tokenizer
+    tokenizer.src_lang = source_lang
+
+    # Tokenize input text
+    # For NLLB, the tokenizer adds language-specific tokens
+    inputs = tokenizer(text, return_tensors="pt", padding=False, truncation=True, max_length=512)
+    input_ids = inputs["input_ids"][0].tolist()
+
+    # Convert token IDs back to tokens for CTranslate2
+    input_tokens = [tokenizer.convert_ids_to_tokens(id) for id in input_ids]
+
+    # Translate with CTranslate2
+    # For NLLB, we need to provide target language as prefix
     results = translator.translate_batch(
-        [tokens],
-        target_prefix=[[target_lang]],  # Language tag as prefix
+        [input_tokens],
+        target_prefix=[[target_lang]],
         beam_size=1,
+        max_decoding_length=512,
     )
 
+    # Get output tokens
+    output_tokens = results[0].hypotheses[0]
+
+    # Convert tokens back to IDs for detokenization
+    try:
+        output_ids = [tokenizer.convert_tokens_to_ids(token) for token in output_tokens]
+    except:
+        # Fallback: if token conversion fails, use tokens directly
+        output_ids = output_tokens
+
     # Detokenize
-    translated_tokens = results[0].hypotheses[0]
-    translated_text = " ".join(translated_tokens)
+    translated_text = tokenizer.decode(output_ids, skip_special_tokens=True)
 
     return translated_text
 
