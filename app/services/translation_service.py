@@ -11,14 +11,23 @@ Order of precedence (strict):
 All lookups use exact match on src_norm (normalized key).
 """
 import logging
+import time
+import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.normalization import normalize_for_tm
 from app.infra.sa_models import TMEntry, TMAlias, DictEntry, DictSource, MTCache, utc_now
+from app.infra.settings import SettingsService
+from app.infra.translators.base_provider import (
+    TranslationRequest,
+    TranslationResult as ProviderTranslationResult,
+    TranslationErrorKind,
+)
+from app.infra.translators.providers_registry import ProvidersRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +110,18 @@ class TranslationService:
             if result.translation:
                 return result
 
-            # 5. MT provider (not implemented yet - would go here)
-            # result = self._query_mt_provider(...)
+            # 5. MT provider (PATCH-P1-T03: provider chain)
+            result = self._translate_via_provider_chain(
+                session=session,
+                src_text=src_text,
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+                glossary=None,  # TODO P1-T05: Build glossary from approved terms
+                allow_fallback=True,  # TODO P1-T05: Make configurable per-request
+                trace_id="",  # Auto-generated if empty
+            )
+            if result.translation:
+                return result
 
         # No translation found
         return TranslationResult()
@@ -590,3 +609,240 @@ class TranslationService:
 
         self.logger.info(f"TM entry {tm_id} reverted to version {target_version}")
         return True
+
+    # ========================================================================
+    # PATCH-P1-T03: MT Provider Chain Integration
+    # ========================================================================
+
+    def _translate_via_provider_chain(
+        self,
+        session: Session,
+        src_text: str,
+        src_lang: str,
+        tgt_lang: str,
+        glossary: Optional[Any] = None,
+        allow_fallback: bool = True,
+        trace_id: str = "",
+    ) -> TranslationResult:
+        """
+        Translate via MT provider chain with fallback logic.
+
+        Args:
+            session: Database session (for future cache writes)
+            src_text: Source text to translate
+            src_lang: Source language (ISO 639-1)
+            tgt_lang: Target language (ISO 639-1)
+            glossary: Provider-specific glossary payload
+            allow_fallback: Allow fallback to next provider on error
+            trace_id: Trace ID for logging (generated if empty)
+
+        Returns:
+            TranslationResult (service class)
+        """
+        # Get settings
+        settings = SettingsService.get_instance()
+        enabled = settings.get_bool("mt/providers/enabled", default=False)
+        chain = settings.get_json("mt/providers/chain", default=[])
+
+        # Feature-safe default: MT disabled or no providers configured
+        if not enabled:
+            return TranslationResult(
+                source="none",
+                notes="MT providers disabled (mt/providers/enabled=False)"
+            )
+
+        if not chain or not isinstance(chain, list):
+            return TranslationResult(
+                source="none",
+                notes="No MT providers configured (mt/providers/chain is empty)"
+            )
+
+        # Generate trace_id if missing
+        if not trace_id:
+            trace_id = str(uuid.uuid4())
+
+        # Build TranslationRequest (provider format)
+        request = TranslationRequest(
+            source_text=src_text,
+            source_lang=src_lang,
+            target_lang=tgt_lang,
+            glossary=glossary,
+            trace_id=trace_id,
+            allow_fallback=allow_fallback,
+        )
+
+        # Get registry
+        registry = ProvidersRegistry()
+        total_latency_ms = 0
+        last_result: Optional[ProviderTranslationResult] = None
+
+        # Iterate provider chain
+        for index, provider_id in enumerate(chain, start=1):
+            # Get provider
+            provider = registry.get(provider_id)
+            if not provider:
+                self._log_provider_attempt({
+                    "trace_id": trace_id,
+                    "provider_id": provider_id,
+                    "attempt_index": index,
+                    "chain_total": len(chain),
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "decision": "SKIP_MISSING",
+                    "fallback_reason": "PROVIDER_NOT_REGISTERED",
+                })
+                continue
+
+            # Measure latency
+            start = time.perf_counter()
+            result = provider.translate(request)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            total_latency_ms += latency_ms
+
+            # Determine decision
+            if result.is_success:
+                decision = "STOP_SUCCESS"
+                fallback_reason = None
+            elif not allow_fallback:
+                decision = "STOP_FAIL"
+                fallback_reason = "ALLOW_FALLBACK_FALSE"
+            else:
+                decision = "CONTINUE_FALLBACK"
+                fallback_reason = result.error_kind.value if result.error_kind else "UNKNOWN"
+
+            # Log attempt
+            self._log_provider_attempt({
+                "trace_id": trace_id,
+                "provider_id": provider_id,
+                "display_name": provider.display_name,
+                "attempt_index": index,
+                "chain_total": len(chain),
+                "src_lang": src_lang,
+                "tgt_lang": tgt_lang,
+                "latency_ms": latency_ms,
+                "used_glossary": result.used_glossary,
+                "glossary_hash_present": bool(request.glossary_hash),
+                "cache_hit": result.cache_hit,
+                "error_kind": result.error_kind.value if result.error_kind else None,
+                "error_message": result.error_message,
+                "decision": decision,
+                "fallback_reason": fallback_reason,
+            })
+
+            # Success → return immediately
+            if result.is_success:
+                self._log_translation_completed(trace_id, index, total_latency_ms, provider_id)
+                return self._map_provider_result_to_service(result)
+
+            # Store last result for error reporting
+            last_result = result
+
+            # Failure → apply fallback policy
+            if not allow_fallback:
+                self._log_translation_failed(trace_id, index, "ALLOW_FALLBACK_FALSE")
+                return self._map_provider_result_to_service(result)
+
+            # Continue to next provider
+
+        # All providers failed
+        self._log_translation_failed(trace_id, len(chain), "NO_MORE_PROVIDERS")
+
+        # Return last error or generic failure
+        if last_result:
+            return self._map_provider_result_to_service(last_result)
+        else:
+            return TranslationResult(
+                source="none",
+                notes="All MT providers failed or unavailable"
+            )
+
+    def _map_provider_result_to_service(
+        self,
+        provider_result: ProviderTranslationResult
+    ) -> TranslationResult:
+        """
+        Map provider TranslationResult to service TranslationResult.
+
+        Args:
+            provider_result: Result from MT provider
+
+        Returns:
+            TranslationResult (service class)
+        """
+        return TranslationResult(
+            translation=provider_result.translated_text or None,
+            source="mt" if provider_result.is_success else "none",
+            confidence=0.8 if provider_result.is_success else None,
+            provider=provider_result.provider_id,
+            matched_on="mt_chain",
+            notes=provider_result.error_message if provider_result.is_error else None,
+        )
+
+    def _log_provider_attempt(self, event: Dict[str, Any]) -> None:
+        """
+        Log provider attempt event (structured logging).
+
+        Args:
+            event: Event dictionary with fields (trace_id, provider_id, etc.)
+        """
+        # PATCH-P1-T03: Basic logging (structured format in P1-T04)
+        trace_id = event.get("trace_id", "")
+        provider_id = event.get("provider_id", "")
+        attempt_index = event.get("attempt_index", 0)
+        decision = event.get("decision", "")
+        fallback_reason = event.get("fallback_reason", "")
+        error_kind = event.get("error_kind")
+        latency_ms = event.get("latency_ms", 0)
+
+        # Log at appropriate level
+        if error_kind in ("auth", "invalid_request", "AUTH", "INVALID_REQUEST"):
+            log_level = logging.ERROR
+            msg = f"MT provider_attempt trace_id={trace_id} provider={provider_id} attempt={attempt_index} decision={decision} error={error_kind} reason={fallback_reason} latency_ms={latency_ms} [CONFIG_ISSUE]"
+        elif error_kind in ("rate_limit", "quota", "unknown", "RATE_LIMIT", "QUOTA", "UNKNOWN"):
+            log_level = logging.WARNING
+            msg = f"MT provider_attempt trace_id={trace_id} provider={provider_id} attempt={attempt_index} decision={decision} error={error_kind} reason={fallback_reason} latency_ms={latency_ms}"
+        else:
+            log_level = logging.INFO
+            msg = f"MT provider_attempt trace_id={trace_id} provider={provider_id} attempt={attempt_index} decision={decision} error={error_kind} reason={fallback_reason} latency_ms={latency_ms}"
+
+        self.logger.log(log_level, msg)
+
+    def _log_translation_completed(
+        self,
+        trace_id: str,
+        total_attempts: int,
+        total_latency_ms: int,
+        final_provider: str
+    ) -> None:
+        """
+        Log translation completed event.
+
+        Args:
+            trace_id: Trace ID
+            total_attempts: Number of attempts made
+            total_latency_ms: Total latency (sum of all attempts)
+            final_provider: Provider that succeeded
+        """
+        self.logger.info(
+            f"MT translation_completed trace_id={trace_id} attempts={total_attempts} "
+            f"provider={final_provider} total_latency_ms={total_latency_ms}"
+        )
+
+    def _log_translation_failed(
+        self,
+        trace_id: str,
+        total_attempts: int,
+        failure_reason: str
+    ) -> None:
+        """
+        Log translation failed event.
+
+        Args:
+            trace_id: Trace ID
+            total_attempts: Number of attempts made
+            failure_reason: Why translation failed
+        """
+        self.logger.warning(
+            f"MT translation_failed trace_id={trace_id} attempts={total_attempts} "
+            f"reason={failure_reason}"
+        )
