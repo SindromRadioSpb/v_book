@@ -96,3 +96,8 @@ task.md
 
 # Installer output
 installer/output/
+
+# Reference corpora data files (keep scripts, not data)
+ref_corpora/*/raw/
+ref_corpora/*/jsonl/
+ref_corpora/*/manifests/
