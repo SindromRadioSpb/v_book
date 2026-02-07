@@ -7,10 +7,11 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus
+from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus, DictProject
 from app.infra.util.hashing import sha256_file
 from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor
 from app.services.db_service import DBService
+from app.domain.exceptions import ReferenceCorpusReadonlyError
 from app.infra.security import (
     validate_file_size,
     validate_path_security,
@@ -173,6 +174,14 @@ class IngestService:
         if not corpus:
             raise ValueError(f"Corpus not found: {corpus_id}")
 
+        # GUARD: Prevent adding documents to reference corpus
+        project = session.get(DictProject, corpus.project_id)
+        if project and project.is_general_corpus == 1:
+            raise ReferenceCorpusReadonlyError(
+                f"Cannot add documents to reference corpus '{project.name}'. "
+                f"Reference corpora are read-only for document operations."
+            )
+
         # Calculate file hash
         file_hash = sha256_file(file_path)
         logger.info(f"File hash: {file_hash}")
@@ -299,10 +308,23 @@ class IngestService:
 
         Returns:
             True if deleted, False if not found
+
+        Raises:
+            ReferenceCorpusReadonlyError: If attempting to delete document from reference corpus
         """
         doc = session.get(SourceDocument, doc_id)
         if not doc:
             return False
+
+        # GUARD: Prevent deleting documents from reference corpus
+        corpus = session.get(SourceCorpus, doc.corpus_id)
+        if corpus:
+            project = session.get(DictProject, corpus.project_id)
+            if project and project.is_general_corpus == 1:
+                raise ReferenceCorpusReadonlyError(
+                    f"Cannot delete documents from reference corpus '{project.name}'. "
+                    f"Reference corpora are read-only for document operations."
+                )
 
         try:
             # M4: Remove statistics first (delta subtraction)

@@ -16,6 +16,7 @@ from app.infra.sa_models import (
     TermCard,
 )
 from app.domain.dto import DeleteReport
+from app.domain.exceptions import ReferenceCorpusReadonlyError
 from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
@@ -55,14 +56,19 @@ class ProjectService:
         """
         Get the default reference corpus project ID.
 
-        Returns the project marked as is_general_corpus=1, or falls back to
-        "Hebrew Wikipedia Baseline" by name if no general corpus is marked.
+        Returns the project marked as is_general_corpus=1 (deterministic: lowest ID first),
+        or falls back to "Hebrew Wikipedia Baseline" by name if no general corpus is marked.
 
         Returns:
             Reference project ID or None if not found
         """
-        # First: look for is_general_corpus=1
-        stmt = select(DictProject.project_id).where(DictProject.is_general_corpus == 1)
+        # First: look for is_general_corpus=1 (deterministic: lowest project_id)
+        stmt = (
+            select(DictProject.project_id)
+            .where(DictProject.is_general_corpus == 1)
+            .order_by(DictProject.project_id.asc())
+            .limit(1)
+        )
         ref_id = session.execute(stmt).scalar_one_or_none()
 
         if ref_id:
@@ -147,24 +153,35 @@ class ProjectService:
 
         Returns:
             DeleteReport with counts of deleted items
-        """
-        try:
-            # Get project
-            project = self.get_project(session, project_id)
-            if not project:
-                return DeleteReport(
-                    project_id=project_id,
-                    project_name="Unknown",
-                    corpora_deleted=0,
-                    documents_deleted=0,
-                    sentences_deleted=0,
-                    lemmas_deleted=0,
-                    ngrams_deleted=0,
-                    term_cards_deleted=0,
-                    success=False,
-                    error_message="Project not found",
-                )
 
+        Raises:
+            ReferenceCorpusReadonlyError: If attempting to delete a reference corpus
+        """
+        # Get project
+        project = self.get_project(session, project_id)
+        if not project:
+            return DeleteReport(
+                project_id=project_id,
+                project_name="Unknown",
+                corpora_deleted=0,
+                documents_deleted=0,
+                sentences_deleted=0,
+                lemmas_deleted=0,
+                ngrams_deleted=0,
+                term_cards_deleted=0,
+                success=False,
+                error_message="Project not found",
+            )
+
+        # GUARD: Prevent deletion of reference corpus (BEFORE try block)
+        if project.is_general_corpus == 1:
+            raise ReferenceCorpusReadonlyError(
+                f"Cannot delete reference corpus '{project.name}'. "
+                f"Reference corpora are read-only and used for termhood calculations. "
+                f"To remove, first unmark as reference corpus (set is_general_corpus=0)."
+            )
+
+        try:
             project_name = project.name
 
             logger.info(f"Deleting project: {project_name} (ID: {project_id})")
