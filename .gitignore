@@ -101,3 +101,8 @@ installer/output/
 ref_corpora/*/raw/
 ref_corpora/*/jsonl/
 ref_corpora/*/manifests/
+
+# Test databases (root level only - keep app database)
+/hdle_premium.db
+/hdle_premium.db-shm
+/hdle_premium.db-wal
