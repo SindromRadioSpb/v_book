@@ -1,6 +1,7 @@
 """HDLE Premium - Main entry point."""
 import sys
 import logging
+import argparse
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
@@ -27,10 +28,25 @@ def get_app_dir() -> Path:
 
 def main():
     """Main application entry point."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="HDLE Premium - Terminology Extraction Tool")
+    parser.add_argument(
+        "--db-path",
+        type=str,
+        help="Path to database file (default: %LOCALAPPDATA%/HDLE/hdle.db)",
+    )
+    args = parser.parse_args()
+
     # Setup directories
     app_dir = get_app_dir()
     log_dir = app_dir / "logs"
-    db_path = app_dir / "hdle.db"
+
+    # Use custom database path if provided, otherwise use default
+    if args.db_path:
+        db_path = Path(args.db_path).resolve()
+        logger.info(f"Using custom database path: {db_path}")
+    else:
+        db_path = app_dir / "hdle.db"
 
     # Setup logging
     setup_logging(log_dir, level=logging.INFO)
