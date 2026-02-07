@@ -816,6 +816,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 4: Translation Pro (MT + Term Extraction)
 **Duration:** 4 weeks
+**Status:** 🚧 IN PROGRESS (Started: 2026-02-07)
 **Goal:** Automated translation with MT providers + advanced term extraction
 
 **P1 Tasks:**
