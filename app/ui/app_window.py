@@ -49,6 +49,9 @@ class AppWindow(QMainWindow):
         # Connect sidebar actions
         self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)
 
+        # Connect layout changes to autosave (debounced)
+        self.workspace.layout_changed.connect(self._save_workspace_layout)
+
         # Create dashboard
         self.dashboard = ProjectDashboard()
         self.dashboard.project_selected.connect(self.open_project)
@@ -57,6 +60,9 @@ class AppWindow(QMainWindow):
 
         # Show dashboard initially
         self.stack.setCurrentWidget(self.dashboard)
+
+        # Restore workspace layout
+        self._restore_workspace_layout()
 
         logger.info("AppWindow initialized")
 
@@ -202,6 +208,30 @@ class AppWindow(QMainWindow):
         self.stack.setCurrentWidget(self.dashboard)
         self.dashboard.load_projects()
 
+    def _save_workspace_layout(self):
+        """Save workspace layout to settings."""
+        try:
+            layout = self.workspace.save_layout()
+            self.settings.set_json("workspace/layout", layout)
+            logger.debug("Workspace layout saved")
+        except Exception as e:
+            logger.error(f"Failed to save workspace layout: {e}")
+
+    def _restore_workspace_layout(self):
+        """Restore workspace layout from settings."""
+        try:
+            layout = self.settings.get_json("workspace/layout")
+            if layout:
+                success = self.workspace.restore_layout(layout)
+                if not success:
+                    logger.warning("Failed to restore layout, resetting to default")
+                    self.workspace.reset_to_default()
+            else:
+                logger.debug("No saved layout found, using default")
+        except Exception as e:
+            logger.error(f"Failed to restore workspace layout: {e}, resetting to default")
+            self.workspace.reset_to_default()
+
     def _on_sidebar_action(self, action_id: str):
         """Route sidebar action to appropriate handler."""
         action_map = {
@@ -220,8 +250,9 @@ class AppWindow(QMainWindow):
         """Handle window close."""
         logger.info("Application closing")
 
-        # Save window geometry
+        # Save window geometry and workspace layout
         self.settings.save_window_geometry(self)
+        self._save_workspace_layout()
         self.settings.sync()
 
         event.accept()

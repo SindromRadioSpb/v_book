@@ -168,6 +168,11 @@ class WorkspaceManager(QWidget):
                 logger.warning(f"Layout schema version mismatch: got {version}, expected {self.LAYOUT_SCHEMA_VERSION}")
                 return False
 
+            # Check required keys
+            if "sidebar_visible" not in data or "splitter_state" not in data:
+                logger.warning("Layout data missing required keys")
+                return False
+
             # Restore sidebar visibility
             sidebar_visible = data.get("sidebar_visible", False)
             if sidebar_visible:
