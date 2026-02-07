@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMenuBar
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
+from app.infra.settings import SettingsService
 from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
@@ -24,7 +25,13 @@ class AppWindow(QMainWindow):
         self.setWindowTitle("HDLE Premium - Hebraic Dynamic Lexicon Engine")
         self.setMinimumSize(1200, 800)
 
+        # Get settings service
+        self.settings = SettingsService.get_instance()
+
         self.init_ui()
+
+        # Restore window geometry
+        self.settings.restore_window_geometry(self)
 
     def init_ui(self):
         """Initialize the UI."""
@@ -176,4 +183,9 @@ class AppWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close."""
         logger.info("Application closing")
+
+        # Save window geometry
+        self.settings.save_window_geometry(self)
+        self.settings.sync()
+
         event.accept()

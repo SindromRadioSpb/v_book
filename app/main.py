@@ -53,7 +53,8 @@ def main():
 
         # Create Qt application
         app = QApplication(sys.argv)
-        app.setApplicationName("HDLE Premium")
+        app.setOrganizationName("HDLE_Premium")
+        app.setApplicationName("HDLE_Premium")
 
         # Create and show main window
         window = AppWindow()
