@@ -89,3 +89,10 @@ test_norm.py
 *settings.local.json
 # Debug files
 debug_*.txt
+
+# Build logs and temporary files
+build_log.txt
+task.md
+
+# Installer output
+installer/output/
