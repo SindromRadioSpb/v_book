@@ -79,11 +79,7 @@ class ProjectDashboard(QWidget):
 
         layout.addLayout(header_layout)
 
-        # My Projects section
-        my_projects_label = QLabel("My Projects")
-        my_projects_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
-        layout.addWidget(my_projects_label)
-
+        # Projects table (includes both regular and reference corpus projects)
         self.project_model = ProjectListModel()
         self.project_table = QTableView()
         self.project_table.setModel(self.project_model)
@@ -96,24 +92,6 @@ class ProjectDashboard(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
         layout.addWidget(self.project_table)
-
-        # Reference Corpora section
-        ref_corpora_label = QLabel("Reference Corpora")
-        ref_corpora_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
-        layout.addWidget(ref_corpora_label)
-
-        self.ref_corpus_model = ProjectListModel()
-        self.ref_corpus_table = QTableView()
-        self.ref_corpus_table.setModel(self.ref_corpus_model)
-        self.ref_corpus_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.ref_corpus_table.doubleClicked.connect(self.on_ref_corpus_double_clicked)
-        self.ref_corpus_table.selectionModel().selectionChanged.connect(self.on_ref_selection_changed)
-
-        # Auto-resize columns
-        ref_header = self.ref_corpus_table.horizontalHeader()
-        ref_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-
-        layout.addWidget(self.ref_corpus_table)
 
         # Status bar
         self.status_label = QLabel("No projects")
@@ -142,20 +120,20 @@ class ProjectDashboard(QWidget):
                     )
                     project_stats.append(stats)
 
-                # Split projects into two groups
-                my_projects = [p for p in project_stats if not p.is_general_corpus]
-                ref_corpora = [p for p in project_stats if p.is_general_corpus]
-
-                self.project_model.update_projects(my_projects)
-                self.ref_corpus_model.update_projects(ref_corpora)
+                # Show all projects in one list (including reference corpora)
+                self.project_model.update_projects(project_stats)
 
                 # Update status
-                my_count = len(my_projects)
-                ref_count = len(ref_corpora)
-                if my_count + ref_count > 0:
-                    self.status_label.setText(
-                        f"My Projects: {my_count} | Reference Corpora: {ref_count}"
-                    )
+                my_count = len([p for p in project_stats if not p.is_general_corpus])
+                ref_count = len([p for p in project_stats if p.is_general_corpus])
+
+                if project_stats:
+                    if ref_count > 0:
+                        self.status_label.setText(
+                            f"Total projects: {len(project_stats)} (My Projects: {my_count} | Reference Corpora: {ref_count})"
+                        )
+                    else:
+                        self.status_label.setText(f"Total projects: {len(project_stats)}")
                 else:
                     self.status_label.setText("No projects. Click 'Create Project' to get started.")
 
@@ -200,10 +178,6 @@ class ProjectDashboard(QWidget):
         """Handle selection change - enable/disable Delete button."""
         selected_indexes = self.project_table.selectedIndexes()
         self.delete_btn.setEnabled(len(selected_indexes) > 0)
-
-        # Clear selection in Reference Corpora table
-        if len(selected_indexes) > 0:
-            self.ref_corpus_table.clearSelection()
 
     def on_open_verification(self):
         """Handle verification button click."""
@@ -298,20 +272,3 @@ class ProjectDashboard(QWidget):
                 "Error",
                 f"An error occurred while deleting the project:\n\n{str(e)[:200]}",
             )
-
-    def on_ref_corpus_double_clicked(self, index):
-        """Handle reference corpus double-click."""
-        if index.isValid():
-            row = index.row()
-            if row < len(self.ref_corpus_model.projects):
-                project_id = self.ref_corpus_model.projects[row].project_id
-                logger.info(f"Opening reference corpus: {project_id}")
-                self.project_selected.emit(project_id)
-
-    def on_ref_selection_changed(self):
-        """Handle reference corpus selection change."""
-        # Disable delete button for reference corpora (always read-only)
-        self.delete_btn.setEnabled(False)
-
-        # Clear selection in My Projects table
-        self.project_table.clearSelection()
