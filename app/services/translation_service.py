@@ -10,10 +10,12 @@ Order of precedence (strict):
 
 All lookups use exact match on src_norm (normalized key).
 """
+import hashlib
 import logging
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple, Any
 
 from sqlalchemy import and_, or_, select
@@ -28,6 +30,7 @@ from app.infra.translators.base_provider import (
     TranslationErrorKind,
 )
 from app.infra.translators.providers_registry import ProvidersRegistry
+from app.infra.reliability import CircuitBreaker, RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,22 @@ class TranslationService:
 
     def __init__(self):
         self.logger = logger
+
+        # PATCH-P1-T04: Circuit breaker for MT providers
+        settings = SettingsService.get_instance()
+        cb_enabled = settings.get_bool("mt/circuit_breaker/enabled", default=True)
+        if cb_enabled:
+            failure_threshold = settings.get_int("mt/circuit_breaker/failure_threshold", default=3)
+            cooldown_seconds = settings.get_int("mt/circuit_breaker/cooldown_seconds", default=60)
+            self._circuit_breaker = CircuitBreaker(
+                failure_threshold=failure_threshold,
+                cooldown_seconds=cooldown_seconds,
+            )
+        else:
+            self._circuit_breaker = None
+
+        # PATCH-P1-T04: Rate limiter for MT providers
+        self._rate_limiter = RateLimiter()
 
     def resolve_translation(
         self,
@@ -693,11 +712,89 @@ class TranslationService:
                 })
                 continue
 
+            # PATCH-P1-T04: Configure rate limiter for provider (if not already configured)
+            requests_per_min = settings.get_int(f"mt/provider/{provider_id}/requests_per_min", default=60)
+            max_wait_seconds = settings.get_int(f"mt/provider/{provider_id}/max_wait_seconds", default=5)
+            if self._rate_limiter.get_status(provider_id)["capacity"] == 0.0:
+                self._rate_limiter.configure_provider(provider_id, requests_per_min)
+
+            # PATCH-P1-T04: Check circuit breaker
+            if self._circuit_breaker and not self._circuit_breaker.is_request_allowed(provider_id):
+                # Circuit breaker OPEN → skip provider
+                breaker_state = self._circuit_breaker.get_state(provider_id)
+                self._log_provider_attempt({
+                    "trace_id": trace_id,
+                    "provider_id": provider_id,
+                    "display_name": provider.display_name,
+                    "attempt_index": index,
+                    "chain_total": len(chain),
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "decision": "SKIP_CIRCUIT_BREAKER_OPEN",
+                    "fallback_reason": f"CIRCUIT_BREAKER_{breaker_state.value.upper()}",
+                    "circuit_breaker_state": breaker_state.value,
+                })
+                continue
+
+            # PATCH-P1-T04: Check rate limiter
+            if not self._rate_limiter.acquire(provider_id, max_wait_seconds=max_wait_seconds):
+                # Rate limit exceeded → skip provider
+                self._log_provider_attempt({
+                    "trace_id": trace_id,
+                    "provider_id": provider_id,
+                    "display_name": provider.display_name,
+                    "attempt_index": index,
+                    "chain_total": len(chain),
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "decision": "SKIP_RATE_LIMIT",
+                    "fallback_reason": "RATE_LIMIT_EXCEEDED",
+                })
+                continue
+
+            # PATCH-P1-T04: Check cache first (if enabled)
+            cache_enabled = settings.get_bool("mt/cache_enabled", default=True)
+
+            if cache_enabled:
+                cached_result = self._lookup_provider_cache(session, request, provider_id)
+                if cached_result:
+                    # Cache hit!
+                    self._log_provider_attempt({
+                        "trace_id": trace_id,
+                        "provider_id": provider_id,
+                        "display_name": provider.display_name,
+                        "attempt_index": index,
+                        "chain_total": len(chain),
+                        "src_lang": src_lang,
+                        "tgt_lang": tgt_lang,
+                        "latency_ms": 0,
+                        "used_glossary": bool(request.glossary),
+                        "glossary_hash_present": bool(request.glossary_hash),
+                        "cache_hit": True,
+                        "error_kind": None,
+                        "error_message": None,
+                        "decision": "STOP_SUCCESS",
+                        "fallback_reason": None,
+                    })
+                    self._log_translation_completed(trace_id, index, 0, provider_id)
+                    return self._map_provider_result_to_service(cached_result)
+
             # Measure latency
             start = time.perf_counter()
             result = provider.translate(request)
             latency_ms = int((time.perf_counter() - start) * 1000)
             total_latency_ms += latency_ms
+
+            # PATCH-P1-T04: Store successful result in cache
+            if cache_enabled and result.is_success:
+                self._store_in_cache(session, request, result, project_id=None)
+
+            # PATCH-P1-T04: Record result in circuit breaker
+            if self._circuit_breaker:
+                if result.is_success:
+                    self._circuit_breaker.record_success(provider_id)
+                else:
+                    self._circuit_breaker.record_failure(provider_id)
 
             # Determine decision
             if result.is_success:
@@ -846,3 +943,169 @@ class TranslationService:
             f"MT translation_failed trace_id={trace_id} attempts={total_attempts} "
             f"reason={failure_reason}"
         )
+
+    # ========================================================================
+    # PATCH-P1-T04: MT Cache Integration
+    # ========================================================================
+
+    def _lookup_provider_cache(
+        self,
+        session: Session,
+        request: TranslationRequest,
+        provider_id: str,
+    ) -> Optional[ProviderTranslationResult]:
+        """
+        Lookup MT cache for given request.
+
+        Args:
+            session: Database session
+            request: Translation request
+            provider_id: Provider ID
+
+        Returns:
+            Cached TranslationResult or None if cache miss/expired
+        """
+        # Build cache key
+        cache_key = self._build_cache_key(request, provider_id)
+
+        # Query mt_cache table
+        stmt = select(MTCache).where(
+            MTCache.provider == provider_id,
+            MTCache.src_lang == request.source_lang,
+            MTCache.tgt_lang == request.target_lang,
+            MTCache.request_key == cache_key,
+        )
+
+        entry = session.execute(stmt).scalar_one_or_none()
+
+        if not entry:
+            return None  # Cache miss
+
+        # Check expiration
+        if entry.expires_at:
+            try:
+                expires_at = datetime.fromisoformat(entry.expires_at.replace('Z', '+00:00'))
+                if datetime.now(timezone.utc) > expires_at:
+                    return None  # Expired
+            except (ValueError, AttributeError):
+                # Invalid expires_at format → treat as expired
+                return None
+
+        # Cache hit!
+        return ProviderTranslationResult(
+            translated_text=entry.translation,
+            provider_id=provider_id,
+            cache_hit=True,
+            latency_ms=0,  # Cache = instant
+        )
+
+    def _store_in_cache(
+        self,
+        session: Session,
+        request: TranslationRequest,
+        result: ProviderTranslationResult,
+        project_id: Optional[int] = None,
+    ) -> None:
+        """
+        Store successful translation in cache.
+
+        Args:
+            session: Database session
+            request: Translation request
+            result: Translation result from provider
+            project_id: Project ID (for project-scoped cache)
+        """
+        if not result.is_success:
+            return  # Don't cache errors
+
+        # Get settings
+        settings = SettingsService.get_instance()
+        ttl_days = settings.get_int("mt/cache_ttl_days", default=7)
+
+        # Calculate expiration
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+
+        # Build cache key
+        cache_key = self._build_cache_key(request, result.provider_id)
+
+        # Check if entry already exists (upsert logic)
+        stmt = select(MTCache).where(
+            MTCache.provider == result.provider_id,
+            MTCache.src_lang == request.source_lang,
+            MTCache.tgt_lang == request.target_lang,
+            MTCache.request_key == cache_key,
+        )
+        existing = session.execute(stmt).scalar_one_or_none()
+
+        if existing:
+            # Update existing entry
+            existing.translation = result.translated_text
+            existing.confidence = result.meta.get("confidence", 0.8)
+            existing.expires_at = expires_at
+            existing.created_at = utc_now()
+        else:
+            # Create new entry
+            cache_entry = MTCache(
+                project_id=project_id,
+                provider=result.provider_id,
+                src_lang=request.source_lang,
+                tgt_lang=request.target_lang,
+                request_key=cache_key,
+                src_text=request.source_text,
+                src_norm=self._normalize_for_cache(request.source_text),
+                glossary_hash=request.glossary_hash or "",
+                translation=result.translated_text,
+                confidence=result.meta.get("confidence", 0.8),
+                created_at=utc_now(),
+                expires_at=expires_at,
+            )
+            session.add(cache_entry)
+
+        session.flush()
+
+    def _build_cache_key(
+        self,
+        request: TranslationRequest,
+        provider_id: str,
+    ) -> str:
+        """
+        Build cache key from request parameters.
+
+        Formula:
+            sha256(src_text + "|" + src_lang + "|" + tgt_lang + "|" + provider_id + "|" + glossary_hash)
+
+        Args:
+            request: Translation request
+            provider_id: Provider ID
+
+        Returns:
+            SHA256 hex digest (cache key)
+        """
+        # Normalize source text for consistent caching
+        normalized_text = self._normalize_for_cache(request.source_text)
+
+        # Build key components
+        components = [
+            normalized_text,
+            request.source_lang,
+            request.target_lang,
+            provider_id,
+            request.glossary_hash or "",
+        ]
+
+        # Join and hash
+        key_string = "|".join(components)
+        return hashlib.sha256(key_string.encode('utf-8')).hexdigest()
+
+    def _normalize_for_cache(self, text: str) -> str:
+        """
+        Normalize text for cache key (consistent formatting).
+
+        Args:
+            text: Source text
+
+        Returns:
+            Normalized text (strip whitespace, lowercase)
+        """
+        # Simple normalization: strip and collapse whitespace
+        return " ".join(text.strip().split())

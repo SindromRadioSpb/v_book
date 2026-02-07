@@ -39,15 +39,20 @@ def mock_settings(monkeypatch):
         "mt/providers/enabled": True,
         "mt/providers/chain": [],
         "mt/providers/allow_fallback_default": True,
+        "mt/cache_enabled": False,  # Disable cache for unit tests (cache tests require real DB)
     }
 
     def get_bool(key, default=False):
+        return settings_data.get(key, default)
+
+    def get_int(key, default=0):
         return settings_data.get(key, default)
 
     def get_json(key, default=None):
         return settings_data.get(key, default)
 
     mock_instance.get_bool = get_bool
+    mock_instance.get_int = get_int
     mock_instance.get_json = get_json
 
     # Monkeypatch SettingsService.get_instance to return mock

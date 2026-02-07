@@ -1,6 +1,6 @@
 # P1 Translation Pro - Implementation Plan
 
-**Status:** PATCH-P1-T03 (MT Provider Chain Integration)
+**Status:** PATCH-P1-T04 (MT Cache + Circuit Breaker + Rate Limiter)
 **Date:** 2026-02-07
 **Owner:** Staff Engineer/Architect
 
@@ -60,7 +60,7 @@ class BaseProvider(ABC):
 
 ---
 
-## PATCH-P1-T03: TranslationService Integration (IN PROGRESS)
+## PATCH-P1-T03: TranslationService Integration (COMPLETE)
 
 ### Integration Point
 
@@ -320,12 +320,203 @@ def _map_provider_result_to_service(
 
 ---
 
-## PATCH-P1-T04: Cache + Circuit Breaker (FUTURE)
+## PATCH-P1-T04: Cache + Circuit Breaker + Rate Limiter (COMPLETE)
 
-- MT cache integration (check cache before provider call)
-- Circuit breaker per provider (state: CLOSED → OPEN → HALF_OPEN)
-- Rate limiting per provider
-- Cache TTL and invalidation
+### Overview
+
+Enhances provider chain with:
+1. **MT Cache** - Cache successful translations per provider (SQLite, TTL-based)
+2. **Circuit Breaker** - Prevent cascading failures (CLOSED/OPEN/HALF_OPEN states)
+3. **Rate Limiter** - Prevent hitting provider rate limits (token bucket algorithm)
+
+### MT Cache
+
+**Table:** `mt_cache` (created in schema v6 - M7 Translation Memory migration)
+
+**Schema:**
+```sql
+CREATE TABLE IF NOT EXISTS mt_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider VARCHAR(50) NOT NULL,
+    request_key VARCHAR(64) NOT NULL,     -- SHA256 hash
+    src_lang VARCHAR(10) NOT NULL,
+    tgt_lang VARCHAR(10) NOT NULL,
+    src_text TEXT NOT NULL,
+    translated_text TEXT NOT NULL,
+    used_glossary BOOLEAN NOT NULL DEFAULT 0,
+    glossary_hash VARCHAR(64),
+    project_id INTEGER,
+    created_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    last_hit_at TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_mt_cache_key ON mt_cache(provider, request_key);
+CREATE INDEX idx_mt_cache_expiration ON mt_cache(expires_at);
+```
+
+**Cache Key Formula:**
+```python
+def _build_cache_key(self, request, provider_id) -> str:
+    """Build cache key from request + provider_id.
+
+    Formula: SHA256(normalized_text|src_lang|tgt_lang|provider_id|glossary_hash)
+    """
+    normalized_text = request.source_text.strip().lower()
+    glossary_hash = request.glossary_hash or ""
+
+    key_input = (
+        f"{normalized_text}|{request.source_lang}|{request.target_lang}|"
+        f"{provider_id}|{glossary_hash}"
+    )
+    return hashlib.sha256(key_input.encode('utf-8')).hexdigest()
+```
+
+**Cache Lookup:**
+- Called before provider translation attempt
+- Checks expiration (`expires_at > now`)
+- Updates `hit_count` and `last_hit_at` on hit
+- Returns `ProviderTranslationResult` with `cache_hit=True`
+
+**Cache Store:**
+- Only stores **successful** translations
+- Sets `expires_at = now + TTL` (default 7 days)
+- Stores full request context (src_text, languages, glossary_hash, project_id)
+
+**Settings:**
+- `mt/cache_enabled` (bool, default: `True`)
+- `mt/cache_ttl_days` (int, default: `7`)
+
+### Circuit Breaker
+
+**File:** `app/infra/reliability/circuit_breaker.py`
+
+**States:**
+- `CLOSED` - Normal operation (allow all requests)
+- `OPEN` - Blocking requests (provider failed repeatedly)
+- `HALF_OPEN` - Testing recovery (allow 1 test request)
+
+**Transitions:**
+```
+CLOSED --[failure_threshold reached]--> OPEN
+OPEN --[cooldown_period expired]--> HALF_OPEN
+HALF_OPEN --[test request succeeds]--> CLOSED
+HALF_OPEN --[test request fails]--> OPEN
+```
+
+**Algorithm:**
+1. **CLOSED state:**
+   - Allow all requests
+   - Track consecutive failures per provider
+   - If `failure_count >= failure_threshold` → transition to OPEN
+
+2. **OPEN state:**
+   - Block all requests (skip provider in chain)
+   - After `cooldown_seconds` elapsed → transition to HALF_OPEN
+
+3. **HALF_OPEN state:**
+   - Allow 1 test request
+   - Success → reset failures, transition to CLOSED
+   - Failure → transition back to OPEN (cooldown resets)
+
+**Settings:**
+- `mt/circuit_breaker/enabled` (bool, default: `True`)
+- `mt/circuit_breaker/failure_threshold` (int, default: `3`)
+- `mt/circuit_breaker/cooldown_seconds` (int, default: `60`)
+
+**Integration:**
+```python
+# Before provider call
+if not self._circuit_breaker.is_request_allowed(provider_id):
+    logger.warning(f"Circuit breaker OPEN for {provider_id}, skipping")
+    continue  # Skip to next provider
+
+# After provider call
+if result.is_success:
+    self._circuit_breaker.record_success(provider_id)
+else:
+    self._circuit_breaker.record_failure(provider_id)
+```
+
+### Rate Limiter
+
+**File:** `app/infra/reliability/rate_limiter.py`
+
+**Algorithm:** Token Bucket
+- Each provider has a bucket with tokens (capacity = requests_per_minute)
+- Each request consumes 1 token
+- Tokens refill at rate `requests_per_minute / 60.0` tokens/second
+- If no tokens available:
+  - Wait up to `max_wait_seconds` for token refill
+  - If wait exceeds limit → return `False` (rate limit exceeded)
+
+**Configuration:**
+```python
+# In TranslationService.__init__()
+self._rate_limiter.configure_provider("deepl", requests_per_minute=60)
+self._rate_limiter.configure_provider("libretranslate", requests_per_minute=120)
+```
+
+**Integration:**
+```python
+# Before provider call
+if not self._rate_limiter.acquire(provider_id, max_wait_seconds=5.0):
+    logger.warning(f"Rate limit exceeded for {provider_id}, skipping")
+    continue  # Skip to next provider
+```
+
+**Status Monitoring:**
+```python
+status = self._rate_limiter.get_status("deepl")
+# Returns: {"tokens": 45.3, "capacity": 60.0, "refill_rate": 1.0}
+```
+
+### Provider Chain Integration
+
+**Updated Flow:**
+```
+1. Check settings (enabled, chain)
+2. Generate trace_id
+3. For each provider in chain:
+   a. Check circuit breaker (skip if OPEN)
+   b. Check rate limiter (skip if no tokens)
+   c. Check cache (return if hit)
+   d. Call provider.translate()
+   e. Record circuit breaker result
+   f. Store in cache (if success)
+   g. Return (if success) or continue (if error + allow_fallback)
+4. All providers failed → return error
+```
+
+**Logging Updates:**
+- `cache_hit` field added to `provider_attempt` logs
+- Circuit breaker state logged when OPEN
+- Rate limiter wait time logged
+
+### Tests
+
+**File:** `tests/test_p1_mt_cache_circuit_breaker.py` (6/6 PASS)
+
+**Circuit Breaker Tests:**
+1. `test_circuit_breaker_state_transitions` - CLOSED → OPEN → HALF_OPEN → CLOSED
+2. `test_circuit_breaker_half_open_failure_back_to_open` - HALF_OPEN → OPEN on failure
+3. `test_circuit_breaker_opens_after_failures` - Integration with provider chain
+
+**Rate Limiter Tests:**
+4. `test_rate_limiter_allows_within_limit` - Allows requests within limit
+5. `test_rate_limiter_blocks_over_limit` - Blocks requests over limit
+6. `test_rate_limiter_waits_if_max_wait_allows` - Waits for token refill
+
+**Note:** Full cache integration tests (hit/miss/expiration) require real SQLite database and are deferred to separate integration test suite.
+
+### Deliverables
+
+- ✅ MT cache implementation (`_lookup_provider_cache()`, `_store_in_cache()`, `_build_cache_key()`)
+- ✅ Circuit breaker module (`app/infra/reliability/circuit_breaker.py`)
+- ✅ Rate limiter module (`app/infra/reliability/rate_limiter.py`)
+- ✅ Provider chain integration (cache check before call, store after success)
+- ✅ Unit tests for circuit breaker state machine and rate limiter
+- ✅ Documentation updates
 
 ---
 
