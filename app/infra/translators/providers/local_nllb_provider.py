@@ -232,9 +232,18 @@ class LocalNLLBProvider(BaseProvider):
         return False
 
     def get_model_version(self) -> str:
-        """Return model version for cache key."""
-        # Use model ID as version
-        return self.model_id.replace("/", "_")
+        """
+        Return model version for cache key.
+
+        Format: {model_id}_{backend}
+        Example: facebook_nllb-200-distilled-1.3B_ctranslate2
+
+        This ensures different backends (ctranslate2 vs transformers)
+        use separate cache entries.
+        """
+        # Include both model_id and backend for cache isolation
+        model_id_normalized = self.model_id.replace("/", "_")
+        return f"{model_id_normalized}_{self.backend}"
 
     def healthcheck(self) -> bool:
         """Check if worker is alive."""

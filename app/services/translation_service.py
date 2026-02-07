@@ -772,8 +772,11 @@ class TranslationService:
             # PATCH-P1-T04: Check cache first (if enabled)
             cache_enabled = settings.get_bool("mt/cache_enabled", default=True)
 
+            # PATCH-09: Get model version for cache keying
+            model_version = provider.get_model_version() if hasattr(provider, 'get_model_version') else ""
+
             if cache_enabled:
-                cached_result = self._lookup_provider_cache(session, request, provider_id)
+                cached_result = self._lookup_provider_cache(session, request, provider_id, model_version)
                 if cached_result:
                     # Cache hit!
                     self._log_provider_attempt({
@@ -822,8 +825,9 @@ class TranslationService:
             total_latency_ms += latency_ms
 
             # PATCH-P1-T04: Store successful result in cache
+            # PATCH-09: Include model_version for cache isolation
             if cache_enabled and result.is_success:
-                self._store_in_cache(session, request, result, project_id=None)
+                self._store_in_cache(session, request, result, project_id=None, model_version=model_version)
 
             # PATCH-P1-T04: Record result in circuit breaker
             if self._circuit_breaker:
@@ -989,6 +993,7 @@ class TranslationService:
         session: Session,
         request: TranslationRequest,
         provider_id: str,
+        model_version: str = "",
     ) -> Optional[ProviderTranslationResult]:
         """
         Lookup MT cache for given request.
@@ -997,43 +1002,51 @@ class TranslationService:
             session: Database session
             request: Translation request
             provider_id: Provider ID
+            model_version: Model version from provider (PATCH-09)
 
         Returns:
             Cached TranslationResult or None if cache miss/expired
         """
-        # Build cache key
-        cache_key = self._build_cache_key(request, provider_id)
+        # PATCH-09: Feature-safe - catch cache errors, don't break translation
+        try:
+            # Build cache key (PATCH-09: include model_version)
+            cache_key = self._build_cache_key(request, provider_id, model_version)
 
-        # Query mt_cache table
-        stmt = select(MTCache).where(
-            MTCache.provider == provider_id,
-            MTCache.src_lang == request.source_lang,
-            MTCache.tgt_lang == request.target_lang,
-            MTCache.request_key == cache_key,
-        )
+            # Query mt_cache table
+            stmt = select(MTCache).where(
+                MTCache.provider == provider_id,
+                MTCache.src_lang == request.source_lang,
+                MTCache.tgt_lang == request.target_lang,
+                MTCache.request_key == cache_key,
+            )
 
-        entry = session.execute(stmt).scalar_one_or_none()
+            entry = session.execute(stmt).scalar_one_or_none()
 
-        if not entry:
-            return None  # Cache miss
+            if not entry:
+                return None  # Cache miss
 
-        # Check expiration
-        if entry.expires_at:
-            try:
-                expires_at = datetime.fromisoformat(entry.expires_at.replace('Z', '+00:00'))
-                if datetime.now(timezone.utc) > expires_at:
-                    return None  # Expired
-            except (ValueError, AttributeError):
-                # Invalid expires_at format → treat as expired
-                return None
+            # Check expiration
+            if entry.expires_at:
+                try:
+                    expires_at = datetime.fromisoformat(entry.expires_at.replace('Z', '+00:00'))
+                    if datetime.now(timezone.utc) > expires_at:
+                        return None  # Expired
+                except (ValueError, AttributeError):
+                    # Invalid expires_at format → treat as expired
+                    return None
 
-        # Cache hit!
-        return ProviderTranslationResult(
-            translated_text=entry.translation,
-            provider_id=provider_id,
-            cache_hit=True,
-            latency_ms=0,  # Cache = instant
-        )
+            # Cache hit!
+            return ProviderTranslationResult(
+                translated_text=entry.translation,
+                provider_id=provider_id,
+                cache_hit=True,
+                latency_ms=0,  # Cache = instant
+            )
+
+        except Exception as e:
+            # PATCH-09: Cache error → log and continue (feature-safe)
+            logger.warning(f"Cache lookup error (continuing with provider): {e}")
+            return None  # Treat as cache miss
 
     def _store_in_cache(
         self,
@@ -1041,6 +1054,7 @@ class TranslationService:
         request: TranslationRequest,
         result: ProviderTranslationResult,
         project_id: Optional[int] = None,
+        model_version: str = "",
     ) -> None:
         """
         Store successful translation in cache.
@@ -1050,69 +1064,78 @@ class TranslationService:
             request: Translation request
             result: Translation result from provider
             project_id: Project ID (for project-scoped cache)
+            model_version: Model version from provider (PATCH-09)
         """
         if not result.is_success:
             return  # Don't cache errors
 
-        # Get settings
-        settings = SettingsService.get_instance()
-        ttl_days = settings.get_int("mt/cache_ttl_days", default=7)
+        # PATCH-09: Feature-safe - catch cache store errors, don't break translation
+        try:
+            # Get settings
+            settings = SettingsService.get_instance()
+            ttl_days = settings.get_int("mt/cache_ttl_days", default=7)
 
-        # Calculate expiration
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+            # Calculate expiration
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
 
-        # Build cache key
-        cache_key = self._build_cache_key(request, result.provider_id)
+            # Build cache key (PATCH-09: include model_version)
+            cache_key = self._build_cache_key(request, result.provider_id, model_version)
 
-        # Check if entry already exists (upsert logic)
-        stmt = select(MTCache).where(
-            MTCache.provider == result.provider_id,
-            MTCache.src_lang == request.source_lang,
-            MTCache.tgt_lang == request.target_lang,
-            MTCache.request_key == cache_key,
-        )
-        existing = session.execute(stmt).scalar_one_or_none()
-
-        if existing:
-            # Update existing entry
-            existing.translation = result.translated_text
-            existing.confidence = result.meta.get("confidence", 0.8)
-            existing.expires_at = expires_at
-            existing.created_at = utc_now()
-        else:
-            # Create new entry
-            cache_entry = MTCache(
-                project_id=project_id,
-                provider=result.provider_id,
-                src_lang=request.source_lang,
-                tgt_lang=request.target_lang,
-                request_key=cache_key,
-                src_text=request.source_text,
-                src_norm=self._normalize_for_cache(request.source_text),
-                glossary_hash=request.glossary_hash or "",
-                translation=result.translated_text,
-                confidence=result.meta.get("confidence", 0.8),
-                created_at=utc_now(),
-                expires_at=expires_at,
+            # Check if entry already exists (upsert logic)
+            stmt = select(MTCache).where(
+                MTCache.provider == result.provider_id,
+                MTCache.src_lang == request.source_lang,
+                MTCache.tgt_lang == request.target_lang,
+                MTCache.request_key == cache_key,
             )
-            session.add(cache_entry)
+            existing = session.execute(stmt).scalar_one_or_none()
 
-        session.flush()
+            if existing:
+                # Update existing entry
+                existing.translation = result.translated_text
+                existing.confidence = result.meta.get("confidence", 0.8)
+                existing.expires_at = expires_at
+                existing.created_at = utc_now()
+            else:
+                # Create new entry
+                cache_entry = MTCache(
+                    project_id=project_id,
+                    provider=result.provider_id,
+                    src_lang=request.source_lang,
+                    tgt_lang=request.target_lang,
+                    request_key=cache_key,
+                    src_text=request.source_text,
+                    src_norm=self._normalize_for_cache(request.source_text),
+                    glossary_hash=request.glossary_hash or "",
+                    translation=result.translated_text,
+                    confidence=result.meta.get("confidence", 0.8),
+                    created_at=utc_now(),
+                    expires_at=expires_at,
+                )
+                session.add(cache_entry)
+
+            session.flush()
+
+        except Exception as e:
+            # PATCH-09: Cache store error → log and continue (feature-safe)
+            logger.warning(f"Cache store error (translation still succeeded): {e}")
 
     def _build_cache_key(
         self,
         request: TranslationRequest,
         provider_id: str,
+        model_version: str = "",
     ) -> str:
         """
         Build cache key from request parameters.
 
         Formula:
-            sha256(src_text + "|" + src_lang + "|" + tgt_lang + "|" + provider_id + "|" + glossary_hash)
+            sha256(src_text + "|" + src_lang + "|" + tgt_lang + "|" + provider_id + "|" + glossary_hash + "|" + model_version)
 
         Args:
             request: Translation request
             provider_id: Provider ID
+            model_version: Model version from provider.get_model_version() (PATCH-09)
 
         Returns:
             SHA256 hex digest (cache key)
@@ -1120,13 +1143,14 @@ class TranslationService:
         # Normalize source text for consistent caching
         normalized_text = self._normalize_for_cache(request.source_text)
 
-        # Build key components
+        # Build key components (PATCH-09: added model_version)
         components = [
             normalized_text,
             request.source_lang,
             request.target_lang,
             provider_id,
             request.glossary_hash or "",
+            model_version,  # PATCH-09: Include model version for cache isolation
         ]
 
         # Join and hash
