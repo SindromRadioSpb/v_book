@@ -1,0 +1,40 @@
+{
+  "benchmark_results": {
+    "nlp": {
+      "phase": "nlp_processing",
+      "sample_size": 99,
+      "success": 99,
+      "errors": 0,
+      "duration_sec": 77.8733901977539,
+      "warmup_sec": 0.5570831298828125,
+      "throughput_docs_per_sec": 1.2712943374957297,
+      "use_gpu": false
+    },
+    "term": {
+      "phase": "term_extraction",
+      "sample_size": 100,
+      "duration_sec": 3.9555699825286865,
+      "throughput_docs_per_sec": 25.28080667051497,
+      "ngrams_extracted": 806,
+      "clusters_created": 760
+    }
+  },
+  "extrapolated_estimates": {
+    "total_docs": 387639,
+    "nlp_processing": {
+      "estimated_duration_sec": 304916.79901885986,
+      "estimated_duration_human": "84.7h",
+      "throughput_docs_per_sec": 1.2712943374957297
+    },
+    "term_extraction": {
+      "estimated_duration_sec": 15333.331924574375,
+      "estimated_duration_human": "4.3h",
+      "throughput_docs_per_sec": 25.28080667051497
+    },
+    "total_pipeline": {
+      "estimated_duration_sec": 320250.13094343425,
+      "estimated_duration_human": "89.0h"
+    }
+  },
+  "timestamp": "20260207T115954Z"
+}
