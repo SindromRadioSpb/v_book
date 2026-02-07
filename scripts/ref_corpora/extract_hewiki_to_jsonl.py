@@ -82,7 +82,8 @@ class ShardWriter:
 
         shard_name = f"{self.prefix}_{self.current_shard:05d}.jsonl"
         self.current_path = self.out_dir / shard_name
-        self.current_file = open(self.current_path, "w", encoding="utf-8")
+        # Use binary mode with UTF-8 to preserve exact line endings (LF not CRLF)
+        self.current_file = open(self.current_path, "wb")
         self.current_lines = 0
         self.current_bytes = 0
 
@@ -94,6 +95,7 @@ class ShardWriter:
             return
 
         self.current_file.close()
+        self.current_file = None  # Reset to allow next shard to open
 
         # Compute SHA256
         sha256 = hashlib.sha256()
@@ -133,7 +135,8 @@ class ShardWriter:
         if not self.current_file:
             self._open_next_shard()
 
-        self.current_file.write(line)
+        # Write bytes (file opened in binary mode to preserve exact LF line endings)
+        self.current_file.write(line_bytes)
         self.current_lines += 1
         self.current_bytes += line_size
         self.total_docs += 1
