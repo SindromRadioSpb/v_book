@@ -1,8 +1,8 @@
 # MT Provider Setup Guide
 
 **Audience:** End users
-**Date:** 2026-02-07
-**Version:** 1.0 (P1 Translation Pro)
+**Date:** 2026-02-08
+**Version:** 1.2 (P1 Translation Pro + UI Integration)
 
 ---
 
@@ -48,7 +48,72 @@ Each provider requires an API key (except LibreTranslate and Mock).
 
 ---
 
-### 2. Configure in HDLE Premium
+### 2. Using Translation in UI
+
+**NEW (2026-02-08):** HDLE Premium now has dedicated UI for translating text!
+
+#### Quick Translation
+
+1. **Open Menu:**
+   - Menu: `Tools → Translation → Translate Text...`
+   - Keyboard: `Ctrl+Alt+T`
+
+2. **Enter Text:**
+   - Select source language (e.g., English)
+   - Select target language (e.g., Hebrew)
+   - Type or paste text to translate
+
+3. **Click "Translate"**
+   - Translation runs in background (UI doesn't freeze)
+   - Progress indicator shows while translating
+   - Translated text appears in output field
+
+4. **View Metadata:**
+   - Provider used: `local_nllb` (Local MT) or `deepl` (Cloud MT)
+   - Cache hit: `Yes ✓` (instant) or `No` (fresh translation)
+   - Glossary: `Yes ✓` if approved terms applied
+   - Latency: Translation time in milliseconds
+   - Model: Model ID if using Local MT
+
+5. **Copy Result:**
+   - Click "Copy to Clipboard" button
+   - Or: Select text and `Ctrl+C`
+
+**Example:**
+```
+Source (English): "database management system"
+Target (Hebrew): "מערכת ניהול מסד נתונים"
+
+Metadata: Provider: local_nllb | Source: mt | Cache Hit: No | Latency: 1234 ms | Model: facebook/nllb-200-distilled-1.3B
+```
+
+#### Configure Providers
+
+1. **Open Settings:**
+   - Menu: `Tools → Translation → MT Provider Settings...`
+   - Keyboard: `Ctrl+Alt+P`
+
+2. **Enable/Disable Providers:**
+   - Check/uncheck providers in list
+   - Local NLLB: Requires model installation (see below)
+   - Cloud providers: Require API keys
+
+3. **Set Provider Chain:**
+   - Drag providers to reorder priority
+   - Example: `Local NLLB → DeepL → LibreTranslate`
+   - First provider tried first, fallback to next on error
+
+4. **Configure Rate Limits:**
+   - Requests per minute (default: 60)
+   - Local providers: Unlimited (9999)
+
+5. **Save Settings:**
+   - Click "Save" or "OK"
+   - Settings persist across sessions
+
+---
+
+### 3. Configure in HDLE Premium (Advanced)
 
 #### Option A: Settings UI (RECOMMENDED)
 
@@ -790,4 +855,4 @@ Output translation
 ---
 
 **Last Updated:** 2026-02-08
-**Document Version:** 1.1 (P1 Translation Pro + Local MT)
+**Document Version:** 1.2 (P1 Translation Pro + Local MT + UI Integration)

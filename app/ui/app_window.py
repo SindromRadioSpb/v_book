@@ -93,6 +93,22 @@ class AppWindow(QMainWindow):
         import_action.triggered.connect(self.open_import_wizard)
         tools_menu.addAction(import_action)
 
+        # Translation submenu
+        tools_menu.addSeparator()
+        translation_menu = tools_menu.addMenu("&Translation")
+
+        # Translate Text
+        translate_text_action = QAction("&Translate Text...", self)
+        translate_text_action.setShortcut("Ctrl+Alt+T")
+        translate_text_action.triggered.connect(self.open_translate_text_dialog)
+        translation_menu.addAction(translate_text_action)
+
+        # MT Provider Settings
+        provider_settings_action = QAction("&MT Provider Settings...", self)
+        provider_settings_action.setShortcut("Ctrl+Alt+P")
+        provider_settings_action.triggered.connect(self.open_provider_settings)
+        translation_menu.addAction(provider_settings_action)
+
         # Premium menu
         premium_menu = menubar.addMenu("&Premium")
 
@@ -189,6 +205,20 @@ class AppWindow(QMainWindow):
         # Add to stack and show
         self.stack.addWidget(coverage_panel)
         self.stack.setCurrentWidget(coverage_panel)
+
+    def open_translate_text_dialog(self):
+        """Open translate text dialog."""
+        from app.ui.translate_text_dialog import show_translate_text_dialog
+
+        logger.info("Opening translate text dialog")
+        show_translate_text_dialog(parent=self)
+
+    def open_provider_settings(self):
+        """Open MT provider settings dialog."""
+        from app.ui.provider_settings_dialog import show_provider_settings
+
+        logger.info("Opening MT provider settings dialog")
+        show_provider_settings(parent=self)
 
     def open_project(self, project_id: int):
         """Open a project view."""

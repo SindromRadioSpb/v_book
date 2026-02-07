@@ -1037,3 +1037,97 @@ class ExportWorker(QThread):
     def cancel(self):
         """Cancel the export."""
         self._cancelled = True
+
+
+class SingleTextTranslateWorker(QThread):
+    """Worker for translating single text via MT providers (non-blocking).
+
+    Used by TranslateTextDialog for user-initiated translation.
+    """
+
+    result_ready = pyqtSignal(object)  # TranslationResult
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        text: str,
+        src_lang: str = "en",
+        tgt_lang: str = "he",
+        project_id: Optional[int] = None,
+    ):
+        """Initialize worker.
+
+        Args:
+            text: Text to translate
+            src_lang: Source language code (ISO 639-1)
+            tgt_lang: Target language code (ISO 639-1)
+            project_id: Optional project ID for TM/glossary scope
+        """
+        super().__init__()
+        self.text = text
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+        self.project_id = project_id
+
+    def run(self):
+        """Translate text via MT providers."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.translation_service import TranslationService
+
+            db_service = DBService.get_instance()
+            translation_service = TranslationService()
+
+            with db_service.get_session() as session:
+                # Resolve translation (tries provider chain with fallback)
+                result = translation_service.resolve_translation(
+                    session,
+                    src_text=self.text,
+                    kind="adhoc",  # User-initiated translation (not lemma/term)
+                    src_lang=self.src_lang,
+                    tgt_lang=self.tgt_lang,
+                    project_id=self.project_id,
+                    allow_draft=False,
+                    use_mt=True,  # Enable MT providers
+                )
+
+                # Emit result
+                self.result_ready.emit(result)
+
+        except Exception as e:
+            logger.exception("Single text translate worker error")
+            error_msg = self._make_user_friendly_error(str(e))
+            self.error.emit(error_msg)
+
+    def _make_user_friendly_error(self, error: str) -> str:
+        """Convert technical error to user-friendly message."""
+        error_lower = error.lower()
+
+        if "database" in error_lower or "locked" in error_lower:
+            return (
+                "Database error occurred during translation.\n\n"
+                "Please try again. If the problem persists, restart the application."
+            )
+        elif "provider" in error_lower or "api" in error_lower:
+            return (
+                "MT provider error occurred.\n\n"
+                "Check:\n"
+                "- MT providers enabled in Settings\n"
+                "- Local model installed (if using Local MT)\n"
+                "- Network connection (if using cloud providers)\n"
+                "- API keys valid (if using cloud providers)"
+            )
+        elif "not installed" in error_lower or "model" in error_lower:
+            return (
+                "Local MT model not installed.\n\n"
+                "To use Local MT:\n"
+                "1. Run: python scripts/install_local_mt_model.py --model nllb-200-distilled-1.3B\n"
+                "2. Enable Local NLLB in MT Provider Settings\n\n"
+                "Or: Use cloud providers (DeepL, Google, etc.)"
+            )
+        else:
+            return (
+                f"Translation failed:\n\n"
+                f"{error[:200]}\n\n"
+                f"Check the application logs for details."
+            )
