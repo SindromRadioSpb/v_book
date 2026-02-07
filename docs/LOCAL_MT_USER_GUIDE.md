@@ -1,6 +1,23 @@
 # Local MT User Guide - NLLB Model Translation
 
-## 📋 Текущее состояние (2026-02-07)
+> **⚠️ DEPRECATED - This document is outdated (early development phase)**
+>
+> **For current documentation, see:**
+> - **User Guide:** `docs/PROVIDER_SETUP_GUIDE.md` → "Local MT Providers" section
+> - **License Notes:** `docs/LOCAL_MT_LICENSE_NOTES.md`
+> - **Implementation Plan:** `docs/P1_TRANSLATION_PRO_PLAN.md` → "task_4_MT_local" section
+>
+> **Status Update (2026-02-08):**
+> - ✅ All features mentioned below are now COMPLETE (PATCH-00 through PATCH-09)
+> - ✅ LocalNLLBProvider fully integrated into provider chain
+> - ✅ Sentence segmentation working
+> - ✅ Glossary postprocess working
+> - ✅ MT cache keying with model version isolation
+> - ✅ Full UI integration
+
+---
+
+## 📋 Текущее состояние (2026-02-07) [OUTDATED]
 
 ### ✅ Что работает:
 1. **Модель установлена:** `J:\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2`

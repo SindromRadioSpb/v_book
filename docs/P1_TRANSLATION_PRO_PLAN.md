@@ -1,19 +1,22 @@
 # P1 Translation Pro - Implementation Plan
 
-**Status:** PATCH-P1-T05 (GlossaryBuilderService) → task_4_MT_local (Local MT Providers)
-**Date:** 2026-02-07
+**Status:** task_4_MT_local (PATCH-09 COMPLETE, PATCH-10 IN PROGRESS)
+**Date:** 2026-02-08
 **Owner:** Staff Engineer/Architect
 
 **Updated Plan:**
 ```
-✅ P1-T00 through P1-T04 (COMPLETE)
-🔜 P1-T05: GlossaryBuilderService (3-5 days)
-🔥 task_4_MT_local: Local MT Providers (2-3 weeks, HIGH PRIORITY)
+✅ P1-T00 through P1-T05 (COMPLETE)
+✅ task_4_MT_local: PATCH-00 through PATCH-09 (COMPLETE)
+🔄 task_4_MT_local: PATCH-10 Documentation (IN PROGRESS)
 ⏭️  P1-T07: Term Extraction Pro
 ⏭️  P1-T08: Hardening + DoD Evidence
 ```
 
-**Note:** P1-T06 (MT Cache migration) merged into P1-T04 - no separate migration needed.
+**Notes:**
+- P1-T06 (MT Cache migration) merged into P1-T04 - no separate migration needed
+- Local MT integration complete through PATCH-09 (cache keying)
+- PATCH-10 (documentation + license notes) in progress
 
 ---
 
@@ -734,34 +737,415 @@ ORDER BY priority_score DESC, source_term ASC
 
 ---
 
-## task_4_MT_local: Local MT Providers (PLANNED - HIGH PRIORITY)
+## task_4_MT_local: Local MT Providers (COMPLETE - PATCH-00 through PATCH-09)
 
 ### Overview
 
-Add offline-capable local MT providers (NLLB + Seamless M4T) integrated into existing provider chain.
+Offline-capable local MT providers (NLLB) integrated into existing provider chain.
 
 **Models:**
-- Primary: `facebook/nllb-200-distilled-1.3B` (CC-BY-NC 4.0, internal use OK)
-- Fallback: `facebook/seamless-m4t-v2-large` (CC-BY-NC 4.0, internal use OK)
+- ✅ Primary: `facebook/nllb-200-distilled-1.3B` (CC-BY-NC 4.0, internal use OK)
+- ⏭️ Fallback: `facebook/seamless-m4t-v2-large` (deferred to future)
 
-**Language Pair:** Hebrew (`heb_Hebr`) → Russian (`rus_Cyrl`)
+**Language Support:** 200+ languages via NLLB-200 (including Hebrew ↔ Russian ↔ English)
 
 **Architecture:**
-- Worker-based inference (no UI blocking)
-- Sentence segmentation (NLLB quality degrades on long inputs)
-- Glossary postprocess (uses approved terms from P1-T05)
-- Full integration with existing cache/circuit breaker/rate limiter
+- ✅ Worker-based inference (no UI blocking)
+- ✅ Sentence segmentation (split texts >512 tokens)
+- ✅ Glossary postprocess (applies approved terms from TM)
+- ✅ Full integration with cache/circuit breaker/rate limiter
 
 **Dependencies:**
 - ✅ BaseProvider contract (P1-T01)
 - ✅ Provider chain (P1-T03)
 - ✅ Circuit breaker + rate limiter (P1-T04)
 - ✅ MT cache (P1-T04)
-- 🔜 **GlossaryBuilderService (P1-T05)** - REQUIRED for glossary postprocess
+- ✅ GlossaryBuilderService (P1-T05)
 
-**Implementation Plan:** See `task_4_MT_local.md` for detailed 10-PATCH breakdown
+---
 
-**Estimated Timeline:** 2-3 weeks after P1-T05 complete
+### PATCH-00: Architecture Analysis (COMPLETE)
+
+**Deliverables:**
+- ✅ Reviewed BaseProvider contract
+- ✅ Analyzed worker process architecture (multiprocessing + spawn context for Windows)
+- ✅ Defined model storage strategy (junction: `%LOCALAPPDATA%\HDLE\models` → `J:\HDLE\models`)
+
+---
+
+### PATCH-01: Model Resource Manager (COMPLETE)
+
+**Files:**
+- ✅ `app/services/local_models/model_resource_manager.py`
+- ✅ `app/services/local_models/manifest.py`
+
+**Features:**
+- Model installation check (`is_installed()`)
+- Model directory resolution (`model_dir()`)
+- Manifest management (model metadata)
+
+---
+
+### PATCH-02: CLI Installation Script (COMPLETE)
+
+**Files:**
+- ✅ `scripts/install_local_mt_model.py`
+
+**Features:**
+- Download models from Hugging Face
+- Convert to CTranslate2 format
+- Apply int8 quantization
+- Verify installation
+
+**Usage:**
+```bash
+python scripts/install_local_mt_model.py --show-models
+python scripts/install_local_mt_model.py --model facebook/nllb-200-distilled-1.3B --backend ctranslate2 --quantization int8
+python scripts/install_local_mt_model.py --list
+```
+
+---
+
+### PATCH-03: Worker Process (COMPLETE)
+
+**Files:**
+- ✅ `app/infra/local_mt/worker_process.py`
+- ✅ `app/infra/local_mt/__init__.py`
+
+**Features:**
+- Spawn-based multiprocessing (Windows-safe)
+- CTranslate2 backend integration
+- IPC via queues (request → worker → response)
+- Timeout handling (default: 30s)
+- Graceful shutdown
+
+**Worker Architecture:**
+```
+Main Process                 Worker Process
+    |                              |
+    | --- WorkerRequest ------>    |
+    |                         Load NLLB
+    |                         Translate
+    |                              |
+    | <--- WorkerResponse -----    |
+```
+
+---
+
+### PATCH-04: Sentence Segmentation (COMPLETE)
+
+**Files:**
+- ✅ `app/services/local_mt/segmentation.py`
+- ✅ `tests/test_local_mt_segmentation.py` (22 tests)
+
+**Features:**
+- Split by sentence boundaries (`.`, `!`, `?`, newlines)
+- Preserve separators for correct reassembly
+- Enforce length limits (max 1000 chars, 512 tokens per segment)
+- Merge short segments (min 10 chars to avoid fragmentation)
+- Roundtrip guarantee: `reassemble(segments, translations) ≈ original_structure`
+
+**Test Coverage:**
+- Basic segmentation (multi-sentence texts)
+- Separator preservation (`.`, `!`, `?`, `\n`, `...`)
+- Length limit enforcement (split long segments)
+- Short segment merging (avoid tiny fragments)
+- Reassembly correctness (preserve whitespace structure)
+- Hebrew text handling (RTL languages)
+
+---
+
+### PATCH-05: Glossary Postprocess (COMPLETE)
+
+**Files:**
+- ✅ `app/services/local_mt/glossary_postprocess.py`
+- ✅ `tests/test_local_mt_glossary_postprocess.py` (19 tests)
+
+**Features:**
+- Query approved terms from TM (`status='approved'`)
+- Match source segments (exact match, case-insensitive, whitespace-normalized)
+- Replace MT output with approved translations
+- Support aliases (via `tm_alias` table)
+- Project + global scope (respects `project_id`)
+
+**Matching Algorithm:**
+1. Normalize source segment (lowercase, strip whitespace)
+2. Query approved terms (exact match on normalized key)
+3. If match found: replace MT output with TM translation
+4. Track applied terms (count, metadata)
+
+**Test Coverage:**
+- Exact match (source → target)
+- Case-insensitive matching ("Hello" = "hello")
+- Alias support (multiple sources → same target)
+- Project scope (project-specific + global terms)
+- No match graceful (return MT output unchanged)
+- Multiple segments (apply to subset)
+
+---
+
+### PATCH-06: LocalNLLBProvider (COMPLETE)
+
+**Files:**
+- ✅ `app/infra/translators/providers/local_nllb_provider.py` (472 lines)
+- ✅ `tests/test_local_nllb_provider.py` (17 tests)
+
+**Features:**
+- Implements `BaseProvider` contract
+- Language code mapping (ISO 639-1 → NLLB codes)
+  - `he` → `heb_Hebr`
+  - `ru` → `rus_Cyrl`
+  - `en` → `eng_Latn`
+  - 30+ languages supported
+- Full translation pipeline:
+  1. Map ISO codes to NLLB codes
+  2. Segment text (via PATCH-04)
+  3. Translate segments (via worker)
+  4. Apply glossary postprocess (via PATCH-05)
+  5. Reassemble segments
+  6. Return TranslationResult
+- Error handling (worker timeout, unsupported languages, empty text)
+- Metadata tracking (segment_count, inference_time_ms, applied_terms_count)
+
+**Provider Properties:**
+- `provider_id = "local_nllb"`
+- `display_name = "Local NLLB-200 (Offline)"`
+- `supports_glossary = True` (via TM postprocess)
+- `supports_batch = False`
+
+**Test Coverage:**
+- Provider properties (ID, name, glossary support)
+- Language mapping (ISO → NLLB)
+- Translation success (simple text)
+- Empty text handling
+- Unsupported language handling
+- Worker error handling
+- Glossary integration (TM terms applied)
+
+---
+
+### PATCH-07: LocalSeamlessProvider (DEFERRED)
+
+**Status:** Skipped (NLLB sufficient for initial release)
+
+**Future Work:**
+- Implement `LocalSeamlessProvider` for speech-to-speech translation
+- Model: `facebook/seamless-m4t-v2-large`
+- Backend: Transformers (CTranslate2 doesn't support Seamless yet)
+
+---
+
+### PATCH-08: Provider Registration (COMPLETE)
+
+**Files:**
+- ✅ `app/infra/translators/local_providers_setup.py` (257 lines)
+- ✅ `tests/test_local_providers_setup.py` (17 tests)
+
+**Features:**
+- Automatic provider registration (`initialize_local_providers()`)
+- Model availability checking (skip if not installed)
+- Unregistration and cleanup (`unregister_local_providers()`)
+- Provider status queries (`check_local_providers_available()`)
+
+**Integration:**
+```python
+from app.infra.translators.local_providers_setup import initialize_local_providers
+
+# In main.py or app startup:
+initialize_local_providers(db_session=session, project_id=project_id)
+
+# Provider now available in chain via ProvidersRegistry
+```
+
+**Test Coverage:**
+- Initialize with installed model (success)
+- Initialize with DB session (glossary support enabled)
+- Skip if model not installed
+- Force register raises error if model missing
+- Check provider availability
+- Unregister and cleanup
+- Duplicate registration handling
+- Initialization failure handling
+
+---
+
+### PATCH-09: MT Cache Keying (COMPLETE)
+
+**Status:** ✅ COMPLETE (2026-02-08)
+
+**Problem:**
+- Cache key formula didn't include `model_version`
+- Different backends (ctranslate2 vs transformers) shared cache entries
+- Model changes didn't invalidate cache
+
+**Solution:**
+- Updated `_build_cache_key()` to include `model_version` parameter
+- Enhanced `LocalNLLBProvider.get_model_version()` to return `{model_id}_{backend}`
+- Updated `_lookup_provider_cache()` and `_store_in_cache()` to accept `model_version`
+- Updated `_translate_via_provider_chain()` to get `model_version` from provider
+
+**Cache Key Formula (Updated):**
+```python
+def _build_cache_key(self, request, provider_id, model_version="") -> str:
+    """Build deterministic cache key.
+
+    Formula: SHA256(normalized_text|src_lang|tgt_lang|provider_id|glossary_hash|model_version)
+    """
+    normalized_text = request.source_text.strip().lower()
+    glossary_hash = request.glossary_hash or ""
+
+    components = [
+        normalized_text,
+        request.source_lang,
+        request.target_lang,
+        provider_id,
+        glossary_hash,
+        model_version,  # PATCH-09: Added
+    ]
+    key_string = "|".join(components)
+    return hashlib.sha256(key_string.encode('utf-8')).hexdigest()
+```
+
+**Model Version Format:**
+- Local NLLB: `facebook_nllb-200-distilled-1.3B_ctranslate2`
+- Local NLLB (transformers): `facebook_nllb-200-distilled-1.3B_transformers`
+- Cloud providers: `""` (empty string for backward compatibility)
+
+**Cache Isolation:**
+- Different backends → different `model_version` → different cache key
+- Model updates → different `model_version` → cache invalidates
+- Glossary changes → different `glossary_hash` → cache invalidates
+
+**Feature Safety:**
+- Cache errors caught with try/except (don't break translation)
+- Cache miss treated as "continue with provider translation"
+- Errors logged as WARNING (not ERROR)
+
+**Files Modified:**
+- ✅ `app/services/translation_service.py`
+  - `_build_cache_key()` - Added `model_version` parameter
+  - `_lookup_provider_cache()` - Added `model_version` parameter + try/except
+  - `_store_in_cache()` - Added `model_version` parameter + try/except
+  - `_translate_via_provider_chain()` - Get `model_version` from provider
+
+- ✅ `app/infra/translators/providers/local_nllb_provider.py`
+  - `get_model_version()` - Return `{model_id}_{backend}`
+
+**Tests:**
+- ✅ `tests/test_local_mt_cache_keying.py` (10 tests, 362 lines)
+  - Deterministic cache key (same inputs → same key)
+  - All parameters included (text, langs, provider, glossary, model_version)
+  - Backend change invalidates cache
+  - Model change invalidates cache
+  - Glossary change invalidates cache
+  - Empty/None glossary handled consistently
+  - Whitespace normalization stable
+  - Model version includes backend
+  - Cache error doesn't break translation (feature-safe)
+  - Empty model_version handled (for cloud providers)
+
+**Test Results:**
+- ✅ All 98 tests PASSED (10 new + 88 existing local MT tests)
+
+**How to Verify Cache Keying:**
+```python
+# Example: Translate same text twice
+result1 = translation_service.resolve_translation(
+    source_text="Hello world",
+    src_lang="en",
+    tgt_lang="ru",
+    use_mt=True
+)
+
+result2 = translation_service.resolve_translation(
+    source_text="Hello world",
+    src_lang="en",
+    tgt_lang="ru",
+    use_mt=True
+)
+
+# Second translation should be cache hit (instant, latency_ms ≈ 0)
+# Check logs: "Cache hit for provider local_nllb"
+```
+
+**Settings:**
+- `mt/cache_enabled` (bool, default: `True`)
+- `mt/cache_ttl_days` (int, default: `7`)
+
+**Cache Stats:**
+- View in Settings → MT Providers → Cache Stats
+- Or query `mt_cache` table: `SELECT provider, COUNT(*) FROM mt_cache GROUP BY provider`
+
+---
+
+### PATCH-10: Documentation + License Notes (IN PROGRESS)
+
+**Status:** 🔄 IN PROGRESS (2026-02-08)
+
+**Deliverables:**
+- ✅ `docs/PROVIDER_SETUP_GUIDE.md` - Added comprehensive "Local MT Providers" section
+  - Installation instructions (model download, junction setup)
+  - Configuration (enable provider, fallback chain)
+  - How it works (pipeline, segmentation, glossary postprocess)
+  - Performance tuning (int8 quantization, RAM requirements)
+  - Troubleshooting (common issues, solutions)
+  - Cache behavior (keying, invalidation, TTL)
+  - Supported languages (200+ via NLLB)
+  - Privacy and security (100% offline, no telemetry)
+  - Comparison table (Local vs Cloud providers)
+
+- ✅ `docs/LOCAL_MT_LICENSE_NOTES.md` - License attribution and compliance notes
+  - NLLB-200 license (CC-BY-NC 4.0)
+  - Seamless M4T license (CC-BY-NC 4.0, future)
+  - CTranslate2 license (MIT)
+  - Hugging Face Transformers license (Apache 2.0)
+  - SentencePiece license (Apache 2.0)
+  - Compliance checklist (for production use)
+  - Attribution examples
+  - Legal disclaimer
+
+- ✅ `docs/P1_TRANSLATION_PRO_PLAN.md` - Updated with PATCH-09 status and cache keying details
+
+**User-Facing Documentation:**
+- How to install local models (step-by-step)
+- How to enable local providers in Settings
+- How to verify local translation (provider_id in results)
+- How glossary works (TM postprocess)
+- Typical problems and solutions
+
+**License Notes:**
+- Model licenses (CC-BY-NC 4.0 for NLLB/Seamless)
+- Dependency licenses (MIT for CTranslate2, Apache 2.0 for Transformers)
+- Attribution requirements
+- Commercial use considerations
+- Compliance checklist
+
+---
+
+### Implementation Summary
+
+**Completed Patches:** PATCH-00 through PATCH-09
+**Total Lines of Code:** ~3000+ lines (production + tests)
+**Total Tests:** 98 tests (all PASSED)
+
+**Key Files:**
+- `app/services/local_models/` - Model management (150 lines)
+- `app/infra/local_mt/` - Worker process (350 lines)
+- `app/services/local_mt/` - Segmentation + glossary (600 lines)
+- `app/infra/translators/providers/local_nllb_provider.py` - Provider (472 lines)
+- `app/infra/translators/local_providers_setup.py` - Registration (257 lines)
+- `scripts/install_local_mt_model.py` - CLI tool (200 lines)
+- `tests/test_local_*` - Test suite (1000+ lines)
+
+**Timeline:**
+- Start: 2026-01-XX (PATCH-00)
+- End: 2026-02-08 (PATCH-09 complete, PATCH-10 in progress)
+- Duration: ~2 weeks (actual)
+
+**Next Steps:**
+- ⏭️ PATCH-10: Complete documentation (in progress)
+- ⏭️ Integration testing (verify end-to-end workflow)
+- ⏭️ Performance benchmarking (translation speed, cache hit rate)
 
 ---
 

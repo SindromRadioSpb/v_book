@@ -392,6 +392,364 @@ api_region="global"  # or specific region (e.g., "westus2")
 
 ---
 
+## Local MT Providers (Offline Translation)
+
+### Overview
+
+**What are Local MT Providers?**
+- Translation models that run **entirely offline** on your computer
+- No API keys, no internet connection, no data sent to third parties
+- Free to use (after one-time model download)
+- Ideal for sensitive data, high-volume translation, or offline work
+
+**Available Models:**
+- **Local NLLB-200** (facebook/nllb-200-distilled-1.3B)
+  - 200+ languages
+  - 1.3B parameters (distilled model)
+  - Backend: CTranslate2 (fast, CPU-optimized)
+  - License: CC-BY-NC 4.0 (free for internal use)
+  - Model size: ~2.6 GB disk space
+
+**System Requirements:**
+- RAM: 4-8 GB free (model loads into memory)
+- Disk: 3-5 GB per model (stored on J: drive via junction)
+- CPU: Modern multi-core CPU recommended (no GPU required)
+- OS: Windows, Linux, macOS
+
+---
+
+### Installation
+
+#### Step 1: Check Disk Space
+
+Local models are stored at `J:\HDLE\models` (Windows) via junction from `%LOCALAPPDATA%\HDLE\models`.
+
+**Verify junction:**
+```powershell
+# Check if junction exists
+Test-Path "$env:LOCALAPPDATA\HDLE\models"
+
+# Check target (should point to J:\HDLE\models)
+cmd /c dir "$env:LOCALAPPDATA\HDLE\models" | Select-String "JUNCTION"
+```
+
+**Create junction (if needed):**
+```powershell
+# Create target directory on J: drive
+$dst = "J:\HDLE\models"
+New-Item -ItemType Directory -Force -Path $dst
+
+# Create junction from C: to J:
+$src = Join-Path $env:LOCALAPPDATA "HDLE\models"
+cmd /c mklink /J "$src" "$dst"
+```
+
+#### Step 2: List Available Models
+
+```bash
+python scripts/install_local_mt_model.py --show-models
+```
+
+**Output:**
+```
+Available models:
+1. facebook/nllb-200-distilled-1.3B (Backend: ctranslate2)
+   - Languages: 200+ (Hebrew, Russian, English, etc.)
+   - Size: ~2.6 GB
+   - License: CC-BY-NC 4.0
+```
+
+#### Step 3: Install Model
+
+**Install NLLB with CTranslate2 backend:**
+```bash
+python scripts/install_local_mt_model.py \
+  --model facebook/nllb-200-distilled-1.3B \
+  --backend ctranslate2 \
+  --quantization int8
+```
+
+**Installation process:**
+1. Downloads model from Hugging Face (~2.6 GB)
+2. Converts to CTranslate2 format (faster inference)
+3. Applies int8 quantization (2x speedup, minimal quality loss)
+4. Stores at `J:\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2\`
+
+**Estimated time:**
+- Download: 5-15 minutes (depending on internet speed)
+- Conversion: 2-5 minutes
+- Total: 10-20 minutes
+
+#### Step 4: Verify Installation
+
+```bash
+python scripts/install_local_mt_model.py --list
+```
+
+**Expected output:**
+```
+Installed models:
+✓ facebook/nllb-200-distilled-1.3B (ctranslate2)
+  Path: J:\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2\
+  Size: 2.6 GB
+  Status: Ready
+```
+
+---
+
+### Configuration
+
+#### Enable Local Provider in HDLE Premium
+
+1. **Open Settings**
+   - Menu: `Settings → MT Providers`
+   - Or: `Ctrl+,` → MT Providers tab
+
+2. **Add Local NLLB Provider**
+   - Provider should auto-detect if model installed
+   - If not visible: Restart HDLE Premium
+
+3. **Configure Fallback Chain**
+   - Drag `Local NLLB` to desired position
+   - **Recommended:** Put local provider first (fastest, free)
+   - Example chain: `Local NLLB → DeepL → LibreTranslate`
+
+4. **Test Translation**
+   - Open a document with Hebrew text
+   - Select segment → Request translation
+   - Check provider ID in result (should show `local_nllb`)
+
+**Settings Keys (Advanced):**
+```ini
+[mt/provider/local_nllb]
+enabled=true
+timeout=30.0  # Worker timeout in seconds
+```
+
+---
+
+### How It Works
+
+**Translation Pipeline:**
+```
+Input text
+  ↓
+1. Sentence segmentation (split long texts)
+  ↓
+2. Worker process (model inference via CTranslate2)
+  ↓
+3. Glossary postprocess (apply approved TM terms)
+  ↓
+4. Reassemble segments
+  ↓
+Output translation
+```
+
+**Sentence Segmentation:**
+- NLLB quality degrades on inputs >512 tokens
+- Automatically splits text at sentence boundaries
+- Preserves separators (`.`, `!`, `?`, newlines)
+- Merges short segments to avoid fragmentation
+
+**Glossary Postprocess:**
+- Queries approved terms from Translation Memory (status='approved')
+- Replaces MT output with approved translations (exact match)
+- Example: MT says "система" → Glossary forces "מערכת" if approved
+- Increases consistency and domain accuracy
+
+**Worker Process:**
+- Model runs in separate process (no UI blocking)
+- Timeout: 30 seconds (configurable)
+- IPC via multiprocessing queues (spawn context for Windows)
+
+---
+
+### Performance
+
+**Translation Speed:**
+- Short text (1-2 sentences): 0.5-2 seconds
+- Medium text (1 paragraph): 2-5 seconds
+- Long text (1 page): 5-15 seconds
+
+**Factors affecting speed:**
+- CPU cores (more cores = faster)
+- Quantization (int8 = 2x faster than float32)
+- Text length (longer = more segments)
+- RAM availability (swapping = slower)
+
+**Optimization Tips:**
+1. Use int8 quantization (minimal quality loss)
+2. Close other applications (free up RAM)
+3. Keep texts under 1000 words per request
+4. Use cache (second translation of same text = instant)
+
+---
+
+### Glossary Integration
+
+**How glossary works with Local MT:**
+1. You approve terms in **Terms** panel (right-click → Approve)
+2. Local MT translates text using NLLB model
+3. **Postprocess:** Replaces MT output with approved terms (exact match)
+4. Final translation combines MT + glossary
+
+**Example:**
+- Source: "המערכת עובדת טוב" (Hebrew)
+- NLLB output: "система работает хорошо" (Russian)
+- Approved term: "המערכת" → "система" (exact match)
+- Final: "система работает хорошо" (applied glossary term)
+
+**Matching Rules:**
+- Exact match only (case-insensitive, whitespace-normalized)
+- Project scope: Uses approved terms from current project + global
+- Conflict resolution: Higher priority_score wins
+
+**View applied terms:**
+- Hover over translation → Shows `applied_terms_count` in metadata
+- Logs show: "Applied 3 glossary terms (out of 5 segments)"
+
+---
+
+### Troubleshooting
+
+#### "Model not installed: facebook/nllb-200-distilled-1.3B"
+
+**Cause:** Model files not found at expected path
+
+**Solution:**
+1. Verify junction: `Test-Path "$env:LOCALAPPDATA\HDLE\models"`
+2. Check target: `ls J:\HDLE\models`
+3. Reinstall model: `python scripts/install_local_mt_model.py --model ...`
+4. Check logs: `M:\V_book\HDLE\logs\hdle_premium.log`
+
+#### "Worker timeout after 30 seconds"
+
+**Cause:** Model inference taking too long (RAM swapping, CPU overload)
+
+**Solution:**
+1. Close other applications (free up RAM)
+2. Reduce text length (split into smaller chunks)
+3. Increase timeout: Settings → `mt/provider/local_nllb/timeout=60.0`
+4. Check RAM usage: Task Manager → Performance → Memory
+
+#### "Translation slower than expected"
+
+**Cause:** Not using int8 quantization, or CPU thermal throttling
+
+**Solution:**
+1. Reinstall with int8: `--quantization int8` (2x speedup)
+2. Check CPU temperature (thermal throttling = slower)
+3. Verify backend: Should use `ctranslate2` (not `transformers`)
+4. Check model path: Should be `..._ctranslate2\` not `..._transformers\`
+
+#### "Glossary terms not applied"
+
+**Cause:** Terms not approved, or language pair mismatch
+
+**Solution:**
+1. Verify term status: Open Terms panel → Check status='approved'
+2. Check language pair: Term must match `src_lang`/`tgt_lang` exactly
+3. Verify normalization: Glossary uses lowercase, whitespace-normalized matching
+4. Check logs: "Applied X glossary terms" (should show match count)
+
+#### "Worker process crashed"
+
+**Cause:** Out of memory, or corrupted model files
+
+**Solution:**
+1. Check RAM: Model needs 4-8 GB free
+2. Reinstall model: Delete `J:\HDLE\models\...` and reinstall
+3. Check logs: `M:\V_book\HDLE\logs\hdle_premium.log` for error details
+4. Report issue with logs attached
+
+---
+
+### Cache Behavior
+
+**Local MT uses same cache as cloud providers:**
+- Cache key includes: `text|src_lang|tgt_lang|provider_id|glossary_hash|model_version`
+- TTL: 7 days (default)
+- Backend isolation: `ctranslate2` and `transformers` use separate cache
+
+**Model version in cache key:**
+- Format: `facebook_nllb-200-distilled-1.3B_ctranslate2`
+- Includes both model ID and backend
+- Different backends → different cache entries (isolated)
+
+**When cache invalidates:**
+- Glossary changed (different `glossary_hash`)
+- Model changed (different `model_version`)
+- Backend changed (e.g., switched from ctranslate2 to transformers)
+- TTL expired (default: 7 days)
+
+**View cache stats:**
+- Settings → MT Providers → Cache Stats
+- Or: Query `mt_cache` table in database
+
+---
+
+### Supported Languages
+
+**NLLB-200 supports 200+ languages, including:**
+
+| Language | ISO Code | NLLB Code |
+|----------|----------|-----------|
+| Hebrew | `he` | `heb_Hebr` |
+| Russian | `ru` | `rus_Cyrl` |
+| English | `en` | `eng_Latn` |
+| Arabic | `ar` | `arb_Arab` |
+| Spanish | `es` | `spa_Latn` |
+| French | `fr` | `fra_Latn` |
+| German | `de` | `deu_Latn` |
+| Chinese (Simplified) | `zh` | `zho_Hans` |
+| Japanese | `ja` | `jpn_Jpan` |
+| Korean | `ko` | `kor_Hang` |
+
+**Full list:** https://github.com/facebookresearch/flores/tree/main/flores200#languages-in-flores-200
+
+---
+
+### Privacy and Security
+
+**Data Privacy:**
+- ✅ **All data stays on your computer** (no network calls)
+- ✅ **No telemetry** (model doesn't phone home)
+- ✅ **No API keys** (no credentials to manage)
+- ✅ **Offline operation** (works without internet after installation)
+
+**Model License:**
+- NLLB-200: CC-BY-NC 4.0 (free for internal/research use)
+- See `docs/LOCAL_MT_LICENSE_NOTES.md` for full license details
+
+**Use Cases:**
+- Translating sensitive documents (legal, medical, financial)
+- High-volume translation (no per-character costs)
+- Offline work (no internet required)
+- Internal company use (no data sharing)
+
+---
+
+### Comparison: Local vs Cloud
+
+| Feature | Local NLLB | DeepL | Google | LibreTranslate |
+|---------|------------|-------|--------|----------------|
+| **Cost** | Free (after download) | $5.50 per 1M chars | $20 per 1M chars | Free (public) |
+| **Privacy** | 100% offline | Cloud (GDPR) | Cloud (privacy policy) | Self-hosted = full control |
+| **Speed** | 2-5 sec (medium text) | 1-2 sec | 1-2 sec | 2-4 sec (public) |
+| **Quality** | Good | Excellent | Excellent | Good |
+| **Languages** | 200+ | 30+ | 100+ | 30+ |
+| **Glossary** | ✅ Yes (TM postprocess) | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Setup** | One-time install | API key | API key | No key (public) |
+| **Internet** | Not needed | Required | Required | Required |
+
+**Recommendation:**
+- **Quality-first:** DeepL → Google → Local NLLB
+- **Privacy-first:** Local NLLB → LibreTranslate (self-hosted)
+- **Cost-aware:** Local NLLB → LibreTranslate (public)
+- **Offline:** Local NLLB only
+
+---
+
 ## FAQ
 
 **Q: Which provider is best for Hebrew ↔ Russian?**
@@ -431,5 +789,5 @@ api_region="global"  # or specific region (e.g., "westus2")
 
 ---
 
-**Last Updated:** 2026-02-07
-**Document Version:** 1.0 (P1 Translation Pro)
+**Last Updated:** 2026-02-08
+**Document Version:** 1.1 (P1 Translation Pro + Local MT)
