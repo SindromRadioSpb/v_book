@@ -37,15 +37,15 @@ class AppWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the UI."""
-        # Menu bar
-        self.create_menu_bar()
-
-        # Central widget - workspace manager (contains stack)
+        # Central widget - workspace manager (create BEFORE menu bar)
         self.workspace = WorkspaceManager()
         self.setCentralWidget(self.workspace)
 
         # Alias for existing code (zero changes to navigation)
         self.stack = self.workspace.stack
+
+        # Menu bar (now workspace exists)
+        self.create_menu_bar()
 
         # Connect sidebar actions
         self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)
