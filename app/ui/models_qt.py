@@ -32,6 +32,9 @@ class ProjectListModel(QAbstractTableModel):
         if col == 0:
             return str(project.project_id)
         elif col == 1:
+            # Add 🌐 marker for reference corpus
+            if project.is_general_corpus:
+                return f"🌐 {project.name}"
             return project.name
         elif col == 2:
             return str(project.total_docs)

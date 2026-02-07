@@ -79,7 +79,11 @@ class ProjectDashboard(QWidget):
 
         layout.addLayout(header_layout)
 
-        # Project table
+        # My Projects section
+        my_projects_label = QLabel("My Projects")
+        my_projects_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(my_projects_label)
+
         self.project_model = ProjectListModel()
         self.project_table = QTableView()
         self.project_table.setModel(self.project_model)
@@ -92,6 +96,24 @@ class ProjectDashboard(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
         layout.addWidget(self.project_table)
+
+        # Reference Corpora section
+        ref_corpora_label = QLabel("Reference Corpora")
+        ref_corpora_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(ref_corpora_label)
+
+        self.ref_corpus_model = ProjectListModel()
+        self.ref_corpus_table = QTableView()
+        self.ref_corpus_table.setModel(self.ref_corpus_model)
+        self.ref_corpus_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.ref_corpus_table.doubleClicked.connect(self.on_ref_corpus_double_clicked)
+        self.ref_corpus_table.selectionModel().selectionChanged.connect(self.on_ref_selection_changed)
+
+        # Auto-resize columns
+        ref_header = self.ref_corpus_table.horizontalHeader()
+        ref_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+        layout.addWidget(self.ref_corpus_table)
 
         # Status bar
         self.status_label = QLabel("No projects")
@@ -116,13 +138,24 @@ class ProjectDashboard(QWidget):
                         processed_docs=0,
                         total_lemmas=0,
                         total_ngrams=0,
+                        is_general_corpus=bool(p.is_general_corpus),
                     )
                     project_stats.append(stats)
 
-                self.project_model.update_projects(project_stats)
+                # Split projects into two groups
+                my_projects = [p for p in project_stats if not p.is_general_corpus]
+                ref_corpora = [p for p in project_stats if p.is_general_corpus]
 
-                if project_stats:
-                    self.status_label.setText(f"Total projects: {len(project_stats)}")
+                self.project_model.update_projects(my_projects)
+                self.ref_corpus_model.update_projects(ref_corpora)
+
+                # Update status
+                my_count = len(my_projects)
+                ref_count = len(ref_corpora)
+                if my_count + ref_count > 0:
+                    self.status_label.setText(
+                        f"My Projects: {my_count} | Reference Corpora: {ref_count}"
+                    )
                 else:
                     self.status_label.setText("No projects. Click 'Create Project' to get started.")
 
@@ -168,6 +201,10 @@ class ProjectDashboard(QWidget):
         selected_indexes = self.project_table.selectedIndexes()
         self.delete_btn.setEnabled(len(selected_indexes) > 0)
 
+        # Clear selection in Reference Corpora table
+        if len(selected_indexes) > 0:
+            self.ref_corpus_table.clearSelection()
+
     def on_open_verification(self):
         """Handle verification button click."""
         logger.info("Verification button clicked")
@@ -184,6 +221,25 @@ class ProjectDashboard(QWidget):
             return
 
         project = self.project_model.projects[row]
+
+        # Block deletion of reference corpus
+        if project.is_general_corpus:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Cannot Delete Reference Corpus",
+                f"'{project.name}' is a reference corpus (read-only).\n\n"
+                f"Reference corpora cannot be deleted because they are used "
+                f"for termhood calculations in other projects.\n\n"
+                f"You can still:\n"
+                f"✓ Open and browse documents\n"
+                f"✓ Add/edit translations\n"
+                f"✓ Extract terms\n\n"
+                f"To remove this corpus, first unmark it as reference "
+                f"(set is_general_corpus=0 in database).",
+                QMessageBox.StandardButton.Ok
+            )
+            return
 
         # Confirmation dialog
         from PyQt6.QtWidgets import QMessageBox
@@ -242,3 +298,20 @@ class ProjectDashboard(QWidget):
                 "Error",
                 f"An error occurred while deleting the project:\n\n{str(e)[:200]}",
             )
+
+    def on_ref_corpus_double_clicked(self, index):
+        """Handle reference corpus double-click."""
+        if index.isValid():
+            row = index.row()
+            if row < len(self.ref_corpus_model.projects):
+                project_id = self.ref_corpus_model.projects[row].project_id
+                logger.info(f"Opening reference corpus: {project_id}")
+                self.project_selected.emit(project_id)
+
+    def on_ref_selection_changed(self):
+        """Handle reference corpus selection change."""
+        # Disable delete button for reference corpora (always read-only)
+        self.delete_btn.setEnabled(False)
+
+        # Clear selection in My Projects table
+        self.project_table.clearSelection()

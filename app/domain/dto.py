@@ -13,6 +13,7 @@ class ProjectStats:
     processed_docs: int
     total_lemmas: int
     total_ngrams: int
+    is_general_corpus: bool = False  # True if reference corpus (read-only documents)
 
 
 @dataclass
