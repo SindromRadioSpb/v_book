@@ -51,21 +51,67 @@ class ProjectService:
         stmt = select(DictProject).where(DictProject.project_id == project_id)
         return session.execute(stmt).scalar_one_or_none()
 
+    def get_default_reference_project(self, session: Session) -> Optional[int]:
+        """
+        Get the default reference corpus project ID.
+
+        Returns the project marked as is_general_corpus=1, or falls back to
+        "Hebrew Wikipedia Baseline" by name if no general corpus is marked.
+
+        Returns:
+            Reference project ID or None if not found
+        """
+        # First: look for is_general_corpus=1
+        stmt = select(DictProject.project_id).where(DictProject.is_general_corpus == 1)
+        ref_id = session.execute(stmt).scalar_one_or_none()
+
+        if ref_id:
+            return ref_id
+
+        # Fallback: search by name "Hebrew Wikipedia Baseline"
+        stmt = select(DictProject.project_id).where(
+            DictProject.name == "Hebrew Wikipedia Baseline"
+        )
+        ref_id = session.execute(stmt).scalar_one_or_none()
+
+        return ref_id
+
     def create_project(
         self,
         session: Session,
         name: str,
         description: str = "",
         library: Optional[Library] = None,
+        auto_assign_reference: bool = True,
     ) -> DictProject:
-        """Create a new project."""
+        """
+        Create a new project.
+
+        Args:
+            session: Database session
+            name: Project name
+            description: Project description
+            library: Library to assign (defaults to "Default Library")
+            auto_assign_reference: If True, automatically assign default reference corpus
+
+        Returns:
+            Created DictProject instance
+        """
         if library is None:
             library = self.get_or_create_default_library(session)
+
+        # Get default reference corpus (if auto-assign enabled)
+        reference_id = None
+        if auto_assign_reference:
+            reference_id = self.get_default_reference_project(session)
+            if reference_id:
+                logger.info(f"Auto-assigning reference corpus ID: {reference_id}")
 
         project = DictProject(
             library_id=library.library_id,
             name=name,
             description=description,
+            general_corpus_id=reference_id,
         )
         session.add(project)
         session.commit()

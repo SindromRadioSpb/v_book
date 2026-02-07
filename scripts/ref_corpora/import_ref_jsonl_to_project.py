@@ -447,7 +447,16 @@ Examples:
             jsonl_files.append(path)
         else:
             # Try glob expansion
-            matched = list(Path(".").glob(pattern))
+            path_obj = Path(pattern)
+            if path_obj.is_absolute() and '*' in pattern:
+                # Absolute path with wildcard - extract parent and pattern
+                parent = path_obj.parent
+                pattern_name = path_obj.name
+                matched = list(parent.glob(pattern_name))
+            else:
+                # Relative pattern
+                matched = list(Path(".").glob(pattern))
+
             if not matched:
                 logger.warning(f"No files matched pattern: {pattern}")
             jsonl_files.extend(matched)

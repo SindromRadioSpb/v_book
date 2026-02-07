@@ -175,6 +175,16 @@ class TermsView(QWidget):
                 # Get current reference setting
                 current_ref = self.term_service.get_reference_project(session, self.project_id)
 
+                # If no reference set, auto-select default reference corpus (is_general_corpus=1)
+                default_ref_id = None
+                if current_ref is None:
+                    default_ref_id = self.term_service._get_default_reference_corpus_id(session)
+                    if default_ref_id and default_ref_id != self.project_id:
+                        # Auto-assign default reference corpus for this project
+                        self.term_service.set_reference_project(session, self.project_id, default_ref_id)
+                        current_ref = default_ref_id
+                        logger.info(f"Auto-assigned default reference corpus (ID: {default_ref_id}) to project {self.project_id}")
+
                 # Clear and populate combo
                 self.reference_combo.clear()
                 self.reference_combo.addItem("None", None)

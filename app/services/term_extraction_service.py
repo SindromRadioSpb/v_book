@@ -840,6 +840,20 @@ class TermExtractionService:
 
         return project.general_corpus_id
 
+    def _get_default_reference_corpus_id(self, session: Session) -> Optional[int]:
+        """
+        Get the default reference corpus ID (is_general_corpus=1).
+
+        Args:
+            session: DB session
+
+        Returns:
+            Default reference corpus ID or None if not found
+        """
+        stmt = select(DictProject.project_id).where(DictProject.is_general_corpus == 1)
+        result = session.execute(stmt).scalar_one_or_none()
+        return result
+
     def list_projects(self, session: Session) -> List[Tuple[int, str]]:
         """
         List all projects for reference selection.
