@@ -21,7 +21,8 @@ DefaultGroupName=HDLE Premium
 DisableProgramGroupPage=yes
 
 ; Output configuration
-OutputDir=installer\output
+; Path relative to project root (one level up from installer folder)
+OutputDir=..\installer\output
 OutputBaseFilename=HDLE_Premium_Setup
 SetupIconFile=compiler:SetupClassicIcon.ico
 
@@ -35,8 +36,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 ; UI
 WizardStyle=modern
-WizardImageFile=compiler:WizModernImage-IS.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
+; Use default images (compiler: paths commented out to avoid file not found errors)
+; WizardImageFile=compiler:WizModernImage-IS.bmp
+; WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
 
 ; Versioning
 VersionInfoVersion=1.0.0.0
@@ -60,7 +62,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Application files (onedir mode - entire distribution folder)
-Source: "dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Path is relative to project root (one level up from installer folder)
+Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; NOTE: User data (database, logs, backups) is stored in:
 ; %LOCALAPPDATA%\HDLE\
