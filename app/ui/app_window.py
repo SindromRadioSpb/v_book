@@ -329,6 +329,7 @@ class AppWindow(QMainWindow):
     def _on_sidebar_action(self, action_id: str):
         """Route sidebar action to appropriate handler."""
         action_map = {
+            "navigate.dashboard": self.back_to_dashboard,
             "tools.verification": self.open_verification,
             "tools.import_dictionary": self.open_import_wizard,
             "premium.tm": self.open_translation_management,

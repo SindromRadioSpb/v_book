@@ -47,6 +47,22 @@ class SidebarWidget(QFrame):
         header = QLabel("<b>Quick Actions</b>")
         layout.addWidget(header)
 
+        # Navigation section
+        nav_label = QLabel("<i>Navigation</i>")
+        nav_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(nav_label)
+
+        self.dashboard_btn = QPushButton("📊 Back to Dashboard")
+        self.dashboard_btn.setToolTip("Return to projects dashboard")
+        self.dashboard_btn.clicked.connect(lambda: self.action_triggered.emit("navigate.dashboard"))
+        layout.addWidget(self.dashboard_btn)
+
+        # Separator
+        layout.addSpacing(8)
+        tools_label = QLabel("<i>Tools</i>")
+        tools_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(tools_label)
+
         # Quick action buttons
         self.import_btn = QPushButton("Import Dictionary")
         self.import_btn.setToolTip("Import dictionary from CSV (Ctrl+Shift+I)")

@@ -32,6 +32,11 @@ class TestSidebarWidget:
         sidebar = SidebarWidget()
         qtbot.addWidget(sidebar)
 
+        # Navigation buttons
+        assert sidebar.dashboard_btn is not None
+        assert "Dashboard" in sidebar.dashboard_btn.text()
+
+        # Tool buttons
         assert sidebar.import_btn is not None
         assert sidebar.tm_btn is not None
         assert sidebar.verify_btn is not None
