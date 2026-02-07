@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
+from app.ui.workspace_manager import WorkspaceManager
 from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
@@ -38,9 +39,15 @@ class AppWindow(QMainWindow):
         # Menu bar
         self.create_menu_bar()
 
-        # Central widget - stack for switching views
-        self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
+        # Central widget - workspace manager (contains stack)
+        self.workspace = WorkspaceManager()
+        self.setCentralWidget(self.workspace)
+
+        # Alias for existing code (zero changes to navigation)
+        self.stack = self.workspace.stack
+
+        # Connect sidebar actions
+        self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)
 
         # Create dashboard
         self.dashboard = ProjectDashboard()
@@ -86,6 +93,21 @@ class AppWindow(QMainWindow):
         coverage_action.setShortcut("Ctrl+Shift+C")
         coverage_action.triggered.connect(self.open_coverage)
         premium_menu.addAction(coverage_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        # Toggle Sidebar
+        toggle_sidebar_action = QAction("Toggle &Sidebar", self)
+        toggle_sidebar_action.setShortcut("Ctrl+B")
+        toggle_sidebar_action.triggered.connect(self.workspace.toggle_sidebar)
+        view_menu.addAction(toggle_sidebar_action)
+
+        # Reset Layout
+        reset_layout_action = QAction("&Reset Layout to Default", self)
+        reset_layout_action.setShortcut("Ctrl+Shift+R")
+        reset_layout_action.triggered.connect(self.workspace.reset_to_default)
+        view_menu.addAction(reset_layout_action)
 
     def open_verification(self):
         """Open verification panel."""
@@ -179,6 +201,20 @@ class AppWindow(QMainWindow):
         # Show dashboard and refresh
         self.stack.setCurrentWidget(self.dashboard)
         self.dashboard.load_projects()
+
+    def _on_sidebar_action(self, action_id: str):
+        """Route sidebar action to appropriate handler."""
+        action_map = {
+            "tools.verification": self.open_verification,
+            "tools.import_dictionary": self.open_import_wizard,
+            "premium.tm": self.open_translation_management,
+        }
+
+        handler = action_map.get(action_id)
+        if handler:
+            handler()
+        else:
+            logger.warning(f"Unknown sidebar action: {action_id}")
 
     def closeEvent(self, event):
         """Handle window close."""
