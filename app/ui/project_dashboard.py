@@ -105,17 +105,19 @@ class ProjectDashboard(QWidget):
             with self.project_service.db_service.get_session() as session:
                 projects = self.project_service.list_projects(session)
 
-                # Convert to ProjectStats
+                # Convert to ProjectStats with REAL metrics
                 project_stats = []
                 for p in projects:
-                    # For M1, we don't have documents yet, so all counts are 0
+                    # Get real statistics from database
+                    project_metrics = self.project_service.get_project_stats(session, p.project_id)
+
                     stats = ProjectStats(
                         project_id=p.project_id,
                         name=p.name,
-                        total_docs=0,
-                        processed_docs=0,
-                        total_lemmas=0,
-                        total_ngrams=0,
+                        total_docs=project_metrics["total_docs"],
+                        processed_docs=project_metrics["processed_docs"],
+                        total_lemmas=project_metrics["total_lemmas"],
+                        total_ngrams=project_metrics["total_ngrams"],
                         is_general_corpus=bool(p.is_general_corpus),
                     )
                     project_stats.append(stats)

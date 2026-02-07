@@ -277,3 +277,48 @@ class ProjectService:
         """Get the default corpus for a project."""
         corpora = self.get_project_corpora(session, project_id)
         return corpora[0] if corpora else None
+
+    def get_project_stats(self, session: Session, project_id: int) -> dict:
+        """
+        Get project statistics (document counts, lemma counts, ngram counts).
+
+        Returns dict with keys:
+        - total_docs: Total documents in all corpora
+        - processed_docs: Documents with status='processed'
+        - total_lemmas: Total unique lemmas
+        - total_ngrams: Total unique n-grams
+        """
+        # Count documents
+        total_docs = session.execute(
+            select(func.count())
+            .select_from(SourceDocument)
+            .join(SourceCorpus)
+            .where(SourceCorpus.project_id == project_id)
+        ).scalar() or 0
+
+        processed_docs = session.execute(
+            select(func.count())
+            .select_from(SourceDocument)
+            .join(SourceCorpus)
+            .where(
+                SourceCorpus.project_id == project_id,
+                SourceDocument.status == "processed",
+            )
+        ).scalar() or 0
+
+        # Count lemmas
+        total_lemmas = session.execute(
+            select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
+        ).scalar() or 0
+
+        # Count ngrams
+        total_ngrams = session.execute(
+            select(func.count()).select_from(Ngram).where(Ngram.project_id == project_id)
+        ).scalar() or 0
+
+        return {
+            "total_docs": total_docs,
+            "processed_docs": processed_docs,
+            "total_lemmas": total_lemmas,
+            "total_ngrams": total_ngrams,
+        }

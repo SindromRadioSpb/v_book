@@ -93,14 +93,20 @@ debug_*.txt
 # Build logs and temporary files
 build_log.txt
 task.md
+task_*.md
+verify_*.py
 
 # Installer output
 installer/output/
 
 # Reference corpora data files (keep scripts, not data)
-ref_corpora/*/raw/
-ref_corpora/*/jsonl/
-ref_corpora/*/manifests/
+ref_corpora/hewiki/
+ref_corpora/manifests/
+ref_corpora/stoplists/
+
+# External tools (embedded git repos)
+tools/Wikiextractor-V2/
+tools/text/
 
 # Test databases (root level only - keep app database)
 /hdle_premium.db
