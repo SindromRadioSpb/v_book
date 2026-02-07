@@ -449,7 +449,7 @@ class TermCardTableModel(QAbstractTableModel):
         self.cards: List[TermCardDTO] = cards or []
         self.headers = [
             "Term", "Lemma", "Freq", "DocFreq", "Status",
-            "Translation", "Aliases", "Stopword"
+            "Pin Translation", "Aliases", "Stopword"
         ]
 
     def rowCount(self, parent=QModelIndex()):

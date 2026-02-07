@@ -60,7 +60,7 @@ When command palette is open (Ctrl+P):
 
 ## Navigation
 
-- **Dashboard**: No shortcut (use command palette "Go to Dashboard" or sidebar "Back" button)
+- **Dashboard**: No shortcut (use command palette "Go to Dashboard" or sidebar "📊 Back to Dashboard" button)
 - **Projects**: Double-click project in dashboard to open
 
 ---
