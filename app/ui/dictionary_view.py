@@ -18,10 +18,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QModelIndex
 from PyQt6.QtGui import QAction
 
+from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.translation_service import TranslationService
 from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
+from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.dialogs import show_error, WhyTranslationDialog
 from app.ui.workers import TranslationResolveWorker
 
@@ -37,6 +39,7 @@ class DictionaryView(QWidget):
         self.db_service = DBService.get_instance()
         self.translation_service = TranslationService()
         self.translation_worker: Optional[TranslationResolveWorker] = None
+        self.settings = SettingsService.get_instance()
 
         self.init_ui()
         self.load_lemmas()
@@ -86,11 +89,15 @@ class DictionaryView(QWidget):
         search_layout.addWidget(self.search_edit)
         layout.addLayout(search_layout)
 
-        # Lemma table
+        # Lemma table with proxy model for sorting
         self.lemma_model = LemmaTableModel()
+        self.proxy_model = MultiSortProxyModel()
+        self.proxy_model.setSourceModel(self.lemma_model)
+
         self.lemma_table = QTableView()
-        self.lemma_table.setModel(self.lemma_model)
+        self.lemma_table.setModel(self.proxy_model)  # Use proxy model
         self.lemma_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.lemma_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)  # Bulk selection
         # M7 P1: Enable editing for Translation column
         self.lemma_table.setEditTriggers(
             QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
@@ -105,6 +112,10 @@ class DictionaryView(QWidget):
         header = self.lemma_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Lemma
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Translation
+        header.setSectionsMovable(True)  # Enable column reorder
+
+        # Restore header state
+        self.settings.restore_header_state("dictionary_view", header)
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
@@ -320,19 +331,20 @@ class DictionaryView(QWidget):
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
-        index = self.lemma_table.indexAt(pos)
+        index = self.lemma_table.indexAt(pos)  # Returns PROXY index
         if not index.isValid():
             return
 
-        row = index.row()
-        lemma = self.lemma_model.lemmas[row]
+        # Map proxy row to source row (CRITICAL FIX for sorted tables)
+        source_row = self.proxy_model.map_to_source_row(index.row())
+        lemma = self.lemma_model.lemmas[source_row]
 
         # Create menu
         menu = QMenu(self)
 
         # "Why?" action - show explainability
         why_action = QAction("Why this translation?", self)
-        why_action.triggered.connect(lambda: self.show_why_dialog(row))
+        why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
         menu.addAction(why_action)
 
         # Show menu
@@ -366,6 +378,9 @@ class DictionaryView(QWidget):
             self.translation_worker.wait(1000)
             if self.translation_worker.isRunning():
                 self.translation_worker.terminate()
+
+        # Save header state (column order, widths, sort)
+        self.settings.save_header_state("dictionary_view", self.lemma_table.horizontalHeader())
 
         super().closeEvent(event)
 

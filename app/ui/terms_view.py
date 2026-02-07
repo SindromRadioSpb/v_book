@@ -9,10 +9,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QModelIndex
 from PyQt6.QtGui import QAction
 
+from app.infra.settings import SettingsService
 from app.services.term_extraction_service import TermExtractionService
 from app.services.translation_service import TranslationService
 from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
 from app.ui.models_qt import TermClusterTableModel
+from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.workers import TranslationResolveWorker
 from app.services.db_service import DBService
 
@@ -28,6 +30,7 @@ class TermsView(QWidget):
         self.term_service = TermExtractionService()
         self.db_service = DBService.get_instance()
         self.translation_service = TranslationService()
+        self.settings = SettingsService.get_instance()
         self.extract_worker = None
         self.translation_worker: Optional[TranslationResolveWorker] = None
 
@@ -115,11 +118,15 @@ class TermsView(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
-        # Terms table (M7 P1: converted to QTableView + TermClusterTableModel)
+        # Terms table with proxy model for sorting (M7 P1: converted to QTableView + TermClusterTableModel)
         self.terms_model = TermClusterTableModel()
+        self.proxy_model = MultiSortProxyModel()
+        self.proxy_model.setSourceModel(self.terms_model)
+
         self.terms_table = QTableView()
-        self.terms_table.setModel(self.terms_model)
+        self.terms_table.setModel(self.proxy_model)  # Use proxy model
         self.terms_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.terms_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)  # Bulk selection
         # M7 P1: Enable editing for Translation column
         self.terms_table.setEditTriggers(
             QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
@@ -134,6 +141,10 @@ class TermsView(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Term
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Lemma
         header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Translation
+        header.setSectionsMovable(True)  # Enable column reorder
+
+        # Restore header state
+        self.settings.restore_header_state("terms_view", header)
 
         # M7 P1: Connect dataChanged to save handler
         self.terms_model.dataChanged.connect(self.on_translation_edited)
@@ -464,19 +475,20 @@ class TermsView(QWidget):
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
-        index = self.terms_table.indexAt(pos)
+        index = self.terms_table.indexAt(pos)  # Returns PROXY index
         if not index.isValid():
             return
 
-        row = index.row()
-        cluster = self.terms_model.clusters[row]
+        # Map proxy row to source row (CRITICAL FIX for sorted tables)
+        source_row = self.proxy_model.map_to_source_row(index.row())
+        cluster = self.terms_model.clusters[source_row]
 
         # Create menu
         menu = QMenu(self)
 
         # "Why?" action - show explainability
         why_action = QAction("Why this translation?", self)
-        why_action.triggered.connect(lambda: self.show_why_dialog(row))
+        why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
         menu.addAction(why_action)
 
         # Show menu
@@ -519,5 +531,8 @@ class TermsView(QWidget):
             self.extract_worker.wait(1000)  # Wait up to 1 second
             if self.extract_worker.isRunning():
                 self.extract_worker.terminate()
+
+        # Save header state (column order, widths, sort)
+        self.settings.save_header_state("terms_view", self.terms_table.horizontalHeader())
 
         super().closeEvent(event)
