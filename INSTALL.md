@@ -175,6 +175,6 @@ For issues, refer to the log files:
 - Test logs: `test_data/logs/hdle.log`
 
 Where `<app_dir>` is:
-- Windows: `%LOCALAPPDATA%\HDLE`
+- **Windows: `M:\V_book\HDLE`** (to avoid filling up C: drive)
 - macOS: `~/Library/Application Support/HDLE`
 - Linux: `~/.local/share/hdle`

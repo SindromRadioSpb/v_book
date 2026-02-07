@@ -3,7 +3,7 @@
 ## Problem: Reference Project Not Visible in UI
 
 When you run HDLE Premium normally, it uses the **production database** located at:
-- **Windows:** `%LOCALAPPDATA%\HDLE\hdle.db`
+- **Windows:** `M:\V_book\HDLE\hdle.db` (configured to avoid filling C: drive)
 - **macOS:** `~/Library/Application Support/HDLE/hdle.db`
 - **Linux:** `~/.local/share/hdle/hdle.db`
 
@@ -44,12 +44,12 @@ If you want the reference corpus available in the production database:
 1. Use the import script from `ref_corpora/hewiki/`:
    ```batch
    cd J:\Project_Vibe\V_book
-   python -m scripts.ref_corpora.import_hewiki_jsonl --target-db "%LOCALAPPDATA%\HDLE\hdle.db" --jsonl-dir "ref_corpora\hewiki\data"
+   python -m scripts.ref_corpora.import_hewiki_jsonl --target-db "M:\V_book\HDLE\hdle.db" --jsonl-dir "ref_corpora\hewiki\data"
    ```
 
 2. Set as reference corpus:
    ```batch
-   python scripts\ref_corpora\setup_hewiki_as_default_reference.py --db-path "%LOCALAPPDATA%\HDLE\hdle.db" --assign-existing
+   python scripts\ref_corpora\setup_hewiki_as_default_reference.py --db-path "M:\V_book\HDLE\hdle.db" --assign-existing
    ```
 
 ---
@@ -85,7 +85,7 @@ HDLE Premium - Terminology Extraction Tool
 
 options:
   -h, --help         show this help message and exit
-  --db-path DB_PATH  Path to database file (default: %LOCALAPPDATA%/HDLE/hdle.db)
+  --db-path DB_PATH  Path to database file (default: M:/V_book/HDLE/hdle.db)
 ```
 
 ---
@@ -94,7 +94,7 @@ options:
 
 | Database | Location | Purpose | Contains HEWiki? |
 |----------|----------|---------|------------------|
-| **Production** | `%LOCALAPPDATA%\HDLE\hdle.db` | Default for end users | ❌ No (only test projects) |
+| **Production** | `M:\V_book\HDLE\hdle.db` | Default for end users | ❌ No (only test projects) |
 | **Development** | `J:\Project_Vibe\V_book\hdle_premium.db` | Development/testing | ✅ Yes (387k documents) |
 
 ---

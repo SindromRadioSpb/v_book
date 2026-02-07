@@ -2,7 +2,7 @@
 
 **Issue:** User reports "Я захожу в программу и не вижу визуально референсного проекта в перечне проектов."
 
-**Root Cause:** Application uses **production database** by default (`%LOCALAPPDATA%\HDLE\hdle.db`), but Hebrew Wikipedia Baseline was imported into **development database** (`J:\Project_Vibe\V_book\hdle_premium.db`).
+**Root Cause:** Application uses **production database** by default (`M:\V_book\HDLE\hdle.db`), but Hebrew Wikipedia Baseline was imported into **development database** (`J:\Project_Vibe\V_book\hdle_premium.db`).
 
 ---
 
@@ -21,7 +21,7 @@ WHERE sc.project_id = 1;
 -- Result: 387,639 documents ✅
 ```
 
-**Production Database** (`C:\Users\Win10_Game_OS\AppData\Local\HDLE\hdle.db`):
+**Production Database** (`M:\V_book\HDLE\hdle.db`):
 ```sql
 SELECT project_id, name, is_general_corpus FROM dict_project;
 -- Result: 2|Тест|0
@@ -70,7 +70,7 @@ def main():
     parser.add_argument(
         "--db-path",
         type=str,
-        help="Path to database file (default: %LOCALAPPDATA%/HDLE/hdle.db)",
+        help="Path to database file (default: M:/V_book/HDLE/hdle.db)",
     )
     args = parser.parse_args()
 
@@ -143,7 +143,7 @@ Comprehensive guide covering:
 
 2. ✅ Verified production database does NOT contain Hebrew Wikipedia:
    ```
-   sqlite3 "%LOCALAPPDATA%\HDLE\hdle.db" "SELECT project_id, name FROM dict_project;"
+   sqlite3 "M:\V_book\HDLE\hdle.db" "SELECT project_id, name FROM dict_project;"
    Result: 2|Тест|0
            3|Тест 2|0
    ```
@@ -219,7 +219,7 @@ python -m app.main --help
 fix(main): add --db-path argument for development database support (PATCH-06)
 
 PROBLEM: User could not see Hebrew Wikipedia Baseline in project list
-ROOT CAUSE: App uses production DB (%LOCALAPPDATA%\HDLE\hdle.db)
+ROOT CAUSE: App uses production DB (M:\V_book\HDLE\hdle.db)
             but HEWiki imported to dev DB (hdle_premium.db)
 
 SOLUTION: Add command-line argument --db-path to specify custom database
