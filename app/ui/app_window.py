@@ -4,10 +4,11 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMenuBar
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 
 from app.infra.settings import SettingsService
 from app.ui.workspace_manager import WorkspaceManager
+from app.ui.command_palette import ActionsRegistry, ActionSpec, CommandPaletteDialog
 from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
@@ -63,6 +64,13 @@ class AppWindow(QMainWindow):
 
         # Restore workspace layout
         self._restore_workspace_layout()
+
+        # Register actions for command palette
+        self._register_actions()
+
+        # Create Ctrl+P shortcut for command palette
+        self.palette_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
+        self.palette_shortcut.activated.connect(self._open_command_palette)
 
         logger.info("AppWindow initialized")
 
@@ -207,6 +215,92 @@ class AppWindow(QMainWindow):
         # Show dashboard and refresh
         self.stack.setCurrentWidget(self.dashboard)
         self.dashboard.load_projects()
+
+    def _register_actions(self):
+        """Register all application actions with the command palette."""
+        registry = ActionsRegistry.get_instance()
+
+        # Tools category
+        registry.register(ActionSpec(
+            action_id="tools.verification",
+            title="Run P1 Verification",
+            keywords=["verify", "p1", "test", "check"],
+            shortcut="Ctrl+Shift+V",
+            callback=self.open_verification,
+            category="Tools"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="tools.import_dictionary",
+            title="Import Dictionary",
+            keywords=["import", "dict", "csv", "load"],
+            shortcut="Ctrl+Shift+I",
+            callback=self.open_import_wizard,
+            category="Tools"
+        ))
+
+        # Premium category
+        registry.register(ActionSpec(
+            action_id="premium.tm",
+            title="Translation Management",
+            keywords=["tm", "translation", "memory", "manage"],
+            shortcut="Ctrl+Shift+T",
+            callback=self.open_translation_management,
+            category="Premium"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="premium.coverage",
+            title="QA / Coverage",
+            keywords=["qa", "coverage", "quality", "test"],
+            shortcut="Ctrl+Shift+C",
+            callback=self.open_coverage,
+            category="Premium"
+        ))
+
+        # View category
+        registry.register(ActionSpec(
+            action_id="view.toggle_sidebar",
+            title="Toggle Sidebar",
+            keywords=["sidebar", "panel", "show", "hide"],
+            shortcut="Ctrl+B",
+            callback=self.workspace.toggle_sidebar,
+            category="View"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="view.reset_layout",
+            title="Reset Layout to Default",
+            keywords=["reset", "layout", "default", "restore"],
+            shortcut="Ctrl+Shift+R",
+            callback=self.workspace.reset_to_default,
+            category="View"
+        ))
+
+        # Navigate category
+        registry.register(ActionSpec(
+            action_id="navigate.dashboard",
+            title="Go to Dashboard",
+            keywords=["dashboard", "home", "projects"],
+            shortcut="",
+            callback=self.back_to_dashboard,
+            category="Navigate"
+        ))
+
+        logger.info(f"Registered {len(registry.get_all())} actions")
+
+    def _open_command_palette(self):
+        """Open command palette dialog."""
+        dialog = CommandPaletteDialog(self)
+        dialog.action_selected.connect(self._execute_palette_action)
+        dialog.exec()
+
+    def _execute_palette_action(self, action_id: str):
+        """Execute action from command palette."""
+        registry = ActionsRegistry.get_instance()
+        success = registry.execute(action_id)
+        if not success:
+            logger.warning(f"Failed to execute action: {action_id}")
 
     def _save_workspace_layout(self):
         """Save workspace layout to settings."""
