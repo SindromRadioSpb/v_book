@@ -30,6 +30,11 @@ class ProviderSettingsDialog(QDialog):
 
     # Provider registry with defaults
     PROVIDERS = {
+        "google_translate": {
+            "name": "Google Translate (Free)",
+            "default_rate_limit": 60,  # Rate-limited by Google
+            "default_enabled": True,  # Always available
+        },
         "deepl": {
             "name": "DeepL",
             "default_rate_limit": 60,
