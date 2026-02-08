@@ -13,10 +13,12 @@ from app.infra.settings import SettingsService
 from app.services.term_extraction_service import TermExtractionService
 from app.services.translation_service import TranslationService
 from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
+from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
-from app.ui.workers import TranslationResolveWorker
+from app.ui.workers import TranslationResolveWorker, BatchTranslateWorker
 from app.services.db_service import DBService
+from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ class TermsView(QWidget):
         self.settings = SettingsService.get_instance()
         self.extract_worker = None
         self.translation_worker: Optional[TranslationResolveWorker] = None
+        self.batch_translate_worker: Optional[BatchTranslateWorker] = None
 
         self.init_ui()
         self.load_terms()
@@ -47,6 +50,11 @@ class TermsView(QWidget):
         title.setStyleSheet("font-size: 14px; font-weight: bold;")
         header_layout.addWidget(title)
         header_layout.addStretch()
+
+        self.batch_translate_btn = QPushButton("Translate Selected...")
+        self.batch_translate_btn.clicked.connect(self.on_batch_translate)
+        self.batch_translate_btn.setEnabled(False)
+        header_layout.addWidget(self.batch_translate_btn)
 
         self.extract_btn = QPushButton("Extract Terms")
         self.extract_btn.clicked.connect(self.on_extract)
@@ -136,6 +144,9 @@ class TermsView(QWidget):
         # M7 P1: Context menu for "Why?" action
         self.terms_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.terms_table.customContextMenuRequested.connect(self.on_context_menu)
+
+        # Connect selection change to enable/disable batch translate button
+        self.terms_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         header = self.terms_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Term
@@ -501,6 +512,14 @@ class TermsView(QWidget):
         why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
         menu.addAction(why_action)
 
+        # Batch translate action
+        selected_rows = self.terms_table.selectionModel().selectedRows()
+        if len(selected_rows) > 1:
+            menu.addSeparator()
+            batch_action = QAction(f"Translate {len(selected_rows)} selected rows...", self)
+            batch_action.triggered.connect(self.on_batch_translate)
+            menu.addAction(batch_action)
+
         # Show menu
         menu.exec(self.terms_table.viewport().mapToGlobal(pos))
 
@@ -524,8 +543,128 @@ class TermsView(QWidget):
         dialog = WhyTranslationDialog(translation_result, cluster.representative_he, self)
         dialog.exec()
 
+    def on_selection_changed(self):
+        """Enable/disable batch translate button based on selection."""
+        selected_rows = self.terms_table.selectionModel().selectedRows()
+        self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
+
+    def on_batch_translate(self):
+        """Handle batch translate selected rows."""
+        selected_indexes = self.terms_table.selectionModel().selectedRows()
+        if not selected_indexes:
+            return
+
+        # Map proxy rows to source rows
+        source_rows = [self.proxy_model.map_to_source_row(idx.row()) for idx in selected_indexes]
+
+        # Build items list
+        items = []
+        for source_row in source_rows:
+            cluster = self.terms_model.clusters[source_row]
+            items.append(BatchTranslateItem(
+                entity_type="term_cluster",
+                entity_id=cluster.representative_he,  # Use representative as ID
+                source_text=cluster.representative_he,
+                src_lang="he",
+                tgt_lang="ru",
+                current_translation=cluster.translation,
+                project_id=self.project_id,
+            ))
+
+        # Show confirm dialog
+        accepted, provider_mode, write_mode = show_batch_translate_dialog(
+            parent=self,
+            selected_count=len(items)
+        )
+
+        if not accepted:
+            return
+
+        # Build options
+        options = BatchTranslateOptions(
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            chunk_size=50,
+        )
+
+        # Show progress dialog
+        progress_dialog = BatchProgressDialog(self, total=len(items))
+        progress_dialog.show()
+
+        # Create worker
+        self.batch_translate_worker = BatchTranslateWorker(
+            items=items,
+            options=options,
+            context="terms"
+        )
+
+        # Connect signals
+        self.batch_translate_worker.progress.connect(progress_dialog.update_progress)
+        self.batch_translate_worker.row_completed.connect(
+            lambda entity_id, success: progress_dialog.update_counts(
+                self.batch_translate_worker.succeeded,
+                self.batch_translate_worker.skipped,
+                self.batch_translate_worker.failed
+            )
+        )
+        self.batch_translate_worker.finished.connect(
+            lambda result: self.on_batch_translate_finished(result, progress_dialog)
+        )
+        self.batch_translate_worker.error.connect(
+            lambda error: self.on_batch_translate_error(error, progress_dialog)
+        )
+
+        # Connect cancel signal
+        progress_dialog.cancel_requested.connect(self.batch_translate_worker.cancel)
+
+        # Start worker
+        self.batch_translate_worker.start()
+
+    def on_batch_translate_finished(self, result, progress_dialog: BatchProgressDialog):
+        """Handle batch translate completion."""
+        progress_dialog.set_completed()
+
+        # Show summary
+        msg = f"Batch translation complete!\n\n"
+        msg += f"Total: {result.total}\n"
+        msg += f"Succeeded: {result.succeeded}\n"
+        msg += f"Skipped: {result.skipped}\n"
+        msg += f"Failed: {result.failed}"
+
+        show_info(self, "Batch Translate Complete", msg)
+
+        # Close progress dialog
+        progress_dialog.accept()
+
+        # Refresh table to show new translations
+        self.load_terms()
+
+        # Clean up worker
+        if self.batch_translate_worker:
+            self.batch_translate_worker.deleteLater()
+            self.batch_translate_worker = None
+
+    def on_batch_translate_error(self, error_msg: str, progress_dialog: BatchProgressDialog):
+        """Handle batch translate error."""
+        progress_dialog.close()
+        show_error(self, "Batch Translate Error", error_msg)
+
+        # Clean up worker
+        if self.batch_translate_worker:
+            self.batch_translate_worker.deleteLater()
+            self.batch_translate_worker = None
+
     def closeEvent(self, event):
         """Handle widget close - ensure workers are stopped."""
+        # Stop batch translate worker
+        if self.batch_translate_worker and self.batch_translate_worker.isRunning():
+            logger.info("Stopping batch translate worker on close")
+            self.batch_translate_worker.cancel()
+            self.batch_translate_worker.quit()
+            self.batch_translate_worker.wait(1000)
+            if self.batch_translate_worker.isRunning():
+                self.batch_translate_worker.terminate()
+
         # M7 P1: Stop translation worker
         if self.translation_worker and self.translation_worker.isRunning():
             logger.info("Stopping translation worker on close")
