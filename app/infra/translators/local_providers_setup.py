@@ -10,6 +10,7 @@ Usage:
     initialize_local_providers(db_session, project_id)
 """
 import logging
+import threading
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -19,6 +20,10 @@ from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvide
 from app.services.local_models import ModelResourceManager
 
 logger = logging.getLogger(__name__)
+
+# Global lock for provider initialization to prevent concurrent worker starts
+_provider_init_lock = threading.Lock()
+_initializing_providers = set()  # Track which providers are currently being initialized
 
 
 # ============================================================================
@@ -271,12 +276,32 @@ def initialize_provider_lazy(
     Note:
         This function is thread-safe and can be called multiple times.
         Subsequent calls for the same provider_id are no-ops if already registered.
+        Uses a lock to prevent concurrent initialization of the same provider.
     """
     registry = ProvidersRegistry()
 
-    # Check if already registered
+    # Quick check without lock (fast path)
     if registry.get(provider_id):
         return True
+
+    # Use lock to prevent concurrent initialization
+    with _provider_init_lock:
+        # Double-check after acquiring lock (another thread may have initialized it)
+        if registry.get(provider_id):
+            return True
+
+        # Check if another thread is currently initializing this provider
+        if provider_id in _initializing_providers:
+            logger.info(f"Provider {provider_id} is being initialized by another thread, waiting...")
+            # Release lock and wait a bit, then retry
+            import time
+            time.sleep(1)
+            return initialize_provider_lazy(provider_id, db_session, project_id)
+
+        # Mark as initializing
+        _initializing_providers.add(provider_id)
+
+    try:
 
     # Find provider config
     provider_config = None
@@ -306,26 +331,32 @@ def initialize_provider_lazy(
         logger.info(f"Cannot initialize {provider_id}: {reason}")
         return False
 
-    # Initialize provider
-    try:
-        provider_class = provider_config["provider_class"]
-        provider = provider_class(
-            model_id=model_id,
-            backend=backend,
-            db_session=db_session,
-            project_id=project_id,
-        )
-
-        # Register provider
+        # Initialize provider
         try:
-            registry.register(provider)
-            logger.info(f"Lazily registered local provider: {provider_id}")
-            return True
-        except ValueError as e:
-            # Already registered (race condition)
-            logger.debug(f"Provider {provider_id} already registered: {e}")
-            return True
+            provider_class = provider_config["provider_class"]
+            logger.info(f"Starting initialization of {provider_id} (this may take 10-30s for model loading)...")
+            provider = provider_class(
+                model_id=model_id,
+                backend=backend,
+                db_session=db_session,
+                project_id=project_id,
+            )
 
-    except Exception as e:
-        logger.error(f"Failed to lazily initialize {provider_id}: {e}")
-        return False
+            # Register provider
+            try:
+                registry.register(provider)
+                logger.info(f"Lazily registered local provider: {provider_id}")
+                return True
+            except ValueError as e:
+                # Already registered (race condition)
+                logger.debug(f"Provider {provider_id} already registered: {e}")
+                return True
+
+        except Exception as e:
+            logger.error(f"Failed to lazily initialize {provider_id}: {e}")
+            return False
+
+    finally:
+        # Always remove from initializing set
+        with _provider_init_lock:
+            _initializing_providers.discard(provider_id)
