@@ -90,22 +90,31 @@ def _worker_main(
 
     # Configure fresh logging for worker process
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Changed to DEBUG for detailed logging
         format=f"[Worker-{model_id}] %(asctime)s - %(levelname)s - %(message)s",
         force=True,  # Force reconfiguration even if basicConfig was called before
     )
     worker_logger = logging.getLogger(__name__)
 
+    # DIAGNOSTIC: Log entry point
+    worker_logger.info("=== WORKER PROCESS STARTED ===")
+    worker_logger.info(f"PID: {multiprocessing.current_process().pid}")
+
     try:
         # Load model
         worker_logger.info(f"Loading model: {model_id} ({backend})")
         worker_logger.info(f"Model path: {model_path}")
+        worker_logger.debug("About to call model loading function...")
 
         try:
             if backend == "ctranslate2":
-                model = _load_ctranslate2_model(model_path)
+                worker_logger.debug("Calling _load_ctranslate2_model...")
+                model = _load_ctranslate2_model(model_path, worker_logger)
+                worker_logger.debug("Returned from _load_ctranslate2_model")
             elif backend == "transformers":
+                worker_logger.debug("Calling _load_transformers_model...")
                 model = _load_transformers_model(model_path, model_id)
+                worker_logger.debug("Returned from _load_transformers_model")
             else:
                 raise WorkerError(f"Unknown backend: {backend}")
 
@@ -120,17 +129,24 @@ def _worker_main(
             raise
 
         # Main loop
+        worker_logger.info("=== ENTERING MAIN LOOP ===")
         while True:
             try:
                 # Wait for request
+                worker_logger.debug("Polling for request (60s timeout)...")
                 if not conn.poll(timeout=60):  # 60 second poll timeout
+                    worker_logger.debug("Poll timeout, continuing...")
                     continue
 
+                worker_logger.debug("Receiving request...")
                 request = conn.recv()
+                worker_logger.debug(f"Received request type: {request.get('type', 'UNKNOWN')}")
 
                 # Handle request
                 if request["type"] == "ping":
+                    worker_logger.debug("Handling ping request...")
                     conn.send({"ok": True, "status": "alive"})
+                    worker_logger.debug("Sent ping response")
 
                 elif request["type"] == "translate":
                     # Extract request data
@@ -209,29 +225,50 @@ def _worker_main(
 # ============================================================================
 
 
-def _load_ctranslate2_model(model_path: str):
+def _load_ctranslate2_model(model_path: str, logger=None):
     """Load CTranslate2 model with tokenizer.
 
     Returns:
         dict: {"translator": ctranslate2.Translator, "tokenizer": AutoTokenizer}
     """
+    if logger:
+        logger.debug("=== _load_ctranslate2_model START ===")
+        logger.debug(f"model_path: {model_path}")
+
     try:
+        if logger:
+            logger.debug("Importing ctranslate2...")
         import ctranslate2
+        if logger:
+            logger.debug("ctranslate2 imported successfully")
     except ImportError:
         raise WorkerError("ctranslate2 not installed")
 
     try:
+        if logger:
+            logger.debug("Importing NllbTokenizer from transformers...")
         from transformers import NllbTokenizer
+        if logger:
+            logger.debug("NllbTokenizer imported successfully")
     except ImportError:
         raise WorkerError("transformers not installed (needed for tokenization)")
 
     try:
         # Load CTranslate2 translator
+        if logger:
+            logger.debug(f"Loading CTranslate2 translator from: {model_path}")
+        import time
+        start_time = time.perf_counter()
         translator = ctranslate2.Translator(model_path, device="cpu")
+        elapsed = time.perf_counter() - start_time
+        if logger:
+            logger.info(f"CTranslate2 translator loaded in {elapsed:.2f}s")
 
         # Load tokenizer for proper tokenization/detokenization
         # CTranslate2 models don't include tokenizer files, so we load from HuggingFace
         model_name = Path(model_path).name
+        if logger:
+            logger.debug(f"Model name: {model_name}")
 
         # Infer HuggingFace model ID from path
         # e.g., "facebook_nllb-200-distilled-1.3B_ctranslate2" -> "facebook/nllb-200-distilled-1.3B"
@@ -244,17 +281,28 @@ def _load_ctranslate2_model(model_path: str):
         else:
             raise WorkerError(f"Cannot determine HuggingFace model ID for: {model_name}")
 
+        if logger:
+            logger.debug(f"HuggingFace model ID: {hf_model_id}")
+            logger.debug(f"Loading tokenizer from HuggingFace (will use cache if available)...")
+
         # Load tokenizer from HuggingFace (will be cached locally)
+        start_time = time.perf_counter()
         tokenizer = NllbTokenizer.from_pretrained(
             hf_model_id,
             src_lang="eng_Latn",  # Default source language
         )
+        elapsed = time.perf_counter() - start_time
+        if logger:
+            logger.info(f"Tokenizer loaded in {elapsed:.2f}s")
+            logger.debug("=== _load_ctranslate2_model END (SUCCESS) ===")
 
         return {"translator": translator, "tokenizer": tokenizer}
     except WorkerError:
         raise
     except Exception as e:
         import traceback
+        if logger:
+            logger.error(f"Exception in _load_ctranslate2_model: {e}")
         traceback.print_exc()
         raise WorkerError(f"Failed to load CTranslate2 model: {e}")
 

@@ -596,7 +596,7 @@ class TermsView(QWidget):
         self.batch_translate_worker = BatchTranslateWorker(
             items=items,
             options=options,
-            context="terms"
+            tab_type="terms"  # FIXED: parameter is tab_type, not context
         )
 
         # Connect signals
