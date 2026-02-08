@@ -302,59 +302,57 @@ def initialize_provider_lazy(
         _initializing_providers.add(provider_id)
 
     try:
+        # Find provider config
+        provider_config = None
+        for config in LOCAL_PROVIDERS_CONFIG:
+            provider_class = config["provider_class"]
+            # Get provider_id from class
+            try:
+                config_provider_id = provider_class.provider_id.fget(None)
+            except:
+                config_provider_id = provider_class.__name__.lower().replace("provider", "")
 
-    # Find provider config
-    provider_config = None
-    for config in LOCAL_PROVIDERS_CONFIG:
-        provider_class = config["provider_class"]
-        # Get provider_id from class
-        try:
-            config_provider_id = provider_class.provider_id.fget(None)
-        except:
-            config_provider_id = provider_class.__name__.lower().replace("provider", "")
+            if config_provider_id == provider_id:
+                provider_config = config
+                break
 
-        if config_provider_id == provider_id:
-            provider_config = config
-            break
+        if not provider_config:
+            logger.warning(f"Unknown local provider: {provider_id}")
+            return False
 
-    if not provider_config:
-        logger.warning(f"Unknown local provider: {provider_id}")
-        return False
+        # Check if model is installed
+        model_manager = ModelResourceManager()
+        model_id = provider_config["model_id"]
+        backend = provider_config["backend"]
 
-    # Check if model is installed
-    model_manager = ModelResourceManager()
-    model_id = provider_config["model_id"]
-    backend = provider_config["backend"]
-
-    is_installed, reason = model_manager.is_installed(model_id, backend)
-    if not is_installed:
-        logger.info(f"Cannot initialize {provider_id}: {reason}")
-        return False
+        is_installed, reason = model_manager.is_installed(model_id, backend)
+        if not is_installed:
+            logger.info(f"Cannot initialize {provider_id}: {reason}")
+            return False
 
         # Initialize provider
+        provider_class = provider_config["provider_class"]
+        logger.info(f"Starting initialization of {provider_id} (this may take 10-30s for model loading)...")
+        provider = provider_class(
+            model_id=model_id,
+            backend=backend,
+            db_session=db_session,
+            project_id=project_id,
+        )
+
+        # Register provider
         try:
-            provider_class = provider_config["provider_class"]
-            logger.info(f"Starting initialization of {provider_id} (this may take 10-30s for model loading)...")
-            provider = provider_class(
-                model_id=model_id,
-                backend=backend,
-                db_session=db_session,
-                project_id=project_id,
-            )
+            registry.register(provider)
+            logger.info(f"Lazily registered local provider: {provider_id}")
+            return True
+        except ValueError as e:
+            # Already registered (race condition)
+            logger.debug(f"Provider {provider_id} already registered: {e}")
+            return True
 
-            # Register provider
-            try:
-                registry.register(provider)
-                logger.info(f"Lazily registered local provider: {provider_id}")
-                return True
-            except ValueError as e:
-                # Already registered (race condition)
-                logger.debug(f"Provider {provider_id} already registered: {e}")
-                return True
-
-        except Exception as e:
-            logger.error(f"Failed to lazily initialize {provider_id}: {e}")
-            return False
+    except Exception as e:
+        logger.error(f"Failed to lazily initialize {provider_id}: {e}")
+        return False
 
     finally:
         # Always remove from initializing set
