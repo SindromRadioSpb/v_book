@@ -4,14 +4,16 @@ Premium desktop application for Hebrew lexicography and terminology extraction.
 
 ## Status
 
-- ✅ **M1-M10: All Milestones** - COMPLETE
+- ✅ **M1-M11: Core Milestones** - COMPLETE
+- ✅ **M11: Batch Translation** - Dictionary & Terms (Google Translate integrated)
 - ✅ **P0: Security Hardening** - COMPLETE
 - ✅ **Database Relocation** - M:\V_book\HDLE (saves C: drive space)
 - ✅ **Hebrew Wikipedia Baseline** - Included as reference corpus (387k documents)
+- ⏳ **M12: Reference Corpus Integration** - IN PROGRESS
 
 ## Features
 
-### Core Features (M1-M10)
+### Core Features (M1-M11)
 - ✅ **Offline-first**: All processing happens locally, no network required
 - ✅ **Multi-format ingestion**: TXT, DOCX, PDF (text + OCR)
 - ✅ **Drag-drop import**: Import files by dragging into the window
@@ -22,7 +24,12 @@ Premium desktop application for Hebrew lexicography and terminology extraction.
 - ✅ **MWE extraction**: Multi-word expressions with PMI/T-score
 - ✅ **Live updates**: Incremental document processing
 - ✅ **FTS5 search**: Fast concordance and KWIC display
-- ✅ **Translation memory**: Offline dictionary + MT integration (LibreTranslate, DeepL, Microsoft)
+- ✅ **Translation memory**: Offline dictionary + MT integration
+- ✅ **Batch translation (M11)**: Automated translation for Dictionary & Terms
+  - Google Translate integration (free, no API key)
+  - Force provider mode (direct provider selection)
+  - Chain mode (fallback to multiple providers)
+  - Progress tracking with real-time updates
 - ✅ **Term curation**: Review workflow with approval states
 - ✅ **Export Center**: Excel, CSV, JSONL, TBX, TMX with real project data
 - ✅ **Security**: FTS5/CSV/log injection prevention, credential encryption, audit logging
