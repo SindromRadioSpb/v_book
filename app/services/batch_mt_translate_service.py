@@ -286,26 +286,77 @@ class BatchMTTranslateService:
                     skipped=False,
                 )
 
-            # Translate via TranslationService
-            # NOTE: force_provider_id not yet supported by TranslationService
-            # For now, always use provider chain
+            # Translate: use force provider if specified, otherwise use chain
             if options.provider_mode.startswith("force:"):
-                force_provider = options.provider_mode.split(":", 1)[1]
-                logger.warning(
-                    f"Force provider '{force_provider}' requested but not yet supported. "
-                    f"Using provider chain instead."
+                # Force provider mode: call provider directly
+                force_provider_id = options.provider_mode.split(":", 1)[1]
+                logger.info(f"Using force provider: {force_provider_id}")
+
+                from app.infra.translators.providers_registry import ProvidersRegistry
+                from app.infra.translators.base_provider import TranslationRequest
+
+                registry = ProvidersRegistry()
+                provider = registry.get(force_provider_id)
+
+                if not provider:
+                    logger.error(f"Force provider '{force_provider_id}' not found in registry")
+                    return BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=int((time.perf_counter() - row_start) * 1000),
+                        error_message=f"Provider '{force_provider_id}' not available",
+                        skipped=False,
+                    )
+
+                # Call provider directly
+                mt_request = TranslationRequest(
+                    source_text=item.source_text,
+                    source_lang=item.src_lang,
+                    target_lang=item.tgt_lang,
+                    glossary=None,  # TODO: Add glossary support
                 )
 
-            translation_result = self.translation_service.resolve_translation(
-                session=session,
-                src_text=item.source_text,
-                kind=item.entity_type,
-                src_lang=item.src_lang,
-                tgt_lang=item.tgt_lang,
-                project_id=item.project_id,
-                use_mt=True,
-                allow_draft=False,
-            )
+                mt_result = provider.translate(mt_request)
+
+                if mt_result.error_kind:
+                    logger.error(f"Force provider '{force_provider_id}' failed: {mt_result.error_message}")
+                    return BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=force_provider_id,
+                        cache_hit=False,
+                        latency_ms=mt_result.latency_ms,
+                        error_message=mt_result.error_message,
+                        skipped=False,
+                    )
+
+                # Success - create translation result
+                from app.services.translation_service import TranslationResult as ServiceTranslationResult
+
+                translation_result = ServiceTranslationResult(
+                    translation=mt_result.translated_text,
+                    source=force_provider_id,
+                    confidence=1.0,
+                )
+
+            else:
+                # Chain mode: use TranslationService
+                translation_result = self.translation_service.resolve_translation(
+                    session=session,
+                    src_text=item.source_text,
+                    kind=item.entity_type,
+                    src_lang=item.src_lang,
+                    tgt_lang=item.tgt_lang,
+                    project_id=item.project_id,
+                    use_mt=True,
+                    allow_draft=False,
+                )
 
             if not translation_result or not translation_result.translation:
                 return BatchTranslateRowResult(
