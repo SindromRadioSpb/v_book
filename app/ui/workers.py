@@ -1131,3 +1131,116 @@ class SingleTextTranslateWorker(QThread):
                 f"{error[:200]}\n\n"
                 f"Check the application logs for details."
             )
+
+
+class BatchTranslateWorker(QThread):
+    """Background worker for batch translation (PATCH-UI-BATCH-T01).
+
+    Translates multiple rows in background without freezing UI.
+    Supports chunked commits, progress reporting, and graceful cancellation.
+    """
+
+    progress = pyqtSignal(int, int)  # (completed, total)
+    row_completed = pyqtSignal(str, bool)  # (entity_id, success)
+    finished = pyqtSignal(object)  # BatchTranslateResult
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        items: List,  # List[BatchTranslateItem]
+        options,  # BatchTranslateOptions
+        tab_type: str,  # "dictionary" | "terms" | "tm"
+    ):
+        """Initialize batch translate worker.
+
+        Args:
+            items: List of BatchTranslateItem to translate
+            options: BatchTranslateOptions (provider_mode, write_mode, etc.)
+            tab_type: Tab type identifier (for logging)
+        """
+        super().__init__()
+        self.items = items
+        self.options = options
+        self.tab_type = tab_type
+        self._cancel_requested = False
+
+    def run(self):
+        """Execute batch translation in background thread."""
+        try:
+            from app.services.batch_mt_translate_service import BatchMTTranslateService
+            from app.services.db_service import DBService
+
+            logger.info(
+                f"BatchTranslateWorker started: tab={self.tab_type}, "
+                f"items={len(self.items)}, mode={self.options.provider_mode}"
+            )
+
+            service = BatchMTTranslateService()
+            db_service = DBService.get_instance()
+
+            with db_service.get_session() as session:
+                result = service.execute_batch(
+                    session=session,
+                    items=self.items,
+                    options=self.options,
+                    progress_callback=self._on_progress,
+                    cancel_check=lambda: self._cancel_requested,
+                )
+
+                self.finished.emit(result)
+
+                logger.info(
+                    f"BatchTranslateWorker finished: succeeded={result.succeeded}, "
+                    f"skipped={result.skipped}, failed={result.failed}"
+                )
+
+        except Exception as e:
+            logger.exception("BatchTranslateWorker failed")
+            error_msg = self._make_user_friendly_error(str(e))
+            self.error.emit(error_msg)
+
+    def cancel(self):
+        """Request graceful cancel.
+
+        Sets flag that will be checked between items.
+        Current item will complete, then worker will stop.
+        """
+        logger.info("BatchTranslateWorker cancel requested")
+        self._cancel_requested = True
+
+    def _on_progress(self, completed: int, total: int):
+        """Handle progress callback from service."""
+        self.progress.emit(completed, total)
+
+    def _make_user_friendly_error(self, error: str) -> str:
+        """Convert technical error to user-friendly message."""
+        error_lower = error.lower()
+
+        if "database" in error_lower or "locked" in error_lower:
+            return (
+                "Database error occurred during batch translation.\n\n"
+                "Please try again. If the problem persists, restart the application."
+            )
+        elif "provider" in error_lower or "api" in error_lower:
+            return (
+                "MT provider error occurred.\n\n"
+                "Check:\n"
+                "- MT providers enabled in Settings (Ctrl+Alt+P)\n"
+                "- Local model installed (if using Local MT)\n"
+                "- Network connection (if using cloud providers)\n"
+                "- API keys valid (if using cloud providers)"
+            )
+        elif "not installed" in error_lower or "model" in error_lower:
+            return (
+                "Local MT model not installed.\n\n"
+                "To use Local MT:\n"
+                "1. Run: python scripts/install_local_mt_model.py --model nllb-200-distilled-1.3B\n"
+                "2. Enable Local NLLB in MT Provider Settings (Ctrl+Alt+P)\n\n"
+                "Or: Use cloud providers (DeepL, Google, etc.)"
+            )
+        else:
+            return (
+                f"Batch translation failed:\n\n"
+                f"{error[:200]}\n\n"
+                f"Check the application logs for details."
+            )
