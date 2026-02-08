@@ -137,7 +137,7 @@ class BatchTranslateDialog(QDialog):
     def load_settings(self):
         """Load saved settings."""
         # Provider mode
-        provider_mode = self.settings.get("batch_translate/provider_mode", "chain")
+        provider_mode = self.settings.get_string("batch_translate/provider_mode", "chain")
         if provider_mode == "chain":
             self.chain_radio.setChecked(True)
         else:
@@ -150,7 +150,7 @@ class BatchTranslateDialog(QDialog):
                     self.provider_combo.setCurrentIndex(index)
 
         # Write mode
-        write_mode = self.settings.get("batch_translate/write_mode", "FILL_EMPTY")
+        write_mode = self.settings.get_string("batch_translate/write_mode", "FILL_EMPTY")
         if write_mode == "FILL_EMPTY":
             self.fill_empty_radio.setChecked(True)
         elif write_mode == "OVERWRITE":
@@ -169,14 +169,14 @@ class BatchTranslateDialog(QDialog):
 
         # Provider mode
         provider_mode = self.get_provider_mode()
-        self.settings.set("batch_translate/provider_mode", provider_mode)
+        self.settings.set_value("batch_translate/provider_mode", provider_mode)
 
         # Write mode
         write_mode = self.get_write_mode()
-        self.settings.set("batch_translate/write_mode", write_mode)
+        self.settings.set_value("batch_translate/write_mode", write_mode)
 
         # Remember choice itself
-        self.settings.set("batch_translate/remember_choices", True)
+        self.settings.set_value("batch_translate/remember_choices", True)
 
     def get_provider_mode(self) -> str:
         """Get selected provider mode.
