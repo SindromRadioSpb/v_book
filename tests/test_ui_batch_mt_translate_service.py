@@ -47,7 +47,6 @@ class MockTranslationService:
         project_id=None,
         use_mt=True,
         allow_draft=False,
-        force_provider_id=None,
     ):
         """Mock resolve_translation - returns deterministic output."""
         self.call_count += 1

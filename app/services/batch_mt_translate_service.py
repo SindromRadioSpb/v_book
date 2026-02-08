@@ -282,9 +282,14 @@ class BatchMTTranslateService:
                 )
 
             # Translate via TranslationService
-            force_provider = None
+            # NOTE: force_provider_id not yet supported by TranslationService
+            # For now, always use provider chain
             if options.provider_mode.startswith("force:"):
                 force_provider = options.provider_mode.split(":", 1)[1]
+                logger.warning(
+                    f"Force provider '{force_provider}' requested but not yet supported. "
+                    f"Using provider chain instead."
+                )
 
             translation_result = self.translation_service.resolve_translation(
                 session=session,
@@ -295,7 +300,6 @@ class BatchMTTranslateService:
                 project_id=item.project_id,
                 use_mt=True,
                 allow_draft=False,
-                force_provider_id=force_provider,
             )
 
             if not translation_result or not translation_result.translation:
