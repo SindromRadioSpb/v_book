@@ -101,14 +101,23 @@ def _worker_main(
         worker_logger.info(f"Loading model: {model_id} ({backend})")
         worker_logger.info(f"Model path: {model_path}")
 
-        if backend == "ctranslate2":
-            model = _load_ctranslate2_model(model_path)
-        elif backend == "transformers":
-            model = _load_transformers_model(model_path, model_id)
-        else:
-            raise WorkerError(f"Unknown backend: {backend}")
+        try:
+            if backend == "ctranslate2":
+                model = _load_ctranslate2_model(model_path)
+            elif backend == "transformers":
+                model = _load_transformers_model(model_path, model_id)
+            else:
+                raise WorkerError(f"Unknown backend: {backend}")
 
-        worker_logger.info(f"Model loaded successfully: {model_id}")
+            worker_logger.info(f"Model loaded successfully: {model_id}")
+        except Exception as e:
+            worker_logger.error(f"CRITICAL: Model loading failed: {e}", exc_info=True)
+            # Send error to parent before dying
+            try:
+                conn.send({"ok": False, "error": f"Model loading failed: {e}"})
+            except:
+                pass
+            raise
 
         # Main loop
         while True:
@@ -413,10 +422,10 @@ class LocalMTWorker:
         self.conn = parent_conn
 
         # Wait for worker to be ready (ping)
-        # Model loading can take 60-120 seconds on slower systems
+        # Model loading can take 60-240 seconds on slower systems (1.3GB model)
         try:
-            logger.info(f"Waiting for worker to load model (timeout=120s)...")
-            if not self.ping(timeout=120):  # 120 seconds for model loading
+            logger.info(f"Waiting for worker to load model (timeout=240s)...")
+            if not self.ping(timeout=240):  # 240 seconds for model loading (increased from 120s)
                 # Check if process is still alive
                 if self.process and self.process.is_alive():
                     logger.error(f"Worker process alive but not responding to ping (timeout)")
@@ -454,10 +463,17 @@ class LocalMTWorker:
 
             if self.conn.poll(timeout=timeout):
                 response = self.conn.recv()
-                return response.get("ok", False)
+                if not response.get("ok", False):
+                    # Worker sent error message
+                    error_msg = response.get("error", "Unknown error")
+                    logger.error(f"Worker ping failed with error: {error_msg}")
+                    raise WorkerError(f"Worker initialization failed: {error_msg}")
+                return True
             else:
                 logger.warning(f"Worker ping timeout: {self.model_id}")
                 return False
+        except WorkerError:
+            raise
         except Exception as e:
             logger.error(f"Worker ping error: {e}")
             return False
