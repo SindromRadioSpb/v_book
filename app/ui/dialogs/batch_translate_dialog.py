@@ -66,6 +66,7 @@ class BatchTranslateDialog(QDialog):
         self.provider_combo = QComboBox()
         self.provider_combo.addItems([
             "google_translate",
+            "google_cloud_translate",
             "local_nllb",
             "deepl",
             "microsoft",

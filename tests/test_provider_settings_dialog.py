@@ -157,7 +157,9 @@ def test_cancel_does_not_save(dialog, qtbot):
 
 def test_chain_list_populated(dialog):
     """Chain list contains all providers."""
-    assert dialog.chain_list.count() == 5
+    # 7 providers: google_translate, google_cloud_translate, deepl, microsoft,
+    # libretranslate, local_nllb, local_seamless
+    assert dialog.chain_list.count() == 7
 
 
 def test_move_up(dialog, qtbot):
