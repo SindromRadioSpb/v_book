@@ -81,10 +81,18 @@ def _worker_main(
         backend: Backend ("ctranslate2" or "transformers")
         model_id: Model ID (for logging)
     """
-    # Configure logging in worker process
+    # CRITICAL: Clear inherited logging handlers from main process
+    # When using multiprocessing spawn, inherited file handlers don't work
+    # in the new process and cause hangs/failures
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Configure fresh logging for worker process
     logging.basicConfig(
         level=logging.INFO,
-        format=f"[Worker-{model_id}] %(asctime)s - %(levelname)s - %(message)s"
+        format=f"[Worker-{model_id}] %(asctime)s - %(levelname)s - %(message)s",
+        force=True,  # Force reconfiguration even if basicConfig was called before
     )
     worker_logger = logging.getLogger(__name__)
 
