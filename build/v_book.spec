@@ -31,12 +31,26 @@ a = Analysis(
         'app.infra.sa_models',
         # Process lock
         'psutil',
+        # MT Providers (M11)
+        'deep_translator',
+        'deep_translator.google',
+        'app.infra.translators.providers.google_translate_provider',
+        # Google Cloud Translate (Official API)
+        'google.cloud.translate_v3',
+        'google.cloud.translate',
+        'google.auth',
+        'google.oauth2.service_account',
+        'google.api_core',
+        'google.api_core.gapic_v1',
+        'grpc',
+        'grpc._cython.cygrpc',
         # Services (explicit to ensure bundling)
         'app.services.backup_service',
         'app.services.snapshot_service',
         'app.services.db_service',
         'app.services.processor_service',
         'app.services.export_service',
+        'app.services.batch_mt_translate_service',
     ],
     hookspath=[],
     hooksconfig={},
