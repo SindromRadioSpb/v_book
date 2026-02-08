@@ -393,7 +393,9 @@ class LocalMTWorker:
 
     def _start_worker(self):
         """Start worker process."""
-        logger.info(f"Starting worker for {self.model_id} ({self.backend})")
+        import time
+        start_time = time.perf_counter()
+        logger.info(f"[WORKER] Starting worker for {self.model_id} ({self.backend})")
 
         # Create IPC connection
         parent_conn, child_conn = multiprocessing.Pipe()
@@ -421,13 +423,16 @@ class LocalMTWorker:
                 else:
                     logger.error(f"Worker process died during startup")
                 raise WorkerError("Worker failed to start")
-            logger.info(f"Worker ready: {self.model_id}")
+            elapsed = time.perf_counter() - start_time
+            logger.info(f"[WORKER] Worker ready: {self.model_id} ({elapsed:.1f}s)")
         except Exception as e:
-            logger.error(f"Worker startup error: {e}")
+            elapsed = time.perf_counter() - start_time
+            logger.error(f"[WORKER] Worker startup error: {e} (failed after {elapsed:.1f}s)")
             self.shutdown()
             raise WorkerError(f"Worker startup failed: {e}")
 
-        logger.info(f"Worker started: {self.model_id}")
+        elapsed = time.perf_counter() - start_time
+        logger.info(f"[WORKER] Worker started successfully: {self.model_id} ({elapsed:.1f}s)")
 
     def ping(self, timeout: Optional[float] = None) -> bool:
         """

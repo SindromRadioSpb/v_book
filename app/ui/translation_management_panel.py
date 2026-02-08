@@ -509,9 +509,7 @@ class TranslationManagementPanel(QWidget):
 
         new_translation = entry.translation
 
-        if not new_translation or not new_translation.strip():
-            return  # Don't save empty translations
-
+        # Allow empty translations (user can delete translation)
         try:
             from app.services.translation_admin_service import TranslationAdminService
             service = TranslationAdminService()
@@ -519,13 +517,15 @@ class TranslationManagementPanel(QWidget):
 
             with db_service.get_session() as session:
                 # Save translation using service (creates history automatically)
+                # Strip whitespace but allow empty string (deletion)
+                translation_value = new_translation.strip() if new_translation else ""
                 service.update_translation(
                     session,
                     tm_id=entry.tm_id,
-                    translation=new_translation.strip(),
+                    translation=translation_value,
                 )
 
-            logger.info(f"Saved translation for TM entry {entry.tm_id}: {new_translation.strip()}")
+            logger.info(f"Saved translation for TM entry {entry.tm_id}: {translation_value}")
 
         except Exception as e:
             logger.error(f"Failed to save translation for TM entry {entry.tm_id}: {e}", exc_info=True)

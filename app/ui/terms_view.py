@@ -425,9 +425,7 @@ class TermsView(QWidget):
         # Get new translation value
         new_translation = cluster.translation
 
-        if not new_translation or not new_translation.strip():
-            return  # Don't save empty translations
-
+        # Allow empty translations (user can delete translation)
         try:
             with self.db_service.get_session() as session:
                 # Save to TM
@@ -451,6 +449,9 @@ class TermsView(QWidget):
                 normalized = normalize_for_tm("he", cluster.representative_he, "term_cluster")
                 src_norm = normalized.norm
 
+                # Strip whitespace but allow empty string (deletion)
+                translation_value = new_translation.strip() if new_translation else ""
+
                 # Check if TM entry exists
                 stmt = select(TMEntry).where(
                     TMEntry.project_id == self.project_id,
@@ -461,7 +462,7 @@ class TermsView(QWidget):
 
                 if existing:
                     # Update existing
-                    existing.translation = new_translation.strip()
+                    existing.translation = translation_value
                     existing.status = "approved"  # User edit → approved
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
@@ -474,7 +475,7 @@ class TermsView(QWidget):
                         tgt_lang="ru",
                         src_text=cluster.representative_he,
                         src_norm=src_norm,
-                        translation=new_translation.strip(),
+                        translation=translation_value,
                         status="approved",  # User edit → approved
                         origin="user_edit",
                         source_ref="terms_view_inline_edit",
@@ -488,7 +489,7 @@ class TermsView(QWidget):
                 status_idx = self.terms_model.index(row, 13)  # Status column
                 self.terms_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
-                logger.info(f"Saved TM entry for term: {cluster.representative_he} -> {new_translation.strip()}")
+                logger.info(f"Saved TM entry for term: {cluster.representative_he} -> {translation_value}")
 
         except Exception as e:
             logger.exception("Failed to save TM entry")

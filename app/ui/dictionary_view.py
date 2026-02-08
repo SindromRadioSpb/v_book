@@ -281,9 +281,7 @@ class DictionaryView(QWidget):
         # Get new translation value
         new_translation = lemma.translation
 
-        if not new_translation or not new_translation.strip():
-            return  # Don't save empty translations
-
+        # Allow empty translations (user can delete translation)
         try:
             with self.db_service.get_session() as session:
                 # Save to TM
@@ -303,9 +301,12 @@ class DictionaryView(QWidget):
                 )
                 existing = session.execute(stmt).scalar()
 
+                # Strip whitespace but allow empty string (deletion)
+                translation_value = new_translation.strip() if new_translation else ""
+
                 if existing:
                     # Update existing
-                    existing.translation = new_translation.strip()
+                    existing.translation = translation_value
                     existing.status = "approved"  # User edit → approved
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
@@ -318,7 +319,7 @@ class DictionaryView(QWidget):
                         tgt_lang="ru",
                         src_text=lemma.lemma_text,
                         src_norm=normalized.norm,
-                        translation=new_translation.strip(),
+                        translation=translation_value,
                         status="approved",  # User edit → approved
                         origin="user_edit",
                         source_ref="dictionary_view_inline_edit",
@@ -332,7 +333,7 @@ class DictionaryView(QWidget):
                 status_idx = self.lemma_model.index(row, 6)  # Status column
                 self.lemma_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
-                logger.info(f"Saved TM entry for lemma: {lemma.lemma_text} -> {new_translation.strip()}")
+                logger.info(f"Saved TM entry for lemma: {lemma.lemma_text} -> {translation_value}")
 
         except Exception as e:
             logger.exception("Failed to save TM entry")

@@ -99,7 +99,7 @@ class BatchMTTranslateService:
         start_time = time.perf_counter()
 
         logger.info(
-            f"Batch translate start: trace_id={trace_id}, total={len(items)}, "
+            f"[JOB:{trace_id[:8]}] Batch translate start: total={len(items)}, "
             f"provider_mode={options.provider_mode}, write_mode={options.write_mode}, "
             f"chunk_size={options.chunk_size}, dry_run={options.dry_run}"
         )
@@ -142,7 +142,12 @@ class BatchMTTranslateService:
                 # Commit chunk (unless dry_run)
                 if not options.dry_run:
                     session.commit()
-                    logger.debug(f"Committed chunk {chunk_start}-{chunk_end}")
+                    chunk_succeeded = sum(1 for r in chunk_results if not r.skipped and not r.error_message)
+                    chunk_failed = sum(1 for r in chunk_results if r.error_message)
+                    logger.debug(
+                        f"[JOB:{trace_id[:8]}] Committed chunk {chunk_start}-{chunk_end}: "
+                        f"succeeded={chunk_succeeded}, failed={chunk_failed}"
+                    )
 
                 # Progress callback
                 if progress_callback:
@@ -185,7 +190,7 @@ class BatchMTTranslateService:
         )
 
         logger.info(
-            f"Batch translate complete: trace_id={trace_id}, "
+            f"[JOB:{trace_id[:8]}] Batch translate complete: "
             f"succeeded={succeeded}, skipped={skipped}, failed={failed}, "
             f"elapsed_ms={elapsed_ms}"
         )
@@ -343,7 +348,9 @@ class BatchMTTranslateService:
 
         except Exception as e:
             logger.warning(
-                f"Row translation failed: trace_id={trace_id}, entity_id={item.entity_id}, "
+                f"[JOB:{trace_id[:8]}] Row translation failed: "
+                f"entity_id={item.entity_id}, entity_type={item.entity_type}, "
+                f"source_text='{item.source_text[:50] if item.source_text else '(empty)'}...', "
                 f"error={str(e)}"
             )
             return BatchTranslateRowResult(
