@@ -403,10 +403,19 @@ class LocalMTWorker:
         self.conn = parent_conn
 
         # Wait for worker to be ready (ping)
+        # Model loading can take 60-120 seconds on slower systems
         try:
-            if not self.ping(timeout=60):  # 60 seconds for model loading
+            logger.info(f"Waiting for worker to load model (timeout=120s)...")
+            if not self.ping(timeout=120):  # 120 seconds for model loading
+                # Check if process is still alive
+                if self.process and self.process.is_alive():
+                    logger.error(f"Worker process alive but not responding to ping (timeout)")
+                else:
+                    logger.error(f"Worker process died during startup")
                 raise WorkerError("Worker failed to start")
+            logger.info(f"Worker ready: {self.model_id}")
         except Exception as e:
+            logger.error(f"Worker startup error: {e}")
             self.shutdown()
             raise WorkerError(f"Worker startup failed: {e}")
 

@@ -716,6 +716,18 @@ class TranslationService:
         for index, provider_id in enumerate(chain, start=1):
             # Get provider
             provider = registry.get(provider_id)
+
+            # Lazy initialization for local providers
+            if not provider and provider_id.startswith("local_"):
+                from app.infra.translators.local_providers_setup import initialize_provider_lazy
+
+                logger.info(f"Attempting lazy initialization of {provider_id}")
+                if initialize_provider_lazy(provider_id, session, project_id=None):
+                    provider = registry.get(provider_id)
+                    logger.info(f"Successfully initialized {provider_id} on-demand")
+                else:
+                    logger.warning(f"Lazy initialization failed for {provider_id}")
+
             if not provider:
                 self._log_provider_attempt({
                     "trace_id": trace_id,

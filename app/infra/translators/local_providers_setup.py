@@ -246,3 +246,86 @@ def get_installed_local_providers() -> list:
         for provider_id, info in status.items()
         if info["available"]
     ]
+
+
+def initialize_provider_lazy(
+    provider_id: str,
+    db_session: Optional[Session] = None,
+    project_id: Optional[int] = None,
+) -> bool:
+    """
+    Lazily initialize a single local provider if not already registered.
+
+    This function checks if the provider is already registered, and if not,
+    attempts to initialize it (if the model is installed).
+
+    Args:
+        provider_id: Provider ID (e.g., "local_nllb")
+        db_session: Optional database session for glossary postprocessing
+        project_id: Optional project ID for TM scope
+
+    Returns:
+        True if provider is now available (was registered or already existed)
+        False if provider could not be initialized
+
+    Note:
+        This function is thread-safe and can be called multiple times.
+        Subsequent calls for the same provider_id are no-ops if already registered.
+    """
+    registry = ProvidersRegistry()
+
+    # Check if already registered
+    if registry.get(provider_id):
+        return True
+
+    # Find provider config
+    provider_config = None
+    for config in LOCAL_PROVIDERS_CONFIG:
+        provider_class = config["provider_class"]
+        # Get provider_id from class
+        try:
+            config_provider_id = provider_class.provider_id.fget(None)
+        except:
+            config_provider_id = provider_class.__name__.lower().replace("provider", "")
+
+        if config_provider_id == provider_id:
+            provider_config = config
+            break
+
+    if not provider_config:
+        logger.warning(f"Unknown local provider: {provider_id}")
+        return False
+
+    # Check if model is installed
+    model_manager = ModelResourceManager()
+    model_id = provider_config["model_id"]
+    backend = provider_config["backend"]
+
+    is_installed, reason = model_manager.is_installed(model_id, backend)
+    if not is_installed:
+        logger.info(f"Cannot initialize {provider_id}: {reason}")
+        return False
+
+    # Initialize provider
+    try:
+        provider_class = provider_config["provider_class"]
+        provider = provider_class(
+            model_id=model_id,
+            backend=backend,
+            db_session=db_session,
+            project_id=project_id,
+        )
+
+        # Register provider
+        try:
+            registry.register(provider)
+            logger.info(f"Lazily registered local provider: {provider_id}")
+            return True
+        except ValueError as e:
+            # Already registered (race condition)
+            logger.debug(f"Provider {provider_id} already registered: {e}")
+            return True
+
+    except Exception as e:
+        logger.error(f"Failed to lazily initialize {provider_id}: {e}")
+        return False

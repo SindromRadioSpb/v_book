@@ -81,12 +81,10 @@ def main():
         if recovered_count > 0:
             logger.warning(f"Crash recovery: marked {recovered_count} runs as failed")
 
-        # Initialize local MT providers
-        registered_count = initialize_local_providers()
-        if registered_count > 0:
-            logger.info(f"Registered {registered_count} local MT provider(s)")
-        else:
-            logger.info("No local MT providers registered (models not installed or disabled)")
+        # Initialize local MT providers (lazy - on first use)
+        # NOTE: Providers are initialized when first needed to avoid blocking app startup
+        # Model loading can take 30-60 seconds, so we defer it until actual translation request
+        logger.info("Local MT providers will be initialized on first use (lazy loading)")
 
         # Create Qt application
         app = QApplication(sys.argv)
