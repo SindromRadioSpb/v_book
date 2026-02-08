@@ -93,17 +93,32 @@ class ProviderSettingsDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
+        # Master enable checkbox
+        master_group = QGroupBox("Master Settings")
+        master_layout = QHBoxLayout(master_group)
+
+        self.master_enable_checkbox = QCheckBox("Enable MT Providers (master switch)")
+        self.master_enable_checkbox.setToolTip(
+            "Master switch to enable or disable all MT providers. "
+            "When disabled, no machine translation will be performed."
+        )
+        self.master_enable_checkbox.setChecked(True)  # Default enabled
+        self.master_enable_checkbox.toggled.connect(self._on_master_toggle)
+        master_layout.addWidget(self.master_enable_checkbox)
+
+        layout.addWidget(master_group)
+
         # Tabs
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
         # Tab 1: Rate Limits
         rate_limits_tab = self._create_rate_limits_tab()
-        tabs.addTab(rate_limits_tab, "Rate Limits")
+        self.tabs.addTab(rate_limits_tab, "Rate Limits")
 
         # Tab 2: Provider Chain
         chain_tab = self._create_chain_tab()
-        tabs.addTab(chain_tab, "Provider Chain")
+        self.tabs.addTab(chain_tab, "Provider Chain")
 
         # Buttons
         button_box = QDialogButtonBox(
@@ -221,8 +236,21 @@ class ProviderSettingsDialog(QDialog):
             self.chain_list.insertItem(current_row + 1, item)
             self.chain_list.setCurrentRow(current_row + 1)
 
+    def _on_master_toggle(self, enabled: bool):
+        """Handle master enable checkbox toggle.
+
+        Args:
+            enabled: True if MT providers are enabled, False otherwise
+        """
+        # Enable/disable all tabs when master switch is toggled
+        self.tabs.setEnabled(enabled)
+
     def _load_settings(self):
         """Load settings from QSettings."""
+        # Load master enable switch (default True)
+        master_enabled = self.settings.value("mt/providers/enabled", True, type=bool)
+        self.master_enable_checkbox.setChecked(master_enabled)
+
         for provider_id, widgets in self.provider_widgets.items():
             # Load enabled status
             enabled_key = f"mt/providers/{provider_id}/enabled"
@@ -250,6 +278,10 @@ class ProviderSettingsDialog(QDialog):
 
     def _save_settings(self):
         """Save settings to QSettings."""
+        # Save master enable switch
+        master_enabled = self.master_enable_checkbox.isChecked()
+        self.settings.setValue("mt/providers/enabled", master_enabled)
+
         for provider_id, widgets in self.provider_widgets.items():
             # Save enabled status
             enabled_key = f"mt/providers/{provider_id}/enabled"
@@ -284,6 +316,9 @@ class ProviderSettingsDialog(QDialog):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            # Restore master enable switch (default True)
+            self.master_enable_checkbox.setChecked(True)
+
             # Restore rate limits and enabled status
             for provider_id, widgets in self.provider_widgets.items():
                 default_enabled = self.PROVIDERS[provider_id]["default_enabled"]
