@@ -231,44 +231,49 @@ def _load_ctranslate2_model(model_path: str, logger=None):
     Returns:
         dict: {"translator": ctranslate2.Translator, "tokenizer": AutoTokenizer}
     """
-    if logger:
-        logger.debug("=== _load_ctranslate2_model START ===")
-        logger.debug(f"model_path: {model_path}")
+    # CRITICAL FIX: Use direct stdout instead of logging to avoid deadlock in spawn context
+    import sys
+    import time
+
+    sys.stdout.write(f"[Worker] _load_ctranslate2_model START\n")
+    sys.stdout.write(f"[Worker] model_path: {model_path}\n")
+    sys.stdout.flush()
 
     try:
-        if logger:
-            logger.debug("Importing ctranslate2...")
+        sys.stdout.write("[Worker] Importing ctranslate2...\n")
+        sys.stdout.flush()
         import ctranslate2
-        if logger:
-            logger.debug("ctranslate2 imported successfully")
+        sys.stdout.write("[Worker] ctranslate2 imported\n")
+        sys.stdout.flush()
     except ImportError:
         raise WorkerError("ctranslate2 not installed")
 
     try:
-        if logger:
-            logger.debug("Importing NllbTokenizer from transformers...")
+        sys.stdout.write("[Worker] Importing NllbTokenizer...\n")
+        sys.stdout.flush()
         from transformers import NllbTokenizer
-        if logger:
-            logger.debug("NllbTokenizer imported successfully")
+        sys.stdout.write("[Worker] NllbTokenizer imported\n")
+        sys.stdout.flush()
     except ImportError:
         raise WorkerError("transformers not installed (needed for tokenization)")
 
     try:
         # Load CTranslate2 translator
-        if logger:
-            logger.debug(f"Loading CTranslate2 translator from: {model_path}")
-        import time
+        sys.stdout.write(f"[Worker] Loading CTranslate2 translator from: {model_path}\n")
+        sys.stdout.flush()
+
         start_time = time.perf_counter()
         translator = ctranslate2.Translator(model_path, device="cpu")
         elapsed = time.perf_counter() - start_time
-        if logger:
-            logger.info(f"CTranslate2 translator loaded in {elapsed:.2f}s")
+
+        sys.stdout.write(f"[Worker] CTranslate2 translator loaded in {elapsed:.2f}s\n")
+        sys.stdout.flush()
 
         # Load tokenizer for proper tokenization/detokenization
         # CTranslate2 models don't include tokenizer files, so we load from HuggingFace
         model_name = Path(model_path).name
-        if logger:
-            logger.debug(f"Model name: {model_name}")
+        sys.stdout.write(f"[Worker] Model name: {model_name}\n")
+        sys.stdout.flush()
 
         # Infer HuggingFace model ID from path
         # e.g., "facebook_nllb-200-distilled-1.3B_ctranslate2" -> "facebook/nllb-200-distilled-1.3B"
@@ -281,9 +286,9 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         else:
             raise WorkerError(f"Cannot determine HuggingFace model ID for: {model_name}")
 
-        if logger:
-            logger.debug(f"HuggingFace model ID: {hf_model_id}")
-            logger.debug(f"Loading tokenizer from HuggingFace (will use cache if available)...")
+        sys.stdout.write(f"[Worker] HuggingFace model ID: {hf_model_id}\n")
+        sys.stdout.write("[Worker] Loading tokenizer from HuggingFace...\n")
+        sys.stdout.flush()
 
         # Load tokenizer from HuggingFace (will be cached locally)
         start_time = time.perf_counter()
@@ -292,17 +297,18 @@ def _load_ctranslate2_model(model_path: str, logger=None):
             src_lang="eng_Latn",  # Default source language
         )
         elapsed = time.perf_counter() - start_time
-        if logger:
-            logger.info(f"Tokenizer loaded in {elapsed:.2f}s")
-            logger.debug("=== _load_ctranslate2_model END (SUCCESS) ===")
+
+        sys.stdout.write(f"[Worker] Tokenizer loaded in {elapsed:.2f}s\n")
+        sys.stdout.write("[Worker] _load_ctranslate2_model END (SUCCESS)\n")
+        sys.stdout.flush()
 
         return {"translator": translator, "tokenizer": tokenizer}
     except WorkerError:
         raise
     except Exception as e:
         import traceback
-        if logger:
-            logger.error(f"Exception in _load_ctranslate2_model: {e}")
+        sys.stdout.write(f"[Worker] ERROR in _load_ctranslate2_model: {e}\n")
+        sys.stdout.flush()
         traceback.print_exc()
         raise WorkerError(f"Failed to load CTranslate2 model: {e}")
 
