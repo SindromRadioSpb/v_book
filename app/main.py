@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QApplication
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
+from app.infra.translators.local_providers_setup import initialize_local_providers
 from app.ui.app_window import AppWindow
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,13 @@ def main():
         recovered_count = db_service.recover_from_crash()
         if recovered_count > 0:
             logger.warning(f"Crash recovery: marked {recovered_count} runs as failed")
+
+        # Initialize local MT providers
+        registered_count = initialize_local_providers()
+        if registered_count > 0:
+            logger.info(f"Registered {registered_count} local MT provider(s)")
+        else:
+            logger.info("No local MT providers registered (models not installed or disabled)")
 
         # Create Qt application
         app = QApplication(sys.argv)
