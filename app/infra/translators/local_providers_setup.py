@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.infra.translators.providers_registry import ProvidersRegistry
 from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
+from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
 from app.services.local_models import ModelResourceManager
 
 logger = logging.getLogger(__name__)
@@ -251,6 +252,30 @@ def get_installed_local_providers() -> list:
         for provider_id, info in status.items()
         if info["available"]
     ]
+
+
+def register_google_translate() -> bool:
+    """
+    Register Google Translate provider (always available, no model needed).
+
+    Returns:
+        True if registered successfully, False otherwise
+    """
+    registry = ProvidersRegistry()
+
+    # Check if already registered
+    if registry.get("google_translate"):
+        logger.debug("Google Translate already registered")
+        return True
+
+    try:
+        provider = GoogleTranslateProvider()
+        registry.register(provider)
+        logger.info("Registered Google Translate provider")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to register Google Translate: {e}")
+        return False
 
 
 def initialize_provider_lazy(

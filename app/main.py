@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QApplication
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
-from app.infra.translators.local_providers_setup import initialize_local_providers
+from app.infra.translators.local_providers_setup import initialize_local_providers, register_google_translate
 from app.ui.app_window import AppWindow
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,10 @@ def main():
         # NOTE: Providers are initialized when first needed to avoid blocking app startup
         # Model loading can take 30-60 seconds, so we defer it until actual translation request
         logger.info("Local MT providers will be initialized on first use (lazy loading)")
+
+        # Register Google Translate (always available, no model needed)
+        register_google_translate()
+        logger.info("Google Translate provider registered")
 
         # Create Qt application
         app = QApplication(sys.argv)
