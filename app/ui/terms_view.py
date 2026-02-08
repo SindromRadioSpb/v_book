@@ -567,7 +567,7 @@ class TermsView(QWidget):
                 source_text=cluster.representative_he,
                 src_lang="he",
                 tgt_lang="ru",
-                current_translation=cluster.translation,
+                current_translation=cluster.pinned_translation,  # FIXED: use pinned_translation
                 project_id=self.project_id,
             ))
 
