@@ -242,17 +242,21 @@ class ProviderConfigManager:
 
         Returns:
             Decrypted credential value or None if not found
-
-        Raises:
-            ValueError: If CredentialStore not initialized
         """
-        if not self.cred_store:
-            raise ValueError(
-                "CredentialStore not initialized. "
-                "Pass cred_store to ProviderConfigManager constructor."
-            )
+        # If cred_store provided, use it directly
+        if self.cred_store:
+            return self.cred_store.get_credential(credential_id)
 
-        return self.cred_store.get_credential(credential_id)
+        # Otherwise, create temporary session
+        from app.services.db_service import DBService
+
+        try:
+            with DBService.get_instance().get_session() as session:
+                temp_store = CredentialStore(session)
+                return temp_store.get_credential(credential_id)
+        except Exception as e:
+            logger.warning(f"Failed to get credential {credential_id}: {e}")
+            return None
 
     def set_credential(self, credential_id: str, value: str) -> None:
         """
@@ -261,17 +265,18 @@ class ProviderConfigManager:
         Args:
             credential_id: Credential ID
             value: Plaintext credential value (will be encrypted)
-
-        Raises:
-            ValueError: If CredentialStore not initialized
         """
-        if not self.cred_store:
-            raise ValueError(
-                "CredentialStore not initialized. "
-                "Pass cred_store to ProviderConfigManager constructor."
-            )
+        # If cred_store provided, use it directly
+        if self.cred_store:
+            self.cred_store.set_credential(credential_id, value)
+            return
 
-        self.cred_store.set_credential(credential_id, value)
+        # Otherwise, create temporary session
+        from app.services.db_service import DBService
+
+        with DBService.get_instance().get_session() as session:
+            temp_store = CredentialStore(session)
+            temp_store.set_credential(credential_id, value)
 
     def delete_credential(self, credential_id: str) -> bool:
         """
@@ -282,17 +287,21 @@ class ProviderConfigManager:
 
         Returns:
             True if deleted, False if not found
-
-        Raises:
-            ValueError: If CredentialStore not initialized
         """
-        if not self.cred_store:
-            raise ValueError(
-                "CredentialStore not initialized. "
-                "Pass cred_store to ProviderConfigManager constructor."
-            )
+        # If cred_store provided, use it directly
+        if self.cred_store:
+            return self.cred_store.delete_credential(credential_id)
 
-        return self.cred_store.delete_credential(credential_id)
+        # Otherwise, create temporary session
+        from app.services.db_service import DBService
+
+        try:
+            with DBService.get_instance().get_session() as session:
+                temp_store = CredentialStore(session)
+                return temp_store.delete_credential(credential_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete credential {credential_id}: {e}")
+            return False
 
     def is_enabled(self, provider_id: str) -> bool:
         """Check if provider is enabled in settings."""
