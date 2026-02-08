@@ -69,24 +69,20 @@ class GoogleCloudTranslateProvider(BaseProvider):
         self,
         config_manager: Optional[ProviderConfigManager] = None,
         cred_store: Optional[CredentialStore] = None,
-        session=None,
     ):
         """Initialize provider.
 
         Args:
             config_manager: Optional config manager (auto-created if None)
             cred_store: Optional credential store (auto-created if None)
-            session: Optional DB session for usage tracking (if None, usage tracking disabled)
 
         Note:
             In production, config_manager and cred_store should be provided.
             Auto-creation is for convenience in simple use cases.
-            Usage tracking requires a session; without it, only per-request limits are enforced.
+            Usage tracking creates a new DB session when needed (if DBService available).
         """
         self._config_manager = config_manager
         self._cred_store = cred_store
-        self._session = session
-        self._usage_tracker = MTUsageTracker(session) if session else None
         self._client: Optional[translate_v3.TranslationServiceClient] = None
         self._project_id: Optional[str] = None
 
@@ -275,25 +271,30 @@ class GoogleCloudTranslateProvider(BaseProvider):
             )
 
         # Check usage tracking (chars per day/month, requests per minute)
-        if self._usage_tracker and config.limits.has_budget_guards():
-            allowed, error_msg = self._usage_tracker.can_spend(
-                self.provider_id, char_count, config.limits
-            )
-            if not allowed:
+        if config.limits.has_budget_guards():
+            try:
+                from app.services.db_service import DBService
+
+                with DBService.get_instance().get_session() as session:
+                    tracker = MTUsageTracker(session)
+                    allowed, error_msg = tracker.can_spend(
+                        self.provider_id, char_count, config.limits
+                    )
+                    if not allowed:
+                        logger.warning(
+                            f"[{self.provider_id}] [{trace_id}] Budget limit exceeded: {error_msg}"
+                        )
+                        return TranslationResult(
+                            provider_id=self.provider_id,
+                            error_kind=TranslationErrorKind.RATE_LIMIT,
+                            error_message=error_msg,
+                            latency_ms=int((time.time() - start_time) * 1000),
+                        )
+            except Exception as e:
                 logger.warning(
-                    f"[{self.provider_id}] [{trace_id}] Budget limit exceeded: {error_msg}"
+                    f"[{self.provider_id}] [{trace_id}] Failed to check usage tracking: {e}. "
+                    f"Proceeding with translation (usage tracking bypassed)."
                 )
-                return TranslationResult(
-                    provider_id=self.provider_id,
-                    error_kind=TranslationErrorKind.RATE_LIMIT,
-                    error_message=error_msg,
-                    latency_ms=int((time.time() - start_time) * 1000),
-                )
-        elif config.limits.has_budget_guards() and not self._usage_tracker:
-            logger.warning(
-                f"[{self.provider_id}] [{trace_id}] Budget guards configured but "
-                f"usage tracking disabled (no DB session provided)"
-            )
 
         # Translate with retry
         result = self._translate_with_retry(request, config, trace_id, start_time)
@@ -356,20 +357,23 @@ class GoogleCloudTranslateProvider(BaseProvider):
                     f"(chars: {len(request.source_text)}, latency: {latency_ms}ms)"
                 )
 
-                # Record usage (if tracker available)
-                if self._usage_tracker:
-                    try:
-                        self._usage_tracker.record_spend(
+                # Record usage (if DBService available)
+                try:
+                    from app.services.db_service import DBService
+
+                    with DBService.get_instance().get_session() as session:
+                        tracker = MTUsageTracker(session)
+                        tracker.record_spend(
                             self.provider_id,
                             char_count=len(request.source_text),
                             request_count=1,
                         )
-                    except Exception as e:
-                        # Don't fail translation if usage tracking fails
-                        logger.error(
-                            f"[{self.provider_id}] [{trace_id}] "
-                            f"Failed to record usage: {e}"
-                        )
+                except Exception as e:
+                    # Don't fail translation if usage tracking fails
+                    logger.error(
+                        f"[{self.provider_id}] [{trace_id}] "
+                        f"Failed to record usage: {e}"
+                    )
 
                 return TranslationResult(
                     translated_text=translated_text,

@@ -601,13 +601,82 @@ class ProviderSettingsDialog(QDialog):
 
     def _test_gcp_connection(self):
         """Test Google Cloud Translate API connection."""
-        QMessageBox.information(
-            self,
-            "Test Connection",
-            "Testing API connection...\n\n"
-            "This feature will translate a test phrase to verify authentication and configuration.\n"
-            "(Implementation pending PATCH-07)",
-        )
+        try:
+            # Get provider from registry
+            from app.infra.translators.providers_registry import ProvidersRegistry
+            from app.infra.translators.base_provider import TranslationRequest
+
+            registry = ProvidersRegistry()
+            provider = registry.get("google_cloud_translate")
+
+            if not provider:
+                QMessageBox.warning(
+                    self,
+                    "Provider Not Found",
+                    "Google Cloud Translate provider is not registered.\n"
+                    "Please restart the application.",
+                )
+                return
+
+            # Test translation: "Hello" (English) → Russian
+            test_request = TranslationRequest(
+                source_text="Hello",
+                source_lang="en",
+                target_lang="ru",
+                trace_id="ui-test-connection",
+            )
+
+            # Show progress dialog
+            from PyQt6.QtWidgets import QProgressDialog
+            from PyQt6.QtCore import Qt
+
+            progress = QProgressDialog(
+                "Testing API connection...\nTranslating test phrase...",
+                None,
+                0,
+                0,
+                self,
+            )
+            progress.setWindowTitle("Test Connection")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setCancelButton(None)
+            progress.show()
+
+            # Call provider
+            result = provider.translate(test_request)
+
+            progress.close()
+
+            # Show result
+            if result.is_success:
+                QMessageBox.information(
+                    self,
+                    "Connection Successful",
+                    f"✓ Google Cloud Translate API connection successful!\n\n"
+                    f"Test translation:\n"
+                    f"  \"Hello\" (en) → \"{result.translated_text}\" (ru)\n\n"
+                    f"Latency: {result.latency_ms}ms\n"
+                    f"Provider: {result.provider_id}",
+                )
+            else:
+                error_details = f"Error: {result.error_message}\n\n"
+                if result.error_kind:
+                    error_details += f"Error type: {result.error_kind.value}\n"
+                error_details += f"Latency: {result.latency_ms}ms"
+
+                QMessageBox.critical(
+                    self,
+                    "Connection Failed",
+                    f"✗ Google Cloud Translate API connection failed.\n\n{error_details}",
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Test Error",
+                f"Failed to test API connection:\n\n{e}",
+            )
 
     def _load_settings(self):
         """Load settings from QSettings."""

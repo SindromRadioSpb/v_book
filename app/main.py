@@ -8,7 +8,11 @@ from PyQt6.QtWidgets import QApplication
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
-from app.infra.translators.local_providers_setup import initialize_local_providers, register_google_translate
+from app.infra.translators.local_providers_setup import (
+    initialize_local_providers,
+    register_google_translate,
+    register_google_cloud_translate,
+)
 from app.ui.app_window import AppWindow
 
 logger = logging.getLogger(__name__)
@@ -89,6 +93,11 @@ def main():
         # Register Google Translate (always available, no model needed)
         register_google_translate()
         logger.info("Google Translate provider registered")
+
+        # Register Google Cloud Translate (Official API v3)
+        # Note: Provider creates DB sessions as needed for usage tracking
+        register_google_cloud_translate()
+        logger.info("Google Cloud Translate provider registered")
 
         # Create Qt application
         app = QApplication(sys.argv)

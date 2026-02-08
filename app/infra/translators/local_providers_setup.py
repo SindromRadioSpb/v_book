@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 from app.infra.translators.providers_registry import ProvidersRegistry
 from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
 from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
+from app.infra.translators.providers.google_cloud_translate_provider import GoogleCloudTranslateProvider
+from app.infra.translators.provider_config_manager import ProviderConfigManager
+from app.infra.settings import SettingsService
 from app.services.local_models import ModelResourceManager
 
 logger = logging.getLogger(__name__)
@@ -275,6 +278,49 @@ def register_google_translate() -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to register Google Translate: {e}")
+        return False
+
+
+def register_google_cloud_translate() -> bool:
+    """
+    Register Google Cloud Translate provider (Official API v3).
+
+    Requires Service Account JSON to be configured in settings.
+    Provider is registered even if auth not configured, but will return errors
+    when used until credentials are set up.
+
+    Provider creates DB sessions as needed for usage tracking (budget guards).
+
+    Returns:
+        True if registered successfully, False otherwise
+
+    Note:
+        Provider enabled status is controlled by settings. If disabled in UI,
+        it won't be used even if registered here.
+    """
+    registry = ProvidersRegistry()
+
+    # Check if already registered
+    if registry.get("google_cloud_translate"):
+        logger.debug("Google Cloud Translate already registered")
+        return True
+
+    try:
+        # Initialize config manager
+        settings_service = SettingsService.get_instance()
+        config_manager = ProviderConfigManager(settings_service)
+
+        # Create provider (creates DB sessions as needed for usage tracking)
+        provider = GoogleCloudTranslateProvider(
+            config_manager=config_manager,
+        )
+
+        registry.register(provider)
+        logger.info("Registered Google Cloud Translate provider")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to register Google Cloud Translate: {e}")
         return False
 
 
