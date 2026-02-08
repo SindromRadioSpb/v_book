@@ -19,4 +19,4 @@ CREATE TABLE mt_usage (
 CREATE INDEX idx_mt_usage_lookup ON mt_usage(provider_id, period_type, period_key);
 
 -- Update schema version
-UPDATE schema_meta SET schema_version = 9 WHERE id = 1;
+UPDATE schema_meta SET value = '9' WHERE key = 'schema_version';
