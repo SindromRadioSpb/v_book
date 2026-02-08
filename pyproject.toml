@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hdle-premium"
-version = "1.0.0"
+version = "1.1.0"
 description = "Hebraic Dynamic Lexicon Engine - Premium Edition"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,6 +18,7 @@ dependencies = [
     "psutil>=5.9.0",  # For process lock stale detection
     "cryptography>=41.0.0",  # For AES-256-GCM credential encryption
     "keyring>=24.0.0",  # For OS keyring credential storage
+    "deep-translator>=1.11.4",  # For Google Translate (M11)
     # Optional OCR dependencies
     # "pytesseract>=0.3.10",
     # "pdf2image>=1.16.0",
