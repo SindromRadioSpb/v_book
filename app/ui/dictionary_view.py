@@ -78,6 +78,12 @@ class DictionaryView(QWidget):
         refresh_btn.clicked.connect(self.load_lemmas)
         header_layout.addWidget(refresh_btn)
 
+        # Batch translate button (PATCH-UI-BATCH-T02)
+        self.batch_translate_btn = QPushButton("Translate Selected...")
+        self.batch_translate_btn.clicked.connect(self.on_batch_translate)
+        self.batch_translate_btn.setEnabled(False)  # Disabled until selection
+        header_layout.addWidget(self.batch_translate_btn)
+
         layout.addLayout(header_layout)
 
         # Search bar
@@ -119,6 +125,9 @@ class DictionaryView(QWidget):
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
+
+        # PATCH-UI-BATCH-T02: Connect selection changed to update button state
+        self.lemma_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         layout.addWidget(self.lemma_table)
 
@@ -342,6 +351,14 @@ class DictionaryView(QWidget):
         # Create menu
         menu = QMenu(self)
 
+        # PATCH-UI-BATCH-T02: "Translate Selected..." action
+        selected_rows = self.lemma_table.selectionModel().selectedRows()
+        if selected_rows:
+            translate_action = QAction(f"Translate Selected ({len(selected_rows)} rows)...", self)
+            translate_action.triggered.connect(self.on_batch_translate)
+            menu.addAction(translate_action)
+            menu.addSeparator()
+
         # "Why?" action - show explainability
         why_action = QAction("Why this translation?", self)
         why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
@@ -369,6 +386,133 @@ class DictionaryView(QWidget):
         # Show dialog
         dialog = WhyTranslationDialog(translation_result, lemma.lemma_text, self)
         dialog.exec()
+
+    def on_selection_changed(self):
+        """PATCH-UI-BATCH-T02: Handle selection change - enable/disable batch translate button."""
+        selected_rows = self.lemma_table.selectionModel().selectedRows()
+        self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
+
+    def on_batch_translate(self):
+        """PATCH-UI-BATCH-T02: Handle batch translate action."""
+        from PyQt6.QtWidgets import QMessageBox
+        from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+        from app.ui.workers import BatchTranslateWorker
+        from app.services.batch_mt_translate_service import (
+            BatchTranslateItem,
+            BatchTranslateOptions,
+        )
+
+        # Get selected rows
+        selected_indexes = self.lemma_table.selectionModel().selectedRows()
+        if not selected_indexes:
+            return
+
+        # Map proxy indices to source rows
+        source_rows = [
+            self.proxy_model.map_to_source_row(index.row())
+            for index in selected_indexes
+        ]
+
+        # Build items list
+        items = []
+        for row in source_rows:
+            lemma = self.lemma_model.lemmas[row]
+            item = BatchTranslateItem(
+                entity_type="lemma",
+                entity_id=lemma.lemma_text,
+                source_text=lemma.lemma_text,
+                src_lang="he",  # Hardcoded for Hebrew
+                tgt_lang="ru",  # Hardcoded for Russian
+                current_translation=lemma.translation,
+                project_id=self.project_id,
+            )
+            items.append(item)
+
+        # Show confirm dialog
+        accepted, provider_mode, write_mode = show_batch_translate_dialog(
+            parent=self,
+            selected_count=len(items),
+        )
+
+        if not accepted:
+            return
+
+        # Create options
+        options = BatchTranslateOptions(
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            chunk_size=50,
+            stop_on_error=False,
+        )
+
+        # Show progress dialog
+        progress_dialog = BatchProgressDialog(parent=self, total=len(items))
+        progress_dialog.show()
+
+        # Create worker
+        worker = BatchTranslateWorker(
+            items=items,
+            options=options,
+            tab_type="dictionary",
+        )
+
+        # Connect signals
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+        worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+
+        # Start worker
+        worker.start()
+
+        # Keep reference to prevent GC
+        self._batch_worker = worker
+
+    def on_batch_translate_finished(self, result, progress_dialog):
+        """PATCH-UI-BATCH-T02: Handle batch translate completion."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Update progress dialog
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(result.succeeded, result.skipped, result.failed)
+
+        # Close progress dialog
+        progress_dialog.accept()
+
+        # Show result message
+        msg = f"Translation completed!\n\n"
+        msg += f"Total: {result.total}\n"
+        msg += f"Succeeded: {result.succeeded}\n"
+        msg += f"Skipped: {result.skipped}\n"
+        msg += f"Failed: {result.failed}"
+
+        if result.failed > 0:
+            QMessageBox.warning(self, "Translation Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Translation Complete", msg)
+
+        # Refresh lemmas to show updated translations
+        self.load_lemmas()
+
+        # Clean up worker
+        if hasattr(self, '_batch_worker'):
+            self._batch_worker.deleteLater()
+            del self._batch_worker
+
+    def on_batch_translate_error(self, error_msg, progress_dialog):
+        """PATCH-UI-BATCH-T02: Handle batch translate error."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Close progress dialog
+        progress_dialog.reject()
+
+        # Show error
+        QMessageBox.critical(self, "Translation Error", error_msg)
+
+        # Clean up worker
+        if hasattr(self, '_batch_worker'):
+            self._batch_worker.deleteLater()
+            del self._batch_worker
 
     def closeEvent(self, event):
         """M7 P1: Clean up translation worker on close."""
