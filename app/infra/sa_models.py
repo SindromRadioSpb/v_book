@@ -536,6 +536,7 @@ class TermClusterMember(Base):
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
 
     member_freq_abs = Column(Integer, nullable=False, default=0)
+    member_doc_freq = Column(Integer, nullable=False, default=0)
 
 
 # -----------------------
@@ -684,4 +685,3 @@ class MTCache(Base):
     __table_args__ = (
         UniqueConstraint("provider", "src_lang", "tgt_lang", "request_key", name="uq_mt_cache_request"),
     )
-    member_doc_freq = Column(Integer, nullable=False, default=0)
