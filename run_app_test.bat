@@ -1,9 +1,10 @@
 @echo off
 echo ================================================
-echo Starting HDLE Premium (Test Mode)
+echo Starting HDLE Premium (Development Mode)
 echo ================================================
 echo.
-echo Database: J:\Project_Vibe\V_book\hdle_test_ui.db
+echo Database: J:\Project_Vibe\V_book\hdle_premium.db
+echo Reference Corpus: Hebrew Wikipedia (387k docs)
 echo.
 
 cd /d "J:\Project_Vibe\V_book"
@@ -13,7 +14,7 @@ echo [1] Activating virtual environment... OK
 echo [2] Starting application...
 echo.
 
-python -m app.main --db-path "J:\Project_Vibe\V_book\hdle_test_ui.db"
+python -m app.main --db-path "J:\Project_Vibe\V_book\hdle_premium.db"
 
 set EXIT_CODE=%ERRORLEVEL%
 echo.
