@@ -93,6 +93,18 @@ class AppWindow(QMainWindow):
         import_action.triggered.connect(self.open_import_wizard)
         tools_menu.addAction(import_action)
 
+        # Project Exchange (Export/Import bundles)
+        tools_menu.addSeparator()
+        export_bundle_action = QAction("&Export Project Bundle...", self)
+        export_bundle_action.setShortcut("Ctrl+Shift+E")
+        export_bundle_action.triggered.connect(self.export_project_bundle)
+        tools_menu.addAction(export_bundle_action)
+
+        import_bundle_action = QAction("I&mport Project Bundle...", self)
+        import_bundle_action.setShortcut("Ctrl+Shift+B")
+        import_bundle_action.triggered.connect(self.import_project_bundle)
+        tools_menu.addAction(import_bundle_action)
+
         # Translation submenu
         tools_menu.addSeparator()
         translation_menu = tools_menu.addMenu("&Translation")
@@ -370,6 +382,152 @@ class AppWindow(QMainWindow):
             handler()
         else:
             logger.warning(f"Unknown sidebar action: {action_id}")
+
+    def export_project_bundle(self):
+        """Export current project as .hdleproj bundle."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+        from app.services.project_exchange.worker import ProjectExportWorker
+        from app.services.project_exchange.dto import ExportOptions
+        from app.ui.dialogs.project_exchange_dialogs import ExportProgressDialog
+
+        # Get current project_id from active view
+        current = self.stack.currentWidget()
+        if not hasattr(current, "project_id") or current.project_id is None:
+            QMessageBox.information(
+                self,
+                "Project Required",
+                "Please open a project first to export it as a bundle."
+            )
+            return
+
+        project_id = current.project_id
+
+        # File dialog
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Project Bundle",
+            "",
+            "HDLE Project Bundle (*.hdleproj)"
+        )
+
+        if not path:
+            return
+
+        # Ensure .hdleproj extension
+        path = Path(path)
+        if path.suffix != ".hdleproj":
+            path = path.with_suffix(".hdleproj")
+
+        # Create worker
+        options = ExportOptions(include_snapshots=True)
+        worker = ProjectExportWorker(project_id, path, options)
+
+        # Create progress dialog
+        progress_dialog = ExportProgressDialog(self)
+
+        # Connect signals
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.finished.connect(lambda report: progress_dialog.set_completed(report))
+        worker.error.connect(lambda error: self._on_export_error(error, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+
+        # Store worker reference to prevent GC
+        self._export_worker = worker
+
+        # Start
+        worker.start()
+        progress_dialog.exec()
+
+    def _on_export_error(self, error: str, dialog):
+        """Handle export error."""
+        from PyQt6.QtWidgets import QMessageBox
+        from app.services.project_exchange.dto import ExportReport
+
+        fake_report = ExportReport(success=False, error_message=error)
+        dialog.set_completed(fake_report)
+
+    def import_project_bundle(self):
+        """Import .hdleproj bundle."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+        from app.services.project_exchange import bundle_format
+        from app.services.project_exchange.worker import ProjectImportWorker
+        from app.services.project_exchange.dto import ImportOptions
+        from app.ui.dialogs.project_exchange_dialogs import (
+            ImportPreviewDialog,
+            ImportProgressDialog,
+        )
+
+        # File dialog
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Project Bundle",
+            "",
+            "HDLE Project Bundle (*.hdleproj)"
+        )
+
+        if not path:
+            return
+
+        bundle_path = Path(path)
+
+        # Peek manifest for preview
+        try:
+            manifest = bundle_format.peek_manifest(bundle_path)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Invalid Bundle",
+                f"Failed to read bundle:\n\n{e}"
+            )
+            return
+
+        # Show preview dialog
+        preview_dialog = ImportPreviewDialog(manifest, self)
+        if preview_dialog.exec() != ImportPreviewDialog.DialogCode.Accepted:
+            return
+
+        # Get custom name
+        custom_name = preview_dialog.get_custom_name()
+
+        # Create worker
+        options = ImportOptions(
+            rename_if_conflict=True,
+            custom_name=custom_name if custom_name != manifest.project_name else None
+        )
+        worker = ProjectImportWorker(bundle_path, options)
+
+        # Create progress dialog
+        progress_dialog = ImportProgressDialog(self)
+
+        # Connect signals
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.finished.connect(lambda report: self._on_import_finished(report, progress_dialog))
+        worker.error.connect(lambda error: self._on_import_error(error, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+
+        # Store worker reference to prevent GC
+        self._import_worker = worker
+
+        # Start
+        worker.start()
+        progress_dialog.exec()
+
+    def _on_import_finished(self, report, dialog):
+        """Handle successful import."""
+        dialog.set_completed(report)
+
+        # Refresh dashboard (if visible)
+        if hasattr(self, "dashboard") and isinstance(self.stack.currentWidget(), type(self.dashboard)):
+            self.dashboard.load_projects()
+
+    def _on_import_error(self, error: str, dialog):
+        """Handle import error."""
+        from app.services.project_exchange.dto import ImportReport
+
+        fake_report = ImportReport(success=False, error_message=error)
+        dialog.set_completed(fake_report)
 
     def closeEvent(self, event):
         """Handle window close."""

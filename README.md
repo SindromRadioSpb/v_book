@@ -32,6 +32,12 @@ Premium desktop application for Hebrew lexicography and terminology extraction.
   - Progress tracking with real-time updates
 - ✅ **Term curation**: Review workflow with approval states
 - ✅ **Export Center**: Excel, CSV, JSONL, TBX, TMX with real project data
+- ✅ **Project Exchange (Task 9)**: Export/import projects as portable `.hdleproj` bundles
+  - Complete project transfer between users or machines
+  - ZIP-based bundle format with SHA256 integrity verification
+  - ID remapping for conflict-free import into existing databases
+  - Schema compatibility checks and migration safety
+  - CLI tools for automation (`export_project_bundle.py`, `import_project_bundle.py`)
 - ✅ **Security**: FTS5/CSV/log injection prevention, credential encryption, audit logging
 - ✅ **Database layer**: SQLite with WAL mode, FTS5, schema versioning
 
