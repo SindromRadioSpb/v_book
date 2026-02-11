@@ -787,6 +787,10 @@ class TermExtractionService:
                 best_llr=c.best_llr,
                 best_dice=c.best_dice,
                 best_tscore=c.best_tscore,
+                entity_class=c.entity_class,
+                is_noise=c.is_noise,
+                noise_reason=c.noise_reason,
+                norm_text=c.norm_text,
             ))
 
         return results
@@ -1160,6 +1164,10 @@ class TermExtractionService:
                 weirdness=weirdness,
                 keyness_llr=keyness_llr,
                 termhood_score=termhood_score,
+                entity_class=d_cluster.entity_class,
+                is_noise=d_cluster.is_noise,
+                noise_reason=d_cluster.noise_reason,
+                norm_text=d_cluster.norm_text,
             ))
 
         # Sort by termhood score (deterministic)

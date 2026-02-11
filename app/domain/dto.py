@@ -27,6 +27,10 @@ class LemmaStats:
     doc_freq: int
     translation: Optional[str] = None
     status: str = "auto"
+    entity_class: Optional[str] = None
+    is_noise: Optional[int] = None
+    noise_reason: Optional[str] = None
+    norm_text: Optional[str] = None
 
 
 @dataclass
@@ -107,6 +111,11 @@ class ClusterStats:
     translation: Optional[str] = None
     translation_source: Optional[str] = None  # tm|dict|mt_cache|mt|none
     translation_status: Optional[str] = None  # approved|draft
+    # Task 11: Entity classification
+    entity_class: Optional[str] = None
+    is_noise: Optional[int] = None
+    noise_reason: Optional[str] = None
+    norm_text: Optional[str] = None
 
 
 @dataclass

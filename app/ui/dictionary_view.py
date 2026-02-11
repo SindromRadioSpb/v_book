@@ -195,6 +195,10 @@ class DictionaryView(QWidget):
                         doc_freq=stat.doc_freq,
                         translation=None,  # M7 will add this
                         status='auto',
+                        entity_class=lemma.entity_class,
+                        is_noise=lemma.is_noise,
+                        noise_reason=lemma.noise_reason,
+                        norm_text=lemma.norm_text,
                     )
                     lemmas.append(lemma_dto)
 
