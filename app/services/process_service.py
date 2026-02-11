@@ -24,6 +24,7 @@ from app.infra.nlp_engines.stanza_engine import create_stanza_engine
 from app.domain.preprocessing import preprocess_text
 from app.domain.sentence_splitter import split_into_sentences
 from app.services.db_service import DBService
+from app.services.entity_classifier import classify_text
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +284,7 @@ class ProcessService:
             Dictionary mapping lemma_text to lemma_id
         """
         lemma_id_map = {}
+        stats = {'new': 0, 'existing': 0, 'noise': 0, 'classes': Counter()}
 
         for lemma_text in lemma_counter:
             # Try to find existing lemma
@@ -293,18 +295,41 @@ class ProcessService:
             lemma = session.execute(stmt).scalar_one_or_none()
 
             if not lemma:
-                # Create new lemma
+                # Classify the lemma (Task 11: Entity Classification)
+                classification = classify_text(lemma_text)
+
+                # Create new lemma with classification
                 pos = lemma_pos_map.get(lemma_text, 'X')
                 lemma = Lemma(
                     project_id=project_id,
                     lemma_text=lemma_text,
                     pos=pos,
+                    entity_class=classification.entity_class,
+                    is_noise=1 if classification.is_noise else 0,
+                    noise_reason=classification.noise_reason,
+                    norm_text=classification.norm_text,
                 )
                 session.add(lemma)
                 session.flush()
-                logger.debug(f"Created lemma: {lemma_text} ({pos})")
+
+                stats['new'] += 1
+                stats['classes'][classification.entity_class] += 1
+                if classification.is_noise:
+                    stats['noise'] += 1
+
+                logger.debug(f"Created lemma: {lemma_text} ({pos}) -> {classification.entity_class}")
+            else:
+                stats['existing'] += 1
 
             lemma_id_map[lemma_text] = lemma.lemma_id
+
+        # Log classification summary
+        if stats['new'] > 0:
+            logger.info(
+                f"Created {stats['new']} new lemmas ({stats['noise']} noise, "
+                f"{stats['new'] - stats['noise']} valid). "
+                f"Classes: {dict(stats['classes'])}"
+            )
 
         return lemma_id_map
 

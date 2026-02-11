@@ -26,6 +26,7 @@ from app.domain.term_extraction.association_measures import compute_all_measures
 from app.domain.term_extraction.canonicalizer import get_cluster_key, choose_representative_term
 from app.services.db_service import DBService
 from app.infra.nlp_engines.base import NLPEngine
+from app.services.entity_classifier import classify_phrase
 
 logger = logging.getLogger(__name__)
 
@@ -554,6 +555,7 @@ class TermExtractionService:
 
         # Create clusters
         clusters_created = 0
+        classification_stats = {'noise': 0, 'classes': Counter()}
 
         for canonical_key, members in clusters_data.items():
             # Aggregate stats
@@ -584,7 +586,13 @@ class TermExtractionService:
             representative_he = choose_representative_term(terms_for_rep)
             representative_lemma = members[0][0].lemma_phrase  # Use first lemma
 
-            # Create cluster
+            # Classify the cluster (Task 11: Entity Classification)
+            classification = classify_phrase(representative_he)
+            classification_stats['classes'][classification.entity_class] += 1
+            if classification.is_noise:
+                classification_stats['noise'] += 1
+
+            # Create cluster with classification
             cluster = TermCluster(
                 project_id=project_id,
                 canonical_key=canonical_key,
@@ -598,6 +606,10 @@ class TermExtractionService:
                 best_dice=best_dice,
                 best_tscore=best_tscore,
                 source_kinds='ngram',
+                entity_class=classification.entity_class,
+                is_noise=1 if classification.is_noise else 0,
+                noise_reason=classification.noise_reason,
+                norm_text=classification.norm_text,
             )
             session.add(cluster)
             session.flush()
@@ -614,7 +626,14 @@ class TermExtractionService:
             clusters_created += 1
 
         session.flush()
-        logger.info(f"Created {clusters_created} clusters")
+
+        # Log classification summary
+        logger.info(
+            f"Created {clusters_created} clusters ({classification_stats['noise']} noise, "
+            f"{clusters_created - classification_stats['noise']} valid). "
+            f"Classes: {dict(classification_stats['classes'])}"
+        )
+
         return clusters_created
 
     def _get_lemma_freq(self, session: Session, project_id: int, lemma_text: str) -> int:
