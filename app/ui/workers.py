@@ -992,6 +992,10 @@ class ExportWorker(QThread):
                 if self._cancelled:
                     return
 
+                # Task 11: Get noise filtering options (apply to all formats)
+                exclude_noise = self.export_options.get("exclude_noise", True)
+                include_classification = self.export_options.get("include_classification", False)
+
                 # Call appropriate export method based on format
                 if self.format_type == "csv":
                     count = export_service.export_tm_csv(
@@ -1003,25 +1007,33 @@ class ExportWorker(QThread):
                     )
                 elif self.format_type == "xlsx":
                     count = export_service.export_xlsx(
-                        session, self.file_path, project_id=self.project_id
+                        session,
+                        self.file_path,
+                        project_id=self.project_id,
+                        exclude_noise=exclude_noise,
+                        include_classification=include_classification,
                     )
                 elif self.format_type == "tbx":
-                    # TBX options: approved_only, include_pinned
+                    # TBX options: approved_only, include_pinned, exclude_noise, include_classification
                     count = export_service.export_tbx(
                         session,
                         self.file_path,
                         project_id=self.project_id,
                         approved_only=self.export_options.get("approved_only", True),
                         include_pinned=self.export_options.get("include_pinned", True),
+                        exclude_noise=exclude_noise,
+                        include_classification=include_classification,
                     )
                 elif self.format_type == "tmx":
-                    # TMX options: include_draft, include_pinned
+                    # TMX options: include_draft, include_pinned, exclude_noise, include_classification
                     count = export_service.export_tmx(
                         session,
                         self.file_path,
                         project_id=self.project_id,
                         include_draft=self.export_options.get("include_draft", False),
                         include_pinned=self.export_options.get("include_pinned", True),
+                        exclude_noise=exclude_noise,
+                        include_classification=include_classification,
                     )
                 else:
                     raise ValueError(f"Unknown format type: {self.format_type}")

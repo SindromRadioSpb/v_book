@@ -86,6 +86,18 @@ class ExportView(QWidget):
         self.include_pinned_cb.setToolTip("Include user-pinned translations from M8 curation")
         options_layout.addWidget(self.include_pinned_cb)
 
+        # Task 11: Noise filtering options
+        options_layout.addWidget(QLabel(""))  # Spacer
+        self.exclude_noise_cb = QCheckBox("Exclude noise items (punctuation, numbers, symbols)")
+        self.exclude_noise_cb.setChecked(True)  # Default: exclude noise
+        self.exclude_noise_cb.setToolTip("Exclude lemmas and terms marked as noise from export")
+        options_layout.addWidget(self.exclude_noise_cb)
+
+        self.show_classification_cb = QCheckBox("Include classification columns (entity_class, is_noise, noise_reason)")
+        self.show_classification_cb.setChecked(False)  # Default: don't show
+        self.show_classification_cb.setToolTip("Add columns showing entity classification and noise status")
+        options_layout.addWidget(self.show_classification_cb)
+
         options_group.setLayout(options_layout)
         layout.addWidget(options_group)
 
@@ -130,12 +142,21 @@ class ExportView(QWidget):
     def get_export_options(self, format_key):
         """Get export options based on format."""
         options = {}
+
+        # Task 11: Noise filtering options (apply to all formats)
+        options["exclude_noise"] = self.exclude_noise_cb.isChecked()
+        options["include_classification"] = self.show_classification_cb.isChecked()
+
+        # Format-specific options
         if format_key == "tbx":
             options["approved_only"] = self.approved_only_cb.isChecked()
             options["include_pinned"] = self.include_pinned_cb.isChecked()
         elif format_key == "tmx":
             options["include_draft"] = self.include_draft_cb.isChecked()
             options["include_pinned"] = self.include_pinned_cb.isChecked()
+        elif format_key == "xlsx":
+            # XLSX also uses these options
+            pass
         return options
 
     def on_export_clicked(self):

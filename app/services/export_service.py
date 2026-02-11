@@ -277,6 +277,7 @@ class ExportService:
         *,
         project_id: int,
         exclude_noise: bool = True,
+        include_classification: bool = False,
     ) -> int:
         """Export project data to Excel workbook with multiple sheets.
 
@@ -319,6 +320,10 @@ class ExportService:
                 "Origin", "Kind", "Frequency", "Notes"
             ]
 
+            # Task 11: Add classification columns if requested
+            if include_classification:
+                headers.extend(["Entity Class", "Is Noise", "Noise Reason"])
+
             ws_dict.append(headers)
 
             # Style headers
@@ -336,7 +341,7 @@ class ExportService:
 
             row_count = 0
             for entry in tm_entries:
-                ws_dict.append([
+                row_data = [
                     entry.src_text or "",
                     entry.translation or "",
                     entry.status or "",
@@ -344,7 +349,11 @@ class ExportService:
                     entry.kind or "",
                     "",  # Frequency (not available for TM entries)
                     entry.notes or "",
-                ])
+                ]
+                # Task 11: Add classification data (TM entries don't have classification)
+                if include_classification:
+                    row_data.extend(["", "", ""])  # Empty for TM entries
+                ws_dict.append(row_data)
                 row_count += 1
 
             # Skip dict entries for now (dict_source table may not exist in all schemas)
@@ -391,7 +400,7 @@ class ExportService:
                 status = tm_entry.status if tm_entry else "untranslated"
                 frequency = lemma_stat.freq_abs if lemma_stat else ""
 
-                ws_dict.append([
+                row_data = [
                     lemma.lemma_text or "",
                     translation,
                     status,
@@ -399,7 +408,17 @@ class ExportService:
                     lemma.pos or "",
                     frequency,
                     "",
-                ])
+                ]
+
+                # Task 11: Add classification data for lemmas
+                if include_classification:
+                    row_data.extend([
+                        lemma.entity_class or "",
+                        "Noise" if lemma.is_noise == 1 else "Valid" if lemma.is_noise == 0 else "",
+                        lemma.noise_reason or "",
+                    ])
+
+                ws_dict.append(row_data)
                 row_count += 1
 
             # Auto-size columns
@@ -556,6 +575,7 @@ class ExportService:
         approved_only: bool = True,
         include_pinned: bool = True,
         exclude_noise: bool = True,
+        include_classification: bool = False,
     ) -> int:
         """Export term clusters to TBX (TermBase eXchange) XML format.
 
@@ -611,6 +631,17 @@ class ExportService:
                 term_he = ET.SubElement(tig_he, "term")
                 term_he.text = sanitize_xml_text(cluster.representative_he)
 
+                # Task 11: Add classification data if requested
+                if include_classification and cluster.entity_class:
+                    descrip_class = ET.SubElement(tig_he, "descrip", {"type": "entityClass"})
+                    descrip_class.text = cluster.entity_class
+                    if cluster.is_noise is not None:
+                        descrip_noise = ET.SubElement(tig_he, "descrip", {"type": "isNoise"})
+                        descrip_noise.text = "true" if cluster.is_noise == 1 else "false"
+                    if cluster.noise_reason:
+                        descrip_reason = ET.SubElement(tig_he, "descrip", {"type": "noiseReason"})
+                        descrip_reason.text = cluster.noise_reason
+
                 # Russian langSet (if translation exists)
                 translation = None
                 if include_pinned and cluster.pinned_translation:
@@ -650,6 +681,7 @@ class ExportService:
         include_draft: bool = False,
         include_pinned: bool = True,
         exclude_noise: bool = True,
+        include_classification: bool = False,
     ) -> int:
         """Export TM entries to TMX (Translation Memory eXchange) XML format.
 
@@ -696,7 +728,8 @@ class ExportService:
                 .order_by(TermCluster.representative_he)
                 .all()
             )
-            pinned_entries = [(c.representative_he, c.pinned_translation) for c in clusters_with_pinned]
+            # Task 11: Keep cluster object for classification data
+            pinned_entries = [(c.representative_he, c.pinned_translation, c if include_classification else None) for c in clusters_with_pinned]
 
         # Build TMX XML
         def write_tmx(f: BinaryIO):
@@ -737,12 +770,24 @@ class ExportService:
                 count += 1
 
             # Add pinned translations as separate TUs with prop
-            for src_he, trans_ru in pinned_entries:
+            for src_he, trans_ru, cluster in pinned_entries:
                 tu = ET.SubElement(body, "tu")
 
                 # Add property to mark as pinned
                 prop = ET.SubElement(tu, "prop", {"type": "source"})
                 prop.text = "pinned"
+
+                # Task 11: Add classification properties if requested
+                if include_classification and cluster:
+                    if cluster.entity_class:
+                        prop_class = ET.SubElement(tu, "prop", {"type": "entityClass"})
+                        prop_class.text = cluster.entity_class
+                    if cluster.is_noise is not None:
+                        prop_noise = ET.SubElement(tu, "prop", {"type": "isNoise"})
+                        prop_noise.text = "true" if cluster.is_noise == 1 else "false"
+                    if cluster.noise_reason:
+                        prop_reason = ET.SubElement(tu, "prop", {"type": "noiseReason"})
+                        prop_reason.text = cluster.noise_reason
 
                 # Source (Hebrew)
                 tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
