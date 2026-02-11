@@ -332,9 +332,10 @@ class ExportService:
                 cell.alignment = Alignment(horizontal="left")
 
             # Get TM entries with classification data if needed
-            if include_classification:
+            # Also need JOIN if exclude_noise=True to filter by lemma.is_noise
+            if include_classification or exclude_noise:
                 # Join with lemma table to get classification for lemma entries
-                from sqlalchemy import outerjoin
+                from sqlalchemy import outerjoin, or_
                 tm_query = (
                     session.query(TMEntry, Lemma)
                     .outerjoin(
@@ -344,8 +345,21 @@ class ExportService:
                         (TMEntry.project_id == Lemma.project_id)
                     )
                     .filter(TMEntry.project_id == project_id)
-                    .order_by(TMEntry.src_text)
                 )
+
+                # Apply noise filter through joined lemma
+                if exclude_noise:
+                    # Exclude if joined lemma is marked as noise
+                    # Keep if: no lemma found (non-lemma entries) OR lemma is not noise
+                    tm_query = tm_query.filter(
+                        or_(
+                            Lemma.lemma_id.is_(None),  # No lemma joined (keep non-lemma entries)
+                            Lemma.is_noise == 0,        # Lemma is not noise
+                            Lemma.is_noise.is_(None)    # Lemma noise status is NULL
+                        )
+                    )
+
+                tm_query = tm_query.order_by(TMEntry.src_text)
                 tm_results = tm_query.all()
             else:
                 tm_entries = (
@@ -724,9 +738,10 @@ class ExportService:
         Note: Uses language codes he/ru (ISO 639-1)
         """
         # Query TM entries with classification data if needed
-        if include_classification:
+        # Also need JOIN if exclude_noise=True to filter by lemma.is_noise
+        if include_classification or exclude_noise:
             # Join with lemma table to get classification for lemma entries
-            from sqlalchemy import outerjoin
+            from sqlalchemy import outerjoin, or_
             query = (
                 session.query(TMEntry, Lemma)
                 .outerjoin(
@@ -740,6 +755,18 @@ class ExportService:
 
             if not include_draft:
                 query = query.filter(TMEntry.status.in_(["approved", "rejected", "deprecated"]))
+
+            # Apply noise filter through joined lemma
+            if exclude_noise:
+                # Exclude if joined lemma is marked as noise
+                # Keep if: no lemma found (non-lemma entries) OR lemma is not noise
+                query = query.filter(
+                    or_(
+                        Lemma.lemma_id.is_(None),  # No lemma joined (keep non-lemma entries)
+                        Lemma.is_noise == 0,        # Lemma is not noise
+                        Lemma.is_noise.is_(None)    # Lemma noise status is NULL
+                    )
+                )
 
             # Stable order for determinism
             query = query.order_by(TMEntry.src_text, TMEntry.tm_id)
