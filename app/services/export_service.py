@@ -276,6 +276,7 @@ class ExportService:
         path: str,
         *,
         project_id: int,
+        exclude_noise: bool = True,
     ) -> int:
         """Export project data to Excel workbook with multiple sheets.
 
@@ -287,6 +288,7 @@ class ExportService:
             session: Database session
             path: Output XLSX file path
             project_id: Project ID to export
+            exclude_noise: Exclude noisy lemmas (default True, Task 11)
 
         Returns:
             Number of dictionary entries exported
@@ -347,9 +349,15 @@ class ExportService:
 
             # Skip dict entries for now (dict_source table may not exist in all schemas)
             # Get lemmas with translations
+            query = session.query(Lemma).filter(Lemma.project_id == project_id)
+
+            # Apply noise filter (Task 11)
+            if exclude_noise:
+                from sqlalchemy import or_
+                query = query.filter(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
+
             lemmas = (
-                session.query(Lemma)
-                .filter(Lemma.project_id == project_id)
+                query
                 .order_by(Lemma.lemma_text)
                 .limit(100)  # Limit to avoid huge exports
                 .all()
@@ -547,6 +555,7 @@ class ExportService:
         project_id: int,
         approved_only: bool = True,
         include_pinned: bool = True,
+        exclude_noise: bool = True,
     ) -> int:
         """Export term clusters to TBX (TermBase eXchange) XML format.
 
@@ -556,6 +565,7 @@ class ExportService:
             project_id: Project ID to export
             approved_only: Export only approved terms (default True)
             include_pinned: Include pinned translations (default True)
+            exclude_noise: Exclude noisy clusters (default True, Task 11)
 
         Returns:
             Number of term entries exported
@@ -567,6 +577,11 @@ class ExportService:
 
         if approved_only:
             query = query.filter(TermCluster.curation_status == "approved")
+
+        # Apply noise filter (Task 11)
+        if exclude_noise:
+            from sqlalchemy import or_
+            query = query.filter(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         # Stable order for determinism
         query = query.order_by(TermCluster.canonical_key, TermCluster.cluster_id)
@@ -634,6 +649,7 @@ class ExportService:
         project_id: int,
         include_draft: bool = False,
         include_pinned: bool = True,
+        exclude_noise: bool = True,
     ) -> int:
         """Export TM entries to TMX (Translation Memory eXchange) XML format.
 
@@ -643,6 +659,7 @@ class ExportService:
             project_id: Project ID to export
             include_draft: Include draft status entries (default False)
             include_pinned: Include pinned translations from term clusters (default True)
+            exclude_noise: Exclude noisy clusters from pinned translations (default True, Task 11)
 
         Returns:
             Number of translation units exported
@@ -662,12 +679,20 @@ class ExportService:
         # Get pinned translations from term clusters if requested
         pinned_entries = []
         if include_pinned:
-            clusters_with_pinned = (
-                session.query(TermCluster)
-                .filter(
-                    TermCluster.project_id == project_id,
-                    TermCluster.pinned_translation.isnot(None)
+            query_pinned = session.query(TermCluster).filter(
+                TermCluster.project_id == project_id,
+                TermCluster.pinned_translation.isnot(None)
+            )
+
+            # Apply noise filter to pinned clusters (Task 11)
+            if exclude_noise:
+                from sqlalchemy import or_
+                query_pinned = query_pinned.filter(
+                    or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None))
                 )
+
+            clusters_with_pinned = (
+                query_pinned
                 .order_by(TermCluster.representative_he)
                 .all()
             )

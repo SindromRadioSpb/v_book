@@ -994,11 +994,11 @@ class ExportWorker(QThread):
 
                 # Call appropriate export method based on format
                 if self.format_type == "csv":
-                    count = export_service.export_csv(
+                    count = export_service.export_tm_csv(
                         session, self.file_path, project_id=self.project_id
                     )
                 elif self.format_type == "json":
-                    count = export_service.export_json(
+                    count = export_service.export_tm_json(
                         session, self.file_path, project_id=self.project_id
                     )
                 elif self.format_type == "xlsx":
