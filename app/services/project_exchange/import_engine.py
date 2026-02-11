@@ -21,6 +21,7 @@ from app.services.project_exchange.dto import (
     ImportOptions,
     ImportReport,
 )
+from app.infra.fts_manager import ensure_fts_tables
 
 logger = logging.getLogger(__name__)
 
@@ -290,9 +291,10 @@ class ProjectImportEngine:
         """
         host_conn.execute("BEGIN IMMEDIATE")
 
-        # Disable triggers during import (FTS5 tables might not exist yet)
-        # They will be rebuilt after import if needed
-        # NOTE: This is safe because we're only importing, not modifying existing data
+        # CRITICAL: Ensure FTS tables exist in host DB before importing
+        # INSERT triggers on document_sentence/term_search reference sentence_fts/term_fts
+        ensure_fts_tables(host_conn, schema="main", rebuild=False)
+        logger.info("Ensured FTS tables exist in host DB")
 
         table_counts = {}
         new_project_id = None

@@ -23,6 +23,7 @@ from app.services.project_exchange.dto import (
     ExportReport,
     ManifestInfo,
 )
+from app.infra.fts_manager import ensure_fts_tables
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,11 @@ class ProjectExportEngine:
 
             # Disable FK checks during export (we insert in topological order but ATTACH doesn't guarantee)
             payload_conn.execute("PRAGMA foreign_keys = OFF")
+
+            # CRITICAL: Ensure FTS tables exist in payload DB before copying data
+            # INSERT triggers on document_sentence/term_search reference sentence_fts/term_fts
+            ensure_fts_tables(payload_conn, schema="main", rebuild=False)
+            logger.info("Ensured FTS tables exist in payload DB")
 
             # Copy data table by table
             table_counts = {}

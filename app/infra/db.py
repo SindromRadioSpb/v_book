@@ -123,6 +123,16 @@ class DatabaseManager:
                     backup_dir, max_count=10, max_age_days=30
                 )
 
+                # CRITICAL: Ensure FTS tables exist after migrations
+                # This handles cases where FTS tables were deleted or migrations failed
+                from app.infra.fts_manager import ensure_fts_tables
+                raw_conn = self.engine.raw_connection()
+                try:
+                    ensure_fts_tables(raw_conn, schema="main", rebuild=False)
+                    logger.info("Verified FTS tables exist after migrations")
+                finally:
+                    raw_conn.close()
+
         except RuntimeError as e:
             # Lock acquisition or backup failure
             logger.error(f"Migration aborted: {e}")

@@ -18,6 +18,7 @@ from app.infra.sa_models import (
 from app.domain.dto import DeleteReport
 from app.domain.exceptions import ReferenceCorpusReadonlyError
 from app.services.db_service import DBService
+from app.infra.fts_manager import ensure_fts_tables
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,11 @@ class ProjectService:
             project_name = project.name
 
             logger.info(f"Deleting project: {project_name} (ID: {project_id})")
+
+            # CRITICAL: Ensure FTS tables exist before deletion
+            # DELETE triggers on document_sentence/term_search reference sentence_fts/term_fts
+            conn = session.connection().connection  # Get raw SQLite connection
+            ensure_fts_tables(conn, schema="main", rebuild=False)
 
             # Count what will be deleted (for reporting)
             corpora_count = session.execute(
