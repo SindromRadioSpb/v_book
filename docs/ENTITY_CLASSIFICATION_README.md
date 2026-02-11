@@ -29,8 +29,8 @@ Automatic classification of lemmas and term clusters into categories (words, num
    - Now you see ALL items including noise
 
 3. **Manual Override** - Fix classifier mistakes:
-   - Right-click on any item → context menu
-   - Select "✓ Mark as Valid" or "✗ Mark as Noise"
+   - **Single item**: Right-click → "✓ Mark as Valid" or "✗ Mark as Noise"
+   - **Multiple items**: Select rows (Ctrl+Click or Shift+Click) → Right-click → "✓ Mark Selected as Valid (N rows)" or "✗ Mark Selected as Noise (N rows)"
    - Database updated, view refreshes automatically
 
 ### Common Workflows
@@ -56,6 +56,16 @@ Automatic classification of lemmas and term clusters into categories (words, num
 → Uncheck "Hide noise"
 → Use Search to find item
 → Right-click → "Mark as Valid" if needed
+```
+
+**Workflow 4: Bulk Quality Control**
+```
+→ Uncheck "Hide noise"
+→ Select multiple items (Ctrl+Click for individual, Shift+Click for range)
+→ Right-click on any selected item
+→ Choose "Mark Selected as Valid" or "Mark Selected as Noise"
+→ Confirm action in dialog
+→ All selected items updated at once
 ```
 
 ---
@@ -175,8 +185,7 @@ Currently exports exclude noise by default. To include noise, you need to:
 
 ### "Can I bulk-override noise status?"
 
-Not yet. Currently you must mark items one-by-one via context menu.
-Future enhancement: bulk actions on selected rows.
+Yes! Select multiple rows (Ctrl+Click for individual items, Shift+Click for range), then right-click on any selected item. Choose "Mark Selected as Valid" or "Mark Selected as Noise" to update all selected items at once.
 
 ### "Where is the classification data stored?"
 
