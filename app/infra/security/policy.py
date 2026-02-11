@@ -12,7 +12,7 @@ import sys
 
 MAX_DOCUMENT_SIZE = 100 * 1024 * 1024  # 100 MB for TXT/DOCX/PDF
 MAX_DICTIONARY_SIZE = 10 * 1024 * 1024  # 10 MB for CSV/XLSX
-MAX_BUNDLE_SIZE = 500 * 1024 * 1024  # 500 MB for .hdleproj bundles
+MAX_BUNDLE_SIZE = 1024 * 1024 * 1024  # 1 GB for .hdleproj bundles (large reference corpora)
 MAX_UPLOAD_SIZE = MAX_DOCUMENT_SIZE  # Default max size
 
 # =============================================================================

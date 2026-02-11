@@ -245,132 +245,132 @@ class ProjectExportEngine:
         # Table-specific export queries
         queries = {
             "library": f"""
-                INSERT INTO library
+                INSERT OR REPLACE INTO library
                 SELECT l.* FROM host.library l
                 WHERE l.library_id = (SELECT library_id FROM host.dict_project WHERE project_id = ?)
             """,
             "dict_project": f"""
-                INSERT INTO dict_project
+                INSERT OR REPLACE INTO dict_project
                 SELECT * FROM host.dict_project WHERE project_id = ?
             """,
             "source_corpus": f"""
-                INSERT INTO source_corpus
+                INSERT OR REPLACE INTO source_corpus
                 SELECT * FROM host.source_corpus WHERE project_id = ?
             """,
             "source_document": f"""
-                INSERT INTO source_document
+                INSERT OR REPLACE INTO source_document
                 SELECT d.* FROM host.source_document d
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
             "document_text": f"""
-                INSERT INTO document_text
+                INSERT OR REPLACE INTO document_text
                 SELECT dt.* FROM host.document_text dt
                 JOIN host.source_document d ON dt.doc_id = d.doc_id
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
             "document_sentence": f"""
-                INSERT INTO document_sentence
+                INSERT OR REPLACE INTO document_sentence
                 SELECT ds.* FROM host.document_sentence ds
                 JOIN host.source_document d ON ds.doc_id = d.doc_id
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
             "lemma": f"""
-                INSERT INTO lemma
+                INSERT OR REPLACE INTO lemma
                 SELECT * FROM host.lemma WHERE project_id = ?
             """,
             "ngram": f"""
-                INSERT INTO ngram
+                INSERT OR REPLACE INTO ngram
                 SELECT * FROM host.ngram WHERE project_id = ?
             """,
             "ngram_component": f"""
-                INSERT INTO ngram_component
+                INSERT OR REPLACE INTO ngram_component
                 SELECT nc.* FROM host.ngram_component nc
                 JOIN host.ngram n ON nc.ngram_id = n.ngram_id
                 WHERE n.project_id = ?
             """,
             "lemma_doc_stat": f"""
-                INSERT INTO lemma_doc_stat
+                INSERT OR REPLACE INTO lemma_doc_stat
                 SELECT * FROM host.lemma_doc_stat WHERE project_id = ?
             """,
             "lemma_project_stat": f"""
-                INSERT INTO lemma_project_stat
+                INSERT OR REPLACE INTO lemma_project_stat
                 SELECT * FROM host.lemma_project_stat WHERE project_id = ?
             """,
             "ngram_doc_stat": f"""
-                INSERT INTO ngram_doc_stat
+                INSERT OR REPLACE INTO ngram_doc_stat
                 SELECT * FROM host.ngram_doc_stat WHERE project_id = ?
             """,
             "ngram_project_stat": f"""
-                INSERT INTO ngram_project_stat
+                INSERT OR REPLACE INTO ngram_project_stat
                 SELECT * FROM host.ngram_project_stat WHERE project_id = ?
             """,
             "term_cluster": f"""
-                INSERT INTO term_cluster
+                INSERT OR REPLACE INTO term_cluster
                 SELECT * FROM host.term_cluster WHERE project_id = ?
             """,
             "term_cluster_member": f"""
-                INSERT INTO term_cluster_member
+                INSERT OR REPLACE INTO term_cluster_member
                 SELECT tcm.* FROM host.term_cluster_member tcm
                 JOIN host.term_cluster tc ON tcm.cluster_id = tc.cluster_id
                 WHERE tc.project_id = ?
             """,
             "term_card": f"""
-                INSERT INTO term_card
+                INSERT OR REPLACE INTO term_card
                 SELECT * FROM host.term_card WHERE project_id = ?
             """,
             "translation_memory": f"""
-                INSERT INTO translation_memory
+                INSERT OR REPLACE INTO translation_memory
                 SELECT * FROM host.translation_memory WHERE project_id = ?
             """,
             "tm_entry": f"""
-                INSERT INTO tm_entry
+                INSERT OR REPLACE INTO tm_entry
                 SELECT * FROM host.tm_entry WHERE project_id = ?
             """,
             "tm_entry_history": f"""
-                INSERT INTO tm_entry_history
+                INSERT OR REPLACE INTO tm_entry_history
                 SELECT teh.* FROM host.tm_entry_history teh
                 JOIN host.tm_entry te ON teh.tm_id = te.tm_id
                 WHERE te.project_id = ?
             """,
             "tm_alias": f"""
-                INSERT INTO tm_alias
+                INSERT OR REPLACE INTO tm_alias
                 SELECT ta.* FROM host.tm_alias ta
                 JOIN host.tm_entry te ON ta.tm_id = te.tm_id
                 WHERE te.project_id = ?
             """,
             "dict_source": f"""
-                INSERT INTO dict_source
+                INSERT OR REPLACE INTO dict_source
                 SELECT * FROM host.dict_source WHERE project_id = ?
             """,
             "dict_entry": f"""
-                INSERT INTO dict_entry
+                INSERT OR REPLACE INTO dict_entry
                 SELECT de.* FROM host.dict_entry de
                 JOIN host.dict_source ds ON de.dict_source_id = ds.dict_source_id
                 WHERE ds.project_id = ?
             """,
             "term_alias": f"""
-                INSERT INTO term_alias
+                INSERT OR REPLACE INTO term_alias
                 SELECT * FROM host.term_alias WHERE project_id = ?
             """,
             "stopword_set": f"""
-                INSERT INTO stopword_set
+                INSERT OR REPLACE INTO stopword_set
                 SELECT * FROM host.stopword_set WHERE project_id = ?
             """,
             "stopword_item": f"""
-                INSERT INTO stopword_item
+                INSERT OR REPLACE INTO stopword_item
                 SELECT si.* FROM host.stopword_item si
                 JOIN host.stopword_set ss ON si.stopset_id = ss.stopset_id
                 WHERE ss.project_id = ?
             """,
             "term_search": f"""
-                INSERT INTO term_search
+                INSERT OR REPLACE INTO term_search
                 SELECT * FROM host.term_search WHERE project_id = ?
             """,
             "project_snapshot": f"""
-                INSERT INTO project_snapshot
+                INSERT OR REPLACE INTO project_snapshot
                 SELECT * FROM host.project_snapshot WHERE project_id = ?
             """,
         }

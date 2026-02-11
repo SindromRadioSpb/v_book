@@ -31,7 +31,7 @@ class ProjectService:
     def get_or_create_default_library(self, session: Session) -> Library:
         """Get or create the default library."""
         stmt = select(Library).where(Library.name == "Default Library")
-        library = session.execute(stmt).scalar_one_or_none()
+        library = session.execute(stmt).scalars().first()
 
         if library is None:
             library = Library(name="Default Library")
@@ -74,11 +74,14 @@ class ProjectService:
         if ref_id:
             return ref_id
 
-        # Fallback: search by name "Hebrew Wikipedia Baseline"
-        stmt = select(DictProject.project_id).where(
-            DictProject.name == "Hebrew Wikipedia Baseline"
+        # Fallback: search by name "Hebrew Wikipedia Baseline" (lowest ID first)
+        stmt = (
+            select(DictProject.project_id)
+            .where(DictProject.name == "Hebrew Wikipedia Baseline")
+            .order_by(DictProject.project_id.asc())
+            .limit(1)
         )
-        ref_id = session.execute(stmt).scalar_one_or_none()
+        ref_id = session.execute(stmt).scalar()
 
         return ref_id
 

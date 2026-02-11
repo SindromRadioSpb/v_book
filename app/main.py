@@ -22,13 +22,21 @@ def get_app_dir() -> Path:
     r"""Get the application data directory.
 
     Default locations:
-    - Windows: M:\V_book\HDLE
+    - Windows: %LOCALAPPDATA%\HDLE (or M:\V_book\HDLE if HDLE_DEV_MODE env var is set)
     - macOS: ~/Library/Application Support/HDLE
     - Linux: ~/.local/share/hdle
     """
+    import os
+
     if sys.platform == "win32":
-        # Use M:\V_book\HDLE to avoid filling up C: drive
-        app_dir = Path(r"M:\V_book\HDLE")
+        # Check if running in development mode (M: drive exists and HDLE_DEV_MODE is set)
+        dev_path = Path(r"M:\V_book\HDLE")
+        if dev_path.parent.exists() and os.environ.get("HDLE_DEV_MODE") == "1":
+            # Development mode: use M: drive
+            app_dir = dev_path
+        else:
+            # Production mode: use %LOCALAPPDATA%
+            app_dir = Path(os.environ.get("LOCALAPPDATA")) / "HDLE"
     elif sys.platform == "darwin":
         app_dir = Path.home() / "Library" / "Application Support" / "HDLE"
     else:  # Linux
@@ -45,7 +53,7 @@ def main():
     parser.add_argument(
         "--db-path",
         type=str,
-        help="Path to database file (default: M:/V_book/HDLE/hdle.db)",
+        help="Path to database file (default: $LOCALAPPDATA/HDLE/hdle.db)",
     )
     args = parser.parse_args()
 
@@ -58,13 +66,7 @@ def main():
         db_path = Path(args.db_path).resolve()
         logger.info(f"Using custom database path: {db_path}")
     else:
-        # Use hdle_production_new.db (contains Hebrew Wikipedia reference corpus)
-        # TODO: Rename to hdle.db after system restart
-        production_db = app_dir / "hdle_production_new.db"
-        if production_db.exists():
-            db_path = production_db
-        else:
-            db_path = app_dir / "hdle.db"
+        db_path = app_dir / "hdle.db"
 
     # Setup logging
     setup_logging(log_dir, level=logging.INFO)
