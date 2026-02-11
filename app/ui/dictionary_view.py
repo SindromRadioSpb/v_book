@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QHeaderView,
     QComboBox,
+    QCheckBox,
     QMenu,
 )
 from PyQt6.QtCore import Qt, QModelIndex
