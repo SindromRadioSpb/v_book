@@ -87,13 +87,20 @@ New-Item -ItemType Directory -Force -Path "build\logs" | Out-Null
 Write-Host "`nBuilding with PyInstaller..." -ForegroundColor Cyan
 $pyinstallerLog = "build\logs\pyinstaller_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-pyinstaller .\hdle_premium_installer.spec --clean --noconfirm 2>&1 | Tee-Object $pyinstallerLog
+# Run PyInstaller and capture output to log file
+# Note: PowerShell Tee-Object conflicts with pyinstaller stderr, so we redirect to file
+pyinstaller .\hdle_premium_installer.spec --clean --noconfirm > $pyinstallerLog 2>&1
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n[FAIL] PyInstaller build failed!" -ForegroundColor Red
     Write-Host "See log: $pyinstallerLog" -ForegroundColor Yellow
+    # Show last 20 lines of log
+    Write-Host "`nLast 20 lines of log:" -ForegroundColor Yellow
+    Get-Content $pyinstallerLog -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
     exit 1
 }
+
+Write-Host "[OK] PyInstaller completed - see log for details: $pyinstallerLog" -ForegroundColor Green
 
 # Verify PyInstaller output
 if (-not (Test-Path "dist\HDLE_Premium\HDLE_Premium.exe")) {
@@ -115,12 +122,16 @@ Write-Host "Temp output: $tempOutput" -ForegroundColor Gray
 
 $innoLog = "build\logs\inno_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-# Run ISCC with temp output override
-& $isccPath "/O`"$tempOutput`"" "/F`"HDLE_Premium_Setup`"" .\installer\installer.iss 2>&1 | Tee-Object $innoLog
+# Run ISCC with temp output override and redirect to log
+& $isccPath "/O`"$tempOutput`"" "/F`"HDLE_Premium_Setup`"" .\installer\installer.iss > $innoLog 2>&1
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n[FAIL] Inno Setup build failed!" -ForegroundColor Red
     Write-Host "See log: $innoLog" -ForegroundColor Yellow
+
+    # Show last 30 lines of log
+    Write-Host "`nLast 30 lines of log:" -ForegroundColor Yellow
+    Get-Content $innoLog -Tail 30 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 
     # Check for common error 110
     $logContent = Get-Content $innoLog -Raw
@@ -136,6 +147,8 @@ if ($LASTEXITCODE -ne 0) {
     }
     exit 1
 }
+
+Write-Host "[OK] Inno Setup completed - see log: $innoLog" -ForegroundColor Green
 
 # Verify temp output
 $tempSetupExe = Join-Path $tempOutput "HDLE_Premium_Setup.exe"
