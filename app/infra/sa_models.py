@@ -224,6 +224,11 @@ class Lemma(Base):
     pos = Column(String)
     morph_json = Column(Text)
     created_at = Column(String, nullable=False, default=utc_now)
+    # Entity classification (Task 11 - Migration 010)
+    entity_class = Column(String)  # WORD_HE, WORD_LATIN, MIXED_ALPHA_NUM, NUMBER, etc.
+    is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise
+    noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_SYMBOL_ONLY, etc.
+    norm_text = Column(String)  # Normalized form of lemma_text
 
     __table_args__ = (
         UniqueConstraint("project_id", "lemma_text", name="uq_lemma_project_text"),
@@ -520,6 +525,12 @@ class TermCluster(Base):
     curation_notes = Column(Text)
     curated_at = Column(String)
     curated_by = Column(String)
+
+    # Entity classification (Task 11 - Migration 010)
+    entity_class = Column(String)  # WORD_HE, WORD_LATIN, MIXED_ALPHA_NUM, NUMBER, etc.
+    is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise
+    noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_SYMBOL_ONLY, etc.
+    norm_text = Column(String)  # Normalized form of representative_he
 
     __table_args__ = (
         UniqueConstraint("project_id", "canonical_key", name="uq_cluster_canonical"),
