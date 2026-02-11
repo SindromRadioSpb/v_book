@@ -331,16 +331,33 @@ class ExportService:
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal="left")
 
-            # Get TM entries
-            tm_entries = (
-                session.query(TMEntry)
-                .filter(TMEntry.project_id == project_id)
-                .order_by(TMEntry.src_text)
-                .all()
-            )
+            # Get TM entries with classification data if needed
+            if include_classification:
+                # Join with lemma table to get classification for lemma entries
+                from sqlalchemy import outerjoin
+                tm_query = (
+                    session.query(TMEntry, Lemma)
+                    .outerjoin(
+                        Lemma,
+                        (TMEntry.kind == "lemma") &
+                        (TMEntry.src_text == Lemma.lemma_text) &
+                        (TMEntry.project_id == Lemma.project_id)
+                    )
+                    .filter(TMEntry.project_id == project_id)
+                    .order_by(TMEntry.src_text)
+                )
+                tm_results = tm_query.all()
+            else:
+                tm_entries = (
+                    session.query(TMEntry)
+                    .filter(TMEntry.project_id == project_id)
+                    .order_by(TMEntry.src_text)
+                    .all()
+                )
+                tm_results = [(entry, None) for entry in tm_entries]
 
             row_count = 0
-            for entry in tm_entries:
+            for entry, lemma in tm_results:
                 row_data = [
                     entry.src_text or "",
                     entry.translation or "",
@@ -350,9 +367,17 @@ class ExportService:
                     "",  # Frequency (not available for TM entries)
                     entry.notes or "",
                 ]
-                # Task 11: Add classification data (TM entries don't have classification)
+                # Task 11: Add classification data from joined lemma
                 if include_classification:
-                    row_data.extend(["", "", ""])  # Empty for TM entries
+                    if lemma:
+                        row_data.extend([
+                            lemma.entity_class or "",
+                            "Noise" if lemma.is_noise == 1 else "Valid" if lemma.is_noise == 0 else "",
+                            lemma.noise_reason or "",
+                        ])
+                    else:
+                        # No lemma found (e.g., for term_cluster or other kinds)
+                        row_data.extend(["", "", ""])
                 ws_dict.append(row_data)
                 row_count += 1
 
