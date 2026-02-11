@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for HDLE Premium
 #
-# АКТУАЛЬНАЯ ВЕРСИЯ: 2026-02-11 (включает Task 9 - Project Exchange)
+# АКТУАЛЬНАЯ ВЕРСИЯ: 2026-02-11 (включает Task 9 - Project Exchange, Task 11 - Entity Classification)
 #
 # Этот spec файл создает standalone Windows executable с:
 # - Полными hiddenimports (PyQt6, SQLAlchemy, psutil, Google Cloud Translate)
@@ -84,6 +84,7 @@ a = Analysis(
         'app.services.term_extraction_service',
         'app.services.coverage_service',
         'app.services.dictionary_import_service',
+        'app.services.entity_classifier',  # Task 11: Entity Classification
 
         # Project Exchange (Task 9) - НОВОЕ
         'app.services.project_exchange',
