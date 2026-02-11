@@ -723,15 +723,37 @@ class ExportService:
 
         Note: Uses language codes he/ru (ISO 639-1)
         """
-        # Query TM entries
-        query = session.query(TMEntry).filter(TMEntry.project_id == project_id)
+        # Query TM entries with classification data if needed
+        if include_classification:
+            # Join with lemma table to get classification for lemma entries
+            from sqlalchemy import outerjoin
+            query = (
+                session.query(TMEntry, Lemma)
+                .outerjoin(
+                    Lemma,
+                    (TMEntry.kind == "lemma") &
+                    (TMEntry.src_text == Lemma.lemma_text) &
+                    (TMEntry.project_id == Lemma.project_id)
+                )
+                .filter(TMEntry.project_id == project_id)
+            )
 
-        if not include_draft:
-            query = query.filter(TMEntry.status.in_(["approved", "rejected", "deprecated"]))
+            if not include_draft:
+                query = query.filter(TMEntry.status.in_(["approved", "rejected", "deprecated"]))
 
-        # Stable order for determinism
-        query = query.order_by(TMEntry.src_text, TMEntry.tm_id)
-        tm_entries = query.all()
+            # Stable order for determinism
+            query = query.order_by(TMEntry.src_text, TMEntry.tm_id)
+            tm_results = query.all()
+        else:
+            query = session.query(TMEntry).filter(TMEntry.project_id == project_id)
+
+            if not include_draft:
+                query = query.filter(TMEntry.status.in_(["approved", "rejected", "deprecated"]))
+
+            # Stable order for determinism
+            query = query.order_by(TMEntry.src_text, TMEntry.tm_id)
+            tm_entries = query.all()
+            tm_results = [(entry, None) for entry in tm_entries]
 
         # Get pinned translations from term clusters if requested
         pinned_entries = []
@@ -778,8 +800,20 @@ class ExportService:
             count = 0
 
             # Add TM entries
-            for entry in tm_entries:
+            for entry, lemma in tm_results:
                 tu = ET.SubElement(body, "tu")
+
+                # Task 11: Add classification properties if requested
+                if include_classification and lemma:
+                    if lemma.entity_class:
+                        prop_class = ET.SubElement(tu, "prop", {"type": "entityClass"})
+                        prop_class.text = lemma.entity_class
+                    if lemma.is_noise is not None:
+                        prop_noise = ET.SubElement(tu, "prop", {"type": "isNoise"})
+                        prop_noise.text = "true" if lemma.is_noise == 1 else "false"
+                    if lemma.noise_reason:
+                        prop_reason = ET.SubElement(tu, "prop", {"type": "noiseReason"})
+                        prop_reason.text = lemma.noise_reason
 
                 # Source (Hebrew)
                 tuv_he = ET.SubElement(tu, "tuv", {"xml:lang": "he"})
