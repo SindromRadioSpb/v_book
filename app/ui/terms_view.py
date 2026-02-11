@@ -531,16 +531,29 @@ class TermsView(QWidget):
 
         # Task 11: Manual noise override actions
         menu.addSeparator()
-        current_is_noise = cluster.is_noise == 1 if cluster.is_noise is not None else False
 
-        if current_is_noise:
-            mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
-            mark_valid_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, False))
-            menu.addAction(mark_valid_action)
+        # Check if multiple rows selected
+        if len(selected_rows) > 1:
+            # Bulk operations
+            mark_valid_bulk_action = QAction(f"✓ Mark Selected as Valid ({len(selected_rows)} rows)", self)
+            mark_valid_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(False))
+            menu.addAction(mark_valid_bulk_action)
+
+            mark_noise_bulk_action = QAction(f"✗ Mark Selected as Noise ({len(selected_rows)} rows)", self)
+            mark_noise_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(True))
+            menu.addAction(mark_noise_bulk_action)
         else:
-            mark_noise_action = QAction("✗ Mark as Noise", self)
-            mark_noise_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, True))
-            menu.addAction(mark_noise_action)
+            # Single row operation
+            current_is_noise = cluster.is_noise == 1 if cluster.is_noise is not None else False
+
+            if current_is_noise:
+                mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
+                mark_valid_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, False))
+                menu.addAction(mark_valid_action)
+            else:
+                mark_noise_action = QAction("✗ Mark as Noise", self)
+                mark_noise_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, True))
+                menu.addAction(mark_noise_action)
 
         # Show menu
         menu.exec(self.terms_table.viewport().mapToGlobal(pos))
@@ -597,6 +610,55 @@ class TermsView(QWidget):
             logger.exception(f"Failed to update noise status for cluster {cluster.cluster_id}")
             from app.ui.dialogs import show_error
             show_error(self, "Error", f"Failed to update noise status: {e}")
+
+    def set_clusters_noise_status_bulk(self, is_noise: bool):
+        """Task 11: Bulk operation - update noise status for multiple selected clusters."""
+        selected_rows = self.terms_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        # Map proxy rows to source rows and get cluster IDs
+        cluster_ids = []
+        source_rows = []
+        for proxy_index in selected_rows:
+            source_row = self.proxy_model.map_to_source_row(proxy_index.row())
+            cluster = self.terms_model.clusters[source_row]
+            cluster_ids.append(cluster.cluster_id)
+            source_rows.append(source_row)
+
+        try:
+            with self.db_service.get_session() as session:
+                from sqlalchemy import update
+                from app.infra.sa_models import TermCluster
+
+                # Bulk update using WHERE IN
+                stmt = update(TermCluster).where(
+                    TermCluster.cluster_id.in_(cluster_ids)
+                ).values(
+                    is_noise=1 if is_noise else 0
+                )
+                result = session.execute(stmt)
+                session.commit()
+
+                # Update local model for all affected rows
+                for source_row in source_rows:
+                    self.terms_model.clusters[source_row].is_noise = 1 if is_noise else 0
+
+                status = "noise" if is_noise else "valid"
+                logger.info(f"Marked {len(cluster_ids)} clusters as {status}")
+
+                # Show success message
+                from app.ui.dialogs import show_info
+                show_info(self, "Success", f"Marked {len(cluster_ids)} term clusters as {status}")
+
+                # Reload to apply filter if needed
+                if self.hide_noise_checkbox.isChecked():
+                    self.load_terms()
+
+        except Exception as e:
+            logger.exception(f"Failed to bulk update noise status for {len(cluster_ids)} clusters")
+            from app.ui.dialogs import show_error
+            show_error(self, "Error", f"Failed to bulk update noise status: {e}")
 
     def on_selection_changed(self):
         """Enable/disable batch translate button based on selection."""
