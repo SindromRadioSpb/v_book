@@ -378,6 +378,19 @@ class DictionaryView(QWidget):
         why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
         menu.addAction(why_action)
 
+        # Task 11: Manual noise override actions
+        menu.addSeparator()
+        current_is_noise = lemma.is_noise == 1 if lemma.is_noise is not None else False
+
+        if current_is_noise:
+            mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
+            mark_valid_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, False))
+            menu.addAction(mark_valid_action)
+        else:
+            mark_noise_action = QAction("✗ Mark as Noise", self)
+            mark_noise_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, True))
+            menu.addAction(mark_noise_action)
+
         # Show menu
         menu.exec(self.lemma_table.viewport().mapToGlobal(pos))
 
@@ -400,6 +413,39 @@ class DictionaryView(QWidget):
         # Show dialog
         dialog = WhyTranslationDialog(translation_result, lemma.lemma_text, self)
         dialog.exec()
+
+    def set_lemma_noise_status(self, row: int, is_noise: bool):
+        """Task 11: Manually override noise status for a lemma."""
+        lemma = self.lemma_model.lemmas[row]
+
+        try:
+            with self.db_service.get_session() as session:
+                from sqlalchemy import update
+                from app.infra.sa_models import Lemma
+
+                # Update is_noise field
+                stmt = update(Lemma).where(
+                    Lemma.lemma_id == lemma.lemma_id
+                ).values(
+                    is_noise=1 if is_noise else 0
+                )
+                session.execute(stmt)
+                session.commit()
+
+                # Update local model
+                lemma.is_noise = 1 if is_noise else 0
+
+                status = "noise" if is_noise else "valid"
+                logger.info(f"Marked lemma '{lemma.lemma_text}' as {status}")
+
+                # Reload to apply filter if needed
+                if self.hide_noise_checkbox.isChecked():
+                    self.load_lemmas()
+
+        except Exception as e:
+            logger.exception(f"Failed to update noise status for lemma {lemma.lemma_id}")
+            from app.ui.dialogs import show_error
+            show_error(self, "Error", f"Failed to update noise status: {e}")
 
     def on_selection_changed(self):
         """PATCH-UI-BATCH-T02: Handle selection change - enable/disable batch translate button."""

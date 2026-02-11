@@ -529,6 +529,19 @@ class TermsView(QWidget):
             batch_action.triggered.connect(self.on_batch_translate)
             menu.addAction(batch_action)
 
+        # Task 11: Manual noise override actions
+        menu.addSeparator()
+        current_is_noise = cluster.is_noise == 1 if cluster.is_noise is not None else False
+
+        if current_is_noise:
+            mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
+            mark_valid_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, False))
+            menu.addAction(mark_valid_action)
+        else:
+            mark_noise_action = QAction("✗ Mark as Noise", self)
+            mark_noise_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, True))
+            menu.addAction(mark_noise_action)
+
         # Show menu
         menu.exec(self.terms_table.viewport().mapToGlobal(pos))
 
@@ -551,6 +564,39 @@ class TermsView(QWidget):
         # Show dialog
         dialog = WhyTranslationDialog(translation_result, cluster.representative_he, self)
         dialog.exec()
+
+    def set_cluster_noise_status(self, row: int, is_noise: bool):
+        """Task 11: Manually override noise status for a term cluster."""
+        cluster = self.terms_model.clusters[row]
+
+        try:
+            with self.db_service.get_session() as session:
+                from sqlalchemy import update
+                from app.infra.sa_models import TermCluster
+
+                # Update is_noise field
+                stmt = update(TermCluster).where(
+                    TermCluster.cluster_id == cluster.cluster_id
+                ).values(
+                    is_noise=1 if is_noise else 0
+                )
+                session.execute(stmt)
+                session.commit()
+
+                # Update local model
+                cluster.is_noise = 1 if is_noise else 0
+
+                status = "noise" if is_noise else "valid"
+                logger.info(f"Marked cluster '{cluster.representative_he}' as {status}")
+
+                # Reload to apply filter if needed
+                if self.hide_noise_checkbox.isChecked():
+                    self.load_terms()
+
+        except Exception as e:
+            logger.exception(f"Failed to update noise status for cluster {cluster.cluster_id}")
+            from app.ui.dialogs import show_error
+            show_error(self, "Error", f"Failed to update noise status: {e}")
 
     def on_selection_changed(self):
         """Enable/disable batch translate button based on selection."""
