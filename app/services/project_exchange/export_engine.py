@@ -3,6 +3,7 @@
 import logging
 import shutil
 import sqlite3
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -26,6 +27,20 @@ from app.services.project_exchange.dto import (
 from app.infra.fts_manager import ensure_fts_tables
 
 logger = logging.getLogger(__name__)
+
+
+def _get_migrations_dir() -> Path:
+    """Get migrations directory path (works in both dev and PyInstaller).
+
+    Returns:
+        Path to app/infra/migrations directory
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller bundle - migrations are in sys._MEIPASS/app/infra/migrations
+        return Path(sys._MEIPASS) / 'app' / 'infra' / 'migrations'
+    else:
+        # Development - relative path from project root
+        return Path('app/infra/migrations')
 
 
 class ProjectExportEngine:
@@ -181,7 +196,7 @@ class ProjectExportEngine:
 
         try:
             # Apply migrations to create schema
-            migrations_dir = Path("app/infra/migrations")
+            migrations_dir = _get_migrations_dir()
             migration_files = sorted(migrations_dir.glob("*.sql"))
 
             logger.info(f"Applying {len(migration_files)} migrations to payload")

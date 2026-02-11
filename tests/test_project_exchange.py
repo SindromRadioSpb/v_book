@@ -301,6 +301,51 @@ def test_export_excludes_credentials(populated_project, temp_db):
             payload_conn.close()
 
 
+def test_export_creates_payload_schema_including_document_sentence(populated_project, temp_db):
+    """Regression test: ensure document_sentence table exists in payload DB.
+
+    This test catches the bug where export_engine.py used a relative path
+    for migrations that failed in PyInstaller builds, causing the payload
+    DB to have no schema, leading to "no such table: main.document_sentence".
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "test_export.hdleproj"
+
+        engine = ProjectExportEngine()
+        report = engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+
+        assert report.success, f"Export failed: {report.error_message}"
+
+        # Extract bundle
+        extract_dir = Path(tmpdir) / "extract"
+        manifest, payload_path = bundle_format.read_bundle(bundle_path, extract_dir)
+
+        # Verify document_sentence table exists and has data
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            # Check table exists
+            result = payload_conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='document_sentence'
+            """).fetchone()
+            assert result is not None, "document_sentence table missing from payload"
+            assert result[0] == 'document_sentence'
+
+            # Check data was exported
+            result = payload_conn.execute("SELECT COUNT(*) FROM document_sentence").fetchone()
+            assert result[0] > 0, "document_sentence should contain exported data"
+
+            # Verify it matches expected count (3 docs × 5 sentences = 15)
+            assert result[0] == 15, f"Expected 15 sentences, got {result[0]}"
+
+        finally:
+            payload_conn.close()
+
+
 # ==============================================================================
 # Integration Tests
 # ==============================================================================

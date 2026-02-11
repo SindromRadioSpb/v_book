@@ -51,7 +51,7 @@ pytest tests/test_project_exchange.py -v
 
 **Expected:**
 - All 6 FTS self-healing tests pass
-- All 9 project exchange tests pass
+- All 10 project exchange tests pass (includes document_sentence regression test)
 
 ## Manual Smoke Tests (UI)
 
@@ -130,6 +130,27 @@ The fix is already applied:
 - Export creates FTS in payload before copying data
 - Import ensures FTS exists in host before inserting
 
+### Issue: "no such table: main.document_sentence" during export
+
+**Root Cause:** PyInstaller builds couldn't find migrations due to relative path resolution.
+
+**Symptoms:**
+```
+Error: no such table: main.document_sentence
+```
+
+**Fix (2026-02-11):**
+The fix is already applied in `export_engine.py`:
+- Added `_get_migrations_dir()` helper function
+- Uses `sys._MEIPASS` for PyInstaller builds
+- Uses relative path `app/infra/migrations` for development
+- Ensures payload DB schema is created before data export
+
+**Verification:**
+- New regression test: `test_export_creates_payload_schema_including_document_sentence`
+- Verifies document_sentence table exists in payload
+- Verifies exported sentence count matches source
+
 ### Issue: Project delete fails
 
 **Root Cause:** DELETE triggers reference missing sentence_fts.
@@ -183,8 +204,9 @@ Triggers require FTS tables to exist. If missing, all INSERTs/DELETEs/UPDATEs fa
 ### Modified Files
 - `app/infra/db.py` - Ensure FTS after migrations
 - `app/services/project_service.py` - Ensure FTS before delete
-- `app/services/project_exchange/export_engine.py` - Ensure FTS in payload
+- `app/services/project_exchange/export_engine.py` - Ensure FTS in payload + PyInstaller path resolution (2026-02-11)
 - `app/services/project_exchange/import_engine.py` - Ensure FTS in host
+- `tests/test_project_exchange.py` - Added document_sentence regression test (2026-02-11)
 
 ## DoD (Definition of Done)
 
@@ -192,7 +214,7 @@ Before releasing a build, verify:
 
 ✅ `python scripts/prebuild_validate.py` passes all checks
 ✅ `pytest tests/test_fts_self_healing.py` - all 6 tests pass
-✅ `pytest tests/test_project_exchange.py` - all 9 tests pass
+✅ `pytest tests/test_project_exchange.py` - all 10 tests pass
 ✅ Manual smoke tests (create/delete/export/import) work in UI
 ✅ No FTS errors in logs
 ✅ Git status clean, all changes committed
