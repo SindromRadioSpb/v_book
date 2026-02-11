@@ -87,9 +87,9 @@ New-Item -ItemType Directory -Force -Path "build\logs" | Out-Null
 Write-Host "`nBuilding with PyInstaller..." -ForegroundColor Cyan
 $pyinstallerLog = "build\logs\pyinstaller_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-# Run PyInstaller and capture output to log file
-# Note: PowerShell Tee-Object conflicts with pyinstaller stderr, so we redirect to file
-pyinstaller .\hdle_premium_installer.spec --clean --noconfirm > $pyinstallerLog 2>&1
+# Run PyInstaller via cmd.exe to avoid PowerShell stderr handling issues
+# PyInstaller writes INFO messages to stderr which PowerShell treats as errors
+cmd /c "pyinstaller .\hdle_premium_installer.spec --clean --noconfirm > `"$pyinstallerLog`" 2>&1"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n[FAIL] PyInstaller build failed!" -ForegroundColor Red
@@ -122,8 +122,8 @@ Write-Host "Temp output: $tempOutput" -ForegroundColor Gray
 
 $innoLog = "build\logs\inno_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-# Run ISCC with temp output override and redirect to log
-& $isccPath "/O`"$tempOutput`"" "/F`"HDLE_Premium_Setup`"" .\installer\installer.iss > $innoLog 2>&1
+# Run ISCC via cmd.exe to avoid PowerShell stderr handling issues
+cmd /c "`"$isccPath`" /O`"$tempOutput`" /F`"HDLE_Premium_Setup`" .\installer\installer.iss > `"$innoLog`" 2>&1"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n[FAIL] Inno Setup build failed!" -ForegroundColor Red
