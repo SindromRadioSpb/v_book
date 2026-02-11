@@ -127,6 +127,10 @@ class ProcessService:
         session.add(run)
         session.flush()
 
+        # Task 12: Save IDs before try block to avoid lazy-load after error
+        run_id = run.run_id
+        # doc_id already available as parameter
+
         try:
             # Update status
             doc.status = 'processing'
@@ -244,23 +248,36 @@ class ProcessService:
         except Exception as e:
             logger.exception(f"Failed to process document {doc_id}")
 
-            # Record error
-            error = RunError(
-                run_id=run.run_id,
-                doc_id=doc_id,
-                stage='processing',
-                message=str(e),
-            )
-            session.add(error)
+            # Task 12: Rollback immediately to clear PendingRollback state
+            session.rollback()
 
-            # Update statuses
-            doc.status = 'failed'
-            doc.error_message = str(e)
+            # Record error in a fresh transaction attempt
+            try:
+                error_msg = str(e)[:500]  # Truncate long error messages
 
-            run.status = 'failed'
-            run.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                error = RunError(
+                    run_id=run_id,  # Use saved ID, not lazy-loaded run.run_id
+                    doc_id=doc_id,
+                    stage='processing',
+                    message=error_msg,
+                )
+                session.add(error)
 
-            session.commit()
+                # Re-fetch objects in clean state
+                run_obj = session.get(ProcessorRun, run_id)
+                if run_obj:
+                    run_obj.status = 'failed'
+                    run_obj.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+                doc_obj = session.get(SourceDocument, doc_id)
+                if doc_obj:
+                    doc_obj.status = 'failed'
+                    doc_obj.error_message = error_msg
+
+                session.commit()
+            except Exception as inner_error:
+                logger.error(f"Failed to record error for run {run_id}: {inner_error}")
+                session.rollback()
 
             return False
 

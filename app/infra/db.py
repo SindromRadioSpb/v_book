@@ -47,6 +47,7 @@ class DatabaseManager:
         migrations_dir = Path(__file__).parent / "migrations"
         if not migrations_dir.exists():
             logger.warning(f"Migrations directory not found: {migrations_dir}")
+            self._ensure_fts_health()  # Still check FTS even if no migrations dir
             return
 
         sql_files = sorted(migrations_dir.glob("*.sql"))
@@ -73,6 +74,8 @@ class DatabaseManager:
 
         if not pending_migrations:
             logger.debug("No pending migrations")
+            # CRITICAL FIX (Task 12): Always check FTS health, even if no migrations pending
+            self._ensure_fts_health()
             return
 
         # NEW: Acquire migration lock to prevent concurrent migrations
@@ -123,20 +126,34 @@ class DatabaseManager:
                     backup_dir, max_count=10, max_age_days=30
                 )
 
-                # CRITICAL: Ensure FTS tables exist after migrations
-                # This handles cases where FTS tables were deleted or migrations failed
-                from app.infra.fts_manager import ensure_fts_tables
-                raw_conn = self.engine.raw_connection()
-                try:
-                    ensure_fts_tables(raw_conn, schema="main", rebuild=False)
-                    logger.info("Verified FTS tables exist after migrations")
-                finally:
-                    raw_conn.close()
-
         except RuntimeError as e:
             # Lock acquisition or backup failure
             logger.error(f"Migration aborted: {e}")
             raise
+
+        # CRITICAL FIX (Task 12): Always check FTS health after migrations
+        self._ensure_fts_health()
+
+    def _ensure_fts_health(self) -> None:
+        """Ensure FTS5 tables and triggers exist. Runs on EVERY startup.
+
+        This is a critical self-healing mechanism for Task 12:
+        - If FTS tables are missing (e.g., after corruption or manual deletion),
+          they are recreated and populated from base tables.
+        - Prevents "no such table: main.sentence_fts" errors during NLP processing.
+        """
+        from app.infra.fts_manager import ensure_fts_tables
+
+        raw_conn = self.engine.raw_connection()
+        try:
+            # rebuild=True ensures that if tables are just created, they get populated
+            ensure_fts_tables(raw_conn, schema="main", rebuild=True)
+            logger.info("FTS health check passed")
+        except Exception as e:
+            logger.error(f"FTS health check failed: {e}")
+            # Don't raise - allow app to start, FTS operations will fail gracefully
+        finally:
+            raw_conn.close()
 
     @staticmethod
     def _extract_version(filename: str) -> int:

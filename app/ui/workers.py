@@ -106,9 +106,11 @@ class ProcessWorker(QThread):
             success_count = 0
             error_count = 0
 
-            with db_service.get_session() as session:
-                try:
-                    for idx, doc_id in enumerate(self.doc_ids):
+            # Task 12: Per-document session isolation to prevent session contamination
+            for idx, doc_id in enumerate(self.doc_ids):
+                # Fresh session for each document
+                with db_service.get_session() as session:
+                    try:
                         # Get document name for progress
                         from app.infra.sa_models import SourceDocument
                         doc = session.get(SourceDocument, doc_id)
@@ -117,37 +119,33 @@ class ProcessWorker(QThread):
                         self.progress.emit(idx + 1, len(self.doc_ids), doc_name)
 
                         # Process or re-process document
-                        try:
-                            if self.is_reprocess:
-                                # M4: Re-process with delta statistics
-                                success = process_service.reprocess_document(
-                                    session,
-                                    doc_id,
-                                    use_gpu=self.use_gpu,
-                                    use_mock=self.use_mock
-                                )
-                            else:
-                                # Normal processing
-                                success = process_service.process_document(
-                                    session,
-                                    doc_id,
-                                    use_gpu=self.use_gpu,
-                                    use_mock=self.use_mock
-                                )
+                        if self.is_reprocess:
+                            # M4: Re-process with delta statistics
+                            success = process_service.reprocess_document(
+                                session,
+                                doc_id,
+                                use_gpu=self.use_gpu,
+                                use_mock=self.use_mock
+                            )
+                        else:
+                            # Normal processing
+                            success = process_service.process_document(
+                                session,
+                                doc_id,
+                                use_gpu=self.use_gpu,
+                                use_mock=self.use_mock
+                            )
 
-                            if success:
-                                success_count += 1
-                            else:
-                                error_count += 1
-                        except Exception as doc_error:
-                            logger.exception(f"Error processing document {doc_id}")
+                        if success:
+                            success_count += 1
+                        else:
                             error_count += 1
-                            # Continue with next document
 
-                except Exception as session_error:
-                    logger.exception("Session error during processing")
-                    session.rollback()
-                    raise
+                    except Exception as doc_error:
+                        logger.exception(f"Error processing document {doc_id}")
+                        error_count += 1
+                        # Session auto-closes and rolls back via context manager
+                        # Continue with next document in fresh session
 
             self.finished.emit(success_count, error_count)
 
