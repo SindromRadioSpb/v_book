@@ -123,6 +123,13 @@ class TermsView(QWidget):
         self.search_edit.textChanged.connect(self.load_terms)
         filter_layout.addWidget(self.search_edit)
 
+        # Hide noise filter (Task 11: Entity Classification)
+        self.hide_noise_checkbox = QCheckBox("Hide noise")
+        self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
+        self.hide_noise_checkbox.setToolTip("Hide numeric, symbolic, and other noisy terms")
+        self.hide_noise_checkbox.stateChanged.connect(self.load_terms)
+        filter_layout.addWidget(self.hide_noise_checkbox)
+
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
@@ -258,7 +265,8 @@ class TermsView(QWidget):
                     top_n=top_n,
                     preset=preset,
                     search=search,
-                    source_filter=source_filter
+                    source_filter=source_filter,
+                    hide_noise=self.hide_noise_checkbox.isChecked()
                 )
 
                 # M7 P1: Update model with clusters

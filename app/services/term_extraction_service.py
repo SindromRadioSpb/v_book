@@ -669,6 +669,7 @@ class TermExtractionService:
         preset: str = 'freq',
         min_freq: Optional[int] = None,
         source_filter: Optional[str] = None,
+        hide_noise: bool = True,
     ) -> List[ClusterStats]:
         """
         List term clusters with filtering and ranking.
@@ -681,6 +682,7 @@ class TermExtractionService:
             preset: Ranking preset ('freq', 'strong', 'balanced', 'termhood')
             min_freq: Minimum frequency filter
             source_filter: Source kind filter ('ngram', 'np', or None for all)
+            hide_noise: Hide noisy clusters (default True, Task 11)
 
         Returns:
             List of ClusterStats
@@ -714,6 +716,11 @@ class TermExtractionService:
         # Apply filters
         if min_freq:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        # Apply noise filter (Task 11: Entity Classification)
+        if hide_noise:
+            # Hide noise: is_noise = 0 OR is_noise IS NULL (backward compatibility)
+            stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         if search:
             # Generate normalized search variants (handles articles, spaces, etc.)

@@ -73,6 +73,13 @@ class DictionaryView(QWidget):
         self.pos_filter.currentTextChanged.connect(self.load_lemmas)
         header_layout.addWidget(self.pos_filter)
 
+        # Hide noise filter (Task 11: Entity Classification)
+        self.hide_noise_checkbox = QCheckBox("Hide noise")
+        self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
+        self.hide_noise_checkbox.setToolTip("Hide punctuation, numbers, symbols, and other noise")
+        self.hide_noise_checkbox.stateChanged.connect(self.load_lemmas)
+        header_layout.addWidget(self.hide_noise_checkbox)
+
         # Refresh button
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.load_lemmas)
@@ -161,6 +168,12 @@ class DictionaryView(QWidget):
                 # Apply POS filter
                 if pos_filter != "All":
                     stmt = stmt.where(Lemma.pos == pos_filter)
+
+                # Apply noise filter (Task 11: Entity Classification)
+                if self.hide_noise_checkbox.isChecked():
+                    # Hide noise: is_noise = 0 OR is_noise IS NULL (backward compatibility)
+                    from sqlalchemy import or_
+                    stmt = stmt.where(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
 
                 # Order by frequency
                 stmt = stmt.order_by(LemmaProjectStat.freq_abs.desc())
