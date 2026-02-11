@@ -76,13 +76,19 @@ class TermsView(QWidget):
         extract_controls_layout.addWidget(QLabel("Max NP length:"))
         self.np_max_len_spin = QSpinBox()
         self.np_max_len_spin.setRange(2, 5)
-        self.np_max_len_spin.setValue(5)
+        # Load saved value or use maximum (5) as default
+        saved_np_max_len = self.settings.get_int("terms_view/np_max_len", 5)
+        self.np_max_len_spin.setValue(saved_np_max_len)
+        self.np_max_len_spin.valueChanged.connect(self.on_np_max_len_changed)
         extract_controls_layout.addWidget(self.np_max_len_spin)
 
         extract_controls_layout.addWidget(QLabel("Min freq:"))
         self.min_freq_spin = QSpinBox()
         self.min_freq_spin.setRange(1, 100)
-        self.min_freq_spin.setValue(2)
+        # Load saved value or use default (2)
+        saved_min_freq = self.settings.get_int("terms_view/min_freq", 2)
+        self.min_freq_spin.setValue(saved_min_freq)
+        self.min_freq_spin.valueChanged.connect(self.on_min_freq_changed)
         extract_controls_layout.addWidget(self.min_freq_spin)
 
         extract_controls_layout.addStretch()
@@ -100,8 +106,10 @@ class TermsView(QWidget):
         filter_layout.addWidget(QLabel("Top:"))
         self.top_n_spin = QSpinBox()
         self.top_n_spin.setRange(10, 10000)
-        self.top_n_spin.setValue(500)
-        self.top_n_spin.valueChanged.connect(self.load_terms)
+        # Load saved value or use maximum (10000) as default
+        saved_top_n = self.settings.get_int("terms_view/top_n", 10000)
+        self.top_n_spin.setValue(saved_top_n)
+        self.top_n_spin.valueChanged.connect(self.on_top_n_changed)
         filter_layout.addWidget(self.top_n_spin)
 
         filter_layout.addWidget(QLabel("Preset:"))
@@ -242,6 +250,19 @@ class TermsView(QWidget):
         except Exception as e:
             logger.exception("Failed to set reference project")
             show_error(self, "Error", f"Failed to set reference project: {e}")
+
+    def on_top_n_changed(self):
+        """Handle top-N filter change - save setting and reload."""
+        self.settings.set_value("terms_view/top_n", self.top_n_spin.value())
+        self.load_terms()
+
+    def on_np_max_len_changed(self):
+        """Handle Max NP length change - save setting (no reload needed, used only during extraction)."""
+        self.settings.set_value("terms_view/np_max_len", self.np_max_len_spin.value())
+
+    def on_min_freq_changed(self):
+        """Handle Min freq change - save setting (no reload needed, used only during extraction)."""
+        self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
 
     def load_terms(self):
         """Load and display term clusters."""

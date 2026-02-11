@@ -62,9 +62,11 @@ class DictionaryView(QWidget):
         header_layout.addWidget(QLabel("Show top:"))
         self.top_n_spin = QSpinBox()
         self.top_n_spin.setRange(10, 10000)
-        self.top_n_spin.setValue(100)
+        # Load saved value or use maximum (10000) as default
+        saved_top_n = self.settings.get_int("dictionary_view/top_n", 10000)
+        self.top_n_spin.setValue(saved_top_n)
         self.top_n_spin.setSingleStep(10)
-        self.top_n_spin.valueChanged.connect(self.load_lemmas)
+        self.top_n_spin.valueChanged.connect(self.on_top_n_changed)
         header_layout.addWidget(self.top_n_spin)
 
         # POS filter
@@ -147,6 +149,13 @@ class DictionaryView(QWidget):
 
         # Store all lemmas for filtering
         self.all_lemmas = []
+
+    def on_top_n_changed(self):
+        """Handle top-N filter change - save setting and reload."""
+        # Save the new value to settings
+        self.settings.set_value("dictionary_view/top_n", self.top_n_spin.value())
+        # Reload lemmas with new filter
+        self.load_lemmas()
 
     def load_lemmas(self):
         """Load lemmas from database."""
