@@ -73,7 +73,7 @@ a = Analysis(
         'app.services.backup_service',
         'app.services.snapshot_service',
         'app.services.db_service',
-        'app.services.processor_service',
+        # 'app.services.processor_service',  # REMOVED: module does not exist
         'app.services.export_service',
         'app.services.batch_mt_translate_service',
         'app.services.ingest_service',
