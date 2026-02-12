@@ -34,6 +34,7 @@ from app.services.db_service import DBService
 from app.ui.models_qt import TranslationManagementTableModel
 from app.ui.workers import TMSearchWorker
 from app.domain.dto import TMEntryDTO
+from app.infra.settings import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -246,18 +247,21 @@ class TranslationManagementPanel(QWidget):
         self.search_timer.setInterval(500)  # 500ms debounce
         self.search_timer.timeout.connect(self.perform_search)
 
+        # Settings service for persistence
+        self.settings = SettingsService.get_instance()
+
         # State: selected project IDs (None = all projects)
         self.selected_project_ids: Optional[List[int]] = None
         self.all_projects = []  # Loaded in init_ui
 
         # State: pagination
         self.current_page = 1
-        self.page_size = 100
+        self.page_size = self.settings.get_int("tm_panel/page_size", 100)
         self.total_count = 0
 
         # State: sorting
-        self.sort_column = "updated_at"
-        self.sort_direction = "desc"
+        self.sort_column = self.settings.get_string("tm_panel/sort_column", "updated_at")
+        self.sort_direction = self.settings.get_string("tm_panel/sort_direction", "desc")
 
         # Column index to DB column mapping
         self.COLUMN_TO_DB = {
@@ -377,6 +381,9 @@ class TranslationManagementPanel(QWidget):
         header.setStretchLastSection(True)
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self.on_header_clicked)
+
+        # Restore header state (column widths)
+        self.settings.restore_header_state("tm_panel", header)
 
         # Install event filter for Enter key editing
         self.table_view.installEventFilter(self)
@@ -591,6 +598,7 @@ class TranslationManagementPanel(QWidget):
         new_size = int(size_str)
         if new_size != self.page_size:
             self.page_size = new_size
+            self.settings.set_value("tm_panel/page_size", self.page_size)
             self.current_page = 1  # Reset to first page
             self.perform_search()
 
@@ -647,6 +655,10 @@ class TranslationManagementPanel(QWidget):
 
         # Update header visuals
         self.update_sort_indicators()
+
+        # Save sort preferences
+        self.settings.set_value("tm_panel/sort_column", self.sort_column)
+        self.settings.set_value("tm_panel/sort_direction", self.sort_direction)
 
         # Reset to first page and search
         self.current_page = 1
@@ -858,11 +870,16 @@ class TranslationManagementPanel(QWidget):
             self.cancel_btn.setEnabled(False)
 
     def closeEvent(self, event):
-        """Handle panel close - stop workers."""
+        """Handle panel close - stop workers and save preferences."""
         if self.worker and self.worker.isRunning():
             logger.info("Stopping TM search worker on panel close")
             self.worker.terminate()
             self.worker.wait()
+
+        # Save header state (column widths)
+        header = self.table_view.horizontalHeader()
+        self.settings.save_header_state("tm_panel", header)
+
         event.accept()
 
     def on_translation_edited(self, top_left, bottom_right, roles):
