@@ -368,6 +368,12 @@ class TranslationManagementPanel(QWidget):
         clear_btn.clicked.connect(self.on_clear_filters)
         row3.addWidget(clear_btn)
 
+        # Refresh button to reload data (for sync updates)
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setToolTip("Refresh data to see changes from Dictionary/Terms views")
+        refresh_btn.clicked.connect(self.on_refresh)
+        row3.addWidget(refresh_btn)
+
         row3.addStretch()
 
         # Hide Noise checkbox (default: checked)
@@ -556,6 +562,15 @@ class TranslationManagementPanel(QWidget):
         # Reset projects to "All"
         self.selected_project_ids = None
         self.update_projects_button_label()
+        self.perform_search()
+
+    def on_refresh(self):
+        """Refresh data to reflect changes from Dictionary/Terms views.
+
+        This is needed because bidirectional sync updates the database,
+        but the TM Panel UI doesn't auto-refresh when changes occur in other tabs.
+        """
+        logger.info("User requested manual refresh")
         self.perform_search()
 
     def on_select_projects(self):

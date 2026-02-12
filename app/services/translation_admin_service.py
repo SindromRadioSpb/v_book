@@ -14,7 +14,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, update
 
 from app.infra.sa_models import TMEntry, TMEntryHistory
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
@@ -503,11 +503,40 @@ class TranslationAdminService:
         entries = session.execute(stmt).scalars().all()
 
         count = 0
+        # Track source IDs for bidirectional sync
+        lemma_ids_to_update = set()
+        cluster_ids_to_update = set()
+
         for entry in entries:
             entry.is_noise = noise_value
             entry.noise_reason = noise_reason if is_noise else None
             entry.updated_at = datetime.now()
             count += 1
+
+            # Collect source IDs for bidirectional sync
+            if entry.kind == 'lemma' and entry.lemma_id:
+                lemma_ids_to_update.add(entry.lemma_id)
+            elif entry.kind == 'term_cluster' and entry.cluster_id:
+                cluster_ids_to_update.add(entry.cluster_id)
+
+        # Bidirectional sync: Update source tables to maintain Single Source of Truth
+        if lemma_ids_to_update:
+            from app.infra.sa_models import Lemma
+            session.execute(
+                update(Lemma)
+                .where(Lemma.lemma_id.in_(lemma_ids_to_update))
+                .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+            )
+            logger.info(f"Synced is_noise to {len(lemma_ids_to_update)} lemmas")
+
+        if cluster_ids_to_update:
+            from app.infra.sa_models import TermCluster
+            session.execute(
+                update(TermCluster)
+                .where(TermCluster.cluster_id.in_(cluster_ids_to_update))
+                .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+            )
+            logger.info(f"Synced is_noise to {len(cluster_ids_to_update)} term clusters")
 
         session.commit()
 
@@ -542,6 +571,9 @@ class TranslationAdminService:
             is_noise=entry.is_noise,
             noise_reason=entry.noise_reason,
             norm_text=entry.norm_text,
+            lemma_id=entry.lemma_id,
+            cluster_id=entry.cluster_id,
+            ngram_id=entry.ngram_id,
         )
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:

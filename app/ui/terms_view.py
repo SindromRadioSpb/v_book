@@ -507,7 +507,7 @@ class TermsView(QWidget):
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
                 else:
-                    # Create new TM entry
+                    # Create new TM entry with source_id link for is_noise synchronization
                     tm_entry = TMEntry(
                         project_id=self.project_id,
                         kind="term_cluster",
@@ -519,6 +519,9 @@ class TermsView(QWidget):
                         status="approved",  # User edit → approved
                         origin="user_edit",
                         source_ref="terms_view_inline_edit",
+                        cluster_id=cluster.cluster_id,  # Link to source for is_noise sync
+                        is_noise=cluster.is_noise if cluster.is_noise is not None else 0,
+                        noise_reason=cluster.noise_reason,
                     )
                     session.add(tm_entry)
 

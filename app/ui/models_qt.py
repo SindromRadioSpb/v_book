@@ -102,7 +102,8 @@ class LemmaTableModel(QAbstractTableModel):
         super().__init__()
         self.lemmas = lemmas or []
         # M7: Added Source column between Translation and Status
-        self.headers = ["Lemma", "POS", "Frequency", "Doc Freq", "Translation", "Source", "Status"]
+        # Added Noise column for is_noise visualization
+        self.headers = ["Lemma", "POS", "Frequency", "Doc Freq", "Translation", "Source", "Status", "Noise"]
         # M7: Store full TranslationResult for each lemma (for Why dialog)
         from app.services.translation_service import TranslationResult
         self.translation_results = {}  # row_index -> TranslationResult
@@ -141,6 +142,14 @@ class LemmaTableModel(QAbstractTableModel):
             elif col == 6:
                 # M7: Status
                 return lemma.status
+            elif col == 7:
+                # Noise column
+                if lemma.is_noise == 1:
+                    return "Noise"
+                elif lemma.is_noise == 0:
+                    return "Valid"
+                else:
+                    return ""  # NULL - legacy records
 
         return None
 
@@ -233,9 +242,10 @@ class TermClusterTableModel(QAbstractTableModel):
         from app.domain.dto import ClusterStats
         self.clusters: List[ClusterStats] = clusters or []
         # M7: Added Translation, Source, Status columns
+        # Added Noise column for is_noise visualization
         self.headers = [
             "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
-            "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status"
+            "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise"
         ]
         # M7: Store full TranslationResult for each cluster
         from app.services.translation_service import TranslationResult
@@ -286,6 +296,14 @@ class TermClusterTableModel(QAbstractTableModel):
             elif col == 13:
                 # M7: Status
                 return cluster.translation_status or "none"
+            elif col == 14:
+                # Noise column
+                if cluster.is_noise == 1:
+                    return "Noise"
+                elif cluster.is_noise == 0:
+                    return "Valid"
+                else:
+                    return ""  # NULL - legacy records
 
         return None
 
@@ -383,9 +401,10 @@ class TranslationManagementTableModel(QAbstractTableModel):
         super().__init__()
         from app.domain.dto import TMEntryDTO
         self.entries: List[TMEntryDTO] = entries or []
+        # Added Noise column for is_noise visualization
         self.headers = [
             "ID", "Kind", "Source", "Translation", "Status",
-            "Scope", "Origin", "Source Ref", "Updated"
+            "Scope", "Origin", "Source Ref", "Updated", "Noise"
         ]
         self.total_count = 0  # Total matching entries (for pagination)
 
@@ -424,6 +443,14 @@ class TranslationManagementTableModel(QAbstractTableModel):
                 if entry.updated_at:
                     return entry.updated_at.split("T")[0]
                 return ""
+            elif col == 9:
+                # Noise column
+                if entry.is_noise == 1:
+                    return "Noise"
+                elif entry.is_noise == 0:
+                    return "Valid"
+                else:
+                    return ""  # NULL - legacy records
 
         return None
 

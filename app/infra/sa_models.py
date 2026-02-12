@@ -589,6 +589,10 @@ class TMEntry(Base):
     is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise, NULL=legacy
     noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
     norm_text = Column(Text)  # Normalized text for noise detection
+    # Source entity links (for is_noise synchronization)
+    lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="SET NULL"))
+    cluster_id = Column(Integer, ForeignKey("term_cluster.cluster_id", ondelete="SET NULL"))
+    ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="SET NULL"))
 
     __table_args__ = (
         UniqueConstraint("project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"),

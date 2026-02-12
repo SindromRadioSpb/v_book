@@ -341,7 +341,7 @@ class DictionaryView(QWidget):
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
                 else:
-                    # Create new TM entry
+                    # Create new TM entry with source_id link for is_noise synchronization
                     tm_entry = TMEntry(
                         project_id=self.project_id,
                         kind="lemma",
@@ -353,6 +353,9 @@ class DictionaryView(QWidget):
                         status="approved",  # User edit → approved
                         origin="user_edit",
                         source_ref="dictionary_view_inline_edit",
+                        lemma_id=lemma.lemma_id,  # Link to source for is_noise sync
+                        is_noise=lemma.is_noise if lemma.is_noise is not None else 0,
+                        noise_reason=lemma.noise_reason,
                     )
                     session.add(tm_entry)
 

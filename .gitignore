@@ -112,3 +112,7 @@ tools/text/
 /hdle_premium.db
 /hdle_premium.db-shm
 /hdle_premium.db-wal
+
+# Diagnostic output files
+diagnosis_output.txt
+diagnosis_result.json

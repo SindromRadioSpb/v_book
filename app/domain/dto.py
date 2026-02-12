@@ -166,6 +166,10 @@ class TMEntryDTO:
     is_noise: Optional[int]  # 0=not noise, 1=noise, None=legacy
     noise_reason: Optional[str]  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
     norm_text: Optional[str]  # Normalized text for noise detection
+    # Source entity links (for is_noise synchronization)
+    lemma_id: Optional[int]
+    cluster_id: Optional[int]
+    ngram_id: Optional[int]
 
 
 @dataclass

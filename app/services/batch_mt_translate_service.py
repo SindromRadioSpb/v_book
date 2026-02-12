@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.infra.sa_models import TMEntry, TermCluster
+from app.infra.sa_models import TMEntry, TermCluster, Lemma
 from app.services.translation_service import TranslationService
 from app.domain.normalization.normalizer import normalize_for_tm
 
@@ -466,7 +466,14 @@ class BatchMTTranslateService:
             existing.origin = "mt_auto"  # Use existing origin value
             existing.updated_at = datetime.now()
         else:
-            # Create new TM entry
+            # Look up source lemma for is_noise synchronization
+            lemma_stmt = select(Lemma).where(
+                Lemma.project_id == item.project_id,
+                Lemma.norm_text == src_norm,
+            )
+            lemma = session.execute(lemma_stmt).scalar()
+
+            # Create new TM entry with source_id link
             tm_entry = TMEntry(
                 project_id=item.project_id,
                 kind="lemma",
@@ -477,6 +484,9 @@ class BatchMTTranslateService:
                 translation=translation,
                 status="approved",
                 origin="mt_auto",  # Use existing origin value
+                lemma_id=lemma.lemma_id if lemma else None,
+                is_noise=lemma.is_noise if lemma else 0,
+                noise_reason=lemma.noise_reason if lemma else None,
             )
             session.add(tm_entry)
 
@@ -506,7 +516,14 @@ class BatchMTTranslateService:
             existing.origin = "mt_auto"  # Use existing origin value
             existing.updated_at = datetime.now()
         else:
-            # Create new TM entry
+            # Look up source cluster for is_noise synchronization
+            cluster_stmt = select(TermCluster).where(
+                TermCluster.project_id == item.project_id,
+                TermCluster.norm_text == src_norm,
+            )
+            cluster = session.execute(cluster_stmt).scalar()
+
+            # Create new TM entry with source_id link
             tm_entry = TMEntry(
                 project_id=item.project_id,
                 kind="term_cluster",
@@ -518,6 +535,9 @@ class BatchMTTranslateService:
                 status="approved",
                 origin="mt_auto",  # Use existing origin value
                 source_ref="batch_translate",
+                cluster_id=cluster.cluster_id if cluster else None,
+                is_noise=cluster.is_noise if cluster else 0,
+                noise_reason=cluster.noise_reason if cluster else None,
             )
             session.add(tm_entry)
 
