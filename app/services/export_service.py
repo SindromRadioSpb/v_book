@@ -15,7 +15,7 @@ import os
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Optional, List, BinaryIO
+from typing import Optional, List, BinaryIO, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -898,5 +898,191 @@ class ExportService:
         result = self._atomic_write_with_result(path, write_tmx)
 
         logger.info(f"Exported TMX to {path} ({result} translation units)")
+        return result
+
+    # ========================================================================
+    # Task #14: TM Filtered XLSX Export
+    # ========================================================================
+
+    def export_tm_filtered_xlsx(
+        self,
+        session: Session,
+        path: str,
+        filters: Optional[Dict[str, Any]] = None,
+        sort_column: str = "updated_at",
+        sort_direction: str = "desc",
+    ) -> int:
+        """Export filtered TM entries to Excel (Translation Management Panel).
+
+        Exports TM entries matching the same filters as search_tm_entries,
+        but WITHOUT pagination (exports ALL matching entries).
+
+        Uses chunked fetch (1000 rows per chunk) for memory efficiency
+        on large datasets.
+
+        Args:
+            session: Database session
+            path: Output XLSX file path
+            filters: Same filters as TranslationAdminService.search_tm_entries():
+                - kind: str (lemma|ngram|term_cluster|surface)
+                - status: str (draft|approved|rejected|deprecated)
+                - project_ids: List[int] (multi-project filter, -1 = global/None)
+                - src_lang: str
+                - tgt_lang: str
+                - search_text: str (search in src_text or translation)
+                - source_ref: str
+                - origin: str (user_edit|import|mt_accept|mt_auto|merge)
+            sort_column: Column to sort by (validated against SORT_COLUMNS)
+            sort_direction: Sort direction ("asc" or "desc")
+
+        Returns:
+            Number of entries exported
+
+        Note: Uses atomic file writing (temp + replace)
+        """
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment
+        except ImportError:
+            raise ImportError("openpyxl is required for XLSX export. Install: pip install openpyxl")
+
+        from sqlalchemy import select, or_, func
+        from app.services.translation_admin_service import TranslationAdminService
+
+        filters = filters or {}
+
+        # Build query (same logic as search_tm_entries, but no limit/offset)
+        stmt = select(TMEntry)
+
+        # Apply filters (copied from TranslationAdminService.search_tm_entries)
+        if "kind" in filters and filters["kind"]:
+            stmt = stmt.where(TMEntry.kind == filters["kind"])
+
+        if "status" in filters and filters["status"]:
+            stmt = stmt.where(TMEntry.status == filters["status"])
+
+        # Multi-project filter
+        if "project_ids" in filters and filters["project_ids"] is not None:
+            project_ids = filters["project_ids"]
+            include_global = -1 in project_ids or None in project_ids
+            real_ids = [pid for pid in project_ids if pid is not None and pid != -1]
+
+            conditions = []
+            if real_ids:
+                conditions.append(TMEntry.project_id.in_(real_ids))
+            if include_global:
+                conditions.append(TMEntry.project_id.is_(None))
+
+            if conditions:
+                stmt = stmt.where(or_(*conditions))
+            elif not real_ids and not include_global:
+                # No projects selected = export nothing
+                stmt = stmt.where(TMEntry.project_id == -999999)
+
+        if "src_lang" in filters and filters["src_lang"]:
+            stmt = stmt.where(TMEntry.src_lang == filters["src_lang"])
+
+        if "tgt_lang" in filters and filters["tgt_lang"]:
+            stmt = stmt.where(TMEntry.tgt_lang == filters["tgt_lang"])
+
+        if "search_text" in filters and filters["search_text"]:
+            search = f"%{filters['search_text']}%"
+            stmt = stmt.where(
+                or_(
+                    TMEntry.src_text.like(search),
+                    TMEntry.translation.like(search),
+                )
+            )
+
+        if "source_ref" in filters and filters["source_ref"]:
+            stmt = stmt.where(TMEntry.source_ref == filters["source_ref"])
+
+        if "origin" in filters and filters["origin"]:
+            stmt = stmt.where(TMEntry.origin == filters["origin"])
+
+        # Apply sorting (using TranslationAdminService.SORT_COLUMNS allowlist)
+        sort_col = TranslationAdminService.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
+        if sort_direction == "asc":
+            stmt = stmt.order_by(sort_col.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc())
+
+        # COUNT total entries first (for chunked fetch)
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_count = session.execute(count_stmt).scalar()
+
+        logger.info(f"Exporting {total_count} filtered TM entries to XLSX: {path}")
+
+        def write_xlsx(f: BinaryIO):
+            """Write XLSX content to file handle."""
+            wb = openpyxl.Workbook()
+
+            # Remove default sheet
+            wb.remove(wb.active)
+
+            # Create sheet
+            ws = wb.create_sheet("Translation Memory", 0)
+
+            # Headers
+            headers = [
+                "ID", "Kind", "Source", "Translation", "Status",
+                "Project", "Origin", "Source Ref", "Updated"
+            ]
+            ws.append(headers)
+
+            # Style headers
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="left")
+
+            # Freeze top row
+            ws.freeze_panes = "A2"
+
+            # Fetch and write data in chunks (1000 rows per chunk)
+            chunk_size = 1000
+            row_count = 0
+
+            for offset in range(0, total_count, chunk_size):
+                # Fetch chunk
+                chunk_stmt = stmt.limit(chunk_size).offset(offset)
+                entries = session.execute(chunk_stmt).scalars().all()
+
+                # Write rows
+                for entry in entries:
+                    ws.append([
+                        entry.tm_id,
+                        entry.kind or "",
+                        entry.src_text or "",
+                        entry.translation or "",
+                        entry.status or "",
+                        str(entry.project_id) if entry.project_id else "Global",
+                        entry.origin or "",
+                        entry.source_ref or "",
+                        str(entry.updated_at) if entry.updated_at else "",
+                    ])
+                    row_count += 1
+
+            # Auto-size columns (same pattern as export_xlsx)
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+
+            # Write to file handle
+            wb.save(f)
+
+            return row_count
+
+        # Atomic write
+        result = self._atomic_write_with_result(path, write_xlsx)
+
+        logger.info(f"Exported {result} TM entries to {path}")
         return result
 

@@ -1055,6 +1055,79 @@ class ExportWorker(QThread):
         self._cancelled = True
 
 
+class TMExportWorker(QThread):
+    """Task #14: Worker for exporting filtered TM entries to Excel (non-blocking).
+
+    Exports TM entries matching current filters in Translation Management Panel.
+    Supports cancel during export (checked between chunks).
+    """
+
+    progress = pyqtSignal(str)  # Progress message
+    export_complete = pyqtSignal(int, str)  # (entry_count, file_path)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        file_path: str,
+        filters: dict,
+        sort_column: str = "updated_at",
+        sort_direction: str = "desc",
+    ):
+        """Initialize TM export worker.
+
+        Args:
+            file_path: Output XLSX file path
+            filters: Filters dict (same as TranslationAdminService.search_tm_entries)
+            sort_column: Column to sort by
+            sort_direction: Sort direction ("asc" or "desc")
+        """
+        super().__init__()
+        self.file_path = file_path
+        self.filters = filters
+        self.sort_column = sort_column
+        self.sort_direction = sort_direction
+        self._cancelled = False
+
+    def run(self):
+        """Run export operation."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.export_service import ExportService
+
+            db_service = DBService.get_instance()
+            export_service = ExportService()
+
+            self.progress.emit("Preparing filtered data for export...")
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    self.progress.emit("Export cancelled")
+                    return
+
+                self.progress.emit("Writing Excel file...")
+
+                # Call export_tm_filtered_xlsx (chunked fetch inside)
+                count = export_service.export_tm_filtered_xlsx(
+                    session,
+                    self.file_path,
+                    filters=self.filters,
+                    sort_column=self.sort_column,
+                    sort_direction=self.sort_direction,
+                )
+
+                if not self._cancelled:
+                    self.progress.emit("Export completed successfully!")
+                    self.export_complete.emit(count, self.file_path)
+
+        except Exception as e:
+            logger.exception("TM export worker error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the export."""
+        self._cancelled = True
+
+
 class SingleTextTranslateWorker(QThread):
     """Worker for translating single text via MT providers (non-blocking).
 

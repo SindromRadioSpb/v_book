@@ -8,6 +8,7 @@ Allows users to:
 """
 
 import logging
+from datetime import datetime
 from typing import Optional, List
 
 from PyQt6.QtWidgets import (
@@ -32,7 +33,7 @@ from PyQt6.QtGui import QFont
 
 from app.services.db_service import DBService
 from app.ui.models_qt import TranslationManagementTableModel
-from app.ui.workers import TMSearchWorker
+from app.ui.workers import TMSearchWorker, TMExportWorker
 from app.domain.dto import TMEntryDTO
 from app.infra.settings import SettingsService
 
@@ -240,6 +241,7 @@ class TranslationManagementPanel(QWidget):
         super().__init__()
         self.project_id = project_id
         self.worker: Optional[TMSearchWorker] = None
+        self.export_worker: Optional[TMExportWorker] = None
         self.model = TranslationManagementTableModel()
         self.current_filters = {}
         self.search_timer = QTimer()
@@ -494,6 +496,12 @@ class TranslationManagementPanel(QWidget):
         self.history_btn = QPushButton("📜 View History")
         self.history_btn.clicked.connect(self.on_view_history)
         actions_layout.addWidget(self.history_btn)
+
+        # Task #14: Export Excel button
+        self.export_btn = QPushButton("📊 Export Excel")
+        self.export_btn.setStyleSheet("background: #2e7d32; color: white; padding: 6px 12px;")
+        self.export_btn.clicked.connect(self.on_export_excel)
+        actions_layout.addWidget(self.export_btn)
 
         actions_layout.addStretch()
 
@@ -876,6 +884,11 @@ class TranslationManagementPanel(QWidget):
             self.worker.terminate()
             self.worker.wait()
 
+        if self.export_worker and self.export_worker.isRunning():
+            logger.info("Stopping TM export worker on panel close")
+            self.export_worker.cancel()
+            self.export_worker.wait()
+
         # Save header state (column widths)
         header = self.table_view.horizontalHeader()
         self.settings.save_header_state("tm_panel", header)
@@ -957,6 +970,102 @@ class TranslationManagementPanel(QWidget):
                         return True  # Event handled
 
         return super().eventFilter(obj, event)
+
+    def on_export_excel(self):
+        """Task #14: Export filtered TM entries to Excel."""
+        from PyQt6.QtWidgets import QFileDialog, QProgressDialog
+
+        # Get save file path from user
+        default_filename = f"translation_memory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Translation Memory to Excel",
+            default_filename,
+            "Excel Files (*.xlsx);;All Files (*)"
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        # Ensure .xlsx extension
+        if not file_path.endswith('.xlsx'):
+            file_path += '.xlsx'
+
+        # Build filters (same as current search)
+        filters = self.build_filters()
+
+        # Create progress dialog
+        self.export_progress_dialog = QProgressDialog(
+            "Preparing export...",
+            "Cancel",
+            0,
+            0,  # Indeterminate progress
+            self
+        )
+        self.export_progress_dialog.setWindowTitle("Exporting to Excel")
+        self.export_progress_dialog.setModal(True)
+        self.export_progress_dialog.setMinimumDuration(0)
+        self.export_progress_dialog.show()
+
+        # Start export worker
+        self.export_worker = TMExportWorker(
+            file_path=file_path,
+            filters=filters,
+            sort_column=self.sort_column,
+            sort_direction=self.sort_direction,
+        )
+
+        # Connect signals
+        self.export_worker.progress.connect(self.on_export_progress)
+        self.export_worker.export_complete.connect(self.on_export_complete)
+        self.export_worker.error.connect(self.on_export_error)
+        self.export_progress_dialog.canceled.connect(self.on_export_cancel)
+
+        # Start worker
+        self.export_worker.start()
+
+    def on_export_progress(self, message: str):
+        """Update export progress dialog."""
+        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+            self.export_progress_dialog.setLabelText(message)
+
+    def on_export_complete(self, count: int, file_path: str):
+        """Handle export completion."""
+        # Close progress dialog
+        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+            self.export_progress_dialog.close()
+            self.export_progress_dialog = None
+
+        # Show success message
+        QMessageBox.information(
+            self,
+            "Export Complete",
+            f"Successfully exported {count:,} entries to:\n{file_path}"
+        )
+
+        logger.info(f"TM export completed: {count} entries to {file_path}")
+
+    def on_export_error(self, error_msg: str):
+        """Handle export error."""
+        # Close progress dialog
+        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+            self.export_progress_dialog.close()
+            self.export_progress_dialog = None
+
+        # Show error message
+        QMessageBox.critical(
+            self,
+            "Export Failed",
+            f"Failed to export TM entries:\n{error_msg}"
+        )
+
+        logger.error(f"TM export failed: {error_msg}")
+
+    def on_export_cancel(self):
+        """Handle export cancellation."""
+        if self.export_worker and self.export_worker.isRunning():
+            self.export_worker.cancel()
+            logger.info("User cancelled TM export")
 
     def on_back(self):
         """Handle back button click."""
