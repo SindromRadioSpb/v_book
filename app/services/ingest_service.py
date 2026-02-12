@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus, DictProject
 from app.infra.util.hashing import sha256_file
-from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor
+from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor, pptx_extractor
 from app.services.db_service import DBService
 from app.domain.exceptions import ReferenceCorpusReadonlyError
 from app.infra.security import (
@@ -31,6 +31,7 @@ class IngestService:
     SUPPORTED_EXTENSIONS = {
         '.txt': 'text',
         '.docx': 'docx',
+        '.pptx': 'pptx',
         '.pdf': 'pdf',
     }
 
@@ -69,6 +70,8 @@ class IngestService:
                 text = txt_extractor.extract_text(file_path)
             elif ext == '.docx':
                 text = docx_extractor.extract_text(file_path)
+            elif ext == '.pptx':
+                text = pptx_extractor.extract_text(file_path)
             elif ext == '.pdf':
                 if use_ocr:
                     try:

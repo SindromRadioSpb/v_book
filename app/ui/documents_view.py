@@ -120,7 +120,7 @@ class DocumentsView(QWidget):
         # Drag-drop hint
         self.hint_label = QLabel(
             "💡 Drag and drop files here to import them\n"
-            "Supported formats: .txt, .docx, .pdf"
+            "Supported formats: .txt, .docx, .pptx, .pdf"
         )
         self.hint_label.setStyleSheet(
             "padding: 10px; "
@@ -305,7 +305,7 @@ class DocumentsView(QWidget):
             self,
             "Select Files",
             "",
-            "Supported Files (*.txt *.docx *.pdf);;All Files (*.*)"
+            "Supported Files (*.txt *.docx *.pptx *.pdf);;All Files (*.*)"
         )
 
         if file_paths:
@@ -333,7 +333,7 @@ class DocumentsView(QWidget):
             folder = Path(folder_path)
             # Find all supported files
             files = []
-            for ext in ['.txt', '.docx', '.pdf']:
+            for ext in ['.txt', '.docx', '.pptx', '.pdf']:
                 files.extend(folder.rglob(f'*{ext}'))
 
             if files:
