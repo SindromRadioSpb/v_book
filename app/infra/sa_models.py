@@ -586,6 +586,9 @@ class TMEntry(Base):
     updated_at = Column(String, nullable=False, default=utc_now)
     approved_at = Column(String)
     approved_by = Column(String)
+    is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise, NULL=legacy
+    noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
+    norm_text = Column(Text)  # Normalized text for noise detection
 
     __table_args__ = (
         UniqueConstraint("project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"),

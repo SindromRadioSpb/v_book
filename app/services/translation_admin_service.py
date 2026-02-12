@@ -127,6 +127,10 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
+        # Hide noise filter (same as Dictionary/Terms views)
+        if filters.get("hide_noise", True):  # Default: hide noise
+            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
+
         # Server-side sorting
         sort_col = self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
         if sort_direction == "asc":
@@ -213,6 +217,10 @@ class TranslationAdminService:
 
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
+
+        # Hide noise filter (same as search_tm_entries)
+        if filters.get("hide_noise", True):  # Default: hide noise
+            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Execute
         count = session.execute(stmt).scalar()
@@ -465,6 +473,49 @@ class TranslationAdminService:
 
         logger.info(f"Updated translation for TM entry {tm_id}")
 
+    def set_noise_status_bulk(
+        self,
+        session: Session,
+        tm_ids: List[int],
+        is_noise: bool,
+        noise_reason: Optional[str] = None,
+    ) -> int:
+        """Set noise status for multiple TM entries.
+
+        Args:
+            session: Database session
+            tm_ids: List of TM entry IDs
+            is_noise: True = mark as noise, False = mark as valid
+            noise_reason: Optional reason code (e.g., NOISE_PUNCT_ONLY)
+
+        Returns:
+            Number of entries updated
+        """
+        if not tm_ids:
+            return 0
+
+        noise_value = 1 if is_noise else 0
+
+        stmt = (
+            select(TMEntry)
+            .where(TMEntry.tm_id.in_(tm_ids))
+        )
+        entries = session.execute(stmt).scalars().all()
+
+        count = 0
+        for entry in entries:
+            entry.is_noise = noise_value
+            entry.noise_reason = noise_reason if is_noise else None
+            entry.updated_at = datetime.now()
+            count += 1
+
+        session.commit()
+
+        action = "noise" if is_noise else "valid"
+        logger.info(f"Marked {count} TM entries as {action}")
+
+        return count
+
     def _entry_to_dto(self, entry: TMEntry) -> TMEntryDTO:
         """Convert TMEntry model to DTO."""
         return TMEntryDTO(
@@ -488,6 +539,9 @@ class TranslationAdminService:
             updated_at=str(entry.updated_at),
             approved_at=str(entry.approved_at) if entry.approved_at else None,
             approved_by=entry.approved_by,
+            is_noise=entry.is_noise,
+            noise_reason=entry.noise_reason,
+            norm_text=entry.norm_text,
         )
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:

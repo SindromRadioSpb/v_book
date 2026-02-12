@@ -163,6 +163,9 @@ class TMEntryDTO:
     updated_at: str
     approved_at: Optional[str]
     approved_by: Optional[str]
+    is_noise: Optional[int]  # 0=not noise, 1=noise, None=legacy
+    noise_reason: Optional[str]  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
+    norm_text: Optional[str]  # Normalized text for noise detection
 
 
 @dataclass

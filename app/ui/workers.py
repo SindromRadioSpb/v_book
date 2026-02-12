@@ -1141,14 +1141,14 @@ class BulkNoiseUpdateWorker(QThread):
 
     def __init__(
         self,
-        model_class: str,  # "Lemma" or "TermCluster"
-        item_ids: list,    # List of lemma_id or cluster_id
+        model_class: str,  # "Lemma" or "TermCluster" or "TMEntry"
+        item_ids: list,    # List of lemma_id, cluster_id, or tm_id
         is_noise: bool,    # True = mark as noise, False = mark as valid
     ):
         """Initialize bulk noise update worker.
 
         Args:
-            model_class: "Lemma" or "TermCluster"
+            model_class: "Lemma", "TermCluster", or "TMEntry"
             item_ids: List of IDs to update
             is_noise: True to mark as noise, False to mark as valid
         """
@@ -1162,7 +1162,7 @@ class BulkNoiseUpdateWorker(QThread):
         """Run bulk update in chunks with progress reporting."""
         try:
             from app.services.db_service import DBService
-            from app.infra.sa_models import Lemma, TermCluster
+            from app.infra.sa_models import Lemma, TermCluster, TMEntry
             from sqlalchemy import update
 
             db_service = DBService.get_instance()
@@ -1174,6 +1174,9 @@ class BulkNoiseUpdateWorker(QThread):
             elif self.model_class == "TermCluster":
                 Model = TermCluster
                 id_column = TermCluster.cluster_id
+            elif self.model_class == "TMEntry":
+                Model = TMEntry
+                id_column = TMEntry.tm_id
             else:
                 raise ValueError(f"Unknown model class: {self.model_class}")
 

@@ -242,6 +242,8 @@ class TranslationManagementPanel(QWidget):
         self.project_id = project_id
         self.worker: Optional[TMSearchWorker] = None
         self.export_worker: Optional[TMExportWorker] = None
+        self.bulk_worker: Optional['BulkNoiseUpdateWorker'] = None
+        self.bulk_progress_dialog: Optional[QProgressDialog] = None
         self.model = TranslationManagementTableModel()
         self.current_filters = {}
         self.search_timer = QTimer()
@@ -363,6 +365,15 @@ class TranslationManagementPanel(QWidget):
         clear_btn.clicked.connect(self.on_clear_filters)
         row3.addWidget(clear_btn)
 
+        row3.addStretch()
+
+        # Hide Noise checkbox (default: checked)
+        self.hide_noise_checkbox = QCheckBox("Hide Noise")
+        self.hide_noise_checkbox.setChecked(True)
+        self.hide_noise_checkbox.setToolTip("Hide entries marked as noise (punctuation, numbers, etc.)")
+        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
+        row3.addWidget(self.hide_noise_checkbox)
+
         filters_layout.addLayout(row3)
 
         filters_group.setLayout(filters_layout)
@@ -392,6 +403,10 @@ class TranslationManagementPanel(QWidget):
 
         # P2 FIX: Connect dataChanged signal to save inline edits
         self.model.dataChanged.connect(self.on_translation_edited)
+
+        # Context menu for noise marking
+        self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self.on_context_menu)
 
         # Column widths
         self.table_view.setColumnWidth(0, 60)   # ID
@@ -731,6 +746,9 @@ class TranslationManagementPanel(QWidget):
         if source_ref:
             filters["source_ref"] = source_ref
 
+        # Hide Noise (default: True)
+        filters["hide_noise"] = self.hide_noise_checkbox.isChecked()
+
         return filters
 
     def perform_search(self):
@@ -888,6 +906,11 @@ class TranslationManagementPanel(QWidget):
             logger.info("Stopping TM export worker on panel close")
             self.export_worker.cancel()
             self.export_worker.wait()
+
+        if self.bulk_worker and self.bulk_worker.isRunning():
+            logger.info("Stopping bulk noise update worker on panel close")
+            self.bulk_worker.cancel()
+            self.bulk_worker.wait()
 
         # Save header state (column widths)
         header = self.table_view.horizontalHeader()
@@ -1066,6 +1089,220 @@ class TranslationManagementPanel(QWidget):
         if self.export_worker and self.export_worker.isRunning():
             self.export_worker.cancel()
             logger.info("User cancelled TM export")
+
+    # ========================================================================
+    # Noise Marking (Hide Noise + Bulk Mark as Valid/Noise)
+    # ========================================================================
+
+    def on_context_menu(self, pos):
+        """Show context menu for noise marking."""
+        # Get selected rows
+        selected_indexes = self.table_view.selectionModel().selectedRows()
+        if not selected_indexes:
+            return
+
+        count = len(selected_indexes)
+
+        # Create menu
+        menu = QMenu(self)
+
+        # Mark as Noise action
+        mark_noise_action = QAction(f"Mark Selected as Noise ({count:,} rows)", self)
+        mark_noise_action.triggered.connect(lambda: self.set_entries_noise_status_bulk(True))
+        menu.addAction(mark_noise_action)
+
+        # Mark as Valid action
+        mark_valid_action = QAction(f"Mark Selected as Valid ({count:,} rows)", self)
+        mark_valid_action.triggered.connect(lambda: self.set_entries_noise_status_bulk(False))
+        menu.addAction(mark_valid_action)
+
+        # Show menu
+        menu.exec(self.table_view.viewport().mapToGlobal(pos))
+
+    def set_entries_noise_status_bulk(self, is_noise: bool):
+        """P0 Safety: Confirmation + progress for bulk noise marking.
+
+        Args:
+            is_noise: True = mark as noise, False = mark as valid
+        """
+        # Get selected rows
+        selected_indexes = self.table_view.selectionModel().selectedRows(0)  # Column 0 = tm_id
+        if not selected_indexes:
+            return
+
+        count = len(selected_indexes)
+        status_text = "noise" if is_noise else "valid"
+
+        # Get tm_ids from selection
+        tm_ids = []
+        source_rows = []
+        for index in selected_indexes:
+            source_row = index.row()
+            source_rows.append(source_row)
+
+            # Get tm_id from model
+            tm_id_index = self.model.index(source_row, 0)
+            tm_id = self.model.data(tm_id_index, Qt.ItemDataRole.DisplayRole)
+            if tm_id:
+                tm_ids.append(int(tm_id))
+
+        if not tm_ids:
+            return
+
+        # P0: Confirmation dialog for > 100 rows
+        if count > 100:
+            reply = QMessageBox.question(
+                self,
+                'Confirm Bulk Action',
+                f'You are about to mark {count:,} TM entries as {status_text}.\n\n'
+                f'This operation cannot be undone easily.\n\nContinue?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No  # Default to No for safety
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # P0: Use background worker for > 1000 rows
+        if count > 1000:
+            self._run_bulk_update_worker(tm_ids, source_rows, is_noise)
+        else:
+            # Fast path: direct update for <= 1000 rows
+            self._run_bulk_update_direct(tm_ids, source_rows, is_noise)
+
+    def _run_bulk_update_direct(self, tm_ids: list, source_rows: list, is_noise: bool):
+        """Direct bulk update for small datasets (<= 1000 rows)."""
+        status_text = "noise" if is_noise else "valid"
+
+        try:
+            # Update via service
+            from app.services.translation_admin_service import TranslationAdminService
+            db_service = DBService.get_instance()
+            admin_service = TranslationAdminService()
+
+            with db_service.get_session() as session:
+                count = admin_service.set_noise_status_bulk(session, tm_ids, is_noise)
+
+            # Update local model cache
+            for row in source_rows:
+                # Update is_noise in model (column might not be visible, but update anyway)
+                # This is for future UI refresh if we show is_noise column
+                pass
+
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Marked {count:,} TM entries as {status_text}."
+            )
+
+            logger.info(f"Marked {count} TM entries as {status_text} (direct update)")
+
+            # Reload data if hide_noise is checked (entries will disappear)
+            if is_noise and self.hide_noise_checkbox.isChecked():
+                self.perform_search()
+
+        except Exception as e:
+            logger.error(f"Failed to bulk update noise status: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to update noise status:\n{str(e)}"
+            )
+
+    def _run_bulk_update_worker(self, tm_ids: list, source_rows: list, is_noise: bool):
+        """Background worker for large datasets (> 1000 rows) with progress dialog."""
+        status_text = "noise" if is_noise else "valid"
+
+        # Create progress dialog
+        self.bulk_progress_dialog = QProgressDialog(
+            f"Marking {len(tm_ids):,} TM entries as {status_text}...",
+            "Cancel",
+            0, len(tm_ids),
+            self
+        )
+        self.bulk_progress_dialog.setWindowTitle("Bulk Noise Update")
+        self.bulk_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.bulk_progress_dialog.setMinimumDuration(0)  # Show immediately
+        self.bulk_progress_dialog.setValue(0)
+
+        # Create worker
+        from app.ui.workers import BulkNoiseUpdateWorker
+        self.bulk_worker = BulkNoiseUpdateWorker(
+            model_class="TMEntry",  # Use TMEntry instead of Lemma/TermCluster
+            item_ids=tm_ids,
+            is_noise=is_noise
+        )
+
+        # Save context for completion handler
+        self.bulk_worker_source_rows = source_rows
+        self.bulk_worker_is_noise = is_noise
+
+        # Connect signals
+        self.bulk_worker.progress.connect(self._on_bulk_progress)
+        self.bulk_worker.update_complete.connect(self._on_bulk_complete)
+        self.bulk_worker.error.connect(self._on_bulk_error)
+        self.bulk_progress_dialog.canceled.connect(self._on_bulk_cancel)
+
+        # Start worker
+        self.bulk_worker.start()
+
+        logger.info(f"Started background worker to mark {len(tm_ids)} TM entries as {status_text}")
+
+    def _on_bulk_progress(self, current: int, total: int):
+        """Update bulk progress dialog."""
+        if self.bulk_progress_dialog:
+            self.bulk_progress_dialog.setValue(current)
+            self.bulk_progress_dialog.setLabelText(f"Updated {current:,} of {total:,} TM entries...")
+
+    def _on_bulk_complete(self, count: int):
+        """Handle bulk update completion."""
+        # Close progress dialog
+        if self.bulk_progress_dialog:
+            self.bulk_progress_dialog.close()
+            self.bulk_progress_dialog = None
+
+        status_text = "noise" if self.bulk_worker_is_noise else "valid"
+
+        # Show success message
+        QMessageBox.information(
+            self,
+            "Success",
+            f"Marked {count:,} TM entries as {status_text}."
+        )
+
+        logger.info(f"Bulk noise update completed: {count} TM entries marked as {status_text}")
+
+        # Reload data if hide_noise is checked and marking as noise
+        if self.bulk_worker_is_noise and self.hide_noise_checkbox.isChecked():
+            self.perform_search()
+
+        # Cleanup
+        self.bulk_worker = None
+
+    def _on_bulk_error(self, error_msg: str):
+        """Handle bulk update error."""
+        # Close progress dialog
+        if self.bulk_progress_dialog:
+            self.bulk_progress_dialog.close()
+            self.bulk_progress_dialog = None
+
+        # Show error message
+        QMessageBox.critical(
+            self,
+            "Bulk Update Failed",
+            f"Failed to update noise status:\n{error_msg}"
+        )
+
+        logger.error(f"Bulk noise update failed: {error_msg}")
+
+        # Cleanup
+        self.bulk_worker = None
+
+    def _on_bulk_cancel(self):
+        """Handle bulk update cancellation."""
+        if self.bulk_worker and self.bulk_worker.isRunning():
+            self.bulk_worker.cancel()
+            logger.info("User cancelled bulk noise update")
 
     def on_back(self):
         """Handle back button click."""
