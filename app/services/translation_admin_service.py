@@ -25,12 +25,27 @@ logger = logging.getLogger(__name__)
 class TranslationAdminService:
     """Service for TM entry administration."""
 
+    # SQL injection prevention: allowlist of sortable columns
+    SORT_COLUMNS = {
+        "tm_id": TMEntry.tm_id,
+        "kind": TMEntry.kind,
+        "src_text": TMEntry.src_text,
+        "translation": TMEntry.translation,
+        "status": TMEntry.status,
+        "project_id": TMEntry.project_id,
+        "origin": TMEntry.origin,
+        "source_ref": TMEntry.source_ref,
+        "updated_at": TMEntry.updated_at,
+    }
+
     def search_tm_entries(
         self,
         session: Session,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
         offset: int = 0,
+        sort_column: str = "updated_at",
+        sort_direction: str = "desc",
     ) -> List[TMEntryDTO]:
         """Search TM entries with filters.
 
@@ -39,8 +54,9 @@ class TranslationAdminService:
             filters: Optional filters:
                 - kind: str (lemma|ngram|term_cluster|surface)
                 - status: str (draft|approved|rejected|deprecated)
-                - scope: str (project|global)
-                - project_id: int (only for scope=project)
+                - scope: str (project|global) — DEPRECATED, use project_ids instead
+                - project_id: int (only for scope=project) — DEPRECATED
+                - project_ids: List[int] (multi-project filter, -1 = global/None)
                 - src_lang: str
                 - tgt_lang: str
                 - search_text: str (search in src_text or translation)
@@ -48,6 +64,8 @@ class TranslationAdminService:
                 - origin: str (user_edit|import|mt_accept|mt_auto|merge)
             limit: Maximum results
             offset: Pagination offset
+            sort_column: Column to sort by (validated against SORT_COLUMNS allowlist)
+            sort_direction: Sort direction ("asc" or "desc")
 
         Returns:
             List of TMEntryDTO
@@ -64,7 +82,25 @@ class TranslationAdminService:
         if "status" in filters and filters["status"]:
             stmt = stmt.where(TMEntry.status == filters["status"])
 
-        if "scope" in filters:
+        # Multi-project filter (new) or legacy scope filter (deprecated)
+        if "project_ids" in filters and filters["project_ids"] is not None:
+            project_ids = filters["project_ids"]
+            include_global = -1 in project_ids or None in project_ids
+            real_ids = [pid for pid in project_ids if pid is not None and pid != -1]
+
+            conditions = []
+            if real_ids:
+                conditions.append(TMEntry.project_id.in_(real_ids))
+            if include_global:
+                conditions.append(TMEntry.project_id.is_(None))
+
+            if conditions:
+                stmt = stmt.where(or_(*conditions))
+            elif not real_ids and not include_global:
+                # No projects selected = show nothing
+                stmt = stmt.where(TMEntry.project_id == -999999)  # Never matches
+        elif "scope" in filters:
+            # Legacy scope filter (deprecated, kept for backward compat)
             if filters["scope"] == "global":
                 stmt = stmt.where(TMEntry.project_id.is_(None))
             elif filters["scope"] == "project" and "project_id" in filters:
@@ -91,8 +127,12 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
-        # Order by most recently updated
-        stmt = stmt.order_by(TMEntry.updated_at.desc())
+        # Server-side sorting
+        sort_col = self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
+        if sort_direction == "asc":
+            stmt = stmt.order_by(sort_col.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc())
 
         # Pagination
         stmt = stmt.limit(limit).offset(offset)
@@ -129,7 +169,25 @@ class TranslationAdminService:
         if "status" in filters and filters["status"]:
             stmt = stmt.where(TMEntry.status == filters["status"])
 
-        if "scope" in filters:
+        # Multi-project filter (same as search_tm_entries)
+        if "project_ids" in filters and filters["project_ids"] is not None:
+            project_ids = filters["project_ids"]
+            include_global = -1 in project_ids or None in project_ids
+            real_ids = [pid for pid in project_ids if pid is not None and pid != -1]
+
+            conditions = []
+            if real_ids:
+                conditions.append(TMEntry.project_id.in_(real_ids))
+            if include_global:
+                conditions.append(TMEntry.project_id.is_(None))
+
+            if conditions:
+                stmt = stmt.where(or_(*conditions))
+            elif not real_ids and not include_global:
+                # No projects selected = show nothing
+                stmt = stmt.where(TMEntry.project_id == -999999)  # Never matches
+        elif "scope" in filters:
+            # Legacy scope filter (deprecated, kept for backward compat)
             if filters["scope"] == "global":
                 stmt = stmt.where(TMEntry.project_id.is_(None))
             elif filters["scope"] == "project" and "project_id" in filters:

@@ -725,11 +725,15 @@ class TMSearchWorker(QThread):
         filters: Dict[str, Any],
         limit: int = 100,
         offset: int = 0,
+        sort_column: str = "updated_at",
+        sort_direction: str = "desc",
     ):
         super().__init__()
         self.filters = filters
         self.limit = limit
         self.offset = offset
+        self.sort_column = sort_column
+        self.sort_direction = sort_direction
         self._cancelled = False
 
     def run(self):
@@ -753,6 +757,8 @@ class TMSearchWorker(QThread):
                     filters=self.filters,
                     limit=self.limit,
                     offset=self.offset,
+                    sort_column=self.sort_column,
+                    sort_direction=self.sort_direction,
                 )
 
                 if self._cancelled:

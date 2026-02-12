@@ -38,6 +38,120 @@ from app.domain.dto import TMEntryDTO
 logger = logging.getLogger(__name__)
 
 
+class ProjectSelectDialog(QDialog):
+    """Dialog for selecting multiple projects to filter TM entries."""
+
+    def __init__(self, all_projects: List, selected_ids: Optional[List[int]], parent=None):
+        """
+        Args:
+            all_projects: List of DictProject instances
+            selected_ids: List of currently selected project IDs (None = all projects)
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.all_projects = all_projects
+        self.selected_ids = selected_ids if selected_ids is not None else []
+        self.init_ui()
+
+    def init_ui(self):
+        """Initialize UI."""
+        self.setWindowTitle("Select Projects")
+        self.setMinimumSize(400, 500)
+
+        layout = QVBoxLayout()
+
+        # Info
+        info = QLabel("Select projects to include in search:")
+        info.setStyleSheet("font-weight: bold;")
+        layout.addWidget(info)
+
+        # List widget with checkboxes
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+
+        # Add "Global (no project)" entry
+        global_item = QListWidgetItem("Global (no project)")
+        global_item.setCheckState(
+            Qt.CheckState.Checked if (-1 in self.selected_ids or None in self.selected_ids) else Qt.CheckState.Unchecked
+        )
+        global_item.setData(Qt.ItemDataRole.UserRole, -1)  # Special ID for global
+        self.list_widget.addItem(global_item)
+
+        # Add separator
+        separator = QListWidgetItem("─" * 40)
+        separator.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.list_widget.addItem(separator)
+
+        # Add projects
+        for project in self.all_projects:
+            item = QListWidgetItem(project.name)
+            item.setCheckState(
+                Qt.CheckState.Checked if project.project_id in self.selected_ids else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, project.project_id)
+            self.list_widget.addItem(item)
+
+        layout.addWidget(self.list_widget)
+
+        # Select/Clear buttons
+        buttons_layout = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self.on_select_all)
+        buttons_layout.addWidget(select_all_btn)
+
+        clear_all_btn = QPushButton("Clear All")
+        clear_all_btn.clicked.connect(self.on_clear_all)
+        buttons_layout.addWidget(clear_all_btn)
+
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        # OK/Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+
+    def on_select_all(self):
+        """Select all items."""
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                item.setCheckState(Qt.CheckState.Checked)
+
+    def on_clear_all(self):
+        """Clear all selections."""
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                item.setCheckState(Qt.CheckState.Unchecked)
+
+    def get_selected_ids(self) -> Optional[List[int]]:
+        """Get list of selected project IDs.
+
+        Returns:
+            List of project IDs (with -1 for global), or None if all checked
+        """
+        selected = []
+        all_count = 0
+
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                all_count += 1
+                if item.checkState() == Qt.CheckState.Checked:
+                    project_id = item.data(Qt.ItemDataRole.UserRole)
+                    selected.append(project_id)
+
+        # If all items checked, return None (means "All")
+        if len(selected) == all_count:
+            return None
+
+        return selected
+
+
 class HistoryDialog(QDialog):
     """Dialog for viewing and reverting history."""
 
@@ -132,11 +246,48 @@ class TranslationManagementPanel(QWidget):
         self.search_timer.setInterval(500)  # 500ms debounce
         self.search_timer.timeout.connect(self.perform_search)
 
+        # State: selected project IDs (None = all projects)
+        self.selected_project_ids: Optional[List[int]] = None
+        self.all_projects = []  # Loaded in init_ui
+
+        # State: pagination
+        self.current_page = 1
+        self.page_size = 100
+        self.total_count = 0
+
+        # State: sorting
+        self.sort_column = "updated_at"
+        self.sort_direction = "desc"
+
+        # Column index to DB column mapping
+        self.COLUMN_TO_DB = {
+            0: "tm_id",
+            1: "kind",
+            2: "src_text",
+            3: "translation",
+            4: "status",
+            5: "project_id",
+            6: "origin",
+            7: "source_ref",
+            8: "updated_at",
+        }
+
         self.init_ui()
         self.load_initial_data()
 
     def init_ui(self):
         """Initialize the UI."""
+        # Load all projects for multi-project filter
+        try:
+            from app.services.project_service import ProjectService
+            db_service = DBService.get_instance()
+            project_service = ProjectService()
+            with db_service.get_session() as session:
+                self.all_projects = project_service.list_projects(session)
+        except Exception as e:
+            logger.error(f"Failed to load projects: {e}", exc_info=True)
+            self.all_projects = []
+
         layout = QVBoxLayout()
 
         # Header
@@ -172,7 +323,7 @@ class TranslationManagementPanel(QWidget):
 
         filters_layout.addLayout(row1)
 
-        # Row 2: Status + Scope + Origin
+        # Row 2: Status + Projects + Origin
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Status:"))
         self.status_combo = QComboBox()
@@ -180,14 +331,11 @@ class TranslationManagementPanel(QWidget):
         self.status_combo.currentTextChanged.connect(self.on_filter_changed)
         row2.addWidget(self.status_combo)
 
-        row2.addWidget(QLabel("Scope:"))
-        self.scope_combo = QComboBox()
-        if self.project_id:
-            self.scope_combo.addItems(["Project", "Global", "All"])
-        else:
-            self.scope_combo.addItems(["Global", "All"])
-        self.scope_combo.currentTextChanged.connect(self.on_filter_changed)
-        row2.addWidget(self.scope_combo)
+        row2.addWidget(QLabel("Projects:"))
+        self.projects_btn = QPushButton("All ▾")
+        self.projects_btn.setMinimumWidth(150)
+        self.projects_btn.clicked.connect(self.on_select_projects)
+        row2.addWidget(self.projects_btn)
 
         row2.addWidget(QLabel("Origin:"))
         self.origin_combo = QComboBox()
@@ -223,7 +371,12 @@ class TranslationManagementPanel(QWidget):
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSortingEnabled(False)  # Server-side sorting only
-        self.table_view.horizontalHeader().setStretchLastSection(True)
+
+        # Enable clickable headers for server-side sorting
+        header = self.table_view.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_header_clicked)
 
         # Install event filter for Enter key editing
         self.table_view.installEventFilter(self)
@@ -241,6 +394,69 @@ class TranslationManagementPanel(QWidget):
         self.table_view.setColumnWidth(6, 100)  # Origin
 
         table_layout.addWidget(self.table_view)
+
+        # Pagination bar
+        pagination_layout = QHBoxLayout()
+
+        # First/Prev buttons
+        self.first_btn = QPushButton("«")
+        self.first_btn.setToolTip("First page")
+        self.first_btn.setMaximumWidth(40)
+        self.first_btn.clicked.connect(self.on_first_page)
+        pagination_layout.addWidget(self.first_btn)
+
+        self.prev_btn = QPushButton("‹")
+        self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
+        self.prev_btn.setMaximumWidth(40)
+        self.prev_btn.clicked.connect(self.on_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        # Page number input
+        pagination_layout.addWidget(QLabel("Page"))
+        from PyQt6.QtWidgets import QSpinBox
+        self.page_spinbox = QSpinBox()
+        self.page_spinbox.setMinimum(1)
+        self.page_spinbox.setMaximum(1)
+        self.page_spinbox.setValue(1)
+        self.page_spinbox.setMaximumWidth(60)
+        self.page_spinbox.valueChanged.connect(self.on_page_changed)
+        pagination_layout.addWidget(self.page_spinbox)
+
+        self.page_count_label = QLabel("of 1")
+        pagination_layout.addWidget(self.page_count_label)
+
+        # Next/Last buttons
+        self.next_btn = QPushButton("›")
+        self.next_btn.setToolTip("Next page (Ctrl+Right)")
+        self.next_btn.setMaximumWidth(40)
+        self.next_btn.clicked.connect(self.on_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        self.last_btn = QPushButton("»")
+        self.last_btn.setToolTip("Last page")
+        self.last_btn.setMaximumWidth(40)
+        self.last_btn.clicked.connect(self.on_last_page)
+        pagination_layout.addWidget(self.last_btn)
+
+        pagination_layout.addSpacing(20)
+
+        # Range label
+        self.range_label = QLabel("Showing 0–0 of 0")
+        pagination_layout.addWidget(self.range_label)
+
+        pagination_layout.addSpacing(20)
+
+        # Page size selector
+        pagination_layout.addWidget(QLabel("Page size:"))
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["25", "50", "100", "250", "500"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pagination_layout.addWidget(self.page_size_combo)
+
+        pagination_layout.addStretch()
+
+        table_layout.addLayout(pagination_layout)
 
         # Results count
         self.results_label = QLabel("Results: 0")
@@ -294,6 +510,7 @@ class TranslationManagementPanel(QWidget):
 
     def on_filter_changed(self):
         """Handle filter combo change."""
+        self.current_page = 1  # Reset to first page when filters change
         self.perform_search()
 
     def on_clear_filters(self):
@@ -302,9 +519,164 @@ class TranslationManagementPanel(QWidget):
         self.source_ref_edit.clear()
         self.kind_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
-        self.scope_combo.setCurrentIndex(0)
         self.origin_combo.setCurrentIndex(0)
+        # Reset projects to "All"
+        self.selected_project_ids = None
+        self.update_projects_button_label()
         self.perform_search()
+
+    def on_select_projects(self):
+        """Open project selection dialog."""
+        dialog = ProjectSelectDialog(self.all_projects, self.selected_project_ids, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.selected_project_ids = dialog.get_selected_ids()
+            self.update_projects_button_label()
+            self.current_page = 1  # Reset to first page when filter changes
+            self.perform_search()
+
+    def update_projects_button_label(self):
+        """Update projects button label to show selection."""
+        if self.selected_project_ids is None:
+            self.projects_btn.setText("All ▾")
+        else:
+            count = len(self.selected_project_ids)
+            total = len(self.all_projects) + 1  # +1 for "Global"
+            self.projects_btn.setText(f"{count} of {total} ▾")
+
+    @property
+    def total_pages(self) -> int:
+        """Calculate total pages based on total_count and page_size."""
+        if self.total_count == 0:
+            return 1
+        return (self.total_count + self.page_size - 1) // self.page_size
+
+    @property
+    def current_offset(self) -> int:
+        """Calculate current offset for pagination."""
+        return (self.current_page - 1) * self.page_size
+
+    def on_first_page(self):
+        """Navigate to first page."""
+        if self.current_page != 1:
+            self.current_page = 1
+            self.perform_search()
+
+    def on_prev_page(self):
+        """Navigate to previous page."""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.perform_search()
+
+    def on_next_page(self):
+        """Navigate to next page."""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.perform_search()
+
+    def on_last_page(self):
+        """Navigate to last page."""
+        total = self.total_pages
+        if self.current_page != total:
+            self.current_page = total
+            self.perform_search()
+
+    def on_page_changed(self, page: int):
+        """Handle page number change from spinbox."""
+        if page != self.current_page:
+            self.current_page = page
+            self.perform_search()
+
+    def on_page_size_changed(self, size_str: str):
+        """Handle page size change."""
+        new_size = int(size_str)
+        if new_size != self.page_size:
+            self.page_size = new_size
+            self.current_page = 1  # Reset to first page
+            self.perform_search()
+
+    def update_pagination_controls(self):
+        """Update pagination control states based on current page and total."""
+        total = self.total_pages
+
+        # Update spinbox range
+        self.page_spinbox.blockSignals(True)
+        self.page_spinbox.setMaximum(total)
+        self.page_spinbox.setValue(self.current_page)
+        self.page_spinbox.blockSignals(False)
+
+        # Update page count label
+        self.page_count_label.setText(f"of {total}")
+
+        # Update button states
+        self.first_btn.setEnabled(self.current_page > 1)
+        self.prev_btn.setEnabled(self.current_page > 1)
+        self.next_btn.setEnabled(self.current_page < total)
+        self.last_btn.setEnabled(self.current_page < total)
+
+        # Update range label
+        if self.total_count == 0:
+            self.range_label.setText("Showing 0–0 of 0")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + self.page_size, self.total_count)
+            self.range_label.setText(f"Showing {start}–{end} of {self.total_count}")
+
+    def on_header_clicked(self, logical_index: int):
+        """Handle column header click for server-side sorting.
+
+        Cycle: no sort → ASC → DESC → no sort (default)
+        """
+        # Get DB column name for this index
+        db_column = self.COLUMN_TO_DB.get(logical_index)
+        if not db_column:
+            return  # Column not sortable
+
+        # Determine new sort state
+        if self.sort_column == db_column:
+            # Same column: cycle through ASC → DESC → default
+            if self.sort_direction == "asc":
+                self.sort_direction = "desc"
+            else:
+                # Reset to default
+                self.sort_column = "updated_at"
+                self.sort_direction = "desc"
+        else:
+            # New column: start with ASC
+            self.sort_column = db_column
+            self.sort_direction = "asc"
+
+        # Update header visuals
+        self.update_sort_indicators()
+
+        # Reset to first page and search
+        self.current_page = 1
+        self.perform_search()
+
+    def update_sort_indicators(self):
+        """Update column header to show sort indicators (▲/▼)."""
+        header = self.table_view.horizontalHeader()
+
+        # Find which column index corresponds to current sort_column
+        sorted_index = None
+        for col_index, db_col in self.COLUMN_TO_DB.items():
+            if db_col == self.sort_column:
+                sorted_index = col_index
+                break
+
+        # Update all column headers
+        for col_index in range(self.model.columnCount()):
+            col_name = self.model.headerData(col_index, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+
+            if col_index == sorted_index:
+                # Add sort indicator
+                indicator = " ▲" if self.sort_direction == "asc" else " ▼"
+                # Remove existing indicators first
+                clean_name = col_name.replace(" ▲", "").replace(" ▼", "")
+                self.model.setHeaderData(col_index, Qt.Orientation.Horizontal, clean_name + indicator)
+            else:
+                # Remove indicators from other columns
+                clean_name = col_name.replace(" ▲", "").replace(" ▼", "")
+                self.model.setHeaderData(col_index, Qt.Orientation.Horizontal, clean_name)
 
     def build_filters(self) -> dict:
         """Build filters dict from UI."""
@@ -325,12 +697,9 @@ class TranslationManagementPanel(QWidget):
         if status != "All":
             filters["status"] = status
 
-        # Scope
-        scope = self.scope_combo.currentText().lower()
-        if scope != "all":
-            filters["scope"] = scope
-            if scope == "project" and self.project_id:
-                filters["project_id"] = self.project_id
+        # Projects (new multi-project filter)
+        if self.selected_project_ids is not None:
+            filters["project_ids"] = self.selected_project_ids
 
         # Origin
         origin = self.origin_combo.currentText()
@@ -345,7 +714,7 @@ class TranslationManagementPanel(QWidget):
         return filters
 
     def perform_search(self):
-        """Perform search with current filters."""
+        """Perform search with current filters and pagination."""
         if self.worker and self.worker.isRunning():
             logger.warning("Search already in progress, skipping")
             return
@@ -354,11 +723,13 @@ class TranslationManagementPanel(QWidget):
         self.status_label.setText("Searching...")
         self.cancel_btn.setEnabled(True)
 
-        # Start worker
+        # Start worker with pagination and sorting
         self.worker = TMSearchWorker(
             filters=self.current_filters,
-            limit=100,
-            offset=0,
+            limit=self.page_size,
+            offset=self.current_offset,
+            sort_column=self.sort_column,
+            sort_direction=self.sort_direction,
         )
         self.worker.results_ready.connect(self.on_search_results)
         self.worker.error.connect(self.on_search_error)
@@ -367,9 +738,11 @@ class TranslationManagementPanel(QWidget):
 
     def on_search_results(self, entries: List[TMEntryDTO], total_count: int):
         """Handle search results."""
+        self.total_count = total_count
         self.model.update_entries(entries, total_count)
         self.results_label.setText(f"Results: {len(entries)} of {total_count}")
         self.status_label.setText("Ready")
+        self.update_pagination_controls()
         logger.info(f"Search completed: {len(entries)} entries")
 
     def on_search_error(self, error_msg: str):
@@ -539,18 +912,32 @@ class TranslationManagementPanel(QWidget):
             )
 
     def eventFilter(self, obj, event):
-        """Handle Enter key to start editing Translation column."""
+        """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.table_view and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
-            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
-                # Get current selection
-                current_index = self.table_view.currentIndex()
-                if current_index.isValid():
-                    # Start editing Translation column (column 3)
-                    translation_index = self.model.index(current_index.row(), 3)
-                    self.table_view.setCurrentIndex(translation_index)
-                    self.table_view.edit(translation_index)
-                    return True  # Event handled
+            if isinstance(event, QKeyEvent):
+                key = event.key()
+                modifiers = event.modifiers()
+
+                # Ctrl+Left: Previous page
+                if key == Qt.Key.Key_Left and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_prev_page()
+                    return True
+
+                # Ctrl+Right: Next page
+                if key == Qt.Key.Key_Right and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_next_page()
+                    return True
+
+                # Enter: Start editing Translation column
+                if key == Qt.Key.Key_Return:
+                    current_index = self.table_view.currentIndex()
+                    if current_index.isValid():
+                        # Start editing Translation column (column 3)
+                        translation_index = self.model.index(current_index.row(), 3)
+                        self.table_view.setCurrentIndex(translation_index)
+                        self.table_view.edit(translation_index)
+                        return True  # Event handled
 
         return super().eventFilter(obj, event)
 
