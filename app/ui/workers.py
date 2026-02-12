@@ -782,6 +782,151 @@ class TMSearchWorker(QThread):
         self._cancelled = True
 
 
+class DictionarySearchWorker(QThread):
+    """Worker for searching lemmas with pagination (non-blocking)."""
+
+    results_ready = pyqtSignal(list, int)  # (rows: List[Tuple[Lemma, LemmaProjectStat]], total_count: int)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        project_id: int,
+        filters: Dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+        sort_column: str = "freq_abs",
+        sort_direction: str = "desc",
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.filters = filters
+        self.limit = limit
+        self.offset = offset
+        self.sort_column = sort_column
+        self.sort_direction = sort_direction
+        self._cancelled = False
+
+    def run(self):
+        """Execute search."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.dictionary_service import DictionaryService
+
+            db_service = DBService.get_instance()
+            dict_service = DictionaryService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                # Get page of lemmas
+                rows = dict_service.search_lemmas(
+                    session,
+                    project_id=self.project_id,
+                    filters=self.filters,
+                    limit=self.limit,
+                    offset=self.offset,
+                    sort_column=self.sort_column,
+                    sort_direction=self.sort_direction,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Get total count
+                total_count = dict_service.count_lemmas(
+                    session,
+                    project_id=self.project_id,
+                    filters=self.filters,
+                )
+
+                if not self._cancelled:
+                    self.results_ready.emit(rows, total_count)
+
+        except Exception as e:
+            logger.exception("Dictionary search error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the search."""
+        self._cancelled = True
+
+
+class TermsSearchWorker(QThread):
+    """Worker for searching term clusters with pagination (non-blocking)."""
+
+    results_ready = pyqtSignal(list, int)  # (clusters: List[TermCluster], total_count: int)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        project_id: int,
+        filters: Dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+        sort_column: str = "freq_abs",  # preset name, actually
+        sort_direction: str = "desc",
+    ):
+        super().__init__()
+        self.project_id = project_id
+        self.filters = filters
+        self.limit = limit
+        self.offset = offset
+        self.sort_column = sort_column  # For Terms, this is "preset" name
+        self.sort_direction = sort_direction
+        self._cancelled = False
+
+    def run(self):
+        """Execute search."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.term_extraction_service import TermExtractionService
+
+            db_service = DBService.get_instance()
+            term_service = TermExtractionService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                # Get page of term clusters
+                clusters = term_service.list_term_clusters(
+                    session,
+                    project_id=self.project_id,
+                    search=self.filters.get("search"),
+                    preset=self.filters.get("preset", "freq"),
+                    min_freq=self.filters.get("min_freq"),
+                    source_filter=self.filters.get("source_filter"),
+                    hide_noise=self.filters.get("hide_noise", True),
+                    top_n=self.limit,
+                    offset=self.offset,
+                )
+
+                if self._cancelled:
+                    return
+
+                # Get total count
+                total_count = term_service.count_term_clusters(
+                    session,
+                    project_id=self.project_id,
+                    search=self.filters.get("search"),
+                    min_freq=self.filters.get("min_freq"),
+                    source_filter=self.filters.get("source_filter"),
+                    hide_noise=self.filters.get("hide_noise", True),
+                )
+
+                if not self._cancelled:
+                    self.results_ready.emit(clusters, total_count)
+
+        except Exception as e:
+            logger.exception("Terms search error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the search."""
+        self._cancelled = True
+
+
 class CoverageWorker(QThread):
     """P2: Worker for computing coverage metrics (non-blocking)."""
 

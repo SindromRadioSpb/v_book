@@ -678,6 +678,7 @@ class TermExtractionService:
         min_freq: Optional[int] = None,
         source_filter: Optional[str] = None,
         hide_noise: bool = True,
+        offset: int = 0,
     ) -> List[ClusterStats]:
         """
         List term clusters with filtering and ranking.
@@ -776,7 +777,7 @@ class TermExtractionService:
                 TermCluster.freq_abs.desc()
             )
 
-        stmt = stmt.limit(top_n)
+        stmt = stmt.limit(top_n).offset(offset)
 
         clusters = session.execute(stmt).scalars().all()
 
@@ -802,6 +803,62 @@ class TermExtractionService:
             ))
 
         return results
+
+    def count_term_clusters(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        search: Optional[str] = None,
+        min_freq: Optional[int] = None,
+        source_filter: Optional[str] = None,
+        hide_noise: bool = True,
+    ) -> int:
+        """
+        Count total term clusters matching filters (for pagination).
+
+        Args:
+            session: Database session
+            project_id: Project ID
+            search: Search text (optional)
+            min_freq: Minimum frequency filter
+            source_filter: Source kind filter ("ngrams" or "np")
+            hide_noise: Hide noise clusters (default True)
+
+        Returns:
+            Total count of matching clusters
+        """
+        stmt = select(func.count()).select_from(TermCluster).where(
+            TermCluster.project_id == project_id
+        )
+
+        # Apply same filters as list_term_clusters (but no limit/offset)
+        # Source filter
+        if source_filter:
+            stmt = stmt.join(TermClusterMember).join(Ngram).where(
+                Ngram.source_kind == source_filter
+            ).distinct()
+
+        # Min freq filter
+        if min_freq:
+            stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        # Noise filter
+        if hide_noise:
+            stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
+
+        # Search filter with normalized variants
+        if search:
+            search_norm = search.replace(" ", "_").lower()
+            stmt = stmt.where(
+                or_(
+                    TermCluster.representative_he.contains(search),
+                    TermCluster.norm_text.contains(search_norm),
+                )
+            )
+
+        count = session.execute(stmt).scalar()
+        return count or 0
 
     def get_cluster_members(self, session: Session, cluster_id: int) -> List[dict]:
         """
