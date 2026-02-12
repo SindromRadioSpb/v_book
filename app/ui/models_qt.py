@@ -23,7 +23,11 @@ class ProjectListModel(QAbstractTableModel):
         return len(self.headers)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+        if not index.isValid():
+            return None
+
+        # Support both DisplayRole and EditRole
+        if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             return None
 
         project = self.projects[index.row()]
@@ -32,7 +36,10 @@ class ProjectListModel(QAbstractTableModel):
         if col == 0:
             return str(project.project_id)
         elif col == 1:
-            # Add 🌐 marker for reference corpus
+            # EditRole: return raw name (for editing, no 🌐 prefix)
+            if role == Qt.ItemDataRole.EditRole:
+                return project.name
+            # DisplayRole: add 🌐 marker for reference corpus
             if project.is_general_corpus:
                 return f"🌐 {project.name}"
             return project.name
@@ -51,6 +58,35 @@ class ProjectListModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.headers[section]
         return None
+
+    def flags(self, index):
+        """Make Name column (column 1) editable."""
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        flags = super().flags(index)
+
+        # Column 1 (Name) is editable
+        if index.column() == 1:
+            flags |= Qt.ItemFlag.ItemIsEditable
+
+        return flags
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        """Handle inline edit of project name."""
+        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+            return False
+
+        if index.column() == 1:  # Name column
+            # Update DTO (actual save happens in view's handler)
+            project = self.projects[index.row()]
+            project.name = value
+
+            # Emit data changed
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
+            return True
+
+        return False
 
     def update_projects(self, projects: List[ProjectStats]):
         """Update the project list."""

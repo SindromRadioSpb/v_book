@@ -47,6 +47,8 @@ class DocumentsView(QWidget):
         self.current_worker = None
         self.process_worker = None
 
+        self._loading = False  # Flag to suppress cellChanged during load
+
         self.init_ui()
         self.load_corpus()
         self.load_documents()
@@ -138,7 +140,17 @@ class DocumentsView(QWidget):
             "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens", "Imported", "Path"
         ])
         self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.docs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        # Enable F2 and double-click editing on File Name column
+        self.docs_table.setEditTriggers(
+            QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.EditKeyPressed
+        )
+
+        # Install event filter for F2 key
+        self.docs_table.installEventFilter(self)
+
+        # Connect cellChanged to rename handler
+        self.docs_table.cellChanged.connect(self.on_cell_changed)
 
         # Enable interactive column sorting
         self.docs_table.setSortingEnabled(True)
@@ -240,6 +252,9 @@ class DocumentsView(QWidget):
             return
 
         try:
+            # Set loading flag to suppress cellChanged handler
+            self._loading = True
+
             with self.db_service.get_session() as session:
                 from sqlalchemy import select
                 from app.infra.sa_models import SourceDocument
@@ -255,41 +270,55 @@ class DocumentsView(QWidget):
                 self.docs_table.setRowCount(len(docs))
 
                 for row, doc in enumerate(docs):
-                    # Column 0: ID (numeric sorting)
+                    # Column 0: ID (numeric sorting) - NOT EDITABLE
                     id_item = QTableWidgetItem()
                     id_item.setData(Qt.ItemDataRole.DisplayRole, doc.doc_id)
+                    id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.docs_table.setItem(row, 0, id_item)
 
-                    # Column 1: File Name (text sorting)
-                    self.docs_table.setItem(row, 1, QTableWidgetItem(doc.file_name))
+                    # Column 1: File Name (text sorting) - EDITABLE
+                    file_name_item = QTableWidgetItem(doc.file_name)
+                    # Store doc_id in UserRole for reliable lookup after sorting
+                    file_name_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
+                    # Keep ItemIsEditable flag (default)
+                    self.docs_table.setItem(row, 1, file_name_item)
 
-                    # Column 2: Size (numeric sorting)
+                    # Column 2: Size (numeric sorting) - NOT EDITABLE
                     size_kb = doc.file_size_bytes / 1024
                     size_item = QTableWidgetItem()
                     size_item.setData(Qt.ItemDataRole.DisplayRole, size_kb)
                     size_item.setText(f"{size_kb:.1f}")
+                    size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.docs_table.setItem(row, 2, size_item)
 
-                    # Column 3: Status (text sorting)
-                    self.docs_table.setItem(row, 3, QTableWidgetItem(doc.status))
+                    # Column 3: Status (text sorting) - NOT EDITABLE
+                    status_item = QTableWidgetItem(doc.status)
+                    status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.docs_table.setItem(row, 3, status_item)
 
-                    # Column 4: Sentences (numeric sorting)
+                    # Column 4: Sentences (numeric sorting) - NOT EDITABLE
                     sentences_item = QTableWidgetItem()
                     sentences_item.setData(Qt.ItemDataRole.DisplayRole, doc.sentence_count or 0)
                     sentences_item.setText(str(doc.sentence_count) if doc.sentence_count else "")
+                    sentences_item.setFlags(sentences_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.docs_table.setItem(row, 4, sentences_item)
 
-                    # Column 5: Tokens (numeric sorting)
+                    # Column 5: Tokens (numeric sorting) - NOT EDITABLE
                     tokens_item = QTableWidgetItem()
                     tokens_item.setData(Qt.ItemDataRole.DisplayRole, doc.token_count or 0)
                     tokens_item.setText(str(doc.token_count) if doc.token_count else "")
+                    tokens_item.setFlags(tokens_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.docs_table.setItem(row, 5, tokens_item)
 
-                    # Column 6: Imported (text sorting - already formatted)
-                    self.docs_table.setItem(row, 6, QTableWidgetItem(doc.imported_at[:19]))
+                    # Column 6: Imported (text sorting - already formatted) - NOT EDITABLE
+                    imported_item = QTableWidgetItem(doc.imported_at[:19])
+                    imported_item.setFlags(imported_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.docs_table.setItem(row, 6, imported_item)
 
-                    # Column 7: Path (text sorting)
-                    self.docs_table.setItem(row, 7, QTableWidgetItem(doc.file_path))
+                    # Column 7: Path (text sorting) - NOT EDITABLE
+                    path_item = QTableWidgetItem(doc.file_path)
+                    path_item.setFlags(path_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.docs_table.setItem(row, 7, path_item)
 
                 # Re-enable sorting after population
                 self.docs_table.setSortingEnabled(True)
@@ -299,6 +328,9 @@ class DocumentsView(QWidget):
         except Exception as e:
             logger.exception("Failed to load documents")
             show_error(self, "Error", f"Failed to load documents: {e}")
+        finally:
+            # Clear loading flag
+            self._loading = False
 
     def _configure_reference_corpus_ui(self):
         """Configure UI for reference corpus (read-only documents)."""
@@ -764,9 +796,124 @@ class DocumentsView(QWidget):
                 logger.exception("Failed to delete document(s)")
                 show_error(self, "Error", f"Failed to delete: {e}")
 
+    def eventFilter(self, obj, event):
+        """Handle F2 key to start editing File Name column."""
+        if obj == self.docs_table and event.type() == event.Type.KeyPress:
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_F2:
+                # Get current selection
+                selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+                if selected_rows:
+                    row = min(selected_rows)
+                    # Jump to File Name column (column 1)
+                    file_name_item = self.docs_table.item(row, 1)
+                    if file_name_item:
+                        self.docs_table.setCurrentItem(file_name_item)
+                        self.docs_table.editItem(file_name_item)
+                        return True  # Event handled
+
+        return super().eventFilter(obj, event)
+
+    def on_cell_changed(self, row, column):
+        """Handle cell edit (only File Name column)."""
+        # Skip if loading or not File Name column
+        if self._loading or column != 1:
+            return
+
+        # Get the edited item
+        file_name_item = self.docs_table.item(row, 1)
+        if not file_name_item:
+            return
+
+        # Get doc_id from UserRole (reliable after sorting)
+        doc_id = file_name_item.data(Qt.ItemDataRole.UserRole)
+        if not doc_id:
+            logger.warning(f"No doc_id found in UserRole for row {row}")
+            return
+
+        # Get new file name
+        new_file_name = file_name_item.text()
+
+        # Validate and save
+        try:
+            with self.db_service.get_session() as session:
+                # Get old name for comparison
+                from app.infra.sa_models import SourceDocument
+                doc = session.get(SourceDocument, doc_id)
+                if not doc:
+                    raise Exception(f"Document with ID {doc_id} not found")
+
+                old_name = doc.file_name
+
+                # Skip if unchanged
+                if new_file_name == old_name:
+                    return
+
+                # Save via service (includes validation and audit)
+                updated_doc = self.ingest_service.rename_document(
+                    session, doc_id, new_file_name
+                )
+
+                logger.info(f"Renamed document {doc_id}: '{old_name}' → '{new_file_name}'")
+
+                # Refresh to show updated name everywhere
+                self.load_documents()
+
+        except ValueError as e:
+            # Validation error - revert and show error
+            logger.warning(f"Document rename validation failed: {e}")
+            show_error(self, "Rename Failed", str(e))
+            # Revert by reloading
+            self.load_documents()
+        except Exception as e:
+            # Other error - revert and show error
+            logger.exception("Failed to rename document")
+            show_error(self, "Rename Failed", f"Failed to rename document: {e}")
+            # Revert by reloading
+            self.load_documents()
+
     def show_context_menu(self, position):
-        """Show context menu."""
-        pass  # Future: add context menu actions
+        """Show context menu with Rename, View Text, and Delete options."""
+        # Get selected row
+        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        if not selected_rows:
+            return
+
+        row = min(selected_rows)
+
+        # Create menu
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+
+        # Rename action (only for single selection)
+        if len(selected_rows) == 1:
+            rename_action = menu.addAction("Rename (F2)")
+            rename_action.triggered.connect(lambda: self.start_rename(row))
+            menu.addSeparator()
+
+        # View Text action (single selection)
+        if len(selected_rows) == 1:
+            view_action = menu.addAction("View Text")
+            view_action.triggered.connect(self.on_view_text)
+
+        # Delete action (single or multiple)
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self.on_delete)
+
+        # Disable delete for reference corpus
+        if self.is_reference_corpus:
+            delete_action.setEnabled(False)
+            delete_action.setToolTip("Cannot delete documents from reference corpus")
+
+        # Show menu
+        menu.exec(self.docs_table.viewport().mapToGlobal(position))
+
+    def start_rename(self, row):
+        """Start editing the File Name column for a specific row."""
+        file_name_item = self.docs_table.item(row, 1)
+        if file_name_item:
+            self.docs_table.setCurrentItem(file_name_item)
+            self.docs_table.editItem(file_name_item)
 
     # Drag and drop handlers
     def dragEnterEvent(self, event: QDragEnterEvent):

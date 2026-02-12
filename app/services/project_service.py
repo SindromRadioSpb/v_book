@@ -139,6 +139,103 @@ class ProjectService:
         logger.info(f"Created project: {name} (ID: {project.project_id})")
         return project
 
+    def rename_project(
+        self,
+        session: Session,
+        project_id: int,
+        new_name: str,
+    ) -> DictProject:
+        """
+        Rename a project.
+
+        Args:
+            session: Database session
+            project_id: Project ID to rename
+            new_name: New project name
+
+        Returns:
+            Updated DictProject instance
+
+        Raises:
+            ValueError: If validation fails (empty, too long, forbidden chars, duplicate)
+            Exception: If project not found or rename fails
+        """
+        from app.infra.sa_models import utc_now
+        from app.infra.security import AuditLogger, sanitize_for_log
+
+        # Validate new name
+        new_name = new_name.strip()
+        if not new_name:
+            raise ValueError("Project name cannot be empty")
+
+        if len(new_name) > 255:
+            raise ValueError("Project name cannot exceed 255 characters")
+
+        # Check for forbidden characters (same as CreateProjectDialog)
+        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        bad_chars = [char for char in new_name if char in forbidden_chars]
+        if bad_chars:
+            raise ValueError(
+                f"Project name cannot contain forbidden characters: / \\ : * ? \" < > |"
+            )
+
+        # Get project
+        project = self.get_project(session, project_id)
+        if not project:
+            raise Exception(f"Project with ID {project_id} not found")
+
+        old_name = project.name
+
+        # Skip if name unchanged
+        if new_name == old_name:
+            return project
+
+        # Check uniqueness within library
+        existing = session.execute(
+            select(DictProject)
+            .where(
+                DictProject.library_id == project.library_id,
+                DictProject.name == new_name,
+                DictProject.project_id != project_id,
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            raise ValueError(
+                f"A project named '{new_name}' already exists in this library"
+            )
+
+        # Update project
+        project.name = new_name
+        project.updated_at = utc_now()
+
+        session.commit()
+        session.refresh(project)
+
+        logger.info(
+            f"Renamed project {project_id}: '{old_name}' → '{new_name}'"
+        )
+
+        # Audit log
+        try:
+            audit = AuditLogger(session)
+            audit.log_event(
+                event_type="project_rename",
+                outcome="ALLOW",
+                operation="rename_project",
+                resource_type="project",
+                resource_id=sanitize_for_log(str(project_id)),
+                details={
+                    "old_name": sanitize_for_log(old_name),
+                    "new_name": sanitize_for_log(new_name),
+                },
+                project_id=project_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log project rename audit: {e}")
+
+        return project
+
     def delete_project(self, session: Session, project_id: int) -> DeleteReport:
         """
         Delete a project and all its related data.

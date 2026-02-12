@@ -10,8 +10,9 @@ from PyQt6.QtWidgets import (
     QTableView,
     QLabel,
     QHeaderView,
+    QMenu,
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 
 from app.domain.dto import ProjectStats
 from app.ui.models_qt import ProjectListModel
@@ -86,6 +87,19 @@ class ProjectDashboard(QWidget):
         self.project_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.project_table.doubleClicked.connect(self.on_project_double_clicked)
         self.project_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+
+        # Enable F2 editing (NOT double-click to avoid conflict with open-project)
+        self.project_table.setEditTriggers(QTableView.EditTrigger.EditKeyPressed)
+
+        # Install event filter for F2 key
+        self.project_table.installEventFilter(self)
+
+        # Connect dataChanged to save handler
+        self.project_model.dataChanged.connect(self.on_project_renamed)
+
+        # Context menu
+        self.project_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.project_table.customContextMenuRequested.connect(self.show_context_menu)
 
         # Auto-resize columns
         header = self.project_table.horizontalHeader()
@@ -274,3 +288,95 @@ class ProjectDashboard(QWidget):
                 "Error",
                 f"An error occurred while deleting the project:\n\n{str(e)[:200]}",
             )
+
+    def eventFilter(self, obj, event):
+        """Handle F2 key to start editing Name column."""
+        if obj == self.project_table and event.type() == event.Type.KeyPress:
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_F2:
+                # Get current selection
+                current_index = self.project_table.currentIndex()
+                if current_index.isValid():
+                    # Jump to Name column (column 1)
+                    name_index = self.project_model.index(current_index.row(), 1)
+                    self.project_table.setCurrentIndex(name_index)
+                    self.project_table.edit(name_index)
+                    return True  # Event handled
+
+        return super().eventFilter(obj, event)
+
+    def on_project_renamed(self, top_left, bottom_right, roles):
+        """Handle inline edit of project name - save to database."""
+        # Check if Name column was edited (col 1)
+        if top_left.column() != 1:
+            return
+
+        row = top_left.row()
+        project = self.project_model.projects[row]
+
+        # Get new name
+        new_name = project.name
+
+        # Validate and save
+        try:
+            with self.project_service.db_service.get_session() as session:
+                # Save via service (includes validation and audit)
+                updated_project = self.project_service.rename_project(
+                    session, project.project_id, new_name
+                )
+
+                logger.info(f"Renamed project {project.project_id} to '{new_name}'")
+
+                # Refresh project list to show updated name everywhere
+                self.load_projects()
+
+        except ValueError as e:
+            # Validation error - revert and show error
+            logger.warning(f"Project rename validation failed: {e}")
+            show_error(self, "Rename Failed", str(e))
+            # Revert by reloading
+            self.load_projects()
+        except Exception as e:
+            # Other error - revert and show error
+            logger.exception("Failed to rename project")
+            show_error(self, "Rename Failed", f"Failed to rename project: {e}")
+            # Revert by reloading
+            self.load_projects()
+
+    def show_context_menu(self, pos):
+        """Show context menu with Rename and Delete options."""
+        # Get selected row
+        index = self.project_table.indexAt(pos)
+        if not index.isValid():
+            return
+
+        row = index.row()
+        if row >= len(self.project_model.projects):
+            return
+
+        project = self.project_model.projects[row]
+
+        # Create menu
+        menu = QMenu(self)
+
+        # Rename action
+        rename_action = menu.addAction("Rename (F2)")
+        rename_action.triggered.connect(lambda: self.start_rename(row))
+
+        menu.addSeparator()
+
+        # Delete action (existing functionality, grayed out for reference corpus)
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self.on_delete_project)
+        if project.is_general_corpus:
+            delete_action.setEnabled(False)
+            delete_action.setToolTip("Cannot delete reference corpus")
+
+        # Show menu
+        menu.exec(self.project_table.viewport().mapToGlobal(pos))
+
+    def start_rename(self, row):
+        """Start editing the Name column for a specific row."""
+        name_index = self.project_model.index(row, 1)
+        self.project_table.setCurrentIndex(name_index)
+        self.project_table.edit(name_index)

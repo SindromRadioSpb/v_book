@@ -373,3 +373,93 @@ class IngestService:
 
         logger.info(f"Bulk delete complete: {success} succeeded, {errors} failed")
         return success, errors
+
+    def rename_document(
+        self,
+        session: Session,
+        doc_id: int,
+        new_file_name: str,
+    ) -> SourceDocument:
+        """
+        Rename a document (update file_name).
+
+        Args:
+            session: Database session
+            doc_id: Document ID to rename
+            new_file_name: New file name (must preserve original extension)
+
+        Returns:
+            Updated SourceDocument instance
+
+        Raises:
+            ValueError: If validation fails (empty, too long, forbidden chars, extension mismatch)
+            Exception: If document not found or rename fails
+        """
+        from app.infra.security import AuditLogger, sanitize_for_log
+        import os
+
+        # Validate new name
+        new_file_name = new_file_name.strip()
+        if not new_file_name:
+            raise ValueError("File name cannot be empty")
+
+        if len(new_file_name) > 255:
+            raise ValueError("File name cannot exceed 255 characters")
+
+        # Check for forbidden characters (same as CreateProjectDialog)
+        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        bad_chars = [char for char in new_file_name if char in forbidden_chars]
+        if bad_chars:
+            raise ValueError(
+                f"File name cannot contain forbidden characters: / \\ : * ? \" < > |"
+            )
+
+        # Get document
+        doc = session.get(SourceDocument, doc_id)
+        if not doc:
+            raise Exception(f"Document with ID {doc_id} not found")
+
+        old_name = doc.file_name
+
+        # Skip if name unchanged
+        if new_file_name == old_name:
+            return doc
+
+        # Validate extension match (user chose "validate extension")
+        old_ext = doc.file_ext
+        new_ext = os.path.splitext(new_file_name)[1]  # Includes dot
+
+        if new_ext.lower() != old_ext.lower():
+            raise ValueError(
+                f"File extension must remain '{old_ext}'. "
+                f"Cannot change from '{old_ext}' to '{new_ext}'"
+            )
+
+        # Update document
+        doc.file_name = new_file_name
+
+        session.commit()
+        session.refresh(doc)
+
+        logger.info(
+            f"Renamed document {doc_id}: '{old_name}' → '{new_file_name}'"
+        )
+
+        # Audit log
+        try:
+            audit = AuditLogger(session)
+            audit.log_event(
+                event_type="document_rename",
+                outcome="ALLOW",
+                operation="rename_document",
+                resource_type="document",
+                resource_id=sanitize_for_log(str(doc_id)),
+                details={
+                    "old_name": sanitize_for_log(old_name),
+                    "new_name": sanitize_for_log(new_file_name),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log document rename audit: {e}")
+
+        return doc
