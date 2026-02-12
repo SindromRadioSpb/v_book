@@ -27,9 +27,12 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QSplitter,
+    QCheckBox,
+    QMenu,
+    QProgressDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QAction
 
 from app.services.db_service import DBService
 from app.ui.models_qt import TranslationManagementTableModel
