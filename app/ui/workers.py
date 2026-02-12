@@ -1128,6 +1128,95 @@ class TMExportWorker(QThread):
         self._cancelled = True
 
 
+class BulkNoiseUpdateWorker(QThread):
+    """P0 Safety: Worker for bulk updating is_noise status (non-blocking).
+
+    Prevents UI freeze during bulk operations on large datasets (1000+ rows).
+    Supports cancel and progress reporting.
+    """
+
+    progress = pyqtSignal(int, int)  # (current, total)
+    update_complete = pyqtSignal(int)  # (rows_updated)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        model_class: str,  # "Lemma" or "TermCluster"
+        item_ids: list,    # List of lemma_id or cluster_id
+        is_noise: bool,    # True = mark as noise, False = mark as valid
+    ):
+        """Initialize bulk noise update worker.
+
+        Args:
+            model_class: "Lemma" or "TermCluster"
+            item_ids: List of IDs to update
+            is_noise: True to mark as noise, False to mark as valid
+        """
+        super().__init__()
+        self.model_class = model_class
+        self.item_ids = item_ids
+        self.is_noise = is_noise
+        self._cancelled = False
+
+    def run(self):
+        """Run bulk update in chunks with progress reporting."""
+        try:
+            from app.services.db_service import DBService
+            from app.infra.sa_models import Lemma, TermCluster
+            from sqlalchemy import update
+
+            db_service = DBService.get_instance()
+
+            # Select model class
+            if self.model_class == "Lemma":
+                Model = Lemma
+                id_column = Lemma.lemma_id
+            elif self.model_class == "TermCluster":
+                Model = TermCluster
+                id_column = TermCluster.cluster_id
+            else:
+                raise ValueError(f"Unknown model class: {self.model_class}")
+
+            total_count = len(self.item_ids)
+            chunk_size = 100  # Update 100 rows per chunk for progress granularity
+            updated_count = 0
+
+            with db_service.get_session() as session:
+                # Process in chunks
+                for i in range(0, total_count, chunk_size):
+                    if self._cancelled:
+                        logger.info(f"Bulk noise update cancelled at {updated_count}/{total_count}")
+                        return
+
+                    # Get chunk of IDs
+                    chunk_ids = self.item_ids[i:i + chunk_size]
+
+                    # Update chunk
+                    stmt = update(Model).where(
+                        id_column.in_(chunk_ids)
+                    ).values(
+                        is_noise=1 if self.is_noise else 0
+                    )
+                    result = session.execute(stmt)
+                    session.commit()
+
+                    # Update progress
+                    updated_count += len(chunk_ids)
+                    self.progress.emit(updated_count, total_count)
+
+                if not self._cancelled:
+                    self.update_complete.emit(updated_count)
+                    logger.info(f"Bulk noise update completed: {updated_count}/{total_count}")
+
+        except Exception as e:
+            logger.exception("Bulk noise update worker error")
+            self.error.emit(str(e))
+
+    def cancel(self):
+        """Cancel the bulk update."""
+        self._cancelled = True
+
+
 class SingleTextTranslateWorker(QThread):
     """Worker for translating single text via MT providers (non-blocking).
 

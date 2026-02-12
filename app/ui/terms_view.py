@@ -644,7 +644,13 @@ class TermsView(QWidget):
             show_error(self, "Error", f"Failed to update noise status: {e}")
 
     def set_clusters_noise_status_bulk(self, is_noise: bool):
-        """Task 11: Bulk operation - update noise status for multiple selected clusters."""
+        """Task 11 + P0: Bulk operation - update noise status for multiple selected clusters.
+
+        P0 Safety features:
+        - Confirmation dialog for > 100 rows
+        - Progress dialog + QThread for > 1000 rows
+        - Cancel support for long operations
+        """
         selected_rows = self.terms_table.selectionModel().selectedRows()
         if not selected_rows:
             return
@@ -658,6 +664,34 @@ class TermsView(QWidget):
             cluster_ids.append(cluster.cluster_id)
             source_rows.append(source_row)
 
+        count = len(cluster_ids)
+        status_text = "noise" if is_noise else "valid"
+
+        # P0: Confirmation dialog for > 100 rows
+        if count > 100:
+            from PyQt6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                'Confirm Bulk Action',
+                f'You are about to mark {count:,} term clusters as {status_text}.\n\n'
+                f'This operation cannot be undone easily.\n\n'
+                f'Continue?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No  # Default to No for safety
+            )
+            if reply == QMessageBox.StandardButton.No:
+                logger.info(f"User cancelled bulk noise update for {count} clusters")
+                return
+
+        # P0: Use background worker for > 1000 rows (prevents UI freeze)
+        if count > 1000:
+            self._run_bulk_update_worker(cluster_ids, source_rows, is_noise)
+        else:
+            # Fast path: direct update for <= 1000 rows
+            self._run_bulk_update_direct(cluster_ids, source_rows, is_noise)
+
+    def _run_bulk_update_direct(self, cluster_ids: list, source_rows: list, is_noise: bool):
+        """Direct bulk update for small datasets (<= 1000 rows)."""
         try:
             with self.db_service.get_session() as session:
                 from sqlalchemy import update
@@ -691,6 +725,93 @@ class TermsView(QWidget):
             logger.exception(f"Failed to bulk update noise status for {len(cluster_ids)} clusters")
             from app.ui.dialogs import show_error
             show_error(self, "Error", f"Failed to bulk update noise status: {e}")
+
+    def _run_bulk_update_worker(self, cluster_ids: list, source_rows: list, is_noise: bool):
+        """Background worker for large datasets (> 1000 rows) with progress dialog."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from app.ui.workers import BulkNoiseUpdateWorker
+
+        # Create progress dialog
+        status_text = "noise" if is_noise else "valid"
+        self.bulk_progress_dialog = QProgressDialog(
+            f"Marking {len(cluster_ids):,} term clusters as {status_text}...",
+            "Cancel",
+            0,
+            len(cluster_ids),
+            self
+        )
+        self.bulk_progress_dialog.setWindowTitle("Bulk Update")
+        self.bulk_progress_dialog.setModal(True)
+        self.bulk_progress_dialog.setMinimumDuration(0)
+        self.bulk_progress_dialog.show()
+
+        # Store source_rows for later model update
+        self._pending_source_rows = source_rows
+        self._pending_is_noise = is_noise
+
+        # Create and start worker
+        self.bulk_worker = BulkNoiseUpdateWorker(
+            model_class="TermCluster",
+            item_ids=cluster_ids,
+            is_noise=is_noise
+        )
+
+        # Connect signals
+        self.bulk_worker.progress.connect(self._on_bulk_progress)
+        self.bulk_worker.update_complete.connect(self._on_bulk_complete)
+        self.bulk_worker.error.connect(self._on_bulk_error)
+        self.bulk_progress_dialog.canceled.connect(self._on_bulk_cancel)
+
+        # Start worker
+        self.bulk_worker.start()
+
+    def _on_bulk_progress(self, current: int, total: int):
+        """Update bulk progress dialog."""
+        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+            self.bulk_progress_dialog.setValue(current)
+            self.bulk_progress_dialog.setLabelText(
+                f"Updated {current:,} of {total:,} term clusters..."
+            )
+
+    def _on_bulk_complete(self, count: int):
+        """Handle bulk update completion."""
+        # Close progress dialog
+        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+            self.bulk_progress_dialog.close()
+            self.bulk_progress_dialog = None
+
+        # Update local model for all affected rows
+        for source_row in self._pending_source_rows:
+            self.terms_model.clusters[source_row].is_noise = 1 if self._pending_is_noise else 0
+
+        status = "noise" if self._pending_is_noise else "valid"
+        logger.info(f"Bulk update completed: {count} clusters marked as {status}")
+
+        # Show success message
+        from app.ui.dialogs import show_info
+        show_info(self, "Success", f"Marked {count:,} term clusters as {status}")
+
+        # Reload to apply filter if needed
+        if self.hide_noise_checkbox.isChecked():
+            self.load_terms()
+
+    def _on_bulk_error(self, error_msg: str):
+        """Handle bulk update error."""
+        # Close progress dialog
+        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+            self.bulk_progress_dialog.close()
+            self.bulk_progress_dialog = None
+
+        logger.error(f"Bulk noise update failed: {error_msg}")
+
+        from app.ui.dialogs import show_error
+        show_error(self, "Error", f"Bulk update failed:\n{error_msg}")
+
+    def _on_bulk_cancel(self):
+        """Handle bulk update cancellation."""
+        if hasattr(self, 'bulk_worker') and self.bulk_worker and self.bulk_worker.isRunning():
+            self.bulk_worker.cancel()
+            logger.info("User cancelled bulk noise update")
 
     def on_selection_changed(self):
         """Enable/disable batch translate button based on selection."""
