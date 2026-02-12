@@ -16,3 +16,6 @@ CREATE INDEX IF NOT EXISTS idx_tm_entry_noise ON tm_entry(is_noise) WHERE is_noi
 
 -- Create index for kind-based queries with noise filter
 CREATE INDEX IF NOT EXISTS idx_tm_entry_kind_noise ON tm_entry(kind, is_noise);
+
+-- Update schema version
+UPDATE schema_meta SET value = '12' WHERE key = 'schema_version';

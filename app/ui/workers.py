@@ -1201,6 +1201,13 @@ class BulkNoiseUpdateWorker(QThread):
                         is_noise=1 if self.is_noise else 0
                     )
                     result = session.execute(stmt)
+
+                    # NOTE: Source->TMEntry sync is now handled by DB triggers (migration 014)
+                    # - trg_lemma_noise_to_tm_entry: fires on lemma.is_noise UPDATE
+                    # - trg_cluster_noise_to_tm_entry: fires on term_cluster.is_noise UPDATE
+                    # This guarantees sync at DB level, no application code needed.
+                    # The trigger fires when we commit the source entity update below.
+
                     session.commit()
 
                     # Update progress
