@@ -94,6 +94,11 @@ class TermsView(QWidget):
         extract_controls_layout.addStretch()
         layout.addLayout(extract_controls_layout)
 
+        # Migration 011: Last extraction parameters info
+        self.last_extract_label = QLabel("")
+        self.last_extract_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        layout.addWidget(self.last_extract_label)
+
         # Filters
         filter_layout = QHBoxLayout()
 
@@ -294,6 +299,9 @@ class TermsView(QWidget):
                 self.terms_model.update_clusters(clusters)
 
                 self.status_label.setText(f"Showing {len(clusters)} term clusters")
+
+                # Migration 011: Load and display last extraction parameters
+                self._update_last_extract_info(session)
 
                 # M7 P1: Start translation worker
                 self.start_translation_worker(clusters)
@@ -791,6 +799,42 @@ class TermsView(QWidget):
         if self.batch_translate_worker:
             self.batch_translate_worker.deleteLater()
             self.batch_translate_worker = None
+
+    def _update_last_extract_info(self, session):
+        """Update label showing last extraction parameters (Migration 011)."""
+        from app.infra.sa_models import DictProject
+
+        project = session.get(DictProject, self.project_id)
+        if not project:
+            return
+
+        # Check if extraction has been performed
+        if project.last_extract_at:
+            # Build parameter info string
+            params_info = []
+
+            if project.last_extract_include_np == 1:
+                params_info.append("Include NP: Yes")
+                if project.last_extract_np_max_len:
+                    params_info.append(f"Max NP length: {project.last_extract_np_max_len}")
+            else:
+                params_info.append("Include NP: No")
+
+            if project.last_extract_min_freq:
+                params_info.append(f"Min freq: {project.last_extract_min_freq}")
+
+            # Format timestamp
+            from datetime import datetime
+            try:
+                extract_dt = datetime.fromisoformat(project.last_extract_at.replace('Z', '+00:00'))
+                time_str = extract_dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                time_str = project.last_extract_at[:19]  # Fallback to first 19 chars
+
+            info_text = f"Last extracted: {time_str} | {' | '.join(params_info)}"
+            self.last_extract_label.setText(info_text)
+        else:
+            self.last_extract_label.setText("No terms extracted yet")
 
     def closeEvent(self, event):
         """Handle widget close - ensure workers are stopped."""

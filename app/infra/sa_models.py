@@ -66,6 +66,12 @@ class DictProject(Base):
     is_general_corpus = Column(Integer, nullable=False, default=0)
     general_corpus_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL"))
 
+    # Migration 011: Term extraction parameters tracking (for UX feedback)
+    last_extract_np_max_len = Column(Integer)  # Last NP max length used
+    last_extract_min_freq = Column(Integer)     # Last min frequency used
+    last_extract_at = Column(String)            # Last extraction timestamp
+    last_extract_include_np = Column(Integer, default=0)  # Whether NP was included
+
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 

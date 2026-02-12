@@ -406,22 +406,31 @@ class DocumentsView(QWidget):
     def on_selection_changed(self):
         """Handle table selection change."""
         has_selection = len(self.docs_table.selectedItems()) > 0
-        self.process_btn.setEnabled(has_selection)
         self.view_text_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
 
-        # Enable re-process only for processed documents
+        # Enable process/re-process based on document status
         if has_selection:
             selected_rows = set(item.row() for item in self.docs_table.selectedItems())
-            # Check if all selected documents are processed
-            all_processed = True
+
+            # Count processed and unprocessed documents
+            has_processed = False
+            has_unprocessed = False
+
             for row in selected_rows:
                 status = self.docs_table.item(row, 3).text()  # Column 3 is Status
-                if status not in ('processed', 'failed'):
-                    all_processed = False
-                    break
-            self.reprocess_btn.setEnabled(all_processed)
+                if status in ('processed', 'failed'):
+                    has_processed = True
+                else:
+                    has_unprocessed = True
+
+            # Process button: only for unprocessed documents
+            self.process_btn.setEnabled(has_unprocessed)
+
+            # Re-process button: only for processed/failed documents
+            self.reprocess_btn.setEnabled(has_processed)
         else:
+            self.process_btn.setEnabled(False)
             self.reprocess_btn.setEnabled(False)
 
     def on_process(self):
@@ -430,11 +439,42 @@ class DocumentsView(QWidget):
         if not selected_rows:
             return
 
-        # Get selected document IDs
+        # Get selected document IDs and check statuses
         doc_ids = []
+        processed_docs = []
         for row in selected_rows:
             doc_id = int(self.docs_table.item(row, 0).text())
-            doc_ids.append(doc_id)
+            status = self.docs_table.item(row, 3).text()
+            file_name = self.docs_table.item(row, 1).text()
+
+            if status in ('processed', 'failed'):
+                processed_docs.append(file_name)
+            else:
+                doc_ids.append(doc_id)
+
+        # Warn if trying to process already-processed documents
+        if processed_docs:
+            from PyQt6.QtWidgets import QMessageBox
+            msg = (
+                f"{len(processed_docs)} document(s) already processed:\n\n" +
+                "\n".join(f"• {name}" for name in processed_docs[:5])
+            )
+            if len(processed_docs) > 5:
+                msg += f"\n... and {len(processed_docs) - 5} more"
+
+            msg += "\n\nUse 'Re-process' button instead to re-process these documents."
+
+            reply = QMessageBox.warning(
+                self,
+                "Documents Already Processed",
+                msg,
+                QMessageBox.StandardButton.Ok
+            )
+            return
+
+        if not doc_ids:
+            show_info(self, "Info", "No unprocessed documents selected")
+            return
 
         if self.process_worker and self.process_worker.isRunning():
             show_error(self, "Error", "Processing already in progress")

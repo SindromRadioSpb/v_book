@@ -190,6 +190,14 @@ class TermExtractionService:
             # Cluster terms
             clusters_created = self._cluster_terms(session, project_id)
 
+            # Migration 011: Save extraction parameters for UX feedback
+            from datetime import datetime, timezone
+            project.last_extract_np_max_len = np_max_len
+            project.last_extract_min_freq = min_freq
+            project.last_extract_include_np = 1 if include_np else 0
+            project.last_extract_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            project.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
             session.commit()
 
             logger.info(
