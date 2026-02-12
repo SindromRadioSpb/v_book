@@ -26,7 +26,7 @@ from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.dialogs import show_error, WhyTranslationDialog
-from app.ui.workers import TranslationResolveWorker
+from app.ui.workers import TranslationResolveWorker, DictionarySearchWorker
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,26 @@ class DictionaryView(QWidget):
         self.translation_worker: Optional[TranslationResolveWorker] = None
         self.settings = SettingsService.get_instance()
 
+        # Pagination state
+        self.current_page = 1
+        self.page_size = self.settings.get_int("dictionary_view/page_size", 100)
+        self.total_count = 0
+        self.search_worker = None  # Track worker for cancellation
+
         self.init_ui()
-        self.load_lemmas()
+        self.perform_search()
+
+    @property
+    def total_pages(self) -> int:
+        """Calculate total pages."""
+        if self.total_count == 0:
+            return 1
+        return (self.total_count + self.page_size - 1) // self.page_size
+
+    @property
+    def current_offset(self) -> int:
+        """Calculate current offset for pagination."""
+        return (self.current_page - 1) * self.page_size
 
     def init_ui(self):
         """Initialize the UI."""
@@ -58,34 +76,23 @@ class DictionaryView(QWidget):
 
         header_layout.addStretch()
 
-        # Top-N filter
-        header_layout.addWidget(QLabel("Show top:"))
-        self.top_n_spin = QSpinBox()
-        self.top_n_spin.setRange(10, 10000)
-        # Load saved value or use maximum (10000) as default
-        saved_top_n = self.settings.get_int("dictionary_view/top_n", 10000)
-        self.top_n_spin.setValue(saved_top_n)
-        self.top_n_spin.setSingleStep(10)
-        self.top_n_spin.valueChanged.connect(self.on_top_n_changed)
-        header_layout.addWidget(self.top_n_spin)
-
         # POS filter
         header_layout.addWidget(QLabel("POS:"))
         self.pos_filter = QComboBox()
         self.pos_filter.addItems(["All", "NOUN", "VERB", "ADJ", "ADV", "PROPN", "NUM"])
-        self.pos_filter.currentTextChanged.connect(self.load_lemmas)
+        self.pos_filter.currentTextChanged.connect(self.on_filter_changed)
         header_layout.addWidget(self.pos_filter)
 
         # Hide noise filter (Task 11: Entity Classification)
         self.hide_noise_checkbox = QCheckBox("Hide noise")
         self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
         self.hide_noise_checkbox.setToolTip("Hide punctuation, numbers, symbols, and other noise")
-        self.hide_noise_checkbox.stateChanged.connect(self.load_lemmas)
+        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
         header_layout.addWidget(self.hide_noise_checkbox)
 
         # Refresh button
         refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.load_lemmas)
+        refresh_btn.clicked.connect(self.perform_search)
         header_layout.addWidget(refresh_btn)
 
         # Batch translate button (PATCH-UI-BATCH-T02)
@@ -95,6 +102,68 @@ class DictionaryView(QWidget):
         header_layout.addWidget(self.batch_translate_btn)
 
         layout.addLayout(header_layout)
+
+        # Pagination bar
+        pagination_layout = QHBoxLayout()
+
+        # First/Prev buttons
+        self.first_btn = QPushButton("«")
+        self.first_btn.setToolTip("First page")
+        self.first_btn.setMaximumWidth(40)
+        self.first_btn.clicked.connect(self.on_first_page)
+        pagination_layout.addWidget(self.first_btn)
+
+        self.prev_btn = QPushButton("‹")
+        self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
+        self.prev_btn.setMaximumWidth(40)
+        self.prev_btn.clicked.connect(self.on_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        # Page number input
+        pagination_layout.addWidget(QLabel("Page"))
+        self.page_spinbox = QSpinBox()
+        self.page_spinbox.setMinimum(1)
+        self.page_spinbox.setMaximum(1)
+        self.page_spinbox.setValue(1)
+        self.page_spinbox.setMaximumWidth(60)
+        self.page_spinbox.valueChanged.connect(self.on_page_changed)
+        pagination_layout.addWidget(self.page_spinbox)
+
+        self.page_count_label = QLabel("of 1")
+        pagination_layout.addWidget(self.page_count_label)
+
+        # Next/Last buttons
+        self.next_btn = QPushButton("›")
+        self.next_btn.setToolTip("Next page (Ctrl+Right)")
+        self.next_btn.setMaximumWidth(40)
+        self.next_btn.clicked.connect(self.on_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        self.last_btn = QPushButton("»")
+        self.last_btn.setToolTip("Last page")
+        self.last_btn.setMaximumWidth(40)
+        self.last_btn.clicked.connect(self.on_last_page)
+        pagination_layout.addWidget(self.last_btn)
+
+        pagination_layout.addSpacing(20)
+
+        # Range label
+        self.range_label = QLabel("Showing 0–0 of 0")
+        pagination_layout.addWidget(self.range_label)
+
+        pagination_layout.addSpacing(20)
+
+        # Page size selector
+        pagination_layout.addWidget(QLabel("Page size:"))
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["25", "50", "100", "250", "500"])
+        self.page_size_combo.setCurrentText(str(self.page_size))
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pagination_layout.addWidget(self.page_size_combo)
+
+        pagination_layout.addStretch()
+
+        layout.addLayout(pagination_layout)
 
         # Search bar
         search_layout = QHBoxLayout()
@@ -120,7 +189,7 @@ class DictionaryView(QWidget):
         )
         self.lemma_table.setSortingEnabled(True)
 
-        # Install event filter for Enter key editing
+        # Install event filter for Enter key editing and keyboard shortcuts
         self.lemma_table.installEventFilter(self)
 
         # M7 P1: Context menu for "Why?" action
@@ -150,104 +219,171 @@ class DictionaryView(QWidget):
 
         self.setLayout(layout)
 
-        # Store all lemmas for filtering
-        self.all_lemmas = []
+    def build_filters(self) -> dict:
+        """Build filters dict for search."""
+        return {
+            "pos": self.pos_filter.currentText(),
+            "hide_noise": self.hide_noise_checkbox.isChecked(),
+            "search": self.search_edit.text().strip(),
+        }
 
-    def on_top_n_changed(self):
-        """Handle top-N filter change - save setting and reload."""
-        # Save the new value to settings
-        self.settings.set_value("dictionary_view/top_n", self.top_n_spin.value())
-        # Reload lemmas with new filter
-        self.load_lemmas()
+    def on_filter_changed(self):
+        """Handle filter change - reset to page 1 and search."""
+        self.current_page = 1
+        self.perform_search()
 
-    def load_lemmas(self):
-        """Load lemmas from database."""
-        try:
-            top_n = self.top_n_spin.value()
-            pos_filter = self.pos_filter.currentText()
+    def perform_search(self):
+        """Perform search with current filters and pagination."""
+        # Cancel previous worker if running
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.quit()
+            self.search_worker.wait(1000)
 
-            with self.db_service.get_session() as session:
-                from sqlalchemy import select
-                from app.infra.sa_models import Lemma, LemmaProjectStat
+        # Build filters
+        filters = self.build_filters()
 
-                # Build query
-                stmt = select(Lemma, LemmaProjectStat).join(
-                    LemmaProjectStat,
-                    Lemma.lemma_id == LemmaProjectStat.lemma_id
-                ).where(
-                    Lemma.project_id == self.project_id
-                )
+        # Create and start worker
+        self.search_worker = DictionarySearchWorker(
+            project_id=self.project_id,
+            filters=filters,
+            limit=self.page_size,
+            offset=self.current_offset,
+        )
 
-                # Apply POS filter
-                if pos_filter != "All":
-                    stmt = stmt.where(Lemma.pos == pos_filter)
+        self.search_worker.results_ready.connect(self.on_search_results)
+        self.search_worker.error.connect(self.on_search_error)
+        self.search_worker.start()
 
-                # Apply noise filter (Task 11: Entity Classification)
-                if self.hide_noise_checkbox.isChecked():
-                    # Hide noise: is_noise = 0 OR is_noise IS NULL (backward compatibility)
-                    from sqlalchemy import or_
-                    stmt = stmt.where(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
+        # Update status
+        self.status_label.setText("Searching...")
 
-                # Order by frequency
-                stmt = stmt.order_by(LemmaProjectStat.freq_abs.desc())
+    def on_search_results(self, rows: list, total_count: int):
+        """Handle search results from worker."""
+        # Update total count
+        self.total_count = total_count
 
-                # Limit
-                stmt = stmt.limit(top_n)
+        # Convert rows to LemmaStats DTOs
+        lemmas = []
+        for row in rows:
+            lemma_dto = LemmaStats(
+                lemma_id=row["lemma_id"],
+                lemma_text=row["lemma_text"],
+                pos=row["pos"],
+                freq_abs=row["freq_abs"],
+                doc_freq=row["doc_freq"],
+                translation=None,  # Will be filled by TranslationResolveWorker
+                status='auto',
+                entity_class=row.get("entity_class"),
+                is_noise=row.get("is_noise"),
+                noise_reason=row.get("noise_reason"),
+                norm_text=row.get("norm_text"),
+            )
+            lemmas.append(lemma_dto)
 
-                results = session.execute(stmt).all()
+        # Update model
+        self.lemma_model.update_lemmas(lemmas)
 
-                # Convert to DTOs
-                lemmas = []
-                for lemma, stat in results:
-                    lemma_dto = LemmaStats(
-                        lemma_id=lemma.lemma_id,
-                        lemma_text=lemma.lemma_text,
-                        pos=lemma.pos,
-                        freq_abs=stat.freq_abs,
-                        doc_freq=stat.doc_freq,
-                        translation=None,  # M7 will add this
-                        status='auto',
-                        entity_class=lemma.entity_class,
-                        is_noise=lemma.is_noise,
-                        noise_reason=lemma.noise_reason,
-                        norm_text=lemma.norm_text,
-                    )
-                    lemmas.append(lemma_dto)
+        # Update status
+        if total_count == 0:
+            self.status_label.setText("No lemmas found")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + len(lemmas), total_count)
+            self.status_label.setText(f"Showing {start}–{end} of {total_count:,} lemmas")
 
-                self.all_lemmas = lemmas
-                self.apply_search_filter()
+        # Update pagination controls
+        self.update_pagination_controls()
 
-                self.status_label.setText(f"Showing {len(lemmas)} lemmas")
+        # Start translation worker
+        self.start_translation_worker(lemmas)
 
-                # M7 P1: Start translation worker
-                self.start_translation_worker(lemmas)
+        # Clean up worker
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
 
-        except Exception as e:
-            logger.exception("Failed to load lemmas")
-            show_error(self, "Error", f"Failed to load lemmas: {e}")
+    def on_search_error(self, error_msg: str):
+        """Handle search error."""
+        logger.error(f"Search error: {error_msg}")
+        show_error(self, "Search Error", f"Failed to search lemmas: {error_msg}")
+        self.status_label.setText("Search failed")
+
+        # Clean up worker
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
 
     def on_search_changed(self, text: str):
-        """Handle search text change."""
-        self.apply_search_filter()
+        """Handle search text change - reset to page 1 and search."""
+        self.current_page = 1
+        self.perform_search()
 
-    def apply_search_filter(self):
-        """Apply search filter to lemmas."""
-        search_text = self.search_edit.text().strip().lower()
+    def on_first_page(self):
+        """Navigate to first page."""
+        if self.current_page != 1:
+            self.current_page = 1
+            self.perform_search()
 
-        if not search_text:
-            # Show all
-            self.lemma_model.update_lemmas(self.all_lemmas)
+    def on_prev_page(self):
+        """Navigate to previous page."""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.perform_search()
+
+    def on_next_page(self):
+        """Navigate to next page."""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.perform_search()
+
+    def on_last_page(self):
+        """Navigate to last page."""
+        total = self.total_pages
+        if self.current_page != total:
+            self.current_page = total
+            self.perform_search()
+
+    def on_page_changed(self, page: int):
+        """Handle page number change from spinbox."""
+        if page != self.current_page:
+            self.current_page = page
+            self.perform_search()
+
+    def on_page_size_changed(self, size_str: str):
+        """Handle page size change."""
+        new_size = int(size_str)
+        if new_size != self.page_size:
+            self.page_size = new_size
+            self.settings.set_value("dictionary_view/page_size", self.page_size)
+            self.current_page = 1  # Reset to first page
+            self.perform_search()
+
+    def update_pagination_controls(self):
+        """Update pagination control states based on current page and total."""
+        total = self.total_pages
+
+        # Update spinbox range
+        self.page_spinbox.blockSignals(True)
+        self.page_spinbox.setMaximum(total)
+        self.page_spinbox.setValue(self.current_page)
+        self.page_spinbox.blockSignals(False)
+
+        # Update page count label
+        self.page_count_label.setText(f"of {total}")
+
+        # Update button states
+        self.first_btn.setEnabled(self.current_page > 1)
+        self.prev_btn.setEnabled(self.current_page > 1)
+        self.next_btn.setEnabled(self.current_page < total)
+        self.last_btn.setEnabled(self.current_page < total)
+
+        # Update range label
+        if self.total_count == 0:
+            self.range_label.setText("Showing 0–0 of 0")
         else:
-            # Filter
-            filtered = [
-                lemma for lemma in self.all_lemmas
-                if search_text in lemma.lemma_text.lower()
-            ]
-            self.lemma_model.update_lemmas(filtered)
-
-            self.status_label.setText(
-                f"Showing {len(filtered)} of {len(self.all_lemmas)} lemmas"
-            )
+            start = self.current_offset + 1
+            end = min(self.current_offset + self.page_size, self.total_count)
+            self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
 
     def start_translation_worker(self, lemmas: List[LemmaStats]):
         """M7 P1: Start worker to resolve translations."""
@@ -473,7 +609,7 @@ class DictionaryView(QWidget):
 
                 # Reload to apply filter if needed
                 if self.hide_noise_checkbox.isChecked():
-                    self.load_lemmas()
+                    self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to update noise status for lemma {lemma.lemma_id}")
@@ -556,7 +692,7 @@ class DictionaryView(QWidget):
 
                 # Reload to apply filter if needed
                 if self.hide_noise_checkbox.isChecked():
-                    self.load_lemmas()
+                    self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(lemma_ids)} lemmas")
@@ -630,7 +766,7 @@ class DictionaryView(QWidget):
 
         # Reload to apply filter if needed
         if self.hide_noise_checkbox.isChecked():
-            self.load_lemmas()
+            self.perform_search()
 
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""
@@ -755,7 +891,7 @@ class DictionaryView(QWidget):
             QMessageBox.information(self, "Translation Complete", msg)
 
         # Refresh lemmas to show updated translations
-        self.load_lemmas()
+        self.perform_search()
 
         # Clean up worker
         if hasattr(self, '_batch_worker'):
@@ -778,23 +914,37 @@ class DictionaryView(QWidget):
             del self._batch_worker
 
     def eventFilter(self, obj, event):
-        """Handle Enter key to start editing Translation column."""
+        """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.lemma_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
-            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
-                # Get current selection
-                current_index = self.lemma_table.currentIndex()
-                if current_index.isValid():
-                    # Start editing Translation column (column 4 in source model)
-                    # Map proxy index to source index
-                    source_index = self.proxy_model.mapToSource(current_index)
-                    # Create translation column index in source model
-                    translation_source_index = self.lemma_model.index(source_index.row(), 4)
-                    # Map back to proxy
-                    translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
-                    self.lemma_table.setCurrentIndex(translation_proxy_index)
-                    self.lemma_table.edit(translation_proxy_index)
-                    return True  # Event handled
+            if isinstance(event, QKeyEvent):
+                key = event.key()
+                modifiers = event.modifiers()
+
+                # Ctrl+Left: Previous page
+                if key == Qt.Key.Key_Left and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_prev_page()
+                    return True
+
+                # Ctrl+Right: Next page
+                if key == Qt.Key.Key_Right and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_next_page()
+                    return True
+
+                # Enter: Start editing Translation column
+                if key == Qt.Key.Key_Return:
+                    current_index = self.lemma_table.currentIndex()
+                    if current_index.isValid():
+                        # Start editing Translation column (column 4 in source model)
+                        # Map proxy index to source index
+                        source_index = self.proxy_model.mapToSource(current_index)
+                        # Create translation column index in source model
+                        translation_source_index = self.lemma_model.index(source_index.row(), 4)
+                        # Map back to proxy
+                        translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                        self.lemma_table.setCurrentIndex(translation_proxy_index)
+                        self.lemma_table.edit(translation_proxy_index)
+                        return True  # Event handled
 
         return super().eventFilter(obj, event)
 
@@ -815,4 +965,4 @@ class DictionaryView(QWidget):
     def refresh(self):
         """Refresh lemma data from database."""
         logger.info("Refreshing dictionary view")
-        self.load_lemmas()
+        self.perform_search()

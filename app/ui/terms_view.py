@@ -16,7 +16,7 @@ from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
 from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
-from app.ui.workers import TranslationResolveWorker, BatchTranslateWorker
+from app.ui.workers import TranslationResolveWorker, BatchTranslateWorker, TermsSearchWorker
 from app.services.db_service import DBService
 from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
 
@@ -37,8 +37,26 @@ class TermsView(QWidget):
         self.translation_worker: Optional[TranslationResolveWorker] = None
         self.batch_translate_worker: Optional[BatchTranslateWorker] = None
 
+        # Pagination state
+        self.current_page = 1
+        self.page_size = self.settings.get_int("terms_view/page_size", 100)
+        self.total_count = 0
+        self.search_worker = None  # Track worker for cancellation
+
         self.init_ui()
-        self.load_terms()
+        self.perform_search()
+
+    @property
+    def total_pages(self) -> int:
+        """Calculate total pages."""
+        if self.total_count == 0:
+            return 1
+        return (self.total_count + self.page_size - 1) // self.page_size
+
+    @property
+    def current_offset(self) -> int:
+        """Calculate current offset for pagination."""
+        return (self.current_page - 1) * self.page_size
 
     def init_ui(self):
         """Initialize UI."""
@@ -61,7 +79,7 @@ class TermsView(QWidget):
         header_layout.addWidget(self.extract_btn)
 
         self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.load_terms)
+        self.refresh_btn.clicked.connect(self.perform_search)
         header_layout.addWidget(self.refresh_btn)
 
         layout.addLayout(header_layout)
@@ -105,22 +123,13 @@ class TermsView(QWidget):
         filter_layout.addWidget(QLabel("Source:"))
         self.source_combo = QComboBox()
         self.source_combo.addItems(["All", "N-grams", "NP"])
-        self.source_combo.currentTextChanged.connect(self.load_terms)
+        self.source_combo.currentTextChanged.connect(self.on_filter_changed)
         filter_layout.addWidget(self.source_combo)
-
-        filter_layout.addWidget(QLabel("Top:"))
-        self.top_n_spin = QSpinBox()
-        self.top_n_spin.setRange(10, 10000)
-        # Load saved value or use maximum (10000) as default
-        saved_top_n = self.settings.get_int("terms_view/top_n", 10000)
-        self.top_n_spin.setValue(saved_top_n)
-        self.top_n_spin.valueChanged.connect(self.on_top_n_changed)
-        filter_layout.addWidget(self.top_n_spin)
 
         filter_layout.addWidget(QLabel("Preset:"))
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(["freq", "strong", "balanced", "termhood"])
-        self.preset_combo.currentTextChanged.connect(self.load_terms)
+        self.preset_combo.currentTextChanged.connect(self.on_filter_changed)
         filter_layout.addWidget(self.preset_combo)
 
         # M5.4: Reference project for termhood
@@ -133,14 +142,14 @@ class TermsView(QWidget):
         filter_layout.addWidget(QLabel("Search:"))
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Filter terms...")
-        self.search_edit.textChanged.connect(self.load_terms)
+        self.search_edit.textChanged.connect(self.on_search_changed)
         filter_layout.addWidget(self.search_edit)
 
         # Hide noise filter (Task 11: Entity Classification)
         self.hide_noise_checkbox = QCheckBox("Hide noise")
         self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
         self.hide_noise_checkbox.setToolTip("Hide numeric, symbolic, and other noisy terms")
-        self.hide_noise_checkbox.stateChanged.connect(self.load_terms)
+        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
         filter_layout.addWidget(self.hide_noise_checkbox)
 
         filter_layout.addStretch()
@@ -184,6 +193,68 @@ class TermsView(QWidget):
         self.terms_model.dataChanged.connect(self.on_translation_edited)
 
         layout.addWidget(self.terms_table)
+
+        # Pagination bar
+        pagination_layout = QHBoxLayout()
+
+        # First/Prev buttons
+        self.first_btn = QPushButton("«")
+        self.first_btn.setToolTip("First page")
+        self.first_btn.setMaximumWidth(40)
+        self.first_btn.clicked.connect(self.on_first_page)
+        pagination_layout.addWidget(self.first_btn)
+
+        self.prev_btn = QPushButton("‹")
+        self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
+        self.prev_btn.setMaximumWidth(40)
+        self.prev_btn.clicked.connect(self.on_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        # Page number input
+        pagination_layout.addWidget(QLabel("Page"))
+        self.page_spinbox = QSpinBox()
+        self.page_spinbox.setMinimum(1)
+        self.page_spinbox.setMaximum(1)
+        self.page_spinbox.setValue(1)
+        self.page_spinbox.setMaximumWidth(60)
+        self.page_spinbox.valueChanged.connect(self.on_page_changed)
+        pagination_layout.addWidget(self.page_spinbox)
+
+        self.page_count_label = QLabel("of 1")
+        pagination_layout.addWidget(self.page_count_label)
+
+        # Next/Last buttons
+        self.next_btn = QPushButton("›")
+        self.next_btn.setToolTip("Next page (Ctrl+Right)")
+        self.next_btn.setMaximumWidth(40)
+        self.next_btn.clicked.connect(self.on_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        self.last_btn = QPushButton("»")
+        self.last_btn.setToolTip("Last page")
+        self.last_btn.setMaximumWidth(40)
+        self.last_btn.clicked.connect(self.on_last_page)
+        pagination_layout.addWidget(self.last_btn)
+
+        pagination_layout.addSpacing(20)
+
+        # Range label
+        self.range_label = QLabel("Showing 0–0 of 0")
+        pagination_layout.addWidget(self.range_label)
+
+        pagination_layout.addSpacing(20)
+
+        # Page size selector
+        pagination_layout.addWidget(QLabel("Page size:"))
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["25", "50", "100", "250", "500"])
+        self.page_size_combo.setCurrentText(str(self.page_size))
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pagination_layout.addWidget(self.page_size_combo)
+
+        pagination_layout.addStretch()
+
+        layout.addLayout(pagination_layout)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -253,16 +324,12 @@ class TermsView(QWidget):
                 )
 
             # Refresh terms table
-            self.load_terms()
+            self.current_page = 1
+            self.perform_search()
 
         except Exception as e:
             logger.exception("Failed to set reference project")
             show_error(self, "Error", f"Failed to set reference project: {e}")
-
-    def on_top_n_changed(self):
-        """Handle top-N filter change - save setting and reload."""
-        self.settings.set_value("terms_view/top_n", self.top_n_spin.value())
-        self.load_terms()
 
     def on_np_max_len_changed(self):
         """Handle Max NP length change - save setting (no reload needed, used only during extraction)."""
@@ -272,46 +339,173 @@ class TermsView(QWidget):
         """Handle Min freq change - save setting (no reload needed, used only during extraction)."""
         self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
 
-    def load_terms(self):
-        """Load and display term clusters."""
+    def build_filters(self) -> dict:
+        """Build filters dict for search."""
+        return {
+            "search": self.search_edit.text().strip(),
+            "preset": self.preset_combo.currentText().lower(),
+            "source_filter": self._get_source_filter(),
+            "min_freq": self.min_freq_spin.value() if self.min_freq_spin.value() > 1 else None,
+            "hide_noise": self.hide_noise_checkbox.isChecked(),
+        }
+
+    def _get_source_filter(self) -> Optional[str]:
+        """Get source filter value from combo."""
+        source = self.source_combo.currentText()
+        if source == "All":
+            return None
+        elif source == "N-grams":
+            return "ngram"
+        elif source == "NP":
+            return "np"
+        return None
+
+    def on_filter_changed(self):
+        """Handle filter change - reset to page 1 and search."""
+        self.current_page = 1
+        self.perform_search()
+
+    def on_search_changed(self, text: str):
+        """Handle search text change - reset to page 1 and search."""
+        self.current_page = 1
+        self.perform_search()
+
+    def perform_search(self):
+        """Perform search with current filters and pagination."""
+        # Cancel previous worker if running
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.quit()
+            self.search_worker.wait(1000)
+
+        # Build filters
+        filters = self.build_filters()
+
+        # Create and start worker
+        self.search_worker = TermsSearchWorker(
+            project_id=self.project_id,
+            filters=filters,
+            limit=self.page_size,
+            offset=self.current_offset,
+        )
+
+        self.search_worker.results_ready.connect(self.on_search_results)
+        self.search_worker.error.connect(self.on_search_error)
+        self.search_worker.start()
+
+        # Update status
+        self.status_label.setText("Searching...")
+
+    def on_search_results(self, clusters: list, total_count: int):
+        """Handle search results from worker."""
+        # Update total count
+        self.total_count = total_count
+
+        # Update model with clusters
+        self.terms_model.update_clusters(clusters)
+
+        # Update status
+        if total_count == 0:
+            self.status_label.setText("No term clusters found")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + len(clusters), total_count)
+            self.status_label.setText(f"Showing {start}–{end} of {total_count:,} term clusters")
+
+        # Update pagination controls
+        self.update_pagination_controls()
+
+        # Load last extraction info (only need session briefly)
         try:
-            top_n = self.top_n_spin.value()
-            preset = self.preset_combo.currentText()
-            search = self.search_edit.text().strip() or None
-
-            # Map source combo to filter value (M5.3)
-            source_text = self.source_combo.currentText()
-            source_filter = None
-            if source_text == "N-grams":
-                source_filter = "ngram"
-            elif source_text == "NP":
-                source_filter = "np"
-
             with self.db_service.get_session() as session:
-                clusters = self.term_service.list_term_clusters(
-                    session,
-                    self.project_id,
-                    top_n=top_n,
-                    preset=preset,
-                    search=search,
-                    source_filter=source_filter,
-                    hide_noise=self.hide_noise_checkbox.isChecked()
-                )
-
-                # M7 P1: Update model with clusters
-                self.terms_model.update_clusters(clusters)
-
-                self.status_label.setText(f"Showing {len(clusters)} term clusters")
-
-                # Migration 011: Load and display last extraction parameters
                 self._update_last_extract_info(session)
-
-                # M7 P1: Start translation worker
-                self.start_translation_worker(clusters)
-
         except Exception as e:
-            logger.exception("Failed to load terms")
-            show_error(self, "Error", f"Failed to load terms: {e}")
+            logger.exception("Failed to load last extraction info")
+
+        # Start translation worker
+        self.start_translation_worker(clusters)
+
+        # Clean up worker
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
+
+    def on_search_error(self, error_msg: str):
+        """Handle search error."""
+        logger.error(f"Search error: {error_msg}")
+        show_error(self, "Search Error", f"Failed to search term clusters: {error_msg}")
+        self.status_label.setText("Search failed")
+
+        # Clean up worker
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
+
+    def on_first_page(self):
+        """Navigate to first page."""
+        if self.current_page != 1:
+            self.current_page = 1
+            self.perform_search()
+
+    def on_prev_page(self):
+        """Navigate to previous page."""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.perform_search()
+
+    def on_next_page(self):
+        """Navigate to next page."""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.perform_search()
+
+    def on_last_page(self):
+        """Navigate to last page."""
+        total = self.total_pages
+        if self.current_page != total:
+            self.current_page = total
+            self.perform_search()
+
+    def on_page_changed(self, page: int):
+        """Handle page number change from spinbox."""
+        if page != self.current_page:
+            self.current_page = page
+            self.perform_search()
+
+    def on_page_size_changed(self, size_str: str):
+        """Handle page size change."""
+        new_size = int(size_str)
+        if new_size != self.page_size:
+            self.page_size = new_size
+            self.settings.set_value("terms_view/page_size", self.page_size)
+            self.current_page = 1  # Reset to first page
+            self.perform_search()
+
+    def update_pagination_controls(self):
+        """Update pagination control states based on current page and total."""
+        total = self.total_pages
+
+        # Update spinbox range
+        self.page_spinbox.blockSignals(True)
+        self.page_spinbox.setMaximum(total)
+        self.page_spinbox.setValue(self.current_page)
+        self.page_spinbox.blockSignals(False)
+
+        # Update page count label
+        self.page_count_label.setText(f"of {total}")
+
+        # Update button states
+        self.first_btn.setEnabled(self.current_page > 1)
+        self.prev_btn.setEnabled(self.current_page > 1)
+        self.next_btn.setEnabled(self.current_page < total)
+        self.last_btn.setEnabled(self.current_page < total)
+
+        # Update range label
+        if self.total_count == 0:
+            self.range_label.setText("Showing 0–0 of 0")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + self.page_size, self.total_count)
+            self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
 
     def on_extract(self):
         """Handle extract terms button."""
@@ -384,7 +578,7 @@ class TermsView(QWidget):
             msg += f"Clusters: {report.clusters_created}"
 
             show_info(self, "Extraction Complete", msg)
-            self.load_terms()
+            self.perform_search()
         else:
             show_error(self, "Extraction Failed", report.error_message)
 
@@ -639,7 +833,7 @@ class TermsView(QWidget):
 
                 # Reload to apply filter if needed
                 if self.hide_noise_checkbox.isChecked():
-                    self.load_terms()
+                    self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to update noise status for cluster {cluster.cluster_id}")
@@ -722,7 +916,7 @@ class TermsView(QWidget):
 
                 # Reload to apply filter if needed
                 if self.hide_noise_checkbox.isChecked():
-                    self.load_terms()
+                    self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(cluster_ids)} clusters")
@@ -796,7 +990,7 @@ class TermsView(QWidget):
 
         # Reload to apply filter if needed
         if self.hide_noise_checkbox.isChecked():
-            self.load_terms()
+            self.perform_search()
 
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""
@@ -910,7 +1104,7 @@ class TermsView(QWidget):
         progress_dialog.accept()
 
         # Refresh table to show new translations
-        self.load_terms()
+        self.perform_search()
 
         # Clean up worker
         if self.batch_translate_worker:
@@ -964,22 +1158,37 @@ class TermsView(QWidget):
             self.last_extract_label.setText("No terms extracted yet")
 
     def eventFilter(self, obj, event):
-        """Handle Enter key to start editing Translation column (column 11)."""
+        """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.terms_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
-            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
-                current_index = self.terms_table.currentIndex()
-                if current_index.isValid():
-                    # Map proxy index to source
-                    source_index = self.proxy_model.mapToSource(current_index)
-                    # Get Translation column (11) in source model
-                    translation_source_index = self.terms_model.index(source_index.row(), 11)
-                    # Map back to proxy
-                    translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
-                    # Set current and edit
-                    self.terms_table.setCurrentIndex(translation_proxy_index)
-                    self.terms_table.edit(translation_proxy_index)
+            if isinstance(event, QKeyEvent):
+                key = event.key()
+                modifiers = event.modifiers()
+
+                # Ctrl+Left: Previous page
+                if key == Qt.Key.Key_Left and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_prev_page()
                     return True
+
+                # Ctrl+Right: Next page
+                if key == Qt.Key.Key_Right and modifiers == Qt.KeyboardModifier.ControlModifier:
+                    self.on_next_page()
+                    return True
+
+                # Enter: Start editing Translation column
+                if key == Qt.Key.Key_Return:
+                    current_index = self.terms_table.currentIndex()
+                    if current_index.isValid():
+                        # Map proxy index to source
+                        source_index = self.proxy_model.mapToSource(current_index)
+                        # Get Translation column (11) in source model
+                        translation_source_index = self.terms_model.index(source_index.row(), 11)
+                        # Map back to proxy
+                        translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                        # Set current and edit
+                        self.terms_table.setCurrentIndex(translation_proxy_index)
+                        self.terms_table.edit(translation_proxy_index)
+                        return True
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
