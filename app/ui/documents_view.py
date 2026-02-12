@@ -308,6 +308,10 @@ class DocumentsView(QWidget):
         self.add_folder_btn.setEnabled(False)
         self.add_folder_btn.setToolTip("Cannot add documents to reference corpus (read-only)")
 
+        # Disable delete button
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.setToolTip("Cannot delete documents from reference corpus (read-only)")
+
         # Update hint label
         self.hint_label.setText(
             "ℹ️ This is a Reference Corpus (read-only documents)\n"
@@ -440,7 +444,9 @@ class DocumentsView(QWidget):
         """Handle table selection change."""
         has_selection = len(self.docs_table.selectedItems()) > 0
         self.view_text_btn.setEnabled(has_selection)
-        self.delete_btn.setEnabled(has_selection)
+
+        # Delete button: enabled only if has selection AND not reference corpus
+        self.delete_btn.setEnabled(has_selection and not self.is_reference_corpus)
 
         # Enable process/re-process based on document status
         if has_selection:
@@ -668,32 +674,94 @@ class DocumentsView(QWidget):
             show_error(self, "Error", f"Failed to view text: {e}")
 
     def on_delete(self):
-        """Delete selected document."""
+        """Delete selected document(s) - supports single and bulk deletion."""
+        # Block for reference corpus (safety check, UI should prevent this)
+        if self.is_reference_corpus:
+            from app.domain.exceptions import ReferenceCorpusReadonlyError
+            show_error(
+                self,
+                "Reference Corpus",
+                "Cannot delete documents from reference corpus.\n\n"
+                "Reference corpora are read-only for document operations."
+            )
+            return
+
         selected_rows = set(item.row() for item in self.docs_table.selectedItems())
         if not selected_rows:
             return
 
-        row = min(selected_rows)
-        doc_id = int(self.docs_table.item(row, 0).text())
-        file_name = self.docs_table.item(row, 1).text()
+        # Collect document IDs and names
+        doc_ids = []
+        doc_names = []
+        for row in selected_rows:
+            doc_id = int(self.docs_table.item(row, 0).text())
+            file_name = self.docs_table.item(row, 1).text()
+            doc_ids.append(doc_id)
+            doc_names.append(file_name)
 
+        # Confirmation dialog (single vs multiple)
         from PyQt6.QtWidgets import QMessageBox
+        if len(doc_ids) == 1:
+            message = f"Delete document '{doc_names[0]}'?"
+        else:
+            message = f"Delete {len(doc_ids)} documents?\n\n"
+            if len(doc_names) <= 5:
+                message += "Documents:\n" + "\n".join(f"• {name}" for name in doc_names)
+            else:
+                message += "Documents:\n" + "\n".join(f"• {name}" for name in doc_names[:5])
+                message += f"\n... and {len(doc_names) - 5} more"
+
         reply = QMessageBox.question(
             self,
             "Confirm Delete",
-            f"Delete document '{file_name}'?",
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
+                from app.domain.exceptions import ReferenceCorpusReadonlyError
+
                 with self.db_service.get_session() as session:
-                    if self.ingest_service.delete_document(session, doc_id):
-                        self.load_documents()
+                    if len(doc_ids) == 1:
+                        # Single document delete
+                        if self.ingest_service.delete_document(session, doc_ids[0]):
+                            logger.info(f"Deleted document ID {doc_ids[0]}")
+                            show_info(self, "Success", f"Document deleted: {doc_names[0]}")
+                        else:
+                            show_error(self, "Error", "Document not found")
                     else:
-                        show_error(self, "Error", "Document not found")
+                        # Bulk delete
+                        success_count, error_count = self.ingest_service.bulk_delete(session, doc_ids)
+
+                        # Show summary
+                        if error_count == 0:
+                            show_info(
+                                self,
+                                "Success",
+                                f"Successfully deleted {success_count} document(s)"
+                            )
+                        else:
+                            show_error(
+                                self,
+                                "Partial Success",
+                                f"Deleted: {success_count}\n"
+                                f"Failed: {error_count}\n\n"
+                                f"Check logs for details."
+                            )
+
+                    # Reload documents list
+                    self.load_documents()
+
+            except ReferenceCorpusReadonlyError as e:
+                logger.warning(f"Attempted to delete from reference corpus: {e}")
+                show_error(
+                    self,
+                    "Reference Corpus",
+                    f"Cannot delete documents from reference corpus.\n\n{str(e)}"
+                )
             except Exception as e:
-                logger.exception("Failed to delete document")
+                logger.exception("Failed to delete document(s)")
                 show_error(self, "Error", f"Failed to delete: {e}")
 
     def show_context_menu(self, position):
