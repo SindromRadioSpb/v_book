@@ -120,6 +120,9 @@ class DictionaryView(QWidget):
         )
         self.lemma_table.setSortingEnabled(True)
 
+        # Install event filter for Enter key editing
+        self.lemma_table.installEventFilter(self)
+
         # M7 P1: Context menu for "Why?" action
         self.lemma_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.lemma_table.customContextMenuRequested.connect(self.on_context_menu)
@@ -649,6 +652,27 @@ class DictionaryView(QWidget):
         if hasattr(self, '_batch_worker'):
             self._batch_worker.deleteLater()
             del self._batch_worker
+
+    def eventFilter(self, obj, event):
+        """Handle Enter key to start editing Translation column."""
+        if obj == self.lemma_table and event.type() == event.Type.KeyPress:
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
+                # Get current selection
+                current_index = self.lemma_table.currentIndex()
+                if current_index.isValid():
+                    # Start editing Translation column (column 4 in source model)
+                    # Map proxy index to source index
+                    source_index = self.proxy_model.mapToSource(current_index)
+                    # Create translation column index in source model
+                    translation_source_index = self.lemma_model.index(source_index.row(), 4)
+                    # Map back to proxy
+                    translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                    self.lemma_table.setCurrentIndex(translation_proxy_index)
+                    self.lemma_table.edit(translation_proxy_index)
+                    return True  # Event handled
+
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         """M7 P1: Clean up translation worker on close."""

@@ -225,6 +225,9 @@ class TranslationManagementPanel(QWidget):
         self.table_view.setSortingEnabled(False)  # Server-side sorting only
         self.table_view.horizontalHeader().setStretchLastSection(True)
 
+        # Install event filter for Enter key editing
+        self.table_view.installEventFilter(self)
+
         # P2 FIX: Connect dataChanged signal to save inline edits
         self.model.dataChanged.connect(self.on_translation_edited)
 
@@ -534,6 +537,22 @@ class TranslationManagementPanel(QWidget):
                 "Save Error",
                 f"Failed to save translation:\n{str(e)}"
             )
+
+    def eventFilter(self, obj, event):
+        """Handle Enter key to start editing Translation column."""
+        if obj == self.table_view and event.type() == event.Type.KeyPress:
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
+                # Get current selection
+                current_index = self.table_view.currentIndex()
+                if current_index.isValid():
+                    # Start editing Translation column (column 3)
+                    translation_index = self.model.index(current_index.row(), 3)
+                    self.table_view.setCurrentIndex(translation_index)
+                    self.table_view.edit(translation_index)
+                    return True  # Event handled
+
+        return super().eventFilter(obj, event)
 
     def on_back(self):
         """Handle back button click."""

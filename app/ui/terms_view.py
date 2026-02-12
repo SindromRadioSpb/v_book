@@ -161,6 +161,9 @@ class TermsView(QWidget):
         )
         self.terms_table.setSortingEnabled(True)
 
+        # Install event filter for Enter key editing
+        self.terms_table.installEventFilter(self)
+
         # M7 P1: Context menu for "Why?" action
         self.terms_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.terms_table.customContextMenuRequested.connect(self.on_context_menu)
@@ -835,6 +838,25 @@ class TermsView(QWidget):
             self.last_extract_label.setText(info_text)
         else:
             self.last_extract_label.setText("No terms extracted yet")
+
+    def eventFilter(self, obj, event):
+        """Handle Enter key to start editing Translation column (column 11)."""
+        if obj == self.terms_table and event.type() == event.Type.KeyPress:
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Return:
+                current_index = self.terms_table.currentIndex()
+                if current_index.isValid():
+                    # Map proxy index to source
+                    source_index = self.proxy_model.mapToSource(current_index)
+                    # Get Translation column (11) in source model
+                    translation_source_index = self.terms_model.index(source_index.row(), 11)
+                    # Map back to proxy
+                    translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                    # Set current and edit
+                    self.terms_table.setCurrentIndex(translation_proxy_index)
+                    self.terms_table.edit(translation_proxy_index)
+                    return True
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         """Handle widget close - ensure workers are stopped."""
