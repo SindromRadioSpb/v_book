@@ -262,21 +262,21 @@ class DictionaryView(QWidget):
         # Update total count
         self.total_count = total_count
 
-        # Convert rows to LemmaStats DTOs
+        # Convert rows (Lemma, LemmaProjectStat tuples) to LemmaStats DTOs
         lemmas = []
-        for row in rows:
+        for lemma, stat in rows:
             lemma_dto = LemmaStats(
-                lemma_id=row["lemma_id"],
-                lemma_text=row["lemma_text"],
-                pos=row["pos"],
-                freq_abs=row["freq_abs"],
-                doc_freq=row["doc_freq"],
+                lemma_id=lemma.lemma_id,
+                lemma_text=lemma.lemma_text,
+                pos=lemma.pos,
+                freq_abs=stat.freq_abs,
+                doc_freq=stat.doc_freq,
                 translation=None,  # Will be filled by TranslationResolveWorker
                 status='auto',
-                entity_class=row.get("entity_class"),
-                is_noise=row.get("is_noise"),
-                noise_reason=row.get("noise_reason"),
-                norm_text=row.get("norm_text"),
+                entity_class=lemma.entity_class if hasattr(lemma, 'entity_class') else None,
+                is_noise=lemma.is_noise,
+                noise_reason=lemma.noise_reason,
+                norm_text=lemma.norm_text,
             )
             lemmas.append(lemma_dto)
 
