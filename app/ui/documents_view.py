@@ -140,6 +140,9 @@ class DocumentsView(QWidget):
         self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.docs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
+        # Enable interactive column sorting
+        self.docs_table.setSortingEnabled(True)
+
         # Auto-resize columns
         header = self.docs_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -247,19 +250,49 @@ class DocumentsView(QWidget):
 
                 docs = session.execute(stmt).scalars().all()
 
+                # Temporarily disable sorting while populating (performance optimization)
+                self.docs_table.setSortingEnabled(False)
                 self.docs_table.setRowCount(len(docs))
 
                 for row, doc in enumerate(docs):
-                    self.docs_table.setItem(row, 0, QTableWidgetItem(str(doc.doc_id)))
+                    # Column 0: ID (numeric sorting)
+                    id_item = QTableWidgetItem()
+                    id_item.setData(Qt.ItemDataRole.DisplayRole, doc.doc_id)
+                    self.docs_table.setItem(row, 0, id_item)
+
+                    # Column 1: File Name (text sorting)
                     self.docs_table.setItem(row, 1, QTableWidgetItem(doc.file_name))
+
+                    # Column 2: Size (numeric sorting)
                     size_kb = doc.file_size_bytes / 1024
-                    self.docs_table.setItem(row, 2, QTableWidgetItem(f"{size_kb:.1f}"))
+                    size_item = QTableWidgetItem()
+                    size_item.setData(Qt.ItemDataRole.DisplayRole, size_kb)
+                    size_item.setText(f"{size_kb:.1f}")
+                    self.docs_table.setItem(row, 2, size_item)
+
+                    # Column 3: Status (text sorting)
                     self.docs_table.setItem(row, 3, QTableWidgetItem(doc.status))
-                    # NLP metrics (Migration 003)
-                    self.docs_table.setItem(row, 4, QTableWidgetItem(str(doc.sentence_count)))
-                    self.docs_table.setItem(row, 5, QTableWidgetItem(str(doc.token_count)))
+
+                    # Column 4: Sentences (numeric sorting)
+                    sentences_item = QTableWidgetItem()
+                    sentences_item.setData(Qt.ItemDataRole.DisplayRole, doc.sentence_count or 0)
+                    sentences_item.setText(str(doc.sentence_count) if doc.sentence_count else "")
+                    self.docs_table.setItem(row, 4, sentences_item)
+
+                    # Column 5: Tokens (numeric sorting)
+                    tokens_item = QTableWidgetItem()
+                    tokens_item.setData(Qt.ItemDataRole.DisplayRole, doc.token_count or 0)
+                    tokens_item.setText(str(doc.token_count) if doc.token_count else "")
+                    self.docs_table.setItem(row, 5, tokens_item)
+
+                    # Column 6: Imported (text sorting - already formatted)
                     self.docs_table.setItem(row, 6, QTableWidgetItem(doc.imported_at[:19]))
+
+                    # Column 7: Path (text sorting)
                     self.docs_table.setItem(row, 7, QTableWidgetItem(doc.file_path))
+
+                # Re-enable sorting after population
+                self.docs_table.setSortingEnabled(True)
 
                 self.status_label.setText(f"Total documents: {len(docs)}")
 
