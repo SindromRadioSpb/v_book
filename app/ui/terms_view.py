@@ -746,11 +746,16 @@ class TermsView(QWidget):
                     session.add(tm_entry)
 
                 # PATCH-19-02: Upsert tm_global and link
-                session.flush()
-                tm_entry_to_link = existing if existing else tm_entry
-                TMGlobalService().upsert_and_link(session, tm_entry_to_link)
+                # Use retry mechanism to handle database locked errors
+                from app.infra.db_retry import with_retry_on_locked
 
-                session.commit()
+                def save_and_propagate():
+                    session.flush()
+                    tm_entry_to_link = existing if existing else tm_entry
+                    TMGlobalService().upsert_and_link(session, tm_entry_to_link)
+                    session.commit()
+
+                with_retry_on_locked(save_and_propagate, max_retries=3)
 
                 # Update status in model to "approved"
                 cluster.translation_status = "approved"
