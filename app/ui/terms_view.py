@@ -472,8 +472,13 @@ class TermsView(QWidget):
             self.perform_search()
 
     def on_page_size_changed(self, size_str: str):
-        """Handle page size change."""
-        new_size = int(size_str)
+        """Handle page size change (Task 15: supports 'All (N)' format)."""
+        # Task 15: Handle "All (N)" format
+        if size_str.startswith("All"):
+            new_size = self.total_count
+        else:
+            new_size = int(size_str)
+
         if new_size != self.page_size:
             self.page_size = new_size
             self.settings.set_value("terms_view/page_size", self.page_size)
@@ -506,6 +511,26 @@ class TermsView(QWidget):
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
             self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
+
+        # Task 15: Add "All (N)" page size option if safe
+        self._update_page_size_combo()
+
+    def _update_page_size_combo(self):
+        """Task 15: Update page_size_combo to include 'All (N)' if safe."""
+        MAX_ALL_ROWS_UI = 5000  # Premium safety limit
+
+        # Remove old "All" item if exists
+        self.page_size_combo.blockSignals(True)
+        for i in range(self.page_size_combo.count()):
+            if self.page_size_combo.itemText(i).startswith("All"):
+                self.page_size_combo.removeItem(i)
+                break
+
+        # Add "All (N)" if safe
+        if 0 < self.total_count <= MAX_ALL_ROWS_UI:
+            self.page_size_combo.addItem(f"All ({self.total_count})")
+
+        self.page_size_combo.blockSignals(False)
 
     def on_extract(self):
         """Handle extract terms button."""
@@ -1016,76 +1041,148 @@ class TermsView(QWidget):
         self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
 
     def on_batch_translate(self):
-        """Handle batch translate selected rows."""
+        """Task 15: Handle batch translate with scope support."""
+        from PyQt6.QtWidgets import QMessageBox
+        from app.ui.workers import TranslateAllFilteredWorker
+        from app.services.db_service import DBService
+        from app.services.term_extraction_service import TermExtractionService
+
         selected_indexes = self.terms_table.selectionModel().selectedRows()
         if not selected_indexes:
             return
 
-        # Map proxy rows to source rows
-        source_rows = [self.proxy_model.map_to_source_row(idx.row()) for idx in selected_indexes]
+        # Task 15: Compute filtered count for "All pages" scope
+        filtered_count = 0
+        try:
+            db_service = DBService.get_instance()
+            term_service = TermExtractionService()
+            with db_service.get_session() as session:
+                filtered_count = term_service.count_cluster_ids_for_translation(
+                    session, self.project_id, self.build_filters(), "FILL_EMPTY"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to compute filtered_count: {e}")
 
-        # Build items list
-        items = []
-        for source_row in source_rows:
-            cluster = self.terms_model.clusters[source_row]
-            items.append(BatchTranslateItem(
-                entity_type="term_cluster",
-                entity_id=cluster.representative_he,  # Use representative as ID
-                source_text=cluster.representative_he,
-                src_lang="he",
-                tgt_lang="ru",
-                current_translation=cluster.translation,  # ClusterStats uses 'translation', not 'pinned_translation'
-                project_id=self.project_id,
-            ))
-
-        # Show confirm dialog
-        accepted, provider_mode, write_mode = show_batch_translate_dialog(
+        # Show confirm dialog with scope support
+        accepted, provider_mode, write_mode, scope = show_batch_translate_dialog(
             parent=self,
-            selected_count=len(items)
+            selected_count=len(selected_indexes),
+            scope_enabled=True,
+            filtered_count=filtered_count,
         )
 
         if not accepted:
             return
 
-        # Build options
-        options = BatchTranslateOptions(
-            provider_mode=provider_mode,
-            write_mode=write_mode,
-            chunk_size=50,
-        )
+        # Task 15: Handle scope selection
+        if scope == "all_filtered":
+            # Premium safety: confirm overwrite on large datasets
+            if write_mode == "OVERWRITE" and filtered_count > 100:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Overwrite",
+                    f"This will overwrite {filtered_count} existing translations.\n\n"
+                    f"This action cannot be undone.\n\n"
+                    f"Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
-        # Show progress dialog
-        progress_dialog = BatchProgressDialog(self, total=len(items))
-        progress_dialog.show()
+            # Create TranslateAllFilteredWorker for chunked translation
+            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} term_clusters")
+            progress_dialog = BatchProgressDialog(self, total=filtered_count)
+            progress_dialog.show()
 
-        # Create worker
-        self.batch_translate_worker = BatchTranslateWorker(
-            items=items,
-            options=options,
-            tab_type="terms"  # FIXED: parameter is tab_type, not context
-        )
-
-        # Connect signals
-        self.batch_translate_worker.progress.connect(progress_dialog.update_progress)
-        self.batch_translate_worker.row_completed.connect(
-            lambda entity_id, success: progress_dialog.update_counts(
-                self.batch_translate_worker.succeeded,
-                self.batch_translate_worker.skipped,
-                self.batch_translate_worker.failed
+            worker = TranslateAllFilteredWorker(
+                entity_type="term_cluster",
+                project_id=self.project_id,
+                filters=self.build_filters(),
+                provider_mode=provider_mode,
+                write_mode=write_mode,
+                chunk_size=200,
+                src_lang="he",
+                tgt_lang="ru",
             )
-        )
-        self.batch_translate_worker.finished.connect(
-            lambda result: self.on_batch_translate_finished(result, progress_dialog)
-        )
-        self.batch_translate_worker.error.connect(
-            lambda error: self.on_batch_translate_error(error, progress_dialog)
-        )
 
-        # Connect cancel signal
-        progress_dialog.cancel_requested.connect(self.batch_translate_worker.cancel)
+            # Connect signals
+            worker.progress.connect(progress_dialog.update_progress)
+            worker.row_completed.connect(
+                lambda entity_id, success: progress_dialog.update_counts(
+                    getattr(worker, 'succeeded', 0),
+                    getattr(worker, 'skipped', 0),
+                    getattr(worker, 'failed', 0)
+                )
+            )
+            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            progress_dialog.cancel_requested.connect(worker.cancel)
 
-        # Start worker
-        self.batch_translate_worker.start()
+            # Disable translate button while worker runs
+            self.batch_translate_btn.setEnabled(False)
+            worker.finished.connect(lambda: self.batch_translate_btn.setEnabled(True))
+            worker.error.connect(lambda: self.batch_translate_btn.setEnabled(True))
+
+            # Start worker
+            worker.start()
+            self.batch_translate_worker = worker
+
+        else:  # scope == "current_page" (original behavior)
+            # Map proxy rows to source rows
+            source_rows = [self.proxy_model.map_to_source_row(idx.row()) for idx in selected_indexes]
+
+            # Build items list
+            items = []
+            for source_row in source_rows:
+                cluster = self.terms_model.clusters[source_row]
+                items.append(BatchTranslateItem(
+                    entity_type="term_cluster",
+                    entity_id=cluster.representative_he,
+                    source_text=cluster.representative_he,
+                    src_lang="he",
+                    tgt_lang="ru",
+                    current_translation=cluster.translation,
+                    project_id=self.project_id,
+                ))
+
+            # Build options
+            options = BatchTranslateOptions(
+                provider_mode=provider_mode,
+                write_mode=write_mode,
+                chunk_size=50,
+            )
+
+            # Show progress dialog
+            progress_dialog = BatchProgressDialog(self, total=len(items))
+            progress_dialog.show()
+
+            # Create worker
+            self.batch_translate_worker = BatchTranslateWorker(
+                items=items,
+                options=options,
+                tab_type="terms"
+            )
+
+            # Connect signals
+            self.batch_translate_worker.progress.connect(progress_dialog.update_progress)
+            self.batch_translate_worker.row_completed.connect(
+                lambda entity_id, success: progress_dialog.update_counts(
+                    self.batch_translate_worker.succeeded,
+                    self.batch_translate_worker.skipped,
+                    self.batch_translate_worker.failed
+                )
+            )
+            self.batch_translate_worker.finished.connect(
+                lambda result: self.on_batch_translate_finished(result, progress_dialog)
+            )
+            self.batch_translate_worker.error.connect(
+                lambda error: self.on_batch_translate_error(error, progress_dialog)
+            )
+            progress_dialog.cancel_requested.connect(self.batch_translate_worker.cancel)
+
+            # Start worker
+            self.batch_translate_worker.start()
 
     def on_batch_translate_finished(self, result, progress_dialog: BatchProgressDialog):
         """Handle batch translate completion."""

@@ -18,6 +18,7 @@ from app.infra.sa_models import (
     SourceCorpus,
     TermCluster,
     TermClusterMember,
+    TMEntry,
 )
 from app.domain.dto import ExtractReport, ClusterStats
 from app.domain.term_extraction.ngram_extractor import extract_ngrams_from_sentence
@@ -859,6 +860,154 @@ class TermExtractionService:
 
         count = session.execute(stmt).scalar()
         return count or 0
+
+    def count_cluster_ids_for_translation(
+        self,
+        session: Session,
+        project_id: int,
+        filters: dict,
+        write_mode: str,
+    ) -> int:
+        """Count term clusters matching filters for translation.
+
+        Filters by empty translation if write_mode is FILL_EMPTY or SKIP_NON_EMPTY.
+
+        Args:
+            session: Database session
+            project_id: Project ID
+            filters: Filter dict with keys: search, min_freq, source_filter, hide_noise, preset
+            write_mode: "FILL_EMPTY" | "SKIP_NON_EMPTY" | "OVERWRITE"
+
+        Returns:
+            Total count of clusters to translate
+        """
+        stmt = select(func.count(TermCluster.cluster_id.distinct())).select_from(TermCluster).where(
+            TermCluster.project_id == project_id
+        )
+
+        # Apply filters (mirror list_term_clusters logic)
+        source_filter = filters.get("source_filter")
+        if source_filter:
+            stmt = stmt.join(TermClusterMember).join(Ngram).where(
+                Ngram.source_kind == source_filter
+            ).distinct()
+
+        min_freq = filters.get("min_freq")
+        if min_freq:
+            stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        if filters.get("hide_noise", True):
+            stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
+
+        search = filters.get("search", "").strip()
+        if search:
+            search_variants = normalize_search_query(search)
+            if search_variants:
+                search_conditions = []
+                for variant in search_variants:
+                    search_conditions.append(TermCluster.representative_he.contains(variant))
+                    search_conditions.append(TermCluster.canonical_key.contains(variant))
+                    if TermCluster.representative_lemma is not None:
+                        search_conditions.append(TermCluster.representative_lemma.contains(variant))
+                stmt = stmt.where(or_(*search_conditions))
+            else:
+                stmt = stmt.where(TermCluster.representative_he.contains(search))
+
+        # For FILL_EMPTY and SKIP_NON_EMPTY: only count clusters without translation
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.outerjoin(
+                TMEntry,
+                (TMEntry.cluster_id == TermCluster.cluster_id) &
+                (TMEntry.kind == "term_cluster") &
+                (TMEntry.project_id == project_id)
+            ).where(
+                or_(
+                    TMEntry.tm_id.is_(None),
+                    TMEntry.translation.is_(None),
+                    TMEntry.translation == ""
+                )
+            )
+
+        count = session.execute(stmt).scalar()
+        return count or 0
+
+    def fetch_cluster_ids_for_translation(
+        self,
+        session: Session,
+        project_id: int,
+        filters: dict,
+        write_mode: str,
+        limit: int,
+        offset: int,
+    ) -> List[int]:
+        """Fetch term cluster IDs matching filters for translation (paginated).
+
+        Args:
+            session: Database session
+            project_id: Project ID
+            filters: Filter dict (same as count_cluster_ids_for_translation)
+            write_mode: "FILL_EMPTY" | "SKIP_NON_EMPTY" | "OVERWRITE"
+            limit: Chunk size
+            offset: Offset for pagination
+
+        Returns:
+            List of cluster_id integers
+        """
+        stmt = select(TermCluster.cluster_id).where(
+            TermCluster.project_id == project_id
+        )
+
+        # Apply filters (mirror list_term_clusters logic)
+        source_filter = filters.get("source_filter")
+        if source_filter:
+            stmt = stmt.join(TermClusterMember).join(Ngram).where(
+                Ngram.source_kind == source_filter
+            ).distinct()
+
+        min_freq = filters.get("min_freq")
+        if min_freq:
+            stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        if filters.get("hide_noise", True):
+            stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
+
+        search = filters.get("search", "").strip()
+        if search:
+            search_variants = normalize_search_query(search)
+            if search_variants:
+                search_conditions = []
+                for variant in search_variants:
+                    search_conditions.append(TermCluster.representative_he.contains(variant))
+                    search_conditions.append(TermCluster.canonical_key.contains(variant))
+                    if TermCluster.representative_lemma is not None:
+                        search_conditions.append(TermCluster.representative_lemma.contains(variant))
+                stmt = stmt.where(or_(*search_conditions))
+            else:
+                stmt = stmt.where(TermCluster.representative_he.contains(search))
+
+        # For FILL_EMPTY and SKIP_NON_EMPTY: only fetch clusters without translation
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.outerjoin(
+                TMEntry,
+                (TMEntry.cluster_id == TermCluster.cluster_id) &
+                (TMEntry.kind == "term_cluster") &
+                (TMEntry.project_id == project_id)
+            ).where(
+                or_(
+                    TMEntry.tm_id.is_(None),
+                    TMEntry.translation.is_(None),
+                    TMEntry.translation == ""
+                )
+            )
+
+        # Order by cluster_id for deterministic chunking
+        stmt = stmt.order_by(TermCluster.cluster_id.asc())
+
+        # Apply pagination
+        stmt = stmt.limit(limit).offset(offset)
+
+        results = session.execute(stmt).scalars().all()
+        return list(results)
 
     def get_cluster_members(self, session: Session, cluster_id: int) -> List[dict]:
         """

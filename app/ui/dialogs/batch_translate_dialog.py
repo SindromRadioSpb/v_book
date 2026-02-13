@@ -16,20 +16,25 @@ class BatchTranslateDialog(QDialog):
     """Confirm dialog for batch translation.
 
     Allows user to select:
+    - Scope: current page or all pages (filtered) (Task 15)
     - Provider mode: chain (default) or force specific provider
     - Write mode: fill empty (default), overwrite, skip non-empty
     - Remember choices checkbox
     """
 
-    def __init__(self, parent=None, selected_count: int = 0):
+    def __init__(self, parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0):
         """Initialize dialog.
 
         Args:
             parent: Parent widget
-            selected_count: Number of selected rows
+            selected_count: Number of selected rows (for current page scope)
+            scope_enabled: Enable "All pages (filtered)" scope option
+            filtered_count: Total count of filtered items (for all pages scope)
         """
         super().__init__(parent)
         self.selected_count = selected_count
+        self.scope_enabled = scope_enabled
+        self.filtered_count = filtered_count
         self.settings = SettingsService.get_instance()
         self.init_ui()
         self.load_settings()
@@ -45,6 +50,30 @@ class BatchTranslateDialog(QDialog):
         header = QLabel(f"<b>Selected rows:</b> {self.selected_count}")
         header.setStyleSheet("font-size: 13px; padding: 8px;")
         layout.addWidget(header)
+
+        # Scope group (Task 15)
+        if self.scope_enabled:
+            scope_group = QGroupBox("Scope")
+            scope_layout = QVBoxLayout()
+
+            self.scope_button_group = QButtonGroup(self)
+
+            self.current_page_radio = QRadioButton(f"Current page ({self.selected_count} selected)")
+            self.current_page_radio.setChecked(True)
+            self.scope_button_group.addButton(self.current_page_radio, 0)
+            scope_layout.addWidget(self.current_page_radio)
+
+            self.all_pages_radio = QRadioButton("All pages (filtered)")
+            self.scope_button_group.addButton(self.all_pages_radio, 1)
+            scope_layout.addWidget(self.all_pages_radio)
+
+            # Count label below "All pages"
+            self.filtered_count_label = QLabel(f"   → Will translate ~{self.filtered_count} items matching current filters")
+            self.filtered_count_label.setStyleSheet("color: #666; font-size: 11px; padding-left: 20px;")
+            scope_layout.addWidget(self.filtered_count_label)
+
+            scope_group.setLayout(scope_layout)
+            layout.addWidget(scope_group)
 
         # Provider mode group
         provider_group = QGroupBox("Provider Mode")
@@ -207,6 +236,20 @@ class BatchTranslateDialog(QDialog):
         else:
             return "FILL_EMPTY"  # Default
 
+    def get_scope(self) -> str:
+        """Get selected scope (Task 15).
+
+        Returns:
+            "current_page" or "all_filtered"
+        """
+        if not self.scope_enabled:
+            return "current_page"
+
+        if self.current_page_radio.isChecked():
+            return "current_page"
+        else:
+            return "all_filtered"
+
     def open_settings(self):
         """Open MT provider settings dialog."""
         from app.ui.provider_settings_dialog import show_provider_settings
@@ -218,23 +261,26 @@ class BatchTranslateDialog(QDialog):
         super().accept()
 
 
-def show_batch_translate_dialog(parent=None, selected_count: int = 0) -> tuple[bool, str, str]:
+def show_batch_translate_dialog(parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0) -> tuple[bool, str, str, str]:
     """Show batch translate dialog and return user choices.
 
     Args:
         parent: Parent widget
         selected_count: Number of selected rows
+        scope_enabled: Enable "All pages (filtered)" scope option (Task 15)
+        filtered_count: Total count of filtered items (for all pages scope) (Task 15)
 
     Returns:
-        Tuple of (accepted, provider_mode, write_mode)
+        Tuple of (accepted, provider_mode, write_mode, scope)
         - accepted: True if user clicked Translate, False if cancelled
         - provider_mode: "chain" or "force:<provider_id>"
         - write_mode: "FILL_EMPTY", "OVERWRITE", or "SKIP_NON_EMPTY"
+        - scope: "current_page" or "all_filtered" (Task 15)
     """
-    dialog = BatchTranslateDialog(parent, selected_count)
+    dialog = BatchTranslateDialog(parent, selected_count, scope_enabled, filtered_count)
     result = dialog.exec()
 
     if result == QDialog.DialogCode.Accepted:
-        return True, dialog.get_provider_mode(), dialog.get_write_mode()
+        return True, dialog.get_provider_mode(), dialog.get_write_mode(), dialog.get_scope()
     else:
-        return False, "chain", "FILL_EMPTY"
+        return False, "chain", "FILL_EMPTY", "current_page"

@@ -1577,3 +1577,232 @@ class BatchTranslateWorker(QThread):
                 f"{error[:200]}\n\n"
                 f"Check the application logs for details."
             )
+
+
+# Task 15: TranslateAllFilteredWorker - chunked translation of all filtered records
+class TranslateAllFilteredWorker(QThread):
+    """Worker for translating all records matching filters (across pages).
+
+    Unlike BatchTranslateWorker which works on pre-selected UI rows,
+    this worker fetches IDs from DB in chunks and translates all matching records.
+    """
+
+    progress = pyqtSignal(int, int)        # (completed, total)
+    row_completed = pyqtSignal(str, bool)  # (entity_id, success)
+    finished = pyqtSignal(object)          # BatchTranslateResult
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        entity_type: str,           # "lemma" | "term_cluster"
+        project_id: int,
+        filters: dict,              # Same dict as passed to search/count
+        provider_mode: str,         # "chain" | "force:<provider_id>"
+        write_mode: str,            # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
+        chunk_size: int = 200,      # ID fetch chunk size
+        src_lang: str = "he",
+        tgt_lang: str = "ru",
+    ):
+        super().__init__()
+        self.entity_type = entity_type
+        self.project_id = project_id
+        self.filters = filters
+        self.provider_mode = provider_mode
+        self.write_mode = write_mode
+        self.chunk_size = chunk_size
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request cancellation (checked between chunks)."""
+        self._cancel_requested = True
+
+    def run(self):
+        """Execute chunked translation."""
+        from app.services.db_service import DBService
+        from app.services.dictionary_service import DictionaryService
+        from app.services.term_extraction_service import TermExtractionService
+        from app.services.batch_mt_translate_service import (
+            BatchMTTranslateService,
+            BatchTranslateItem,
+            BatchTranslateOptions,
+            BatchTranslateResult,
+        )
+        from app.services.translation_service import TranslationService
+        from app.infra.sa_models import Lemma, TermCluster, TMEntry
+        from sqlalchemy import select
+
+        try:
+            db_service = DBService.get_instance()
+            batch_service = BatchMTTranslateService()
+            translation_service = TranslationService()
+
+            # Aggregate results across chunks
+            total_succeeded = 0
+            total_skipped = 0
+            total_failed = 0
+            all_row_results = []
+
+            with db_service.get_session() as session:
+                # Step 1: Count total
+                if self.entity_type == "lemma":
+                    dict_service = DictionaryService()
+                    total = dict_service.count_lemma_ids_for_translation(
+                        session, self.project_id, self.filters, self.write_mode
+                    )
+                elif self.entity_type == "term_cluster":
+                    term_service = TermExtractionService()
+                    total = term_service.count_cluster_ids_for_translation(
+                        session, self.project_id, self.filters, self.write_mode
+                    )
+                else:
+                    raise ValueError(f"Unknown entity_type: {self.entity_type}")
+
+                if total == 0:
+                    # Nothing to translate
+                    empty_result = BatchTranslateResult(
+                        total=0,
+                        succeeded=0,
+                        skipped=0,
+                        failed=0,
+                        row_results=[],
+                        trace_id="empty",
+                        elapsed_ms=0,
+                    )
+                    self.finished.emit(empty_result)
+                    return
+
+                logger.info(f"TranslateAllFilteredWorker: translating {total} {self.entity_type} records")
+
+                # Step 2: Process in chunks
+                completed = 0
+                for offset in range(0, total, self.chunk_size):
+                    # Check cancel
+                    if self._cancel_requested:
+                        logger.info(f"Translation cancelled at {completed}/{total}")
+                        result = BatchTranslateResult(
+                            total=completed,
+                            succeeded=total_succeeded,
+                            skipped=total_skipped,
+                            failed=total_failed,
+                            row_results=all_row_results,
+                            trace_id="cancelled",
+                            elapsed_ms=0,
+                        )
+                        self.finished.emit(result)
+                        return
+
+                    # Fetch IDs for this chunk
+                    if self.entity_type == "lemma":
+                        ids = dict_service.fetch_lemma_ids_for_translation(
+                            session, self.project_id, self.filters, self.write_mode,
+                            limit=self.chunk_size, offset=offset
+                        )
+                    else:  # term_cluster
+                        ids = term_service.fetch_cluster_ids_for_translation(
+                            session, self.project_id, self.filters, self.write_mode,
+                            limit=self.chunk_size, offset=offset
+                        )
+
+                    if not ids:
+                        break
+
+                    # Load entities and build BatchTranslateItem list
+                    items = []
+                    if self.entity_type == "lemma":
+                        # Load lemmas + their current translations via LEFT JOIN to TMEntry
+                        stmt = select(Lemma, TMEntry).outerjoin(
+                            TMEntry,
+                            (TMEntry.lemma_id == Lemma.lemma_id) &
+                            (TMEntry.kind == "lemma") &
+                            (TMEntry.project_id == self.project_id)
+                        ).where(Lemma.lemma_id.in_(ids))
+
+                        results = session.execute(stmt).all()
+                        for lemma, tm_entry in results:
+                            current_translation = tm_entry.translation if tm_entry else None
+                            items.append(BatchTranslateItem(
+                                entity_type="lemma",
+                                entity_id=lemma.lemma_text,
+                                source_text=lemma.lemma_text,
+                                src_lang=self.src_lang,
+                                tgt_lang=self.tgt_lang,
+                                current_translation=current_translation,
+                                project_id=self.project_id,
+                            ))
+
+                    else:  # term_cluster
+                        # Load clusters + their current translations
+                        stmt = select(TermCluster, TMEntry).outerjoin(
+                            TMEntry,
+                            (TMEntry.cluster_id == TermCluster.cluster_id) &
+                            (TMEntry.kind == "term_cluster") &
+                            (TMEntry.project_id == self.project_id)
+                        ).where(TermCluster.cluster_id.in_(ids))
+
+                        results = session.execute(stmt).all()
+                        for cluster, tm_entry in results:
+                            current_translation = tm_entry.translation if tm_entry else None
+                            items.append(BatchTranslateItem(
+                                entity_type="term_cluster",
+                                entity_id=cluster.representative_he,
+                                source_text=cluster.representative_he,
+                                src_lang=self.src_lang,
+                                tgt_lang=self.tgt_lang,
+                                current_translation=current_translation,
+                                project_id=self.project_id,
+                            ))
+
+                    if not items:
+                        break
+
+                    # Translate this chunk using existing batch service
+                    options = BatchTranslateOptions(
+                        provider_mode=self.provider_mode,
+                        write_mode=self.write_mode,
+                        chunk_size=len(items),  # Process all items in this chunk together
+                        stop_on_error=False,
+                    )
+
+                    # Execute batch for this chunk
+                    chunk_result = batch_service.execute_batch(
+                        session=session,
+                        items=items,
+                        options=options,
+                        progress_callback=None,  # We handle progress at worker level
+                        cancel_check=lambda: self._cancel_requested,
+                    )
+
+                    # Aggregate results
+                    total_succeeded += chunk_result.succeeded
+                    total_skipped += chunk_result.skipped
+                    total_failed += chunk_result.failed
+                    all_row_results.extend(chunk_result.row_results)
+
+                    # Emit row_completed signals for real-time UI updates
+                    for row_result in chunk_result.row_results:
+                        success = (not row_result.skipped and not row_result.error_message)
+                        self.row_completed.emit(row_result.entity_id, success)
+
+                    # Update progress
+                    completed += len(items)
+                    self.progress.emit(completed, total)
+
+                    logger.debug(f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded")
+
+                # Done
+                final_result = BatchTranslateResult(
+                    total=completed,
+                    succeeded=total_succeeded,
+                    skipped=total_skipped,
+                    failed=total_failed,
+                    row_results=all_row_results,
+                    trace_id="all_filtered",
+                    elapsed_ms=0,  # We don't track elapsed time at worker level
+                )
+                self.finished.emit(final_result)
+
+        except Exception as e:
+            logger.error(f"TranslateAllFilteredWorker error: {e}", exc_info=True)
+            self.error.emit(str(e))

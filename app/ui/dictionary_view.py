@@ -350,8 +350,13 @@ class DictionaryView(QWidget):
             self.perform_search()
 
     def on_page_size_changed(self, size_str: str):
-        """Handle page size change."""
-        new_size = int(size_str)
+        """Handle page size change (Task 15: supports 'All (N)' format)."""
+        # Task 15: Handle "All (N)" format
+        if size_str.startswith("All"):
+            new_size = self.total_count
+        else:
+            new_size = int(size_str)
+
         if new_size != self.page_size:
             self.page_size = new_size
             self.settings.set_value("dictionary_view/page_size", self.page_size)
@@ -384,6 +389,26 @@ class DictionaryView(QWidget):
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
             self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
+
+        # Task 15: Add "All (N)" page size option if safe
+        self._update_page_size_combo()
+
+    def _update_page_size_combo(self):
+        """Task 15: Update page_size_combo to include 'All (N)' if safe."""
+        MAX_ALL_ROWS_UI = 5000  # Premium safety limit
+
+        # Remove old "All" item if exists
+        self.page_size_combo.blockSignals(True)
+        for i in range(self.page_size_combo.count()):
+            if self.page_size_combo.itemText(i).startswith("All"):
+                self.page_size_combo.removeItem(i)
+                break
+
+        # Add "All (N)" if safe
+        if 0 < self.total_count <= MAX_ALL_ROWS_UI:
+            self.page_size_combo.addItem(f"All ({self.total_count})")
+
+        self.page_size_combo.blockSignals(False)
 
     def start_translation_worker(self, lemmas: List[LemmaStats]):
         """M7 P1: Start worker to resolve translations."""
@@ -792,80 +817,142 @@ class DictionaryView(QWidget):
         self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
 
     def on_batch_translate(self):
-        """PATCH-UI-BATCH-T02: Handle batch translate action."""
+        """Task 15: Handle batch translate action with scope support."""
         from PyQt6.QtWidgets import QMessageBox
         from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
-        from app.ui.workers import BatchTranslateWorker
+        from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
         from app.services.batch_mt_translate_service import (
             BatchTranslateItem,
             BatchTranslateOptions,
         )
+        from app.services.db_service import DBService
+        from app.services.dictionary_service import DictionaryService
 
         # Get selected rows
         selected_indexes = self.lemma_table.selectionModel().selectedRows()
         if not selected_indexes:
             return
 
-        # Map proxy indices to source rows
-        source_rows = [
-            self.proxy_model.map_to_source_row(index.row())
-            for index in selected_indexes
-        ]
+        # Task 15: Compute filtered count for "All pages" scope
+        filtered_count = 0
+        try:
+            db_service = DBService.get_instance()
+            dict_service = DictionaryService()
+            with db_service.get_session() as session:
+                filtered_count = dict_service.count_lemma_ids_for_translation(
+                    session, self.project_id, self.build_filters(), "FILL_EMPTY"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to compute filtered_count: {e}")
 
-        # Build items list
-        items = []
-        for row in source_rows:
-            lemma = self.lemma_model.lemmas[row]
-            item = BatchTranslateItem(
-                entity_type="lemma",
-                entity_id=lemma.lemma_text,
-                source_text=lemma.lemma_text,
-                src_lang="he",  # Hardcoded for Hebrew
-                tgt_lang="ru",  # Hardcoded for Russian
-                current_translation=lemma.translation,
-                project_id=self.project_id,
-            )
-            items.append(item)
-
-        # Show confirm dialog
-        accepted, provider_mode, write_mode = show_batch_translate_dialog(
+        # Show confirm dialog with scope support
+        accepted, provider_mode, write_mode, scope = show_batch_translate_dialog(
             parent=self,
-            selected_count=len(items),
+            selected_count=len(selected_indexes),
+            scope_enabled=True,
+            filtered_count=filtered_count,
         )
 
         if not accepted:
             return
 
-        # Create options
-        options = BatchTranslateOptions(
-            provider_mode=provider_mode,
-            write_mode=write_mode,
-            chunk_size=50,
-            stop_on_error=False,
-        )
+        # Task 15: Handle scope selection
+        if scope == "all_filtered":
+            # Premium safety: confirm overwrite on large datasets
+            if write_mode == "OVERWRITE" and filtered_count > 100:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Overwrite",
+                    f"This will overwrite {filtered_count} existing translations.\n\n"
+                    f"This action cannot be undone.\n\n"
+                    f"Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
-        # Show progress dialog
-        progress_dialog = BatchProgressDialog(parent=self, total=len(items))
-        progress_dialog.show()
+            # Create TranslateAllFilteredWorker for chunked translation
+            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} lemmas")
+            progress_dialog = BatchProgressDialog(parent=self, total=filtered_count)
+            progress_dialog.show()
 
-        # Create worker
-        worker = BatchTranslateWorker(
-            items=items,
-            options=options,
-            tab_type="dictionary",
-        )
+            worker = TranslateAllFilteredWorker(
+                entity_type="lemma",
+                project_id=self.project_id,
+                filters=self.build_filters(),
+                provider_mode=provider_mode,
+                write_mode=write_mode,
+                chunk_size=200,
+                src_lang="he",
+                tgt_lang="ru",
+            )
 
-        # Connect signals
-        worker.progress.connect(progress_dialog.update_progress)
-        worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
-        worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
-        progress_dialog.cancel_requested.connect(worker.cancel)
+            # Connect signals
+            worker.progress.connect(progress_dialog.update_progress)
+            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            progress_dialog.cancel_requested.connect(worker.cancel)
 
-        # Start worker
-        worker.start()
+            # Disable translate button while worker runs
+            self.batch_translate_btn.setEnabled(False)
+            worker.finished.connect(lambda: self.batch_translate_btn.setEnabled(True))
+            worker.error.connect(lambda: self.batch_translate_btn.setEnabled(True))
 
-        # Keep reference to prevent GC
-        self._batch_worker = worker
+            # Start worker
+            worker.start()
+            self._batch_worker = worker
+
+        else:  # scope == "current_page" (original behavior)
+            # Map proxy indices to source rows
+            source_rows = [
+                self.proxy_model.map_to_source_row(index.row())
+                for index in selected_indexes
+            ]
+
+            # Build items list
+            items = []
+            for row in source_rows:
+                lemma = self.lemma_model.lemmas[row]
+                item = BatchTranslateItem(
+                    entity_type="lemma",
+                    entity_id=lemma.lemma_text,
+                    source_text=lemma.lemma_text,
+                    src_lang="he",
+                    tgt_lang="ru",
+                    current_translation=lemma.translation,
+                    project_id=self.project_id,
+                )
+                items.append(item)
+
+            # Create options
+            options = BatchTranslateOptions(
+                provider_mode=provider_mode,
+                write_mode=write_mode,
+                chunk_size=50,
+                stop_on_error=False,
+            )
+
+            # Show progress dialog
+            progress_dialog = BatchProgressDialog(parent=self, total=len(items))
+            progress_dialog.show()
+
+            # Create worker
+            worker = BatchTranslateWorker(
+                items=items,
+                options=options,
+                tab_type="dictionary",
+            )
+
+            # Connect signals
+            worker.progress.connect(progress_dialog.update_progress)
+            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            progress_dialog.cancel_requested.connect(worker.cancel)
+
+            # Start worker
+            worker.start()
+            self._batch_worker = worker
 
     def on_batch_translate_finished(self, result, progress_dialog):
         """PATCH-UI-BATCH-T02: Handle batch translate completion."""

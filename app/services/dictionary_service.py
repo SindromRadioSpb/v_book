@@ -10,7 +10,7 @@ from typing import List, Tuple
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import Lemma, LemmaProjectStat
+from app.infra.sa_models import Lemma, LemmaProjectStat, TMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -130,3 +130,107 @@ class DictionaryService:
             stmt = stmt.order_by(column_attr.desc())
 
         return stmt
+
+    def count_lemma_ids_for_translation(
+        self,
+        session: Session,
+        project_id: int,
+        filters: dict,
+        write_mode: str,
+    ) -> int:
+        """Count lemmas matching filters for translation.
+
+        Filters by empty translation if write_mode is FILL_EMPTY or SKIP_NON_EMPTY.
+
+        Args:
+            session: Database session
+            project_id: Project ID
+            filters: Same filter dict as search_lemmas()
+            write_mode: "FILL_EMPTY" | "SKIP_NON_EMPTY" | "OVERWRITE"
+
+        Returns:
+            Total count of lemmas to translate
+        """
+        stmt = select(func.count(Lemma.lemma_id.distinct())).select_from(Lemma).join(
+            LemmaProjectStat,
+            Lemma.lemma_id == LemmaProjectStat.lemma_id
+        ).where(
+            Lemma.project_id == project_id
+        )
+
+        # Apply standard filters (pos, hide_noise, search)
+        stmt = self._apply_filters(stmt, filters)
+
+        # For FILL_EMPTY and SKIP_NON_EMPTY: only count lemmas without translation
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.outerjoin(
+                TMEntry,
+                (TMEntry.lemma_id == Lemma.lemma_id) &
+                (TMEntry.kind == "lemma") &
+                (TMEntry.project_id == project_id)
+            ).where(
+                or_(
+                    TMEntry.tm_id.is_(None),
+                    TMEntry.translation.is_(None),
+                    TMEntry.translation == ""
+                )
+            )
+
+        count = session.execute(stmt).scalar()
+        return count or 0
+
+    def fetch_lemma_ids_for_translation(
+        self,
+        session: Session,
+        project_id: int,
+        filters: dict,
+        write_mode: str,
+        limit: int,
+        offset: int,
+    ) -> List[int]:
+        """Fetch lemma IDs matching filters for translation (paginated).
+
+        Args:
+            session: Database session
+            project_id: Project ID
+            filters: Same filter dict as search_lemmas()
+            write_mode: "FILL_EMPTY" | "SKIP_NON_EMPTY" | "OVERWRITE"
+            limit: Chunk size
+            offset: Offset for pagination
+
+        Returns:
+            List of lemma_id integers
+        """
+        stmt = select(Lemma.lemma_id).join(
+            LemmaProjectStat,
+            Lemma.lemma_id == LemmaProjectStat.lemma_id
+        ).where(
+            Lemma.project_id == project_id
+        )
+
+        # Apply standard filters (pos, hide_noise, search)
+        stmt = self._apply_filters(stmt, filters)
+
+        # For FILL_EMPTY and SKIP_NON_EMPTY: only fetch lemmas without translation
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.outerjoin(
+                TMEntry,
+                (TMEntry.lemma_id == Lemma.lemma_id) &
+                (TMEntry.kind == "lemma") &
+                (TMEntry.project_id == project_id)
+            ).where(
+                or_(
+                    TMEntry.tm_id.is_(None),
+                    TMEntry.translation.is_(None),
+                    TMEntry.translation == ""
+                )
+            )
+
+        # Order by lemma_id for deterministic chunking
+        stmt = stmt.order_by(Lemma.lemma_id.asc())
+
+        # Apply pagination
+        stmt = stmt.limit(limit).offset(offset)
+
+        results = session.execute(stmt).scalars().all()
+        return list(results)
