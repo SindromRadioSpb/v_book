@@ -22,7 +22,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.normalization import normalize_for_tm
-from app.infra.sa_models import TMEntry, TMAlias, DictEntry, DictSource, MTCache, utc_now
+from app.infra.sa_models import TMEntry, TMAlias, TMGlobal, DictEntry, DictSource, MTCache, utc_now
 from app.infra.settings import SettingsService
 from app.infra.translators.base_provider import (
     TranslationRequest,
@@ -229,6 +229,33 @@ class TranslationService:
                 match_key_used=src_norm,
                 tm_id=entry.tm_id,
                 notes=entry.notes,
+            )
+
+        # PATCH-19-03: Fallback to tm_global canonical layer
+        stmt = (
+            select(TMGlobal)
+            .where(
+                and_(
+                    TMGlobal.src_lang == src_lang,
+                    TMGlobal.tgt_lang == tgt_lang,
+                    TMGlobal.kind == kind,
+                    TMGlobal.src_norm == src_norm,
+                    status_filter if allow_draft else TMGlobal.status == "approved",
+                )
+            )
+            .limit(1)
+        )
+        global_entry = session.execute(stmt).scalar()
+        if global_entry and global_entry.translation:
+            return TranslationResult(
+                translation=global_entry.translation,
+                source="tm_global",
+                status=global_entry.status,
+                confidence=global_entry.confidence,
+                origin=global_entry.origin,
+                matched_on="src_norm",
+                match_key_used=src_norm,
+                notes=global_entry.notes,
             )
 
         return TranslationResult()
@@ -504,6 +531,33 @@ class TranslationService:
                     tm_id=entry.tm_id,
                     notes=entry.notes,
                 )
+
+        # PATCH-19-03: Fallback to tm_global for keys not found in tm_entry
+        missing_keys = [k for k in norm_keys if not any((k, kind) in results for kind in ["lemma", "term_cluster", "ngram", "surface"])]
+        if missing_keys:
+            global_status_filter = TMGlobal.status.in_(["approved", "draft"]) if allow_draft else TMGlobal.status == "approved"
+            global_stmt = select(TMGlobal).where(
+                and_(
+                    TMGlobal.src_norm.in_(missing_keys),
+                    TMGlobal.src_lang == src_lang,
+                    TMGlobal.tgt_lang == tgt_lang,
+                    global_status_filter,
+                )
+            )
+            global_entries = session.execute(global_stmt).scalars().all()
+            for g_entry in global_entries:
+                key = (g_entry.src_norm, g_entry.kind)
+                if key not in results and g_entry.translation:
+                    results[key] = TranslationResult(
+                        translation=g_entry.translation,
+                        source="tm_global",
+                        status=g_entry.status,
+                        confidence=g_entry.confidence,
+                        origin=g_entry.origin,
+                        matched_on="src_norm",
+                        match_key_used=g_entry.src_norm,
+                        notes=g_entry.notes,
+                    )
 
         return results
 

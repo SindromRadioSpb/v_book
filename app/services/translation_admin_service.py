@@ -597,6 +597,7 @@ class TranslationAdminService:
             lemma_id=entry.lemma_id,
             cluster_id=entry.cluster_id,
             ngram_id=entry.ngram_id,
+            tm_global_id=entry.tm_global_id,  # PATCH-19-03
         )
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:

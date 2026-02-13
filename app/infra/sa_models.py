@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -397,8 +398,8 @@ class TranslationMemory(Base):
         CheckConstraint("source IN ('auto','user','import')", name="ck_tm_source"),
         CheckConstraint("is_override IN (0, 1)", name="ck_tm_is_override"),
         UniqueConstraint("project_id", "lemma_id", "ngram_id", name="uq_tm"),
-        Index("idx_tm_lookup_lemma", "project_id", "lemma_id", sqlite_where="lemma_id IS NOT NULL"),
-        Index("idx_tm_lookup_ngram", "project_id", "ngram_id", sqlite_where="ngram_id IS NOT NULL"),
+        Index("idx_tm_lookup_lemma", "project_id", "lemma_id", sqlite_where=text("lemma_id IS NOT NULL")),
+        Index("idx_tm_lookup_ngram", "project_id", "ngram_id", sqlite_where=text("ngram_id IS NOT NULL")),
     )
 
 
