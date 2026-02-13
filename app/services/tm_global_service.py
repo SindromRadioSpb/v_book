@@ -157,6 +157,8 @@ class TMGlobalService:
     def upsert_and_link(self, session: Session, entry: TMEntry) -> TMGlobal:
         """Convenience: upsert tm_global from TMEntry fields, set entry.tm_global_id.
 
+        After upserting tm_global, propagates changes to ALL linked tm_entries to ensure consistency.
+
         Args:
             session: DB session
             entry: TMEntry instance (must be flushed to have tm_id)
@@ -181,6 +183,16 @@ class TMGlobalService:
             source_tm_id=entry.tm_id,
         )
         entry.tm_global_id = g.tm_global_id
+
+        # CRITICAL FIX: Propagate tm_global changes to ALL linked tm_entries
+        # This ensures cross-project translation sharing works correctly
+        session.flush()  # Ensure entry.tm_global_id is committed
+        self.propagate_to_entries(
+            session=session,
+            tm_global_id=g.tm_global_id,
+            fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"]
+        )
+
         return g
 
     def propagate_to_entries(
@@ -218,6 +230,12 @@ class TMGlobalService:
                 changed = True
             if "status" in fields and entry.status != g.status:
                 entry.status = g.status
+                changed = True
+            if "origin" in fields and entry.origin != g.origin:
+                entry.origin = g.origin
+                changed = True
+            if "confidence" in fields and entry.confidence != g.confidence:
+                entry.confidence = g.confidence
                 changed = True
             if "is_noise" in fields:
                 entry.is_noise = g.is_noise
