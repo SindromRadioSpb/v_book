@@ -16,8 +16,9 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, and_, update
 
-from app.infra.sa_models import TMEntry, TMEntryHistory
+from app.infra.sa_models import TMEntry, TMEntryHistory, Lemma, TermCluster
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
+from app.services.tm_global_service import TMGlobalService
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +296,10 @@ class TranslationAdminService:
             entry.approved_at = None
             entry.approved_by = None
 
+        # PATCH-19-02: Upsert tm_global and link
+        session.flush()
+        TMGlobalService().upsert_and_link(session, entry)
+
         session.commit()
 
         logger.info(f"TM entry {tm_id} status: {old_status} → {status}")
@@ -354,6 +359,11 @@ class TranslationAdminService:
                 entry.approved_by = None
 
             count += 1
+
+        # PATCH-19-02: Upsert tm_global and link for all entries
+        session.flush()
+        for entry in entries:
+            TMGlobalService().upsert_and_link(session, entry)
 
         session.commit()
 
@@ -431,6 +441,10 @@ class TranslationAdminService:
             if approved_by:
                 entry.approved_by = approved_by
 
+        # PATCH-19-02: Upsert tm_global and link
+        session.flush()
+        TMGlobalService().upsert_and_link(session, entry)
+
         session.commit()
 
         logger.info(f"Reverted TM entry {tm_id} to version {version}")
@@ -468,6 +482,10 @@ class TranslationAdminService:
             entry.notes = notes
         entry.origin = "user_edit"
         entry.updated_at = datetime.now()
+
+        # PATCH-19-02: Upsert tm_global and link
+        session.flush()
+        TMGlobalService().upsert_and_link(session, entry)
 
         session.commit()
 
@@ -537,6 +555,11 @@ class TranslationAdminService:
                 .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
             )
             logger.info(f"Synced is_noise to {len(cluster_ids_to_update)} term clusters")
+
+        # PATCH-19-02: Upsert tm_global and link for all entries
+        session.flush()
+        for entry in entries:
+            TMGlobalService().upsert_and_link(session, entry)
 
         session.commit()
 

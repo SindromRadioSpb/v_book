@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.infra.sa_models import TMEntry, TermCluster, Lemma
 from app.services.translation_service import TranslationService
+from app.services.tm_global_service import TMGlobalService
 from app.domain.normalization.normalizer import normalize_for_tm
 
 logger = logging.getLogger(__name__)
@@ -472,6 +473,9 @@ class BatchMTTranslateService:
             existing.status = "approved"
             existing.origin = "mt_auto"  # Use existing origin value
             existing.updated_at = datetime.now()
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, existing)
         else:
             # Look up source lemma for is_noise synchronization
             lemma_stmt = select(Lemma).where(
@@ -496,6 +500,9 @@ class BatchMTTranslateService:
                 noise_reason=lemma.noise_reason if lemma else None,
             )
             session.add(tm_entry)
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, tm_entry)
 
     def _write_term_cluster(
         self,
@@ -522,6 +529,9 @@ class BatchMTTranslateService:
             existing.status = "approved"
             existing.origin = "mt_auto"  # Use existing origin value
             existing.updated_at = datetime.now()
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, existing)
         else:
             # Look up source cluster for is_noise synchronization
             cluster_stmt = select(TermCluster).where(
@@ -547,6 +557,9 @@ class BatchMTTranslateService:
                 noise_reason=cluster.noise_reason if cluster else None,
             )
             session.add(tm_entry)
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, tm_entry)
 
     def _write_tm_entry(
         self,
@@ -569,6 +582,9 @@ class BatchMTTranslateService:
         # Update translation only (preserve status, origin)
         entry.translation = translation
         entry.updated_at = datetime.now()
+        # PATCH-19-02: Upsert tm_global and link
+        session.flush()
+        TMGlobalService().upsert_and_link(session, entry)
 
         # Note: We don't create history here (TranslationAdminService does that)
         # For batch operations, we prioritize performance over history granularity

@@ -37,6 +37,7 @@ from sqlalchemy import select
 
 from app.infra.sa_models import TMEntry
 from app.services.translation_service import TranslationService
+from app.services.tm_global_service import TMGlobalService
 from app.infra.translators.providers_registry import ProvidersRegistry
 from app.domain.normalization.normalizer import normalize_for_tm
 
@@ -487,7 +488,7 @@ class BatchTranslateEngineV2:
 
     def _write_lemma(self, session: Session, item: BatchTranslateItem, translation: str):
         """Write lemma translation to TM."""
-        src_norm = item.source_text  # Lemma: src_norm == src_text
+        src_norm = item.source_text  # Lemma: src_norm == src_text (KNOWN BUG: no normalization)
 
         stmt = select(TMEntry).where(
             TMEntry.project_id == item.project_id,
@@ -501,6 +502,9 @@ class BatchTranslateEngineV2:
             existing.status = "approved"
             existing.origin = "mt_auto"
             existing.updated_at = datetime.now()
+            # PATCH-19-02: Upsert tm_global and link (uses buggy src_norm)
+            session.flush()
+            TMGlobalService().upsert_and_link(session, existing)
         else:
             tm_entry = TMEntry(
                 project_id=item.project_id,
@@ -514,6 +518,9 @@ class BatchTranslateEngineV2:
                 origin="mt_auto",
             )
             session.add(tm_entry)
+            # PATCH-19-02: Upsert tm_global and link (uses buggy src_norm)
+            session.flush()
+            TMGlobalService().upsert_and_link(session, tm_entry)
 
     def _write_term_cluster(self, session: Session, item: BatchTranslateItem, translation: str):
         """Write term cluster translation to TM."""
@@ -540,6 +547,9 @@ class BatchTranslateEngineV2:
             existing.status = "approved"
             existing.origin = "mt_auto"
             existing.updated_at = datetime.now()
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, existing)
         else:
             tm_entry = TMEntry(
                 project_id=item.project_id,
@@ -554,6 +564,9 @@ class BatchTranslateEngineV2:
                 source_ref="batch_translate_v2",
             )
             session.add(tm_entry)
+            # PATCH-19-02: Upsert tm_global and link
+            session.flush()
+            TMGlobalService().upsert_and_link(session, tm_entry)
 
     def _write_tm_entry(self, session: Session, item: BatchTranslateItem, translation: str):
         """Write TM entry translation (Translation Management tab)."""

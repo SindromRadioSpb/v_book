@@ -18,6 +18,7 @@ from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.workers import TranslationResolveWorker, BatchTranslateWorker, TermsSearchWorker
 from app.services.db_service import DBService
+from app.services.tm_global_service import TMGlobalService
 from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
 
 logger = logging.getLogger(__name__)
@@ -743,6 +744,11 @@ class TermsView(QWidget):
                         noise_reason=cluster.noise_reason,
                     )
                     session.add(tm_entry)
+
+                # PATCH-19-02: Upsert tm_global and link
+                session.flush()
+                tm_entry_to_link = existing if existing else tm_entry
+                TMGlobalService().upsert_and_link(session, tm_entry_to_link)
 
                 session.commit()
 

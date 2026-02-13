@@ -22,6 +22,7 @@ from PyQt6.QtGui import QAction
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.translation_service import TranslationService
+from app.services.tm_global_service import TMGlobalService
 from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
@@ -519,6 +520,11 @@ class DictionaryView(QWidget):
                         noise_reason=lemma.noise_reason,
                     )
                     session.add(tm_entry)
+
+                # PATCH-19-02: Upsert tm_global and link
+                session.flush()
+                tm_entry_to_link = existing if existing else tm_entry
+                TMGlobalService().upsert_and_link(session, tm_entry_to_link)
 
                 session.commit()
 
