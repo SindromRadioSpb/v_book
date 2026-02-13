@@ -22,6 +22,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import TMEntry, TMGlobal
+from app.infra.db_retry import retry_on_db_locked
 
 logger = logging.getLogger(__name__)
 
@@ -154,14 +155,22 @@ class TMGlobalService:
             session.flush()  # Get tm_global_id
             return g
 
-    def upsert_and_link(self, session: Session, entry: TMEntry) -> TMGlobal:
+    def upsert_and_link(
+        self,
+        session: Session,
+        entry: TMEntry,
+        immediate_propagate: bool = True
+    ) -> TMGlobal:
         """Convenience: upsert tm_global from TMEntry fields, set entry.tm_global_id.
 
-        After upserting tm_global, propagates changes to ALL linked tm_entries to ensure consistency.
+        After upserting tm_global, optionally propagates changes to ALL linked tm_entries.
 
         Args:
             session: DB session
             entry: TMEntry instance (must be flushed to have tm_id)
+            immediate_propagate: If True, propagate to all entries immediately.
+                                If False, caller must manually call propagate_to_entries later.
+                                Set to False for batch operations to reduce lock contention.
 
         Returns:
             TMGlobal row (existing or newly created)
@@ -184,17 +193,20 @@ class TMGlobalService:
         )
         entry.tm_global_id = g.tm_global_id
 
-        # CRITICAL FIX: Propagate tm_global changes to ALL linked tm_entries
-        # This ensures cross-project translation sharing works correctly
-        session.flush()  # Ensure entry.tm_global_id is committed
-        self.propagate_to_entries(
-            session=session,
-            tm_global_id=g.tm_global_id,
-            fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"]
-        )
+        if immediate_propagate:
+            # CRITICAL FIX: Propagate tm_global changes to ALL linked tm_entries
+            # This ensures cross-project translation sharing works correctly
+            # For batch operations, set immediate_propagate=False to defer propagation
+            session.flush()  # Ensure entry.tm_global_id is committed
+            self.propagate_to_entries(
+                session=session,
+                tm_global_id=g.tm_global_id,
+                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"]
+            )
 
         return g
 
+    @retry_on_db_locked(max_retries=3, initial_delay=0.1, max_delay=1.0)
     def propagate_to_entries(
         self,
         session: Session,

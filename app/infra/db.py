@@ -24,12 +24,15 @@ class DatabaseManager:
             connect_args={"check_same_thread": False},
         )
 
-        # Enable WAL mode and foreign keys
+        # Enable WAL mode, foreign keys, and busy timeout
         @event.listens_for(Engine, "connect")
         def set_sqlite_pragma(dbapi_conn, connection_record):
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
+            # Wait up to 5 seconds if database is locked before raising error
+            # This helps reduce "database is locked" errors during concurrent operations
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
         self.SessionLocal = sessionmaker(
