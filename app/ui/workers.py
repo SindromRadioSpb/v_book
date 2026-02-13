@@ -1591,6 +1591,7 @@ class TranslateAllFilteredWorker(QThread):
     stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed) - real-time stats
     row_completed = pyqtSignal(str, bool)  # (entity_id, success)
     row_translated = pyqtSignal(str, str, bool)  # (entity_id, translation, success) - for activity log
+    stage_updated = pyqtSignal(str)        # PATCH-16-02: Current stage description
     finished = pyqtSignal(object)          # BatchTranslateResult
     error = pyqtSignal(str)
     paused = pyqtSignal()
@@ -1656,6 +1657,9 @@ class TranslateAllFilteredWorker(QThread):
         from sqlalchemy import select
 
         try:
+            # PATCH-16-02: Emit initial stage
+            self.stage_updated.emit("Initializing...")
+
             db_service = DBService.get_instance()
             batch_service = BatchMTTranslateService()
             translation_service = TranslationService()
@@ -1668,6 +1672,9 @@ class TranslateAllFilteredWorker(QThread):
 
             with db_service.get_session() as session:
                 # Step 1: Count total
+                # PATCH-16-02: Emit stage
+                self.stage_updated.emit("Counting targets...")
+
                 if self.entity_type == "lemma":
                     dict_service = DictionaryService()
                     total = dict_service.count_lemma_ids_for_translation(
@@ -1683,6 +1690,7 @@ class TranslateAllFilteredWorker(QThread):
 
                 if total == 0:
                     # Nothing to translate
+                    self.stage_updated.emit("No targets found")  # PATCH-16-02
                     empty_result = BatchTranslateResult(
                         total=0,
                         succeeded=0,
@@ -1695,6 +1703,8 @@ class TranslateAllFilteredWorker(QThread):
                     self.finished.emit(empty_result)
                     return
 
+                # PATCH-16-02: Emit stage with total count
+                self.stage_updated.emit(f"Found {total} items to translate")
                 logger.info(f"TranslateAllFilteredWorker: translating {total} {self.entity_type} records")
 
                 # Step 2: Process in chunks
@@ -1709,6 +1719,7 @@ class TranslateAllFilteredWorker(QThread):
                     # Check cancel
                     if self._cancel_requested:
                         logger.info(f"Translation cancelled at {completed}/{total}")
+                        self.stage_updated.emit("Cancelled")  # PATCH-16-02
                         result = BatchTranslateResult(
                             total=completed,
                             succeeded=total_succeeded,
@@ -1720,6 +1731,11 @@ class TranslateAllFilteredWorker(QThread):
                         )
                         self.finished.emit(result)
                         return
+
+                    # PATCH-16-02: Emit fetching stage
+                    batch_num = (offset // self.id_fetch_chunk) + 1
+                    total_batches = (total + self.id_fetch_chunk - 1) // self.id_fetch_chunk
+                    self.stage_updated.emit(f"Fetching batch {batch_num}/{total_batches}...")
 
                     # Fetch IDs for this chunk
                     if self.entity_type == "lemma":
@@ -1735,6 +1751,9 @@ class TranslateAllFilteredWorker(QThread):
 
                     if not ids:
                         break
+
+                    # PATCH-16-02: Emit loading stage
+                    self.stage_updated.emit(f"Loading entities for batch {batch_num}...")
 
                     # Load entities and build BatchTranslateItem list
                     items = []
@@ -1785,6 +1804,9 @@ class TranslateAllFilteredWorker(QThread):
                     if not items:
                         break
 
+                    # PATCH-16-02: Emit translating stage
+                    self.stage_updated.emit(f"Translating batch {batch_num}/{total_batches} ({len(items)} items)...")
+
                     # Translate this chunk using existing batch service
                     # Use translation_chunk for granular progress updates + commit safety
                     options = BatchTranslateOptions(
@@ -1794,12 +1816,30 @@ class TranslateAllFilteredWorker(QThread):
                         stop_on_error=False,
                     )
 
+                    # PATCH-16-01: Progress callback for real-time UI updates
+                    # BatchMTTranslateService calls this after each translation_chunk (25 items)
+                    def on_batch_progress(completed_in_batch, total_in_batch):
+                        """Called by BatchMTTranslateService after each sub-chunk (25 items)."""
+                        # Calculate global progress
+                        global_completed = offset + completed_in_batch
+
+                        # Update worker stats (approximation until chunk completes)
+                        # Real stats will be updated after chunk_result is available
+                        self.progress.emit(global_completed, total)
+
+                        # PATCH-16-02: Update stage during translation
+                        sub_chunk_num = completed_in_batch // self.translation_chunk
+                        self.stage_updated.emit(
+                            f"Translating batch {batch_num}/{total_batches} "
+                            f"(sub-chunk {sub_chunk_num}, {completed_in_batch}/{total_in_batch} done)..."
+                        )
+
                     # Execute batch for this chunk
                     chunk_result = batch_service.execute_batch(
                         session=session,
                         items=items,
                         options=options,
-                        progress_callback=None,  # We handle progress at worker level
+                        progress_callback=on_batch_progress,  # PATCH-16-01: Real-time updates!
                         cancel_check=lambda: self._cancel_requested,
                     )
 
@@ -1837,6 +1877,7 @@ class TranslateAllFilteredWorker(QThread):
                     logger.debug(f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded")
 
                 # Done
+                self.stage_updated.emit(f"Completed: {total_succeeded} succeeded, {total_skipped} skipped, {total_failed} failed")  # PATCH-16-02
                 final_result = BatchTranslateResult(
                     total=completed,
                     succeeded=total_succeeded,

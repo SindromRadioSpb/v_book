@@ -894,6 +894,7 @@ class DictionaryView(QWidget):
             worker.progress.connect(progress_dialog.update_progress)
             worker.stats_updated.connect(progress_dialog.update_counts)  # Direct connection
             worker.row_translated.connect(progress_dialog.add_recent_item)  # Direct connection
+            worker.stage_updated.connect(progress_dialog.set_stage)  # PATCH-16-02: Stage updates
             worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
             worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
             progress_dialog.cancel_requested.connect(worker.cancel)

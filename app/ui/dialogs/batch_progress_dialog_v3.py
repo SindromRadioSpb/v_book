@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QGroupBox, QTextEdit
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 
@@ -45,10 +45,19 @@ class BatchProgressDialogV3(QDialog):
         self.pause_start = None  # When current pause started
         self.is_paused = False
 
+        # PATCH-16-02: Heartbeat tracking
+        self.last_activity_time = time.time()
+        self.current_stage = "Initializing..."
+
         # Recent activity (last 5 items)
         self.recent_items = deque(maxlen=5)
 
         self.init_ui()
+
+        # PATCH-16-02: Start heartbeat timer (updates elapsed/last activity every 500ms)
+        self.heartbeat_timer = QTimer(self)
+        self.heartbeat_timer.timeout.connect(self._update_heartbeat)
+        self.heartbeat_timer.start(500)  # 500ms updates
 
     def init_ui(self):
         """Initialize UI with premium layout."""
@@ -68,11 +77,25 @@ class BatchProgressDialogV3(QDialog):
 
         # === Header with status ===
         header_layout = QHBoxLayout()
-        self.status_label = QLabel("⚡ Translating...")
+        self.status_label = QLabel("[*] Translating...")
         self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
         header_layout.addWidget(self.status_label)
         header_layout.addStretch()
         layout.addLayout(header_layout)
+
+        # PATCH-16-02: Stage and Last Activity row
+        stage_layout = QHBoxLayout()
+        self.stage_label = QLabel("Stage: Initializing...")
+        self.stage_label.setStyleSheet("color: #666; font-size: 12px;")
+        stage_layout.addWidget(self.stage_label)
+
+        stage_layout.addStretch()
+
+        self.last_activity_label = QLabel("Last activity: 0s ago")
+        self.last_activity_label.setStyleSheet("color: #666; font-size: 11px; font-style: italic;")
+        stage_layout.addWidget(self.last_activity_label)
+
+        layout.addLayout(stage_layout)
 
         # === Progress bar ===
         self.progress_bar = QProgressBar()
@@ -193,6 +216,9 @@ class BatchProgressDialogV3(QDialog):
         # Calculate metrics
         self._update_metrics()
 
+        # PATCH-16-02: Mark activity
+        self.mark_activity()
+
     def update_counts(self, succeeded: int, skipped: int, failed: int):
         """Update result counts with percentages.
 
@@ -210,19 +236,22 @@ class BatchProgressDialogV3(QDialog):
         # Update labels with percentages
         if total_processed > 0:
             succ_pct = int((succeeded / total_processed) * 100)
-            self.succeeded_label.setText(f"✅ Translated:  {succeeded}  ({succ_pct}%)")
+            self.succeeded_label.setText(f"[OK] Translated:  {succeeded}  ({succ_pct}%)")
 
             if skipped > 0:
                 skip_pct = int((skipped / total_processed) * 100)
-                self.skipped_label.setText(f"⏭️ Skipped:  {skipped}  ({skip_pct}%)")
+                self.skipped_label.setText(f"[SKIP] Skipped:  {skipped}  ({skip_pct}%)")
 
             if failed > 0:
                 fail_pct = int((failed / total_processed) * 100)
-                self.failed_label.setText(f"❌ Failed:  {failed}  ({fail_pct}%)")
+                self.failed_label.setText(f"[FAIL] Failed:  {failed}  ({fail_pct}%)")
         else:
-            self.succeeded_label.setText(f"✅ Translated:  {succeeded}  (0%)")
-            self.skipped_label.setText(f"⏭️ Skipped:  {skipped}  (already done)")
-            self.failed_label.setText(f"❌ Failed:  {failed}  (errors)")
+            self.succeeded_label.setText(f"[OK] Translated:  {succeeded}  (0%)")
+            self.skipped_label.setText(f"[SKIP] Skipped:  {skipped}  (already done)")
+            self.failed_label.setText(f"[FAIL] Failed:  {failed}  (errors)")
+
+        # PATCH-16-02: Mark activity
+        self.mark_activity()
 
     def add_recent_item(self, entity_id: str, translation: str, success: bool):
         """Add item to recent activity log.
@@ -233,11 +262,11 @@ class BatchProgressDialogV3(QDialog):
             success: True if succeeded, False if failed
         """
         if success:
-            icon = "✓"
+            icon = "[+]"
             color = "#4caf50"
-            text = f"{entity_id} → {translation}"
+            text = f"{entity_id} -> {translation}"
         else:
-            icon = "✗"
+            icon = "[x]"
             color = "#f44336"
             text = f"{entity_id}: {translation}"
 
@@ -255,6 +284,9 @@ class BatchProgressDialogV3(QDialog):
         cursor = self.activity_log.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self.activity_log.setTextCursor(cursor)
+
+        # PATCH-16-02: Mark activity
+        self.mark_activity()
 
     def _update_metrics(self):
         """Update speed and ETA labels."""
@@ -304,8 +336,9 @@ class BatchProgressDialogV3(QDialog):
             # Resume
             self.is_paused = False
             self.pause_btn.setText("Pause")
-            self.status_label.setText("⚡ Translating...")
+            self.status_label.setText("[*] Translating...")
             self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
+            self.set_stage("Resuming...")  # PATCH-16-02
 
             # Track paused time
             if self.pause_start:
@@ -317,8 +350,9 @@ class BatchProgressDialogV3(QDialog):
             # Pause
             self.is_paused = True
             self.pause_btn.setText("Resume")
-            self.status_label.setText("⏸️ Paused")
+            self.status_label.setText("[||] Paused")
             self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff9800;")
+            self.set_stage("Paused")  # PATCH-16-02
 
             # Mark pause start
             self.pause_start = time.time()
@@ -330,16 +364,56 @@ class BatchProgressDialogV3(QDialog):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("Cancelling...")
         self.pause_btn.setEnabled(False)
-        self.status_label.setText("🚫 Cancelling... (finishing current item)")
+        self.status_label.setText("[X] Cancelling... (finishing current item)")
         self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #f44336;")
+        self.set_stage("Cancelling...")  # PATCH-16-02
         self.cancel_requested.emit()
+
+    def mark_activity(self):
+        """PATCH-16-02: Mark that activity just happened (reset last activity timer)."""
+        self.last_activity_time = time.time()
+
+    def set_stage(self, stage: str):
+        """PATCH-16-02: Update current stage label.
+
+        Args:
+            stage: Stage description (e.g. "Initializing...", "Translating batch 1/5", "Waiting provider response...")
+        """
+        self.current_stage = stage
+        self.stage_label.setText(f"Stage: {stage}")
+        self.mark_activity()
+
+    def _update_heartbeat(self):
+        """PATCH-16-02: Called by QTimer every 500ms to update elapsed/last activity."""
+        # Update elapsed time label (already exists in _update_metrics, but force update here)
+        if not self.is_paused:
+            elapsed = time.time() - self.start_time - self.paused_time
+            if self.pause_start:
+                elapsed -= (time.time() - self.pause_start)
+
+            if elapsed < 60:
+                self.elapsed_label.setText(f"Time: {int(elapsed)}s elapsed")
+            else:
+                mins = int(elapsed / 60)
+                secs = int(elapsed % 60)
+                self.elapsed_label.setText(f"Time: {mins}m {secs}s elapsed")
+
+        # Update last activity label
+        seconds_ago = int(time.time() - self.last_activity_time)
+        if seconds_ago < 60:
+            self.last_activity_label.setText(f"Last activity: {seconds_ago}s ago")
+        else:
+            mins_ago = seconds_ago // 60
+            self.last_activity_label.setText(f"Last activity: {mins_ago}m ago")
 
     def set_completed(self):
         """Mark translation as completed."""
+        self.heartbeat_timer.stop()  # PATCH-16-02: Stop heartbeat timer
         self.cancel_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
-        self.status_label.setText("✅ Translation complete!")
+        self.status_label.setText("[DONE] Translation complete!")
         self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #4caf50;")
+        self.set_stage("Completed")  # PATCH-16-02
 
         # Update progress to 100%
         self.progress_bar.setValue(self.total)
