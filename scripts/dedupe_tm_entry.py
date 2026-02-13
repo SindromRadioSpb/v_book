@@ -22,7 +22,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy import select, func
-from app.infra.db import DatabaseManager
+from app.services.db_service import DBService
 from app.infra.sa_models import TMEntry, Lemma, TermCluster
 from app.domain.normalization.normalizer import normalize_for_tm
 
@@ -188,15 +188,6 @@ class TMEntryDeduplicator:
                 if not self.dry_run:
                     canonical.status = 'approved'
 
-        # Re-normalize canonical src_norm using normalize_for_tm
-        src_lang = canonical.src_lang or 'he'
-        normalized = normalize_for_tm(src_lang, src_text, kind)
-        if canonical.src_norm != normalized.norm:
-            logger.info(f"      -> Re-normalizing src_norm: '{canonical.src_norm}' -> '{normalized.norm}'")
-            if not self.dry_run:
-                canonical.src_norm = normalized.norm
-            self.stats['records_renormalized'] += 1
-
         # Link to source entity if not already linked
         if kind == 'lemma' and not canonical.lemma_id:
             lemma_stmt = select(Lemma).where(
@@ -224,12 +215,27 @@ class TMEntryDeduplicator:
                     canonical.is_noise = cluster.is_noise
                     canonical.noise_reason = cluster.noise_reason
 
-        # Delete other records
+        # CRITICAL: Delete other records BEFORE re-normalizing canonical
+        # to avoid UNIQUE constraint violation
         for other in others:
             logger.info(f"    Deleting: tm_id={other.tm_id}")
             if not self.dry_run:
                 self.session.delete(other)
             self.stats['records_deleted'] += 1
+
+        # Flush deletions to DB before re-normalizing
+        if not self.dry_run:
+            self.session.flush()
+
+        # Re-normalize canonical src_norm using normalize_for_tm
+        # (after deletions to avoid UNIQUE constraint conflict)
+        src_lang = canonical.src_lang or 'he'
+        normalized = normalize_for_tm(src_lang, src_text, kind)
+        if canonical.src_norm != normalized.norm:
+            logger.info(f"      -> Re-normalizing src_norm: '{canonical.src_norm}' -> '{normalized.norm}'")
+            if not self.dry_run:
+                canonical.src_norm = normalized.norm
+            self.stats['records_renormalized'] += 1
 
 
 def main():
@@ -240,12 +246,16 @@ def main():
 
     # Get DB instance
     if args.db_path:
-        db_manager = DatabaseManager(db_path=str(args.db_path))
+        db_service = DBService.initialize(Path(args.db_path))
     else:
-        db_manager = DatabaseManager.get_instance()
+        # Use default production DB path
+        from app.main import get_app_dir
+        app_dir = get_app_dir()
+        db_path = app_dir / "hdle.db"
+        db_service = DBService.initialize(db_path)
 
     # Run deduplication
-    with db_manager.get_session() as session:
+    with db_service.get_session() as session:
         deduplicator = TMEntryDeduplicator(session, dry_run=args.dry_run)
         deduplicator.run()
 
