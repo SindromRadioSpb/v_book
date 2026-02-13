@@ -1588,6 +1588,7 @@ class TranslateAllFilteredWorker(QThread):
     """
 
     progress = pyqtSignal(int, int)        # (completed, total)
+    stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed) - real-time stats
     row_completed = pyqtSignal(str, bool)  # (entity_id, success)
     row_translated = pyqtSignal(str, str, bool)  # (entity_id, translation, success) - for activity log
     finished = pyqtSignal(object)          # BatchTranslateResult
@@ -1619,6 +1620,11 @@ class TranslateAllFilteredWorker(QThread):
         self.tgt_lang = tgt_lang
         self._cancel_requested = False
         self._paused = False
+
+        # Track stats for real-time updates
+        self.succeeded = 0
+        self.skipped = 0
+        self.failed = 0
 
     def cancel(self):
         """Request cancellation (checked between chunks)."""
@@ -1803,22 +1809,30 @@ class TranslateAllFilteredWorker(QThread):
                     total_failed += chunk_result.failed
                     all_row_results.extend(chunk_result.row_results)
 
-                    # Emit row_completed signals for real-time UI updates
-                    for row_result in chunk_result.row_results:
-                        success = (not row_result.skipped and not row_result.error_message)
-                        self.row_completed.emit(row_result.entity_id, success)
-
-                        # Emit row_translated for activity log (first 5 items)
-                        if completed + len(all_row_results) <= 5:  # Only first few for activity log
-                            if success:
-                                translation = row_result.new_translation or ""
-                                self.row_translated.emit(row_result.entity_id, translation[:50], True)
-                            elif row_result.error_message:
-                                self.row_translated.emit(row_result.entity_id, row_result.error_message[:50], False)
+                    # Update worker stats (for real-time UI access)
+                    self.succeeded = total_succeeded
+                    self.skipped = total_skipped
+                    self.failed = total_failed
 
                     # Update progress
                     completed += len(items)
                     self.progress.emit(completed, total)
+
+                    # Emit stats update for UI
+                    self.stats_updated.emit(total_succeeded, total_skipped, total_failed)
+
+                    # Emit row_completed and row_translated signals for real-time UI updates
+                    for row_result in chunk_result.row_results:
+                        success = (not row_result.skipped and not row_result.error_message)
+                        self.row_completed.emit(row_result.entity_id, success)
+
+                        # Emit row_translated for activity log (limit to keep UI responsive)
+                        if len(all_row_results) <= 100:  # Activity log for first 100 items
+                            if success and row_result.new_translation:
+                                translation = row_result.new_translation[:50]
+                                self.row_translated.emit(row_result.entity_id, translation, True)
+                            elif row_result.error_message:
+                                self.row_translated.emit(row_result.entity_id, row_result.error_message[:50], False)
 
                     logger.debug(f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded")
 
