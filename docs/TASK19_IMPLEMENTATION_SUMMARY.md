@@ -244,6 +244,48 @@ python scripts/backfill_tm_global.py
 
 ---
 
+## Hotfix: Cross-Project Propagation (2026-02-13) ✅ FIXED
+
+### Problem
+
+Cross-project translation propagation was not working. When editing translation in one project, other projects did not receive the update.
+
+**Symptoms**:
+- Project 7: lemma "אוסטניטי" has translation "Аустенитный"
+- Project 6: same lemma has empty translation
+- Both linked to same `tm_global_id=2157` with translation "Аустенитный"
+
+### Root Cause
+
+`upsert_and_link()` only updated `tm_global` but didn't call `propagate_to_entries()` to sync all linked `tm_entry` rows.
+
+### Solution (commit 2c24f23)
+
+1. **`upsert_and_link()`**: Now calls `propagate_to_entries()` after every `tm_global` update
+2. **`propagate_to_entries()`**: Added support for `"origin"` and `"confidence"` fields
+3. **`repropagate_tm_global.py`**: One-time script to fix existing data (updated 13,006 entries)
+
+### Testing
+
+- **New tests**: `tests/test_task19_propagation.py` (3 tests for cross-project propagation)
+- **Total tests**: 13 Task 19 tests PASSED (10 original + 3 new)
+- **Regression**: 50 tests PASSED
+
+### Verification
+
+```bash
+# Run re-propagation script
+python scripts/repropagate_tm_global.py --dry-run  # Preview
+python scripts/repropagate_tm_global.py            # Fix existing data
+
+# Verify specific lemma
+python scripts/check_lemma.py
+```
+
+**Result**: Lemma "אוסטניטי" now correctly shows "Аустенитный" in both projects 6 and 7.
+
+---
+
 ## Performance Impact
 
 ### Write-Path Overhead
@@ -444,6 +486,41 @@ Files:
 - NEW: docs/TASK19_GLOBAL_TM_DESIGN.md
 - NEW: docs/TASK19_GLOBAL_TM_BACKFILL.md
 - NEW: docs/TASK19_IMPLEMENTATION_SUMMARY.md
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+### HOTFIX: Cross-Project Propagation
+```
+fix(task19): add automatic cross-project translation propagation
+
+PROBLEM: Translations were not propagating across projects automatically.
+When editing translation in project 7, project 6 didn't receive the update.
+
+ROOT CAUSE: upsert_and_link() only updated tm_global but didn't call
+propagate_to_entries() to sync all linked tm_entry rows.
+
+SOLUTION (3 changes):
+1. upsert_and_link: Now calls propagate_to_entries after every tm_global update
+2. propagate_to_entries: Added support for "origin" and "confidence" fields
+3. repropagate_tm_global.py: One-time script to fix existing data (updated 13,006 entries)
+
+TESTING:
+- Added 3 new tests in test_task19_propagation.py (cross-project, edit, scoring)
+- All 13 Task 19 tests PASSED (10 original + 3 new)
+- All 50 regression tests PASSED
+
+VERIFICATION:
+- Test lemma "אוסטניטי" now correctly shows "Аустенитный" in both projects 6 and 7
+- Before fix: Project 6 had empty translation, Project 7 had "Аустенитный"
+- After fix: Both projects have "Аустенитный" (propagated from tm_global)
+
+FILES:
+- MOD: app/services/tm_global_service.py (upsert_and_link + propagate_to_entries)
+- NEW: tests/test_task19_propagation.py (3 tests for cross-project propagation)
+- NEW: scripts/repropagate_tm_global.py (one-time data fix script)
+- NEW: scripts/diagnose_task19.py (diagnostic tool)
+- NEW: scripts/check_lemma.py (test specific lemma)
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
