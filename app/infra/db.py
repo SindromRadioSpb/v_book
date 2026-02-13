@@ -134,6 +134,9 @@ class DatabaseManager:
         # CRITICAL FIX (Task 12): Always check FTS health after migrations
         self._ensure_fts_health()
 
+        # Task 19: Auto-backfill tm_global if needed (after migration 015)
+        self._backfill_tm_global_if_needed()
+
     def _ensure_fts_health(self) -> None:
         """Ensure FTS5 tables and triggers exist. Runs on EVERY startup.
 
@@ -154,6 +157,58 @@ class DatabaseManager:
             # Don't raise - allow app to start, FTS operations will fail gracefully
         finally:
             raw_conn.close()
+
+    def _backfill_tm_global_if_needed(self) -> None:
+        """Backfill tm_global from existing tm_entry data if table is empty.
+
+        This is a one-time operation after migration 015:
+        - If tm_global table exists AND has 0 rows AND tm_entry has >0 rows → run backfill
+        - Safe to run multiple times (idempotent via UNIQUE constraint)
+        """
+        from sqlalchemy import text
+
+        try:
+            with self.engine.connect() as conn:
+                # Check if tm_global table exists
+                result = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='tm_global'")
+                ).fetchone()
+                if not result:
+                    return  # Table doesn't exist yet, skip
+
+                # Check if tm_global is empty
+                tm_global_count = conn.execute(text("SELECT COUNT(*) FROM tm_global")).scalar()
+                if tm_global_count > 0:
+                    logger.debug("tm_global already populated, skipping backfill")
+                    return  # Already populated
+
+                # Check if tm_entry has data to backfill
+                tm_entry_count = conn.execute(text("SELECT COUNT(*) FROM tm_entry")).scalar()
+                if tm_entry_count == 0:
+                    logger.debug("No tm_entry records to backfill")
+                    return  # Nothing to backfill
+
+            # Run backfill
+            logger.info(f"Auto-backfilling tm_global from {tm_entry_count} tm_entry records...")
+            from app.services.tm_global_service import TMGlobalService
+
+            session = self.SessionLocal()
+            try:
+                service = TMGlobalService()
+                stats = service.backfill(session, chunk_size=500, dry_run=False)
+                logger.info(
+                    f"tm_global backfill complete: {stats['groups_created']} rows created, "
+                    f"{stats['entries_linked']} entries linked"
+                )
+            except Exception as e:
+                logger.error(f"tm_global backfill failed: {e}")
+                session.rollback()
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"tm_global backfill check failed: {e}")
+            # Don't raise - allow app to start
 
     @staticmethod
     def _extract_version(filename: str) -> int:

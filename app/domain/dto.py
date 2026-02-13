@@ -170,6 +170,8 @@ class TMEntryDTO:
     lemma_id: Optional[int]
     cluster_id: Optional[int]
     ngram_id: Optional[int]
+    # Global TM canonical link (Task 19)
+    tm_global_id: Optional[int] = None
 
 
 @dataclass

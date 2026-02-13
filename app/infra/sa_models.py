@@ -593,6 +593,8 @@ class TMEntry(Base):
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="SET NULL"))
     cluster_id = Column(Integer, ForeignKey("term_cluster.cluster_id", ondelete="SET NULL"))
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="SET NULL"))
+    # Global TM canonical link (Task 19)
+    tm_global_id = Column(Integer, ForeignKey("tm_global.tm_global_id", ondelete="SET NULL"))
 
     __table_args__ = (
         UniqueConstraint("project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"),
@@ -602,6 +604,39 @@ class TMEntry(Base):
             "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')", name="ck_tm_origin"
         ),
         CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_tm_confidence"),
+    )
+
+
+class TMGlobal(Base):
+    """Global (cross-project) canonical translation entry."""
+
+    __tablename__ = "tm_global"
+
+    tm_global_id = Column(Integer, primary_key=True)
+    src_lang = Column(String, nullable=False)
+    tgt_lang = Column(String, nullable=False)
+    kind = Column(String, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    src_text = Column(Text, nullable=False)
+    translation = Column(Text, nullable=False, default="")
+    status = Column(String, nullable=False, default="draft")
+    origin = Column(String, nullable=False, default="mt_auto")
+    confidence = Column(Float)
+    is_noise = Column(Integer, default=0)
+    noise_reason = Column(String)
+    notes = Column(Text)
+    source_tm_id = Column(Integer)  # tm_entry.tm_id that won merge
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("src_lang", "tgt_lang", "kind", "src_norm", name="uq_tm_global"),
+        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tmg_kind"),
+        CheckConstraint("status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tmg_status"),
+        CheckConstraint(
+            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')",
+            name="ck_tmg_origin",
+        ),
     )
 
 
