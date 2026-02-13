@@ -1627,6 +1627,10 @@ class TranslateAllFilteredWorker(QThread):
         self.skipped = 0
         self.failed = 0
 
+        # PATCH-17-02: Activity throttling (max 10 events/sec)
+        self._last_activity_emit = 0.0
+        self._activity_throttle_interval = 0.1  # 100ms
+
     def cancel(self):
         """Request cancellation (checked between chunks)."""
         self._cancel_requested = True
@@ -1640,6 +1644,41 @@ class TranslateAllFilteredWorker(QThread):
         """Resume from pause."""
         self._paused = False
         self.resumed.emit()
+
+    def _emit_activity_from_row_result(self, row_result):
+        """PATCH-17-02: Emit activity event with throttling.
+
+        Args:
+            row_result: BatchTranslateRowResult from service
+        """
+        import time
+
+        now = time.time()
+
+        # Throttle unless FAIL (priority)
+        if row_result.error_message:
+            # FAIL: emit immediately (high priority)
+            pass
+        else:
+            # OK/SKIP: throttle to max 10 events/sec
+            if now - self._last_activity_emit < self._activity_throttle_interval:
+                return  # Skip this event to avoid UI flooding
+
+        self._last_activity_emit = now
+
+        # Determine event type and emit
+        if row_result.skipped:
+            # SKIP event
+            msg = "already translated"
+            self.row_translated.emit(row_result.entity_id, msg, False)
+        elif row_result.error_message:
+            # FAIL event
+            error_short = row_result.error_message[:50]
+            self.row_translated.emit(row_result.entity_id, error_short, False)
+        elif row_result.new_translation:
+            # OK event
+            translation = row_result.new_translation[:50]
+            self.row_translated.emit(row_result.entity_id, translation, True)
 
     def run(self):
         """Execute chunked translation."""
@@ -1841,6 +1880,7 @@ class TranslateAllFilteredWorker(QThread):
                         options=options,
                         progress_callback=on_batch_progress,  # PATCH-16-01: Real-time updates!
                         cancel_check=lambda: self._cancel_requested,
+                        item_callback=self._emit_activity_from_row_result,  # PATCH-17-02: Real-time activity!
                     )
 
                     # Aggregate results
@@ -1861,18 +1901,8 @@ class TranslateAllFilteredWorker(QThread):
                     # Emit stats update for UI
                     self.stats_updated.emit(total_succeeded, total_skipped, total_failed)
 
-                    # Emit row_completed and row_translated signals for real-time UI updates
-                    for row_result in chunk_result.row_results:
-                        success = (not row_result.skipped and not row_result.error_message)
-                        self.row_completed.emit(row_result.entity_id, success)
-
-                        # Emit row_translated for activity log (limit to keep UI responsive)
-                        if len(all_row_results) <= 100:  # Activity log for first 100 items
-                            if success and row_result.new_translation:
-                                translation = row_result.new_translation[:50]
-                                self.row_translated.emit(row_result.entity_id, translation, True)
-                            elif row_result.error_message:
-                                self.row_translated.emit(row_result.entity_id, row_result.error_message[:50], False)
+                    # PATCH-17-03: Activity events now emitted via item_callback (real-time)
+                    # Old post-batch emission code removed - events now come during translation
 
                     logger.debug(f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded")
 

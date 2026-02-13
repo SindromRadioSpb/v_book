@@ -258,17 +258,27 @@ class BatchProgressDialogV3(QDialog):
 
         Args:
             entity_id: Source text
-            translation: Translated text (or error message)
-            success: True if succeeded, False if failed
+            translation: Translated text, skip reason, or error message
+            success: True if succeeded, False if skipped/failed
         """
         if success:
+            # OK event: successful translation
             icon = "[+]"
             color = "#4caf50"
             text = f"{entity_id} -> {translation}"
         else:
-            icon = "[x]"
-            color = "#f44336"
-            text = f"{entity_id}: {translation}"
+            # PATCH-17-04: Distinguish SKIP vs FAIL
+            translation_lower = translation.lower()
+            if "already" in translation_lower or "skip" in translation_lower or "translated" in translation_lower:
+                # SKIP event: already translated
+                icon = "[~]"
+                color = "#ff9800"  # Orange for skip
+                text = f"{entity_id} ({translation})"
+            else:
+                # FAIL event: error
+                icon = "[x]"
+                color = "#f44336"  # Red for fail
+                text = f"{entity_id}: {translation}"
 
         # Add to deque
         self.recent_items.append((icon, text, color))

@@ -82,6 +82,7 @@ class BatchMTTranslateService:
         options: BatchTranslateOptions,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        item_callback: Optional[Callable[["BatchTranslateRowResult"], None]] = None,  # PATCH-17-01: Per-item events
     ) -> BatchTranslateResult:
         """Execute batch translation.
 
@@ -91,6 +92,7 @@ class BatchMTTranslateService:
             options: Execution options
             progress_callback: Optional callback(completed, total)
             cancel_check: Optional callback() -> bool (True = cancel requested)
+            item_callback: Optional callback(row_result) for real-time activity updates (PATCH-17-01)
 
         Returns:
             BatchTranslateResult with summary and per-row results
@@ -136,6 +138,10 @@ class BatchMTTranslateService:
                         failed += 1
                     else:
                         succeeded += 1
+
+                    # PATCH-17-01: Call item_callback for real-time activity updates
+                    if item_callback:
+                        item_callback(result)
 
                 completed += len(chunk_results)
 
