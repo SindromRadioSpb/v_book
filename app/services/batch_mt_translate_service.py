@@ -454,8 +454,9 @@ class BatchMTTranslateService:
         translation: str,
     ) -> None:
         """Write lemma translation (Dictionary tab pattern)."""
-        # Normalize for matching (lemma: same as src_text)
-        src_norm = item.source_text
+        # PATCH-18-01: Compute src_norm (same as dictionary_view.py inline edit)
+        normalized = normalize_for_tm(item.src_lang, item.source_text, "lemma")
+        src_norm = normalized.norm
 
         # Check if TM entry exists
         stmt = select(TMEntry).where(
