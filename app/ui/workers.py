@@ -1589,8 +1589,11 @@ class TranslateAllFilteredWorker(QThread):
 
     progress = pyqtSignal(int, int)        # (completed, total)
     row_completed = pyqtSignal(str, bool)  # (entity_id, success)
+    row_translated = pyqtSignal(str, str, bool)  # (entity_id, translation, success) - for activity log
     finished = pyqtSignal(object)          # BatchTranslateResult
     error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
 
     def __init__(
         self,
@@ -1599,7 +1602,8 @@ class TranslateAllFilteredWorker(QThread):
         filters: dict,              # Same dict as passed to search/count
         provider_mode: str,         # "chain" | "force:<provider_id>"
         write_mode: str,            # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
-        chunk_size: int = 200,      # ID fetch chunk size
+        id_fetch_chunk: int = 200,  # How many IDs to fetch from DB per iteration (efficiency)
+        translation_chunk: int = 25, # How many items to translate before commit (UX + safety)
         src_lang: str = "he",
         tgt_lang: str = "ru",
     ):
@@ -1609,14 +1613,26 @@ class TranslateAllFilteredWorker(QThread):
         self.filters = filters
         self.provider_mode = provider_mode
         self.write_mode = write_mode
-        self.chunk_size = chunk_size
+        self.id_fetch_chunk = id_fetch_chunk
+        self.translation_chunk = translation_chunk
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self._cancel_requested = False
+        self._paused = False
 
     def cancel(self):
         """Request cancellation (checked between chunks)."""
         self._cancel_requested = True
+
+    def pause(self):
+        """Request pause (checked between translation items)."""
+        self._paused = True
+        self.paused.emit()
+
+    def resume(self):
+        """Resume from pause."""
+        self._paused = False
+        self.resumed.emit()
 
     def run(self):
         """Execute chunked translation."""
@@ -1677,7 +1693,13 @@ class TranslateAllFilteredWorker(QThread):
 
                 # Step 2: Process in chunks
                 completed = 0
-                for offset in range(0, total, self.chunk_size):
+                for offset in range(0, total, self.id_fetch_chunk):
+                    # Check pause (wait until resumed)
+                    while self._paused:
+                        time.sleep(0.1)  # Sleep while paused
+                        if self._cancel_requested:
+                            break
+
                     # Check cancel
                     if self._cancel_requested:
                         logger.info(f"Translation cancelled at {completed}/{total}")
@@ -1697,12 +1719,12 @@ class TranslateAllFilteredWorker(QThread):
                     if self.entity_type == "lemma":
                         ids = dict_service.fetch_lemma_ids_for_translation(
                             session, self.project_id, self.filters, self.write_mode,
-                            limit=self.chunk_size, offset=offset
+                            limit=self.id_fetch_chunk, offset=offset
                         )
                     else:  # term_cluster
                         ids = term_service.fetch_cluster_ids_for_translation(
                             session, self.project_id, self.filters, self.write_mode,
-                            limit=self.chunk_size, offset=offset
+                            limit=self.id_fetch_chunk, offset=offset
                         )
 
                     if not ids:
@@ -1758,10 +1780,11 @@ class TranslateAllFilteredWorker(QThread):
                         break
 
                     # Translate this chunk using existing batch service
+                    # Use translation_chunk for granular progress updates + commit safety
                     options = BatchTranslateOptions(
                         provider_mode=self.provider_mode,
                         write_mode=self.write_mode,
-                        chunk_size=len(items),  # Process all items in this chunk together
+                        chunk_size=self.translation_chunk,  # 25 items per commit (dynamic UX)
                         stop_on_error=False,
                     )
 
@@ -1784,6 +1807,14 @@ class TranslateAllFilteredWorker(QThread):
                     for row_result in chunk_result.row_results:
                         success = (not row_result.skipped and not row_result.error_message)
                         self.row_completed.emit(row_result.entity_id, success)
+
+                        # Emit row_translated for activity log (first 5 items)
+                        if completed + len(all_row_results) <= 5:  # Only first few for activity log
+                            if success:
+                                translation = row_result.new_translation or ""
+                                self.row_translated.emit(row_result.entity_id, translation[:50], True)
+                            elif row_result.error_message:
+                                self.row_translated.emit(row_result.entity_id, row_result.error_message[:50], False)
 
                     # Update progress
                     completed += len(items)

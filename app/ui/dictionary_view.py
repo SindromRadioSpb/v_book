@@ -820,6 +820,7 @@ class DictionaryView(QWidget):
         """Task 15: Handle batch translate action with scope support."""
         from PyQt6.QtWidgets import QMessageBox
         from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
         from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
         from app.services.batch_mt_translate_service import (
             BatchTranslateItem,
@@ -874,7 +875,7 @@ class DictionaryView(QWidget):
 
             # Create TranslateAllFilteredWorker for chunked translation
             logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} lemmas")
-            progress_dialog = BatchProgressDialog(parent=self, total=filtered_count)
+            progress_dialog = BatchProgressDialogV3(parent=self, total=filtered_count)
             progress_dialog.show()
 
             worker = TranslateAllFilteredWorker(
@@ -883,16 +884,31 @@ class DictionaryView(QWidget):
                 filters=self.build_filters(),
                 provider_mode=provider_mode,
                 write_mode=write_mode,
-                chunk_size=200,
+                id_fetch_chunk=200,      # Fetch 200 IDs from DB per iteration
+                translation_chunk=25,     # Translate 25 items before commit (dynamic UX)
                 src_lang="he",
                 tgt_lang="ru",
             )
 
             # Connect signals
             worker.progress.connect(progress_dialog.update_progress)
+            worker.row_completed.connect(
+                lambda entity_id, success: progress_dialog.update_counts(
+                    getattr(worker, 'succeeded', 0),
+                    getattr(worker, 'skipped', 0),
+                    getattr(worker, 'failed', 0)
+                )
+            )
+            worker.row_translated.connect(
+                lambda entity_id, translation, success: progress_dialog.add_recent_item(
+                    entity_id, translation, success
+                )
+            )
             worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
             worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
             progress_dialog.cancel_requested.connect(worker.cancel)
+            progress_dialog.pause_requested.connect(worker.pause)
+            progress_dialog.resume_requested.connect(worker.resume)
 
             # Disable translate button while worker runs
             self.batch_translate_btn.setEnabled(False)
