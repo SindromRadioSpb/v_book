@@ -1026,7 +1026,7 @@ class ExportService:
             # Headers
             headers = [
                 "ID", "Kind", "Source", "Translation", "Status",
-                "Project", "Origin", "Source Ref", "Updated"
+                "Project", "Origin", "Source Ref", "Updated", "Noise"
             ]
             ws.append(headers)
 
@@ -1049,6 +1049,14 @@ class ExportService:
 
                 # Write rows
                 for entry in entries:
+                    # Format is_noise for display (same as UI table model):
+                    # 1 = "Noise", 0 = "Valid", None = ""
+                    noise_display = ""
+                    if entry.is_noise == 1:
+                        noise_display = "Noise"
+                    elif entry.is_noise == 0:
+                        noise_display = "Valid"
+
                     ws.append([
                         entry.tm_id,
                         entry.kind or "",
@@ -1059,6 +1067,7 @@ class ExportService:
                         entry.origin or "",
                         entry.source_ref or "",
                         str(entry.updated_at) if entry.updated_at else "",
+                        noise_display,
                     ])
                     row_count += 1
 
