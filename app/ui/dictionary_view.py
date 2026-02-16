@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QMenu,
 )
-from PyQt6.QtCore import Qt, QModelIndex
+from PyQt6.QtCore import Qt, QModelIndex, QTimer
 from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
@@ -48,6 +48,12 @@ class DictionaryView(QWidget):
         self.page_size = self.settings.get_int("dictionary_view/page_size", 100)
         self.total_count = 0
         self.search_worker = None  # Track worker for cancellation
+        self._search_request_seq = 0
+        self._active_search_seq = 0
+        self._search_retry_pending = False
+        self._translation_request_seq = 0
+        self._active_translation_seq = 0
+        self._pending_translation_lemmas: Optional[List[LemmaStats]] = None
 
         self.init_ui()
         self.perform_search()
@@ -237,11 +243,18 @@ class DictionaryView(QWidget):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
-            self.search_worker.quit()
-            self.search_worker.wait(1000)
+            self.search_worker.cancel()
+            if not self.search_worker.wait(100):
+                # Don't destroy a running QThread; queue latest request instead.
+                self._search_retry_pending = True
+                return
+
+        self._search_retry_pending = False
 
         # Build filters
         filters = self.build_filters()
+        self._search_request_seq += 1
+        request_seq = self._search_request_seq
 
         # Create and start worker
         self.search_worker = DictionarySearchWorker(
@@ -250,16 +263,39 @@ class DictionaryView(QWidget):
             limit=self.page_size,
             offset=self.current_offset,
         )
+        self._active_search_seq = request_seq
 
-        self.search_worker.results_ready.connect(self.on_search_results)
-        self.search_worker.error.connect(self.on_search_error)
+        self.search_worker.results_ready.connect(
+            lambda rows, total_count, seq=request_seq: self.on_search_results(rows, total_count, seq)
+        )
+        self.search_worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
+        )
+        self.search_worker.finished.connect(
+            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(worker, seq)
+        )
         self.search_worker.start()
 
         # Update status
         self.status_label.setText("Searching...")
 
-    def on_search_results(self, rows: list, total_count: int):
+    def _on_search_worker_finished(self, worker, request_seq: int):
+        """Clean up search worker and run pending search request if queued."""
+        if worker is self.search_worker:
+            self.search_worker = None
+
+        worker.deleteLater()
+
+        if self._search_retry_pending:
+            self._search_retry_pending = False
+            QTimer.singleShot(0, self.perform_search)
+
+    def on_search_results(self, rows: list, total_count: int, request_seq: Optional[int] = None):
         """Handle search results from worker."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(f"Ignoring stale dictionary search results: seq={request_seq}, active={self._active_search_seq}")
+            return
+
         # Update total count
         self.total_count = total_count
 
@@ -298,21 +334,15 @@ class DictionaryView(QWidget):
         # Start translation worker
         self.start_translation_worker(lemmas)
 
-        # Clean up worker
-        if self.search_worker:
-            self.search_worker.deleteLater()
-            self.search_worker = None
-
-    def on_search_error(self, error_msg: str):
+    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(f"Ignoring stale dictionary search error: seq={request_seq}, active={self._active_search_seq}")
+            return
+
         logger.error(f"Search error: {error_msg}")
         show_error(self, "Search Error", f"Failed to search lemmas: {error_msg}")
         self.status_label.setText("Search failed")
-
-        # Clean up worker
-        if self.search_worker:
-            self.search_worker.deleteLater()
-            self.search_worker = None
 
     def on_search_changed(self, text: str):
         """Handle search text change - reset to page 1 and search."""
@@ -418,8 +448,14 @@ class DictionaryView(QWidget):
 
         # Cancel previous worker if running
         if self.translation_worker and self.translation_worker.isRunning():
-            self.translation_worker.quit()
-            self.translation_worker.wait(1000)
+            self.translation_worker.cancel()
+            if not self.translation_worker.wait(100):
+                # Keep only latest pending translation request.
+                self._pending_translation_lemmas = lemmas
+                return
+
+        self._translation_request_seq += 1
+        request_seq = self._translation_request_seq
 
         # Build items for worker: (src_text, kind)
         items = [(lemma.lemma_text, "lemma") for lemma in lemmas]
@@ -432,34 +468,56 @@ class DictionaryView(QWidget):
             tgt_lang="ru",
             allow_draft=False,
         )
+        self._active_translation_seq = request_seq
 
-        self.translation_worker.results_ready.connect(self.on_translation_results)
-        self.translation_worker.error.connect(self.on_translation_error)
+        self.translation_worker.results_ready.connect(
+            lambda results, seq=request_seq: self.on_translation_results(results, seq)
+        )
+        self.translation_worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_translation_error(error_msg, seq)
+        )
+        self.translation_worker.finished.connect(
+            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(worker, seq)
+        )
         self.translation_worker.start()
 
         logger.info(f"Started translation worker for {len(items)} lemmas")
 
-    def on_translation_results(self, results: dict):
+    def _on_translation_worker_finished(self, worker, request_seq: int):
+        """Clean up translation worker and run pending request if queued."""
+        if worker is self.translation_worker:
+            self.translation_worker = None
+
+        worker.deleteLater()
+
+        if self._pending_translation_lemmas:
+            pending_lemmas = self._pending_translation_lemmas
+            self._pending_translation_lemmas = None
+            QTimer.singleShot(0, lambda: self.start_translation_worker(pending_lemmas))
+
+    def on_translation_results(self, results: dict, request_seq: Optional[int] = None):
         """M7 P1: Handle translation results from worker."""
+        if request_seq is not None and request_seq != self._active_translation_seq:
+            logger.debug(
+                f"Ignoring stale dictionary translation results: seq={request_seq}, active={self._active_translation_seq}"
+            )
+            return
+
         logger.info(f"Received {len(results)} translation results")
 
         # Update model with results
         self.lemma_model.update_translations(results)
 
-        # Clean up worker
-        if self.translation_worker:
-            self.translation_worker.deleteLater()
-            self.translation_worker = None
-
-    def on_translation_error(self, error_msg: str):
+    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
         """M7 P1: Handle translation worker error."""
+        if request_seq is not None and request_seq != self._active_translation_seq:
+            logger.debug(
+                f"Ignoring stale dictionary translation error: seq={request_seq}, active={self._active_translation_seq}"
+            )
+            return
+
         logger.error(f"Translation worker error: {error_msg}")
         show_error(self, "Translation Error", f"Failed to load translations: {error_msg}")
-
-        # Clean up worker
-        if self.translation_worker:
-            self.translation_worker.deleteLater()
-            self.translation_worker = None
 
     def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
         """M7 P1: Handle inline edit of translation - save to TM."""
@@ -1055,9 +1113,16 @@ class DictionaryView(QWidget):
 
     def closeEvent(self, event):
         """M7 P1: Clean up translation worker on close."""
+        if self.search_worker and self.search_worker.isRunning():
+            logger.info("Stopping search worker on close")
+            self.search_worker.cancel()
+            self.search_worker.wait(1000)
+            if self.search_worker.isRunning():
+                self.search_worker.terminate()
+
         if self.translation_worker and self.translation_worker.isRunning():
             logger.info("Stopping translation worker on close")
-            self.translation_worker.quit()
+            self.translation_worker.cancel()
             self.translation_worker.wait(1000)
             if self.translation_worker.isRunning():
                 self.translation_worker.terminate()
