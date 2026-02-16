@@ -327,3 +327,88 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
     assert DummyWorker.captured["options"].write_mode == "FILL_EMPTY"
     assert [item.entity_id for item in DummyWorker.captured["items"]] == ["101", "303"]
     assert all(item.entity_type == "tm_entry" for item in DummyWorker.captured["items"])
+
+
+def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
+    """TM context menu should expose Translate Selected action for selected rows."""
+
+    class DummySignal:
+        def __init__(self):
+            self._callbacks = []
+
+        def connect(self, cb):
+            self._callbacks.append(cb)
+
+        def emit(self):
+            for cb in self._callbacks:
+                cb()
+
+    class FakeAction:
+        def __init__(self, text, parent):
+            self.text = text
+            self.parent = parent
+            self.triggered = DummySignal()
+
+    class FakeMenu:
+        last = None
+
+        def __init__(self, parent):
+            self.parent = parent
+            self.actions = []
+            self.separators = 0
+            FakeMenu.last = self
+
+        def addAction(self, action):
+            self.actions.append(action)
+
+        def addSeparator(self):
+            self.separators += 1
+
+        def exec(self, _pos):
+            return None
+
+    class FakeIndex:
+        def __init__(self, row):
+            self._row = row
+
+        def row(self):
+            return self._row
+
+    class FakeSelectionModel:
+        def selectedRows(self, *_args):
+            return [FakeIndex(1), FakeIndex(4)]
+
+    class FakeViewport:
+        def mapToGlobal(self, pos):
+            return pos
+
+    class FakeTable:
+        def __init__(self):
+            self._selection_model = FakeSelectionModel()
+            self._viewport = FakeViewport()
+
+        def selectionModel(self):
+            return self._selection_model
+
+        def viewport(self):
+            return self._viewport
+
+    panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
+    panel.table_view = FakeTable()
+
+    state = {"translate_called": 0}
+    panel.on_batch_translate = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
+    panel.set_entries_noise_status_bulk = lambda _flag: None
+
+    monkeypatch.setattr("app.ui.translation_management_panel.QMenu", FakeMenu)
+    monkeypatch.setattr("app.ui.translation_management_panel.QAction", FakeAction)
+
+    TranslationManagementPanel.on_context_menu(panel, pos=(0, 0))
+
+    assert FakeMenu.last is not None
+    assert len(FakeMenu.last.actions) >= 3
+    assert FakeMenu.last.actions[0].text == "Translate Selected (2 rows)..."
+
+    # Ensure wired callback invokes TM batch translate handler.
+    FakeMenu.last.actions[0].triggered.emit()
+    assert state["translate_called"] == 1

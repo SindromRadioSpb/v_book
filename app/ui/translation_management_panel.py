@@ -1308,6 +1308,12 @@ class TranslationManagementPanel(QWidget):
         # Create menu
         menu = QMenu(self)
 
+        # Translate selected action (parity with Dictionary/Terms context menu)
+        translate_action = QAction(f"Translate Selected ({count:,} rows)...", self)
+        translate_action.triggered.connect(self.on_batch_translate)
+        menu.addAction(translate_action)
+        menu.addSeparator()
+
         # Mark as Noise action
         mark_noise_action = QAction(f"Mark Selected as Noise ({count:,} rows)", self)
         mark_noise_action.triggered.connect(lambda: self.set_entries_noise_status_bulk(True))
