@@ -227,6 +227,163 @@ class TranslationAdminService:
         count = session.execute(stmt).scalar()
         return count or 0
 
+    def count_tm_ids_for_translation(
+        self,
+        session: Session,
+        filters: Optional[Dict[str, Any]],
+        write_mode: str,
+    ) -> int:
+        """Count TM entry IDs eligible for batch translation.
+
+        Applies the same filters as TM search, plus write mode semantics:
+        - FILL_EMPTY / SKIP_NON_EMPTY: only rows with empty translation
+        - OVERWRITE: all filtered rows
+        """
+        filters = filters or {}
+
+        stmt = select(func.count()).select_from(TMEntry)
+
+        # Apply same filters as search/count
+        if "kind" in filters and filters["kind"]:
+            stmt = stmt.where(TMEntry.kind == filters["kind"])
+
+        if "status" in filters and filters["status"]:
+            stmt = stmt.where(TMEntry.status == filters["status"])
+
+        if "project_ids" in filters and filters["project_ids"] is not None:
+            project_ids = filters["project_ids"]
+            include_global = -1 in project_ids or None in project_ids
+            real_ids = [pid for pid in project_ids if pid is not None and pid != -1]
+
+            conditions = []
+            if real_ids:
+                conditions.append(TMEntry.project_id.in_(real_ids))
+            if include_global:
+                conditions.append(TMEntry.project_id.is_(None))
+
+            if conditions:
+                stmt = stmt.where(or_(*conditions))
+            elif not real_ids and not include_global:
+                stmt = stmt.where(TMEntry.project_id == -999999)
+        elif "scope" in filters:
+            if filters["scope"] == "global":
+                stmt = stmt.where(TMEntry.project_id.is_(None))
+            elif filters["scope"] == "project" and "project_id" in filters:
+                stmt = stmt.where(TMEntry.project_id == filters["project_id"])
+
+        if "src_lang" in filters and filters["src_lang"]:
+            stmt = stmt.where(TMEntry.src_lang == filters["src_lang"])
+
+        if "tgt_lang" in filters and filters["tgt_lang"]:
+            stmt = stmt.where(TMEntry.tgt_lang == filters["tgt_lang"])
+
+        if "search_text" in filters and filters["search_text"]:
+            search = f"%{filters['search_text']}%"
+            stmt = stmt.where(
+                or_(
+                    TMEntry.src_text.like(search),
+                    TMEntry.translation.like(search),
+                )
+            )
+
+        if "source_ref" in filters and filters["source_ref"]:
+            stmt = stmt.where(TMEntry.source_ref == filters["source_ref"])
+
+        if "origin" in filters and filters["origin"]:
+            stmt = stmt.where(TMEntry.origin == filters["origin"])
+
+        if filters.get("hide_noise", True):
+            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
+
+        # Write mode filter
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.where(
+                or_(
+                    TMEntry.translation.is_(None),
+                    func.trim(TMEntry.translation) == "",
+                )
+            )
+
+        count = session.execute(stmt).scalar()
+        return count or 0
+
+    def fetch_tm_ids_for_translation(
+        self,
+        session: Session,
+        filters: Optional[Dict[str, Any]],
+        write_mode: str,
+        limit: int,
+        offset: int,
+    ) -> List[int]:
+        """Fetch TM entry IDs for batch translation in deterministic order."""
+        filters = filters or {}
+
+        stmt = select(TMEntry.tm_id)
+
+        # Apply same filters as search/count
+        if "kind" in filters and filters["kind"]:
+            stmt = stmt.where(TMEntry.kind == filters["kind"])
+
+        if "status" in filters and filters["status"]:
+            stmt = stmt.where(TMEntry.status == filters["status"])
+
+        if "project_ids" in filters and filters["project_ids"] is not None:
+            project_ids = filters["project_ids"]
+            include_global = -1 in project_ids or None in project_ids
+            real_ids = [pid for pid in project_ids if pid is not None and pid != -1]
+
+            conditions = []
+            if real_ids:
+                conditions.append(TMEntry.project_id.in_(real_ids))
+            if include_global:
+                conditions.append(TMEntry.project_id.is_(None))
+
+            if conditions:
+                stmt = stmt.where(or_(*conditions))
+            elif not real_ids and not include_global:
+                stmt = stmt.where(TMEntry.project_id == -999999)
+        elif "scope" in filters:
+            if filters["scope"] == "global":
+                stmt = stmt.where(TMEntry.project_id.is_(None))
+            elif filters["scope"] == "project" and "project_id" in filters:
+                stmt = stmt.where(TMEntry.project_id == filters["project_id"])
+
+        if "src_lang" in filters and filters["src_lang"]:
+            stmt = stmt.where(TMEntry.src_lang == filters["src_lang"])
+
+        if "tgt_lang" in filters and filters["tgt_lang"]:
+            stmt = stmt.where(TMEntry.tgt_lang == filters["tgt_lang"])
+
+        if "search_text" in filters and filters["search_text"]:
+            search = f"%{filters['search_text']}%"
+            stmt = stmt.where(
+                or_(
+                    TMEntry.src_text.like(search),
+                    TMEntry.translation.like(search),
+                )
+            )
+
+        if "source_ref" in filters and filters["source_ref"]:
+            stmt = stmt.where(TMEntry.source_ref == filters["source_ref"])
+
+        if "origin" in filters and filters["origin"]:
+            stmt = stmt.where(TMEntry.origin == filters["origin"])
+
+        if filters.get("hide_noise", True):
+            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
+
+        # Write mode filter
+        if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
+            stmt = stmt.where(
+                or_(
+                    TMEntry.translation.is_(None),
+                    func.trim(TMEntry.translation) == "",
+                )
+            )
+
+        stmt = stmt.order_by(TMEntry.tm_id.asc()).limit(limit).offset(offset)
+        return list(session.execute(stmt).scalars().all())
+
     def get_entry(self, session: Session, tm_id: int) -> Optional[TMEntryDTO]:
         """Get single TM entry by ID.
 

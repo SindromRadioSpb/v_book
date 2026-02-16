@@ -1,0 +1,329 @@
+"""Tests for TM Panel batch translate entrypoint and write-mode behavior."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.infra.sa_models import DictProject, Library, TMEntry
+from app.services.batch_mt_translate_service import (
+    BatchMTTranslateService,
+    BatchTranslateItem,
+    BatchTranslateOptions,
+)
+from app.services.translation_service import TranslationResult
+from app.ui.translation_management_panel import TranslationManagementPanel
+
+
+@pytest.fixture
+def tm_engine():
+    """SQLite test DB with minimal TM schema."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        Library.__table__.create(engine, checkfirst=True)
+        DictProject.__table__.create(engine, checkfirst=True)
+        TMEntry.__table__.create(engine, checkfirst=True)
+        yield engine
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)
+
+
+@pytest.fixture
+def tm_session(tm_engine):
+    """Session with one project and TM entries used by tests."""
+    with Session(tm_engine) as session:
+        lib = Library(name="Test Library")
+        session.add(lib)
+        session.flush()
+        project = DictProject(library_id=lib.library_id, name="P1")
+        session.add(project)
+        session.flush()
+
+        entries = [
+            TMEntry(
+                project_id=project.project_id,
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="alpha",
+                src_norm="alpha",
+                translation="",
+                status="approved",
+                origin="import",
+                is_noise=0,
+            ),
+            TMEntry(
+                project_id=project.project_id,
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="beta",
+                src_norm="beta",
+                translation="EXISTING",
+                status="rejected",
+                origin="merge",
+                is_noise=1,
+            ),
+            TMEntry(
+                project_id=project.project_id,
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="gamma",
+                src_norm="gamma",
+                translation="",
+                status="draft",
+                origin="mt_auto",
+                is_noise=0,
+            ),
+        ]
+        session.add_all(entries)
+        session.commit()
+        yield session
+
+
+def _build_items(session: Session, tm_ids: list[int]) -> list[BatchTranslateItem]:
+    """Build BatchTranslateItem list for tm_entry rows."""
+    items: list[BatchTranslateItem] = []
+    for tm_id in tm_ids:
+        entry = session.get(TMEntry, tm_id)
+        items.append(
+            BatchTranslateItem(
+                entity_type="tm_entry",
+                entity_id=str(entry.tm_id),
+                source_text=entry.src_text,
+                src_lang=entry.src_lang,
+                tgt_lang=entry.tgt_lang,
+                current_translation=entry.translation,
+                project_id=entry.project_id,
+            )
+        )
+    return items
+
+
+def _run_batch(monkeypatch, session: Session, tm_ids: list[int], write_mode: str):
+    """Execute batch translation with deterministic fake MT output."""
+    monkeypatch.setattr(
+        "app.services.tm_global_service.TMGlobalService.upsert_and_link",
+        lambda self, db_session, entry: None,
+    )
+
+    def fake_resolve(
+        self,
+        session,
+        src_text,
+        kind,
+        src_lang,
+        tgt_lang,
+        project_id,
+        use_mt,
+        allow_draft,
+    ):
+        return TranslationResult(translation=f"MT::{src_text}", source="mt_auto", confidence=1.0)
+
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService.resolve_translation",
+        fake_resolve,
+    )
+
+    service = BatchMTTranslateService()
+    result = service.execute_batch(
+        session=session,
+        items=_build_items(session, tm_ids),
+        options=BatchTranslateOptions(provider_mode="chain", write_mode=write_mode, chunk_size=50),
+    )
+    return result
+
+
+def test_translate_selected_fill_empty_only(monkeypatch, tm_session):
+    """Fill-empty mode updates only rows with empty translations."""
+    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    _run_batch(monkeypatch, tm_session, tm_ids, "FILL_EMPTY")
+
+    rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    assert rows[0].translation == "MT::alpha"
+    assert rows[1].translation == "EXISTING"
+    assert rows[2].translation == "MT::gamma"
+
+
+def test_translate_selected_overwrite(monkeypatch, tm_session):
+    """Overwrite mode updates every selected row."""
+    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    _run_batch(monkeypatch, tm_session, tm_ids, "OVERWRITE")
+
+    rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    assert rows[0].translation == "MT::alpha"
+    assert rows[1].translation == "MT::beta"
+    assert rows[2].translation == "MT::gamma"
+
+
+def test_translate_selected_skip_non_empty(monkeypatch, tm_session):
+    """Skip-non-empty mode keeps non-empty translations intact."""
+    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    _run_batch(monkeypatch, tm_session, tm_ids, "SKIP_NON_EMPTY")
+
+    rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    assert rows[0].translation == "MT::alpha"
+    assert rows[1].translation == "EXISTING"
+    assert rows[2].translation == "MT::gamma"
+
+
+def test_translate_selected_preserves_status_origin_noise_fields(monkeypatch, tm_session):
+    """tm_entry write path should not reset status/origin/is_noise."""
+    target = tm_session.query(TMEntry).filter(TMEntry.src_text == "beta").one()
+    tm_id = target.tm_id
+    before = (target.status, target.origin, target.is_noise)
+
+    _run_batch(monkeypatch, tm_session, [tm_id], "OVERWRITE")
+
+    updated = tm_session.get(TMEntry, tm_id)
+    assert updated.translation == "MT::beta"
+    assert (updated.status, updated.origin, updated.is_noise) == before
+
+
+def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
+    """TM panel entrypoint should pass selected tm_id list into BatchTranslateWorker."""
+
+    class DummySignal:
+        def __init__(self):
+            self._callbacks = []
+
+        def connect(self, cb):
+            self._callbacks.append(cb)
+
+    class DummyProgressDialog:
+        def __init__(self, parent=None, total=0):
+            self.cancel_requested = DummySignal()
+
+        def show(self):
+            return None
+
+        def update_progress(self, *_args):
+            return None
+
+        def set_completed(self):
+            return None
+
+        def update_counts(self, *_args):
+            return None
+
+        def accept(self):
+            return None
+
+        def reject(self):
+            return None
+
+    class DummyWorker:
+        captured = None
+
+        def __init__(self, items, options, tab_type):
+            DummyWorker.captured = {
+                "items": items,
+                "options": options,
+                "tab_type": tab_type,
+            }
+            self.progress = DummySignal()
+            self.finished = DummySignal()
+            self.error = DummySignal()
+
+        def start(self):
+            return None
+
+        def cancel(self):
+            return None
+
+        def isRunning(self):
+            return False
+
+        def deleteLater(self):
+            return None
+
+    class FakeIndex:
+        def __init__(self, row):
+            self._row = row
+
+        def row(self):
+            return self._row
+
+    class FakeSelectionModel:
+        def selectedRows(self, *_args):
+            return [FakeIndex(2), FakeIndex(0)]
+
+    class FakeTable:
+        def __init__(self):
+            self._selection_model = FakeSelectionModel()
+
+        def selectionModel(self):
+            return self._selection_model
+
+    class FakeButton:
+        def __init__(self):
+            self.enabled = True
+
+        def setEnabled(self, value):
+            self.enabled = value
+
+    class DummySessionCtx:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class DummyDB:
+        def get_session(self):
+            return DummySessionCtx()
+
+    fake_entries = {
+        0: SimpleNamespace(
+            tm_id=101,
+            src_text="s1",
+            src_lang="he",
+            tgt_lang="ru",
+            translation="",
+            project_id=1,
+        ),
+        2: SimpleNamespace(
+            tm_id=303,
+            src_text="s3",
+            src_lang="he",
+            tgt_lang="ru",
+            translation="x",
+            project_id=2,
+        ),
+    }
+
+    panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
+    panel.table_view = FakeTable()
+    panel.model = SimpleNamespace(get_entry=lambda row: fake_entries.get(row))
+    panel.batch_translate_btn = FakeButton()
+    panel.project_id = None
+    panel.batch_translate_worker = None
+    panel.build_filters = lambda: {}
+    panel.perform_search = lambda: None
+
+    monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"))
+    monkeypatch.setattr("app.ui.dialogs.BatchProgressDialog", DummyProgressDialog)
+    monkeypatch.setattr("app.ui.workers.BatchTranslateWorker", DummyWorker)
+    monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
+    monkeypatch.setattr(
+        "app.services.translation_admin_service.TranslationAdminService.count_tm_ids_for_translation",
+        lambda self, session, filters, write_mode: 2,
+    )
+
+    TranslationManagementPanel.on_batch_translate(panel)
+
+    assert DummyWorker.captured is not None
+    assert DummyWorker.captured["tab_type"] == "tm"
+    assert DummyWorker.captured["options"].write_mode == "FILL_EMPTY"
+    assert [item.entity_id for item in DummyWorker.captured["items"]] == ["101", "303"]
+    assert all(item.entity_type == "tm_entry" for item in DummyWorker.captured["items"])

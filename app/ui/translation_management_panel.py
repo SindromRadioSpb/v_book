@@ -245,6 +245,7 @@ class TranslationManagementPanel(QWidget):
         self.project_id = project_id
         self.worker: Optional[TMSearchWorker] = None
         self.export_worker: Optional[TMExportWorker] = None
+        self.batch_translate_worker = None
         self.bulk_worker: Optional['BulkNoiseUpdateWorker'] = None
         self.bulk_progress_dialog: Optional[QProgressDialog] = None
         self.model = TranslationManagementTableModel()
@@ -395,6 +396,7 @@ class TranslationManagementPanel(QWidget):
         self.table_view = QTableView()
         self.table_view.setModel(self.model)
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table_view.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSortingEnabled(False)  # Server-side sorting only
 
@@ -412,6 +414,7 @@ class TranslationManagementPanel(QWidget):
 
         # P2 FIX: Connect dataChanged signal to save inline edits
         self.model.dataChanged.connect(self.on_translation_edited)
+        self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         # Context menu for noise marking
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -520,6 +523,11 @@ class TranslationManagementPanel(QWidget):
         self.history_btn = QPushButton("📜 View History")
         self.history_btn.clicked.connect(self.on_view_history)
         actions_layout.addWidget(self.history_btn)
+
+        self.batch_translate_btn = QPushButton("Translate Selected...")
+        self.batch_translate_btn.clicked.connect(self.on_batch_translate)
+        self.batch_translate_btn.setEnabled(False)
+        actions_layout.addWidget(self.batch_translate_btn)
 
         # Task #14: Export Excel button
         self.export_btn = QPushButton("📊 Export Excel")
@@ -799,6 +807,7 @@ class TranslationManagementPanel(QWidget):
         self.results_label.setText(f"Results: {len(entries)} of {total_count}")
         self.status_label.setText("Ready")
         self.update_pagination_controls()
+        self.on_selection_changed()
         logger.info(f"Search completed: {len(entries)} entries")
 
     def on_search_error(self, error_msg: str):
@@ -924,6 +933,11 @@ class TranslationManagementPanel(QWidget):
             logger.info("Stopping TM export worker on panel close")
             self.export_worker.cancel()
             self.export_worker.wait()
+
+        if self.batch_translate_worker and self.batch_translate_worker.isRunning():
+            logger.info("Stopping TM batch translate worker on panel close")
+            self.batch_translate_worker.cancel()
+            self.batch_translate_worker.wait()
 
         if self.bulk_worker and self.bulk_worker.isRunning():
             logger.info("Stopping bulk noise update worker on panel close")
@@ -1107,6 +1121,176 @@ class TranslationManagementPanel(QWidget):
         if self.export_worker and self.export_worker.isRunning():
             self.export_worker.cancel()
             logger.info("User cancelled TM export")
+
+    def on_selection_changed(self):
+        """Enable/disable translate action based on row selection."""
+        if not hasattr(self, "batch_translate_btn"):
+            return
+        selected_rows = self.table_view.selectionModel().selectedRows()
+        self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
+
+    def _get_selected_tm_entries(self) -> List[TMEntryDTO]:
+        """Return selected TM entries in deterministic order."""
+        selected_indexes = self.table_view.selectionModel().selectedRows()
+        entries: List[TMEntryDTO] = []
+        for index in sorted(selected_indexes, key=lambda idx: idx.row()):
+            entry = self.model.get_entry(index.row())
+            if entry:
+                entries.append(entry)
+        return entries
+
+    def on_batch_translate(self):
+        """Handle batch translation for selected TM entries."""
+        from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
+        from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
+        from app.services.translation_admin_service import TranslationAdminService
+
+        selected_entries = self._get_selected_tm_entries()
+        if not selected_entries:
+            return
+
+        filtered_count = 0
+        try:
+            db_service = DBService.get_instance()
+            admin_service = TranslationAdminService()
+            with db_service.get_session() as session:
+                filtered_count = admin_service.count_tm_ids_for_translation(
+                    session,
+                    self.build_filters(),
+                    "FILL_EMPTY",
+                )
+        except Exception as e:
+            logger.warning(f"Failed to compute filtered_count for TM batch translate: {e}")
+
+        accepted, provider_mode, write_mode, scope = show_batch_translate_dialog(
+            parent=self,
+            selected_count=len(selected_entries),
+            scope_enabled=True,
+            filtered_count=filtered_count,
+        )
+        if not accepted:
+            return
+
+        if scope == "all_filtered":
+            if write_mode == "OVERWRITE" and filtered_count > 100:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Overwrite",
+                    f"This will overwrite {filtered_count} existing translations.\n\n"
+                    f"This action cannot be undone.\n\n"
+                    f"Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
+            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} tm_entry records")
+            progress_dialog = BatchProgressDialogV3(parent=self, total=filtered_count)
+            progress_dialog.show()
+
+            worker = TranslateAllFilteredWorker(
+                entity_type="tm_entry",
+                project_id=self.project_id,
+                filters=self.build_filters(),
+                provider_mode=provider_mode,
+                write_mode=write_mode,
+                id_fetch_chunk=200,
+                translation_chunk=25,
+            )
+
+            worker.progress.connect(progress_dialog.update_progress)
+            worker.stats_updated.connect(progress_dialog.update_counts)
+            worker.row_translated.connect(progress_dialog.add_recent_item)
+            worker.stage_updated.connect(progress_dialog.set_stage)
+            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            progress_dialog.cancel_requested.connect(worker.cancel)
+            progress_dialog.pause_requested.connect(worker.pause)
+            progress_dialog.resume_requested.connect(worker.resume)
+
+            self.batch_translate_btn.setEnabled(False)
+            worker.finished.connect(self.on_selection_changed)
+            worker.error.connect(self.on_selection_changed)
+
+            worker.start()
+            self.batch_translate_worker = worker
+            return
+
+        items = [
+            BatchTranslateItem(
+                entity_type="tm_entry",
+                entity_id=str(entry.tm_id),
+                source_text=entry.src_text,
+                src_lang=entry.src_lang,
+                tgt_lang=entry.tgt_lang,
+                current_translation=entry.translation,
+                project_id=entry.project_id,
+            )
+            for entry in selected_entries
+        ]
+
+        options = BatchTranslateOptions(
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            chunk_size=50,
+            stop_on_error=False,
+        )
+
+        progress_dialog = BatchProgressDialog(parent=self, total=len(items))
+        progress_dialog.show()
+
+        worker = BatchTranslateWorker(
+            items=items,
+            options=options,
+            tab_type="tm",
+        )
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+        worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+
+        self.batch_translate_btn.setEnabled(False)
+        worker.finished.connect(self.on_selection_changed)
+        worker.error.connect(self.on_selection_changed)
+
+        worker.start()
+        self.batch_translate_worker = worker
+
+    def on_batch_translate_finished(self, result, progress_dialog):
+        """Handle TM batch translate completion."""
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(result.succeeded, result.skipped, result.failed)
+        progress_dialog.accept()
+
+        msg = (
+            "Translation completed!\n\n"
+            f"Total: {result.total}\n"
+            f"Succeeded: {result.succeeded}\n"
+            f"Skipped: {result.skipped}\n"
+            f"Failed: {result.failed}"
+        )
+        if result.failed > 0:
+            QMessageBox.warning(self, "Translation Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Translation Complete", msg)
+
+        self.perform_search()
+
+        if self.batch_translate_worker:
+            self.batch_translate_worker.deleteLater()
+            self.batch_translate_worker = None
+
+    def on_batch_translate_error(self, error_msg: str, progress_dialog):
+        """Handle TM batch translate error."""
+        progress_dialog.reject()
+        QMessageBox.critical(self, "Translation Error", error_msg)
+
+        if self.batch_translate_worker:
+            self.batch_translate_worker.deleteLater()
+            self.batch_translate_worker = None
 
     # ========================================================================
     # Noise Marking (Hide Noise + Bulk Mark as Valid/Noise)

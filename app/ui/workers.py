@@ -1599,8 +1599,8 @@ class TranslateAllFilteredWorker(QThread):
 
     def __init__(
         self,
-        entity_type: str,           # "lemma" | "term_cluster"
-        project_id: int,
+        entity_type: str,           # "lemma" | "term_cluster" | "tm_entry"
+        project_id: Optional[int],
         filters: dict,              # Same dict as passed to search/count
         provider_mode: str,         # "chain" | "force:<provider_id>"
         write_mode: str,            # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
@@ -1685,6 +1685,7 @@ class TranslateAllFilteredWorker(QThread):
         from app.services.db_service import DBService
         from app.services.dictionary_service import DictionaryService
         from app.services.term_extraction_service import TermExtractionService
+        from app.services.translation_admin_service import TranslationAdminService
         from app.services.batch_mt_translate_service import (
             BatchMTTranslateService,
             BatchTranslateItem,
@@ -1723,6 +1724,11 @@ class TranslateAllFilteredWorker(QThread):
                     term_service = TermExtractionService()
                     total = term_service.count_cluster_ids_for_translation(
                         session, self.project_id, self.filters, self.write_mode
+                    )
+                elif self.entity_type == "tm_entry":
+                    admin_service = TranslationAdminService()
+                    total = admin_service.count_tm_ids_for_translation(
+                        session, self.filters, self.write_mode
                     )
                 else:
                     raise ValueError(f"Unknown entity_type: {self.entity_type}")
@@ -1782,9 +1788,14 @@ class TranslateAllFilteredWorker(QThread):
                             session, self.project_id, self.filters, self.write_mode,
                             limit=self.id_fetch_chunk, offset=offset
                         )
-                    else:  # term_cluster
+                    elif self.entity_type == "term_cluster":
                         ids = term_service.fetch_cluster_ids_for_translation(
                             session, self.project_id, self.filters, self.write_mode,
+                            limit=self.id_fetch_chunk, offset=offset
+                        )
+                    else:  # tm_entry
+                        ids = admin_service.fetch_tm_ids_for_translation(
+                            session, self.filters, self.write_mode,
                             limit=self.id_fetch_chunk, offset=offset
                         )
 
@@ -1818,7 +1829,7 @@ class TranslateAllFilteredWorker(QThread):
                                 project_id=self.project_id,
                             ))
 
-                    else:  # term_cluster
+                    elif self.entity_type == "term_cluster":
                         # Load clusters + their current translations
                         stmt = select(TermCluster, TMEntry).outerjoin(
                             TMEntry,
@@ -1838,6 +1849,23 @@ class TranslateAllFilteredWorker(QThread):
                                 tgt_lang=self.tgt_lang,
                                 current_translation=current_translation,
                                 project_id=self.project_id,
+                            ))
+                    else:  # tm_entry
+                        stmt = (
+                            select(TMEntry)
+                            .where(TMEntry.tm_id.in_(ids))
+                            .order_by(TMEntry.tm_id.asc())
+                        )
+
+                        for entry in session.execute(stmt).scalars().all():
+                            items.append(BatchTranslateItem(
+                                entity_type="tm_entry",
+                                entity_id=str(entry.tm_id),
+                                source_text=entry.src_text,
+                                src_lang=entry.src_lang or self.src_lang,
+                                tgt_lang=entry.tgt_lang or self.tgt_lang,
+                                current_translation=entry.translation,
+                                project_id=entry.project_id,
                             ))
 
                     if not items:
