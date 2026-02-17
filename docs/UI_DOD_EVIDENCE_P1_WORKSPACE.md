@@ -2,6 +2,26 @@
 
 Evidence that P1 UI Pro Workspace meets all requirements from `task.md`.
 
+## Addendum (2026-02-17): Table Column Layout Persistence Coverage
+
+Column layout persistence and reset UX are now applied across:
+
+1. Dictionary
+2. Terms
+3. Documents
+4. Term Cards
+5. Translation Management
+
+Verification status:
+
+- Manual smoke-check: PASS
+- Controller tests: `tests/test_table_layout_controller.py`
+- Settings regression tests: `tests/test_p1_settings.py`
+
+Reference:
+
+- `docs/UI_COLUMN_LAYOUT_PERSISTENCE.md`
+
 ---
 
 ## Test Execution Summary

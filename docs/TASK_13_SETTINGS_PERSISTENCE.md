@@ -7,6 +7,24 @@
 
 ---
 
+## Addendum (2026-02-17): Header Layout Safety Upgrade
+
+Follow-up UX hardening introduced a shared table layout controller.
+
+For TM panel it adds:
+
+1. Header context menu action: `Reset Columns Layout`
+2. Schema-safe restore guard (`header_signature`) to prevent invalid state replay
+3. Debounced autosave on resize/reorder
+4. Removal of restore/default-width conflict (restored widths are not overwritten)
+
+See:
+
+- `app/ui/table_layout_controller.py`
+- `docs/UI_COLUMN_LAYOUT_PERSISTENCE.md`
+
+---
+
 ## Summary
 
 Added persistent user preferences to Translation Management Panel using existing SettingsService. User settings are now preserved across sessions.

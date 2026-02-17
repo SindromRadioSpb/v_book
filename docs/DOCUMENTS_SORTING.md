@@ -11,6 +11,8 @@ Documents view now supports interactive column sorting. Click any column header 
 - **Visual indicator:** Arrow icon shows current sort direction
 - **Numeric sorting:** ID, Size, Sentences, Tokens sort numerically (not alphabetically)
 - **Text sorting:** File Name, Status, Path sort alphabetically
+- **Column width persistence:** Manually resized widths are restored across sessions
+- **Layout reset:** Right-click header → **Reset Columns Layout**
 
 ## Columns
 
@@ -79,6 +81,7 @@ self.docs_table.setItem(row, 2, size_item)
 ## Notes
 
 - **Persistent across reloads:** Sort order NOT preserved when reloading documents
+- **Persistent across sessions:** Column order and widths are preserved
 - **Default order:** Imported date descending (most recent first)
 - **Empty values:** Numeric columns treat NULL as 0 for sorting
 - **Selection preserved:** Selected rows remain selected after sorting

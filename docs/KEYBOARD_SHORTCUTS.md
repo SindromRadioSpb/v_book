@@ -36,6 +36,8 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 
 ### Column Operations
 - **Drag** column header: Reorder columns (moves persist across sessions)
+- **Drag** column divider: Resize column width (widths persist across sessions)
+- **Right-Click** column header: Open header menu and use **Reset Columns Layout**
 
 ### Editing
 - **Double-Click** cell: Edit cell (Translation column in Dictionary/Terms views)
@@ -69,7 +71,7 @@ When command palette is open (Ctrl+P):
 
 1. **Keyboard-First Workflow**: Use Ctrl+P to access any feature without memorizing individual shortcuts
 2. **Multi-Column Sort**: Shift+Click multiple headers to build complex sort orders (e.g., POS → Frequency → Lemma)
-3. **Column Persistence**: Column order and widths are saved automatically when you close a view
+3. **Column Persistence**: Column order and widths are saved automatically for Dictionary, Terms, Documents, Term Cards, and Translation Management
 4. **Bulk Operations**: Select multiple rows with Ctrl+Click or Shift+Click for bulk actions (future feature)
 
 ---

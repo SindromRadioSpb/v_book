@@ -7,6 +7,23 @@
 
 ---
 
+## Addendum (2026-02-17): Column Layout UX Upgrade
+
+Post-release UX hardening added:
+
+- ✅ Interactive manual column width resize in TM table
+- ✅ Header context action: `Reset Columns Layout`
+- ✅ Safe restore contract with schema signature guard
+- ✅ Removed restore-vs-default-width conflict (restored widths are no longer overwritten)
+
+Implementation files:
+
+- `app/ui/table_layout_controller.py`
+- `app/ui/translation_management_panel.py`
+- `docs/UI_COLUMN_LAYOUT_PERSISTENCE.md`
+
+---
+
 ## Executive Summary
 
 Complete premium-grade overhaul of the Translation Management Panel (Ctrl+Shift+T) transforming it from a basic 100-row viewer into a professional, enterprise-ready data management interface with full pagination, multi-project filtering, server-side sorting, Excel export, and comprehensive safety features.
