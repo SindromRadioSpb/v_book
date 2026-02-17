@@ -1968,3 +1968,442 @@ class TranslateAllFilteredWorker(QThread):
             _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:error")
             logger.error(f"TranslateAllFilteredWorker error: {e}", exc_info=True)
             self.error.emit(str(e))
+
+
+class UserDictionaryBulkAddWorker(QThread):
+    """Background worker for adding many rows to a user dictionary."""
+
+    progress = pyqtSignal(int, int)  # (processed, total)
+    finished = pyqtSignal(dict)      # {added, skipped, failed, ...}
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        dictionary_id: int,
+        items: List[Dict[str, Any]],
+        *,
+        include_noise: bool = False,
+        skip_duplicates: bool = True,
+        chunk_size: int = 500,
+    ):
+        super().__init__()
+        self.dictionary_id = dictionary_id
+        self.items = items
+        self.include_noise = include_noise
+        self.skip_duplicates = skip_duplicates
+        self.chunk_size = chunk_size
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request graceful cancellation."""
+        self._cancel_requested = True
+
+    def run(self):
+        """Execute bulk add in background."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.user_dictionary_service import UserDictionaryService
+
+            db_service = DBService.get_instance()
+            service = UserDictionaryService()
+
+            with db_service.get_session() as session:
+                result = service.bulk_add_items(
+                    session=session,
+                    dictionary_id=self.dictionary_id,
+                    items=self.items,
+                    include_noise=self.include_noise,
+                    skip_duplicates=self.skip_duplicates,
+                    chunk_size=self.chunk_size,
+                    progress_callback=lambda processed, total: self.progress.emit(processed, total),
+                    cancel_check=lambda: self._cancel_requested,
+                )
+                session.commit()
+
+            self.finished.emit(result)
+        except Exception as e:
+            logger.error("UserDictionaryBulkAddWorker error: %s", e, exc_info=True)
+            self.error.emit(str(e))
+
+
+class UserDictionaryBulkRemoveWorker(QThread):
+    """Background worker for removing many user dictionary items."""
+
+    progress = pyqtSignal(int, int)  # (processed, total)
+    finished = pyqtSignal(dict)      # {removed, processed, total, cancelled}
+    error = pyqtSignal(str)
+
+    def __init__(self, item_ids: List[int], *, chunk_size: int = 500):
+        super().__init__()
+        self.item_ids = item_ids
+        self.chunk_size = chunk_size
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request graceful cancellation."""
+        self._cancel_requested = True
+
+    def run(self):
+        """Execute bulk delete in background."""
+        try:
+            from app.services.db_service import DBService
+            from app.services.user_dictionary_service import UserDictionaryService
+
+            db_service = DBService.get_instance()
+            service = UserDictionaryService()
+
+            with db_service.get_session() as session:
+                result = service.bulk_remove_items(
+                    session=session,
+                    item_ids=self.item_ids,
+                    chunk_size=self.chunk_size,
+                    progress_callback=lambda processed, total: self.progress.emit(processed, total),
+                    cancel_check=lambda: self._cancel_requested,
+                )
+                session.commit()
+
+            self.finished.emit(result)
+        except Exception as e:
+            logger.error("UserDictionaryBulkRemoveWorker error: %s", e, exc_info=True)
+            self.error.emit(str(e))
+
+
+class UserDictTranslateWorker(QThread):
+    """Translate user dictionary items via canonical tm_global write path."""
+
+    progress = pyqtSignal(int, int)        # (completed, total)
+    stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(object)          # BatchTranslateResult
+    error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
+
+    def __init__(
+        self,
+        dictionary_id: int,
+        scope: str,  # "current_page" | "all_filtered"
+        selected_item_ids: List[int],
+        filters: Dict[str, Any],
+        provider_mode: str,
+        write_mode: str,
+        *,
+        id_fetch_chunk: int = 200,
+        translation_chunk: int = 25,
+    ):
+        super().__init__()
+        self.dictionary_id = dictionary_id
+        self.scope = scope
+        self.selected_item_ids = selected_item_ids
+        self.filters = filters
+        self.provider_mode = provider_mode
+        self.write_mode = write_mode
+        self.id_fetch_chunk = id_fetch_chunk
+        self.translation_chunk = translation_chunk
+        self._cancel_requested = False
+        self._paused = False
+        self._trace = f"user_dict:{dictionary_id}"
+
+    def cancel(self):
+        """Request cancellation."""
+        self._cancel_requested = True
+
+    def pause(self):
+        """Pause at next safe boundary."""
+        self._paused = True
+        self.paused.emit()
+
+    def resume(self):
+        """Resume worker."""
+        self._paused = False
+        self.resumed.emit()
+
+    def _wait_if_paused(self) -> None:
+        while self._paused and not self._cancel_requested:
+            time.sleep(0.1)
+
+    @staticmethod
+    def _is_non_empty(text_value: Optional[str]) -> bool:
+        return bool(text_value and str(text_value).strip())
+
+    def _fetch_current_global(self, session, item) -> Optional["TMGlobal"]:
+        from sqlalchemy import select
+        from app.infra.sa_models import TMGlobal
+
+        stmt = (
+            select(TMGlobal)
+            .where(
+                TMGlobal.src_lang == item.src_lang,
+                TMGlobal.tgt_lang == item.tgt_lang,
+                TMGlobal.kind == item.kind,
+                TMGlobal.src_norm == item.src_norm,
+            )
+            .limit(1)
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+    def _translate_item(self, session, item):
+        from app.services.translation_service import TranslationService
+
+        if self.provider_mode.startswith("force:"):
+            force_provider_id = self.provider_mode.split(":", 1)[1]
+            from app.infra.translators.providers_registry import ProvidersRegistry
+            from app.infra.translators.base_provider import TranslationRequest
+
+            provider = ProvidersRegistry().get(force_provider_id)
+            if not provider:
+                raise ValueError(f"Provider '{force_provider_id}' not available")
+
+            mt_request = TranslationRequest(
+                source_text=item.src_text,
+                source_lang=item.src_lang,
+                target_lang=item.tgt_lang,
+                glossary=None,
+            )
+            mt_result = provider.translate(mt_request)
+            if mt_result.error_kind:
+                raise ValueError(mt_result.error_message or "Provider translation failed")
+
+            return {
+                "translation": mt_result.translated_text,
+                "origin": force_provider_id,
+                "confidence": 1.0,
+            }
+
+        service = TranslationService()
+        result = service.resolve_translation(
+            session=session,
+            src_text=item.src_text,
+            kind=item.kind,
+            src_lang=item.src_lang,
+            tgt_lang=item.tgt_lang,
+            project_id=item.origin_project_id,
+            allow_draft=False,
+            use_mt=True,
+        )
+        return {
+            "translation": result.translation,
+            "origin": result.source or "mt_auto",
+            "confidence": result.confidence,
+        }
+
+    def _write_global(self, session, item, translation: str, confidence: Optional[float]) -> None:
+        from app.services.tm_global_service import TMGlobalService
+
+        tm_global_service = TMGlobalService()
+        global_row = tm_global_service.upsert_global(
+            session=session,
+            src_lang=item.src_lang,
+            tgt_lang=item.tgt_lang,
+            kind=item.kind,
+            src_norm=item.src_norm,
+            src_text=item.src_text,
+            translation=translation,
+            status="approved",
+            origin="mt_auto",
+            confidence=confidence,
+            is_noise=item.is_noise or 0,
+            noise_reason=item.noise_reason,
+            notes=item.notes,
+            source_tm_id=item.origin_tm_entry_id,
+        )
+        tm_global_service.propagate_to_entries(
+            session=session,
+            tm_global_id=global_row.tm_global_id,
+            fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"],
+        )
+
+    def run(self):
+        from app.services.db_service import DBService
+        from app.services.user_dictionary_service import UserDictionaryService
+        from app.services.batch_mt_translate_service import BatchTranslateResult, BatchTranslateRowResult
+
+        try:
+            self.stage_updated.emit("Initializing...")
+            db_service = DBService.get_instance()
+            user_dict_service = UserDictionaryService()
+
+            succeeded = 0
+            skipped = 0
+            failed = 0
+            completed = 0
+            row_results = []
+            pending_writes = 0
+
+            with db_service.get_session() as session:
+                self.stage_updated.emit("Counting targets...")
+
+                if self.scope == "all_filtered":
+                    total = user_dict_service.count_item_ids_for_translation(
+                        session=session,
+                        dictionary_id=self.dictionary_id,
+                        filters=self.filters,
+                        write_mode=self.write_mode,
+                    )
+                    source_ids = None
+                else:
+                    source_ids = sorted(set(self.selected_item_ids))
+                    total = len(source_ids)
+
+                if total == 0:
+                    self.stage_updated.emit("No targets found")
+                    empty_result = BatchTranslateResult(
+                        total=0,
+                        succeeded=0,
+                        skipped=0,
+                        failed=0,
+                        row_results=[],
+                        trace_id="empty",
+                        elapsed_ms=0,
+                    )
+                    _flush_mt_usage_queue(f"{self._trace}:empty")
+                    self.finished.emit(empty_result)
+                    return
+
+                self.stage_updated.emit(f"Found {total} items to translate")
+                chunk_offset = 0
+                total_batches = (total + self.id_fetch_chunk - 1) // self.id_fetch_chunk
+
+                while True:
+                    self._wait_if_paused()
+                    if self._cancel_requested:
+                        break
+
+                    if self.scope == "all_filtered":
+                        batch_ids = user_dict_service.fetch_item_ids_for_translation(
+                            session=session,
+                            dictionary_id=self.dictionary_id,
+                            filters=self.filters,
+                            write_mode=self.write_mode,
+                            limit=self.id_fetch_chunk,
+                            offset=chunk_offset,
+                        )
+                    else:
+                        if source_ids is None or chunk_offset >= len(source_ids):
+                            break
+                        batch_ids = source_ids[chunk_offset : chunk_offset + self.id_fetch_chunk]
+
+                    if not batch_ids:
+                        break
+
+                    chunk_offset += len(batch_ids)
+                    batch_num = ((chunk_offset - 1) // self.id_fetch_chunk) + 1
+                    self.stage_updated.emit(f"Translating batch {batch_num}/{max(total_batches, 1)}...")
+
+                    items = user_dict_service.get_items_by_ids(session, batch_ids)
+                    for item in items:
+                        self._wait_if_paused()
+                        if self._cancel_requested:
+                            break
+
+                        row_id = str(item.item_id)
+                        current_global = self._fetch_current_global(session, item)
+                        current_translation = current_global.translation if current_global else None
+
+                        if self.write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY") and self._is_non_empty(current_translation):
+                            skipped += 1
+                            completed += 1
+                            row_results.append(
+                                BatchTranslateRowResult(
+                                    entity_id=row_id,
+                                    source_text=item.src_text,
+                                    old_translation=current_translation,
+                                    new_translation=None,
+                                    provider_id=None,
+                                    cache_hit=False,
+                                    latency_ms=None,
+                                    error_message=None,
+                                    skipped=True,
+                                )
+                            )
+                            self.row_translated.emit(row_id, "already translated", False)
+                            self.progress.emit(completed, total)
+                            self.stats_updated.emit(succeeded, skipped, failed)
+                            continue
+
+                        row_start = time.perf_counter()
+                        try:
+                            translated = self._translate_item(session, item)
+                            text_value = translated.get("translation")
+                            if not self._is_non_empty(text_value):
+                                raise ValueError("No translation returned")
+
+                            with session.begin_nested():
+                                self._write_global(
+                                    session=session,
+                                    item=item,
+                                    translation=text_value.strip(),
+                                    confidence=translated.get("confidence"),
+                                )
+                            pending_writes += 1
+                            if pending_writes >= self.translation_chunk:
+                                session.commit()
+                                pending_writes = 0
+
+                            succeeded += 1
+                            completed += 1
+                            row_results.append(
+                                BatchTranslateRowResult(
+                                    entity_id=row_id,
+                                    source_text=item.src_text,
+                                    old_translation=current_translation,
+                                    new_translation=text_value.strip(),
+                                    provider_id=str(translated.get("origin") or ""),
+                                    cache_hit=False,
+                                    latency_ms=int((time.perf_counter() - row_start) * 1000),
+                                    error_message=None,
+                                    skipped=False,
+                                )
+                            )
+                            self.row_translated.emit(row_id, text_value.strip()[:50], True)
+                        except Exception as row_err:
+                            failed += 1
+                            completed += 1
+                            err_msg = str(row_err) or "Translation failed"
+                            row_results.append(
+                                BatchTranslateRowResult(
+                                    entity_id=row_id,
+                                    source_text=item.src_text,
+                                    old_translation=current_translation,
+                                    new_translation=None,
+                                    provider_id=None,
+                                    cache_hit=False,
+                                    latency_ms=int((time.perf_counter() - row_start) * 1000),
+                                    error_message=err_msg,
+                                    skipped=False,
+                                )
+                            )
+                            self.row_translated.emit(row_id, err_msg[:50], False)
+                        finally:
+                            self.progress.emit(completed, total)
+                            self.stats_updated.emit(succeeded, skipped, failed)
+
+                    if self._cancel_requested:
+                        break
+
+                if pending_writes:
+                    session.commit()
+
+                if self._cancel_requested:
+                    self.stage_updated.emit("Cancelled")
+                else:
+                    self.stage_updated.emit(
+                        f"Completed: {succeeded} succeeded, {skipped} skipped, {failed} failed"
+                    )
+
+                result = BatchTranslateResult(
+                    total=completed,
+                    succeeded=succeeded,
+                    skipped=skipped,
+                    failed=failed,
+                    row_results=row_results,
+                    trace_id="user_dictionary",
+                    elapsed_ms=0,
+                )
+                _flush_mt_usage_queue(f"{self._trace}:completed")
+                self.finished.emit(result)
+        except Exception as e:
+            _flush_mt_usage_queue(f"{self._trace}:error")
+            logger.error("UserDictTranslateWorker error: %s", e, exc_info=True)
+            self.error.emit(str(e))

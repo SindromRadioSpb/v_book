@@ -22,12 +22,14 @@ from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.translation_service import TranslationService
 from app.services.tm_global_service import TMGlobalService
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, WhyTranslationDialog
-from app.ui.workers import TranslationResolveWorker, DictionarySearchWorker
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.workers import TranslationResolveWorker, DictionarySearchWorker, UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -629,6 +631,10 @@ class DictionaryView(QWidget):
             translate_action = QAction(f"Translate Selected ({len(selected_rows)} rows)...", self)
             translate_action.triggered.connect(self.on_batch_translate)
             menu.addAction(translate_action)
+
+            add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
+            add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
+            menu.addAction(add_action)
             menu.addSeparator()
 
         # "Why?" action - show explainability
@@ -664,6 +670,98 @@ class DictionaryView(QWidget):
 
         # Show menu
         menu.exec(self.lemma_table.viewport().mapToGlobal(pos))
+
+    def on_add_selected_to_user_dictionary(self):
+        """Add selected lemma rows to a user dictionary."""
+        selected_rows = self.lemma_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        payloads = []
+        for proxy_index in selected_rows:
+            source_row = self.proxy_model.map_to_source_row(proxy_index.row())
+            lemma = self.lemma_model.lemmas[source_row]
+            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            payloads.append(
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": lemma.lemma_text,
+                    "src_norm": src_norm,
+                    "is_noise": 1 if lemma.is_noise == 1 else 0,
+                    "noise_reason": lemma.noise_reason,
+                    "origin_project_id": self.project_id,
+                    "origin_entity_type": "lemma",
+                    "origin_entity_id": lemma.lemma_id,
+                    "origin_source_ref": "dictionary_view",
+                }
+            )
+
+        accepted, dictionary_id, options = show_add_to_user_dictionary_dialog(
+            parent=self,
+            selected_count=len(payloads),
+        )
+        if not accepted or not dictionary_id:
+            return
+
+        tags = options.get("tags", [])
+        preserve_origin = bool(options.get("preserve_origin_refs", True))
+        prepared = []
+        for item in payloads:
+            row = dict(item)
+            if tags:
+                row["tags_json"] = tags
+            if not preserve_origin:
+                row["origin_project_id"] = None
+                row["origin_entity_type"] = None
+                row["origin_entity_id"] = None
+                row["origin_tm_entry_id"] = None
+                row["origin_doc_id"] = None
+                row["origin_source_ref"] = None
+            prepared.append(row)
+
+        from PyQt6.QtWidgets import QProgressDialog
+
+        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress.setWindowTitle("User Dictionaries")
+        progress.setModal(True)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        worker = UserDictionaryBulkAddWorker(
+            dictionary_id=dictionary_id,
+            items=prepared,
+            include_noise=bool(options.get("include_noise", False)),
+            skip_duplicates=bool(options.get("skip_duplicates", True)),
+            chunk_size=500,
+        )
+        self._user_dict_add_worker = worker
+        worker.progress.connect(lambda done, total: progress.setValue(done))
+        worker.finished.connect(lambda result: self._on_user_dict_add_finished(result, progress))
+        worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _on_user_dict_add_finished(self, result, progress_dialog):
+        progress_dialog.close()
+        from app.ui.dialogs import show_info
+
+        show_info(
+            self,
+            "Add Complete",
+            f"Added: {result.get('added', 0)}\n"
+            f"Skipped: {result.get('skipped', 0)}\n"
+            f"Failed: {result.get('failed', 0)}",
+        )
+        self._user_dict_add_worker = None
+
+    def _on_user_dict_add_error(self, error_msg: str, progress_dialog):
+        progress_dialog.close()
+        from app.ui.dialogs import show_error
+
+        show_error(self, "Add Failed", error_msg)
+        self._user_dict_add_worker = None
 
     def show_why_dialog(self, row: int):
         """M7 P1: Show WhyTranslationDialog for a lemma."""

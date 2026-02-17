@@ -664,6 +664,98 @@ class TMEntryHistory(Base):
     )
 
 
+class UserDictionary(Base):
+    """User dictionary container for study lists."""
+
+    __tablename__ = "user_dictionary"
+
+    dictionary_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(Text)
+    is_pinned = Column(Integer, nullable=False, default=0)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("is_pinned IN (0, 1)", name="ck_user_dict_is_pinned"),
+    )
+
+
+class UserDictionaryItem(Base):
+    """Item in a user dictionary (translation resolves via tm_global by canonical key)."""
+
+    __tablename__ = "user_dictionary_item"
+
+    item_id = Column(Integer, primary_key=True)
+    dictionary_id = Column(Integer, ForeignKey("user_dictionary.dictionary_id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String, nullable=False)  # lemma|ngram|term_cluster|surface
+    src_lang = Column(String, nullable=False)
+    tgt_lang = Column(String, nullable=False)
+    src_text = Column(Text, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    canonical_hash = Column(String, nullable=False)
+    tags_json = Column(Text, nullable=False, default="[]")
+    notes = Column(Text)
+    is_noise = Column(Integer, nullable=False, default=0)
+    noise_reason = Column(String)
+    study_state = Column(String, nullable=False, default="new")
+    last_seen_at = Column(String)
+    seen_count = Column(Integer, nullable=False, default=0)
+    origin_project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL"))
+    origin_entity_type = Column(String)
+    origin_entity_id = Column(String)
+    origin_tm_entry_id = Column(Integer, ForeignKey("tm_entry.tm_id", ondelete="SET NULL"))
+    origin_doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="SET NULL"))
+    origin_source_ref = Column(Text)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("dictionary_id", "canonical_hash", name="uq_user_dict_item_hash"),
+        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_user_dict_item_kind"),
+        CheckConstraint("is_noise IN (0, 1)", name="ck_user_dict_item_noise"),
+        CheckConstraint(
+            "study_state IN ('new', 'learning', 'mastered', 'suspended')",
+            name="ck_user_dict_item_study_state",
+        ),
+    )
+
+
+class AudioAsset(Base):
+    """Audio asset metadata (P0 stub architecture; no generation in this stage)."""
+
+    __tablename__ = "audio_asset"
+
+    asset_id = Column(Integer, primary_key=True)
+    lang = Column(String, nullable=False)
+    norm_text = Column(Text, nullable=False)
+    voice_id = Column(String, nullable=False, default="default")
+    speed = Column(Float, nullable=False, default=1.0)
+    provider = Column(String, nullable=False, default="none")
+    asset_status = Column(String, nullable=False, default="missing")
+    audio_rel_path = Column(Text)
+    duration_ms = Column(Integer)
+    sha256 = Column(String)
+    error_text = Column(Text)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("lang", "norm_text", "voice_id", "speed", "provider", name="uq_audio_asset_key"),
+        CheckConstraint("asset_status IN ('missing', 'ready', 'failed')", name="ck_audio_asset_status"),
+        CheckConstraint(
+            "audio_rel_path IS NULL OR ("
+            "audio_rel_path NOT LIKE '/%' AND "
+            "audio_rel_path NOT LIKE '\\\\%' AND "
+            "audio_rel_path NOT LIKE '%..%' AND "
+            "audio_rel_path NOT GLOB '[A-Za-z]:*'"
+            ")",
+            name="ck_audio_asset_rel_path",
+        ),
+    )
+
+
 class TMAlias(Base):
     """Translation Memory aliases for variant matching."""
 

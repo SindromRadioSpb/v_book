@@ -39,7 +39,10 @@ from app.ui.models_qt import TranslationManagementTableModel
 from app.ui.workers import TMSearchWorker, TMExportWorker
 from app.ui.table_layout_controller import TableLayoutController
 from app.domain.dto import TMEntryDTO
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -1318,6 +1321,10 @@ class TranslationManagementPanel(QWidget):
         translate_action = QAction(f"Translate Selected ({count:,} rows)...", self)
         translate_action.triggered.connect(self.on_batch_translate)
         menu.addAction(translate_action)
+
+        add_to_dict_action = QAction(f"Add Selected to User Dictionary ({count:,} rows)...", self)
+        add_to_dict_action.triggered.connect(self.on_add_selected_to_user_dictionary)
+        menu.addAction(add_to_dict_action)
         menu.addSeparator()
 
         # Mark as Noise action
@@ -1332,6 +1339,91 @@ class TranslationManagementPanel(QWidget):
 
         # Show menu
         menu.exec(self.table_view.viewport().mapToGlobal(pos))
+
+    def on_add_selected_to_user_dictionary(self):
+        """Add selected TM rows to a user dictionary."""
+        selected_entries = self._get_selected_tm_entries()
+        if not selected_entries:
+            return
+
+        payloads = []
+        for entry in selected_entries:
+            src_norm = entry.src_norm or normalize_for_tm(entry.src_lang, entry.src_text, entry.kind).norm
+            payloads.append(
+                {
+                    "kind": entry.kind,
+                    "src_lang": entry.src_lang,
+                    "tgt_lang": entry.tgt_lang,
+                    "src_text": entry.src_text,
+                    "src_norm": src_norm,
+                    "is_noise": 1 if entry.is_noise == 1 else 0,
+                    "noise_reason": entry.noise_reason,
+                    "origin_project_id": entry.project_id,
+                    "origin_entity_type": "tm_entry",
+                    "origin_entity_id": entry.tm_id,
+                    "origin_tm_entry_id": entry.tm_id,
+                    "origin_source_ref": "translation_management_panel",
+                }
+            )
+
+        accepted, dictionary_id, options = show_add_to_user_dictionary_dialog(
+            parent=self,
+            selected_count=len(payloads),
+        )
+        if not accepted or not dictionary_id:
+            return
+
+        tags = options.get("tags", [])
+        preserve_origin = bool(options.get("preserve_origin_refs", True))
+        prepared = []
+        for item in payloads:
+            row = dict(item)
+            if tags:
+                row["tags_json"] = tags
+            if not preserve_origin:
+                row["origin_project_id"] = None
+                row["origin_entity_type"] = None
+                row["origin_entity_id"] = None
+                row["origin_tm_entry_id"] = None
+                row["origin_doc_id"] = None
+                row["origin_source_ref"] = None
+            prepared.append(row)
+
+        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress.setWindowTitle("User Dictionaries")
+        progress.setModal(True)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        worker = UserDictionaryBulkAddWorker(
+            dictionary_id=dictionary_id,
+            items=prepared,
+            include_noise=bool(options.get("include_noise", False)),
+            skip_duplicates=bool(options.get("skip_duplicates", True)),
+            chunk_size=500,
+        )
+        self._user_dict_add_worker = worker
+        worker.progress.connect(lambda done, total: progress.setValue(done))
+        worker.finished.connect(lambda result: self._on_user_dict_add_finished(result, progress))
+        worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _on_user_dict_add_finished(self, result, progress_dialog):
+        progress_dialog.close()
+        QMessageBox.information(
+            self,
+            "Add Complete",
+            f"Added: {result.get('added', 0)}\n"
+            f"Skipped: {result.get('skipped', 0)}\n"
+            f"Failed: {result.get('failed', 0)}",
+        )
+        self._user_dict_add_worker = None
+
+    def _on_user_dict_add_error(self, error_msg: str, progress_dialog):
+        progress_dialog.close()
+        QMessageBox.warning(self, "Add Failed", error_msg)
+        self._user_dict_add_worker = None
 
     def set_entries_noise_status_bulk(self, is_noise: bool):
         """P0 Safety: Confirmation + progress for bulk noise marking.

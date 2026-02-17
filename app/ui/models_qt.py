@@ -3,7 +3,12 @@ import logging
 from typing import List
 
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
-from app.domain.dto import ProjectStats, LemmaStats
+from app.domain.dto import (
+    ProjectStats,
+    LemmaStats,
+    UserDictionaryDTO,
+    UserDictionaryItemDTO,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -566,4 +571,115 @@ class TermCardTableModel(QAbstractTableModel):
         """Get card at row."""
         if 0 <= row < len(self.cards):
             return self.cards[row]
+        return None
+
+
+class UserDictionaryListModel(QAbstractTableModel):
+    """Model for user dictionaries list panel."""
+
+    def __init__(self, dictionaries: List[UserDictionaryDTO] = None):
+        super().__init__()
+        self.dictionaries: List[UserDictionaryDTO] = dictionaries or []
+        self.headers = ["Dictionary", "Items"]
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.dictionaries)
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+
+        dictionary = self.dictionaries[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                pin = "[PIN] " if dictionary.is_pinned else ""
+                return f"{pin}{dictionary.name}"
+            if col == 1:
+                return f"{dictionary.item_count:,}"
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def update_dictionaries(self, dictionaries: List[UserDictionaryDTO]):
+        self.beginResetModel()
+        self.dictionaries = dictionaries
+        self.endResetModel()
+
+    def get_dictionary(self, row: int) -> UserDictionaryDTO | None:
+        if 0 <= row < len(self.dictionaries):
+            return self.dictionaries[row]
+        return None
+
+
+class UserDictionaryItemsTableModel(QAbstractTableModel):
+    """Model for user dictionary items table."""
+
+    def __init__(self, items: List[UserDictionaryItemDTO] = None):
+        super().__init__()
+        self.items: List[UserDictionaryItemDTO] = items or []
+        self.headers = [
+            "Kind",
+            "Source",
+            "Translation",
+            "Status",
+            "Noise",
+            "Study",
+            "Origin",
+            "Audio",
+        ]
+        self.total_count = 0
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.items)
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+
+        item = self.items[index.row()]
+        col = index.column()
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return item.kind
+            if col == 1:
+                return item.src_text
+            if col == 2:
+                return item.translation or ""
+            if col == 3:
+                return item.translation_status or ""
+            if col == 4:
+                return "Noise" if item.is_noise == 1 else "Valid"
+            if col == 5:
+                return item.study_state
+            if col == 6:
+                return item.origin_entity_type or ""
+            if col == 7:
+                return item.audio_status
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def update_items(self, items: List[UserDictionaryItemDTO], total_count: int):
+        self.beginResetModel()
+        self.items = items
+        self.total_count = total_count
+        self.endResetModel()
+
+    def get_item(self, row: int) -> UserDictionaryItemDTO | None:
+        if 0 <= row < len(self.items):
+            return self.items[row]
         return None

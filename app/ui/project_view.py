@@ -15,6 +15,7 @@ from app.ui.dictionary_view import DictionaryView
 from app.ui.terms_view import TermsView
 from app.ui.concordance_view import ConcordanceView
 from app.ui.term_card_view import TermCardView
+from app.ui.user_dictionaries_view import UserDictionariesView
 from app.ui.export_view import ExportView
 from app.services.project_service import ProjectService
 
@@ -79,6 +80,10 @@ class ProjectView(QWidget):
         # Term Cards tab
         self.term_card_view = TermCardView(self.project_id)
         self.tabs.addTab(self.term_card_view, "Term Cards")
+
+        # User Dictionaries tab (P0)
+        self.user_dictionaries_view = UserDictionariesView(self.project_id)
+        self.tabs.addTab(self.user_dictionaries_view, "User Dictionaries")
 
         # Export tab
         self.export_view = ExportView(self.project_id)

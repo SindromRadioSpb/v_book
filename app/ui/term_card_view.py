@@ -4,17 +4,21 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QLineEdit, QTextEdit, QComboBox, QTableView, QSplitter,
-    QGroupBox, QSpinBox, QInputDialog, QMessageBox
+    QGroupBox, QSpinBox, QInputDialog, QMessageBox, QMenu, QProgressDialog
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, show_info
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -217,8 +221,11 @@ class TermCardView(QWidget):
         self.queue_table = QTableView()
         self.queue_table.setModel(self.queue_model)
         self.queue_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.queue_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.queue_table.setSortingEnabled(True)
         self.queue_table.clicked.connect(self.on_queue_item_clicked)
+        self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.queue_table.customContextMenuRequested.connect(self.on_queue_context_menu)
 
         self.table_layout_controller = TableLayoutController(
             settings=self.settings,
@@ -289,6 +296,117 @@ class TermCardView(QWidget):
         row = index.row()
         self.current_queue_index = row
         self.load_card_at_index(row)
+
+    def on_queue_context_menu(self, pos):
+        """Context menu for review queue rows."""
+        selected_rows = self.queue_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        count = len(selected_rows)
+        menu = QMenu(self)
+        add_action = QAction(f"Add Selected to User Dictionary ({count} rows)...", self)
+        add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
+        menu.addAction(add_action)
+        menu.exec(self.queue_table.viewport().mapToGlobal(pos))
+
+    def on_add_selected_to_user_dictionary(self):
+        """Add selected term-card rows to user dictionary."""
+        selected_rows = self.queue_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        cluster_ids = []
+        for index in selected_rows:
+            card = self.queue_model.get_card(index.row())
+            if card:
+                cluster_ids.append(card.cluster_id)
+        cluster_ids = sorted(set(cluster_ids))
+        if not cluster_ids:
+            return
+
+        from sqlalchemy import select
+        from app.infra.sa_models import TermCluster
+
+        payloads = []
+        with self.db_service.get_session() as session:
+            stmt = select(TermCluster).where(TermCluster.cluster_id.in_(cluster_ids))
+            for cluster in session.execute(stmt).scalars().all():
+                src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+                payloads.append(
+                    {
+                        "kind": "term_cluster",
+                        "src_lang": "he",
+                        "tgt_lang": "ru",
+                        "src_text": cluster.representative_he,
+                        "src_norm": src_norm,
+                        "is_noise": 1 if cluster.is_noise == 1 else 0,
+                        "noise_reason": cluster.noise_reason,
+                        "origin_project_id": self.project_id,
+                        "origin_entity_type": "term_card",
+                        "origin_entity_id": cluster.cluster_id,
+                        "origin_source_ref": "term_card_view",
+                    }
+                )
+
+        accepted, dictionary_id, options = show_add_to_user_dictionary_dialog(
+            parent=self,
+            selected_count=len(payloads),
+        )
+        if not accepted or not dictionary_id:
+            return
+
+        tags = options.get("tags", [])
+        preserve_origin = bool(options.get("preserve_origin_refs", True))
+        prepared = []
+        for item in payloads:
+            row = dict(item)
+            if tags:
+                row["tags_json"] = tags
+            if not preserve_origin:
+                row["origin_project_id"] = None
+                row["origin_entity_type"] = None
+                row["origin_entity_id"] = None
+                row["origin_tm_entry_id"] = None
+                row["origin_doc_id"] = None
+                row["origin_source_ref"] = None
+            prepared.append(row)
+
+        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress.setWindowTitle("User Dictionaries")
+        progress.setModal(True)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        worker = UserDictionaryBulkAddWorker(
+            dictionary_id=dictionary_id,
+            items=prepared,
+            include_noise=bool(options.get("include_noise", False)),
+            skip_duplicates=bool(options.get("skip_duplicates", True)),
+            chunk_size=500,
+        )
+        self._user_dict_add_worker = worker
+        worker.progress.connect(lambda done, total: progress.setValue(done))
+        worker.finished.connect(lambda result: self._on_user_dict_add_finished(result, progress))
+        worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _on_user_dict_add_finished(self, result, progress_dialog):
+        progress_dialog.close()
+        show_info(
+            self,
+            "Add Complete",
+            f"Added: {result.get('added', 0)}\n"
+            f"Skipped: {result.get('skipped', 0)}\n"
+            f"Failed: {result.get('failed', 0)}",
+        )
+        self._user_dict_add_worker = None
+
+    def _on_user_dict_add_error(self, error_msg: str, progress_dialog):
+        progress_dialog.close()
+        show_error(self, "Add Failed", error_msg)
+        self._user_dict_add_worker = None
 
     def load_card_at_index(self, index: int):
         """Load card at specific queue index."""

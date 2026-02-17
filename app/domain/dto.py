@@ -175,6 +175,55 @@ class TMEntryDTO:
 
 
 @dataclass
+class UserDictionaryDTO:
+    """User dictionary metadata for UI."""
+
+    dictionary_id: int
+    name: str
+    description: Optional[str]
+    is_pinned: int
+    sort_order: int
+    created_at: str
+    updated_at: str
+    item_count: int = 0
+
+
+@dataclass
+class UserDictionaryItemDTO:
+    """User dictionary item with resolved canonical translation fields."""
+
+    item_id: int
+    dictionary_id: int
+    kind: str
+    src_lang: str
+    tgt_lang: str
+    src_text: str
+    src_norm: str
+    canonical_hash: str
+    tags_json: str
+    notes: Optional[str]
+    is_noise: int
+    noise_reason: Optional[str]
+    study_state: str
+    last_seen_at: Optional[str]
+    seen_count: int
+    origin_project_id: Optional[int]
+    origin_entity_type: Optional[str]
+    origin_entity_id: Optional[str]
+    origin_tm_entry_id: Optional[int]
+    origin_doc_id: Optional[int]
+    origin_source_ref: Optional[str]
+    created_at: str
+    updated_at: str
+    translation: Optional[str] = None
+    translation_status: Optional[str] = None
+    translation_origin: Optional[str] = None
+    translation_confidence: Optional[float] = None
+    tm_global_id: Optional[int] = None
+    audio_status: str = "missing"
+
+
+@dataclass
 class TMHistoryDTO:
     """P2: TM History entry."""
 
