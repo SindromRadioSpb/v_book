@@ -797,18 +797,18 @@ class TermsView(QWidget):
         # Create menu
         menu = QMenu(self)
 
+        # Batch translate action (parity with Translate Selected button)
+        selected_rows = self.terms_table.selectionModel().selectedRows()
+        if selected_rows:
+            batch_action = QAction(f"Translate selected ({len(selected_rows)} rows)...", self)
+            batch_action.triggered.connect(self.on_batch_translate)
+            menu.addAction(batch_action)
+            menu.addSeparator()
+
         # "Why?" action - show explainability
         why_action = QAction("Why this translation?", self)
         why_action.triggered.connect(lambda: self.show_why_dialog(source_row))
         menu.addAction(why_action)
-
-        # Batch translate action
-        selected_rows = self.terms_table.selectionModel().selectedRows()
-        if len(selected_rows) > 1:
-            menu.addSeparator()
-            batch_action = QAction(f"Translate {len(selected_rows)} selected rows...", self)
-            batch_action.triggered.connect(self.on_batch_translate)
-            menu.addAction(batch_action)
 
         # Task 11: Manual noise override actions
         menu.addSeparator()
