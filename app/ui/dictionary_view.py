@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (
     QTableView,
     QSpinBox,
     QLineEdit,
-    QHeaderView,
     QComboBox,
     QCheckBox,
     QMenu,
@@ -26,6 +25,7 @@ from app.services.tm_global_service import TMGlobalService
 from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
+from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, WhyTranslationDialog
 from app.ui.workers import TranslationResolveWorker, DictionarySearchWorker
 
@@ -203,14 +203,22 @@ class DictionaryView(QWidget):
         self.lemma_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.lemma_table.customContextMenuRequested.connect(self.on_context_menu)
 
-        # Auto-resize columns
-        header = self.lemma_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Lemma
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Translation
-        header.setSectionsMovable(True)  # Enable column reorder
-
-        # Restore header state
-        self.settings.restore_header_state("dictionary_view", header)
+        self.table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="dictionary_view",
+            table=self.lemma_table,
+            default_widths={
+                0: 220,  # Lemma
+                1: 90,   # POS
+                2: 95,   # Frequency
+                3: 95,   # Doc Freq
+                4: 260,  # Translation
+                5: 120,  # Source
+                6: 110,  # Status
+                7: 90,   # Noise
+            },
+        )
+        self.table_layout_controller.install()
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
@@ -1128,7 +1136,7 @@ class DictionaryView(QWidget):
                 self.translation_worker.terminate()
 
         # Save header state (column order, widths, sort)
-        self.settings.save_header_state("dictionary_view", self.lemma_table.horizontalHeader())
+        self.table_layout_controller.save_now()
 
         super().closeEvent(event)
 

@@ -37,6 +37,7 @@ from PyQt6.QtGui import QFont, QAction
 from app.services.db_service import DBService
 from app.ui.models_qt import TranslationManagementTableModel
 from app.ui.workers import TMSearchWorker, TMExportWorker
+from app.ui.table_layout_controller import TableLayoutController
 from app.domain.dto import TMEntryDTO
 from app.infra.settings import SettingsService
 
@@ -402,12 +403,27 @@ class TranslationManagementPanel(QWidget):
 
         # Enable clickable headers for server-side sorting
         header = self.table_view.horizontalHeader()
-        header.setStretchLastSection(True)
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self.on_header_clicked)
 
-        # Restore header state (column widths)
-        self.settings.restore_header_state("tm_panel", header)
+        self.table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="tm_panel",
+            table=self.table_view,
+            default_widths={
+                0: 70,   # ID
+                1: 110,  # Kind
+                2: 220,  # Source
+                3: 220,  # Translation
+                4: 110,  # Status
+                5: 110,  # Scope
+                6: 110,  # Origin
+                7: 170,  # Source Ref
+                8: 120,  # Updated
+                9: 90,   # Noise
+            },
+        )
+        self.table_layout_controller.install()
 
         # Install event filter for Enter key editing
         self.table_view.installEventFilter(self)
@@ -419,15 +435,6 @@ class TranslationManagementPanel(QWidget):
         # Context menu for noise marking
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.on_context_menu)
-
-        # Column widths
-        self.table_view.setColumnWidth(0, 60)   # ID
-        self.table_view.setColumnWidth(1, 100)  # Kind
-        self.table_view.setColumnWidth(2, 150)  # Source
-        self.table_view.setColumnWidth(3, 150)  # Translation
-        self.table_view.setColumnWidth(4, 100)  # Status
-        self.table_view.setColumnWidth(5, 100)  # Scope
-        self.table_view.setColumnWidth(6, 100)  # Origin
 
         table_layout.addWidget(self.table_view)
 
@@ -945,8 +952,7 @@ class TranslationManagementPanel(QWidget):
             self.bulk_worker.wait()
 
         # Save header state (column widths)
-        header = self.table_view.horizontalHeader()
-        self.settings.save_header_state("tm_panel", header)
+        self.table_layout_controller.save_now()
 
         event.accept()
 

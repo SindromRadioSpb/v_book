@@ -4,7 +4,7 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableView, QLabel, QSpinBox,
-    QComboBox, QLineEdit, QHeaderView, QProgressBar, QCheckBox, QMenu
+    QComboBox, QLineEdit, QProgressBar, QCheckBox, QMenu
 )
 from PyQt6.QtCore import Qt, QModelIndex
 from PyQt6.QtGui import QAction
@@ -16,6 +16,7 @@ from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
 from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
+from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import TranslationResolveWorker, BatchTranslateWorker, TermsSearchWorker
 from app.services.db_service import DBService
 from app.services.tm_global_service import TMGlobalService
@@ -181,14 +182,29 @@ class TermsView(QWidget):
         # Connect selection change to enable/disable batch translate button
         self.terms_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
-        header = self.terms_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Term
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Lemma
-        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Translation
-        header.setSectionsMovable(True)  # Enable column reorder
-
-        # Restore header state
-        self.settings.restore_header_state("terms_view", header)
+        self.table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="terms_view",
+            table=self.terms_table,
+            default_widths={
+                0: 260,  # Term
+                1: 180,  # Lemma
+                2: 85,   # Freq
+                3: 90,   # DocFreq
+                4: 90,   # Members
+                5: 90,   # PMI
+                6: 90,   # LLR
+                7: 90,   # Dice
+                8: 105,  # Weirdness
+                9: 105,  # Keyness
+                10: 105, # Termhood
+                11: 260, # Translation
+                12: 120, # Source
+                13: 110, # Status
+                14: 90,  # Noise
+            },
+        )
+        self.table_layout_controller.install()
 
         # M7 P1: Connect dataChanged to save handler
         self.terms_model.dataChanged.connect(self.on_translation_edited)
@@ -1327,6 +1343,6 @@ class TermsView(QWidget):
                 self.extract_worker.terminate()
 
         # Save header state (column order, widths, sort)
-        self.settings.save_header_state("terms_view", self.terms_table.horizontalHeader())
+        self.table_layout_controller.save_now()
 
         super().closeEvent(event)

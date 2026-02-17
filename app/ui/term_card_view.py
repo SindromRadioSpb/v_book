@@ -4,14 +4,16 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QLineEdit, QTextEdit, QComboBox, QTableView, QSplitter,
-    QGroupBox, QSpinBox, QHeaderView, QInputDialog, QMessageBox
+    QGroupBox, QSpinBox, QInputDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt
 
+from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
 from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
+from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, show_info
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ class TermCardView(QWidget):
         self.project_id = project_id
         self.db_service = DBService.get_instance()
         self.card_service = TermCardService()
+        self.settings = SettingsService.get_instance()
 
         self.current_card: Optional[TermCardDTO] = None
         self.current_queue_index = -1
@@ -217,8 +220,22 @@ class TermCardView(QWidget):
         self.queue_table.setSortingEnabled(True)
         self.queue_table.clicked.connect(self.on_queue_item_clicked)
 
-        header = self.queue_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Term
+        self.table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="term_card_view",
+            table=self.queue_table,
+            default_widths={
+                0: 260,  # Term
+                1: 180,  # Lemma
+                2: 90,   # Freq
+                3: 100,  # DocFreq
+                4: 120,  # Status
+                5: 200,  # Pin Translation
+                6: 200,  # Aliases
+                7: 90,   # Stopword
+            },
+        )
+        self.table_layout_controller.install()
 
         queue_layout.addWidget(self.queue_table)
 
@@ -614,3 +631,8 @@ class TermCardView(QWidget):
         except Exception as e:
             logger.exception("Failed to reload card")
             show_error(self, "Error", f"Failed to reload card: {e}")
+
+    def closeEvent(self, event):
+        """Persist term-card queue table layout on close."""
+        self.table_layout_controller.save_now()
+        super().closeEvent(event)

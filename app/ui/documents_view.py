@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QLabel,
     QFileDialog,
-    QHeaderView,
     QCheckBox,
     QProgressBar,
 )
@@ -22,6 +21,8 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from app.services.db_service import DBService
 from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
+from app.infra.settings import SettingsService
+from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import IngestWorker, ProcessWorker
 from app.ui.dialogs import show_error, show_info, show_warning
 
@@ -43,6 +44,7 @@ class DocumentsView(QWidget):
         self.db_service = DBService.get_instance()
         self.project_service = ProjectService()
         self.ingest_service = IngestService()
+        self.settings = SettingsService.get_instance()
 
         self.current_worker = None
         self.process_worker = None
@@ -155,10 +157,22 @@ class DocumentsView(QWidget):
         # Enable interactive column sorting
         self.docs_table.setSortingEnabled(True)
 
-        # Auto-resize columns
-        header = self.docs_table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="documents_view",
+            table=self.docs_table,
+            default_widths={
+                0: 70,   # ID
+                1: 260,  # File Name
+                2: 100,  # Size
+                3: 120,  # Status
+                4: 100,  # Sentences
+                5: 100,  # Tokens
+                6: 140,  # Imported
+                7: 320,  # Path
+            },
+        )
+        self.table_layout_controller.install()
 
         # Context menu
         self.docs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1017,5 +1031,7 @@ class DocumentsView(QWidget):
             self.process_worker.wait(1000)
             if self.process_worker.isRunning():
                 self.process_worker.terminate()
+
+        self.table_layout_controller.save_now()
 
         super().closeEvent(event)
