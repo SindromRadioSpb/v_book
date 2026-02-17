@@ -166,6 +166,35 @@ class TestRecordSpend:
         assert summary["day"]["char_count"] == 100
         assert summary["month"]["char_count"] == 100
 
+    def test_record_spend_with_explicit_timestamp(self, in_memory_session):
+        """Test explicit timestamp is used for period keys."""
+        tracker = MTUsageTracker(in_memory_session)
+        fixed_dt = datetime(2026, 2, 16, 23, 30, 45)
+
+        tracker.record_spend(
+            "test_provider",
+            77,
+            2,
+            timestamp_utc=fixed_dt,
+        )
+
+        rows = in_memory_session.execute(
+            text(
+                """
+                SELECT period_type, period_key, char_count, request_count
+                FROM mt_usage
+                WHERE provider_id = :provider_id
+                ORDER BY period_type
+                """
+            ),
+            {"provider_id": "test_provider"},
+        ).fetchall()
+
+        by_type = {r[0]: (r[1], r[2], r[3]) for r in rows}
+        assert by_type["minute"] == ("2026-02-16T23:30", 77, 2)
+        assert by_type["day"] == ("2026-02-16", 77, 2)
+        assert by_type["month"] == ("2026-02", 77, 2)
+
 
 class TestConcurrentAccess:
     """Test concurrent access handling."""

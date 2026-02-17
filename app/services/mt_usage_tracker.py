@@ -94,6 +94,8 @@ class MTUsageTracker:
         provider_id: str,
         char_count: int,
         request_count: int = 1,
+        timestamp_utc: Optional[datetime] = None,
+        commit: bool = True,
     ) -> None:
         """Record usage atomically.
 
@@ -103,18 +105,46 @@ class MTUsageTracker:
             provider_id: Provider identifier
             char_count: Number of characters spent
             request_count: Number of requests made (default: 1)
+            timestamp_utc: Optional UTC timestamp bucket source
+            commit: Whether to commit session after write
         """
-        now = datetime.utcnow()
+        now = timestamp_utc or datetime.utcnow()
         minute_key = now.strftime("%Y-%m-%dT%H:%M")
         day_key = now.strftime("%Y-%m-%d")
         month_key = now.strftime("%Y-%m")
+
+        self.record_spend_for_keys(
+            provider_id=provider_id,
+            minute_key=minute_key,
+            day_key=day_key,
+            month_key=month_key,
+            char_count=char_count,
+            request_count=request_count,
+            commit=commit,
+        )
+
+    def record_spend_for_keys(
+        self,
+        provider_id: str,
+        minute_key: str,
+        day_key: str,
+        month_key: str,
+        char_count: int,
+        request_count: int = 1,
+        commit: bool = True,
+    ) -> None:
+        """Record usage using explicit period keys.
+
+        Useful for deferred/retry flows that must preserve original time buckets.
+        """
 
         # Record usage for all periods
         self._record_period(provider_id, "minute", minute_key, char_count, request_count)
         self._record_period(provider_id, "day", day_key, char_count, request_count)
         self._record_period(provider_id, "month", month_key, char_count, request_count)
 
-        self.session.commit()
+        if commit:
+            self.session.commit()
 
         logger.debug(
             f"[{provider_id}] Recorded usage: {char_count} chars, {request_count} requests"

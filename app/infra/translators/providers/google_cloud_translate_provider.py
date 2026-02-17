@@ -27,6 +27,10 @@ import json
 import logging
 import time
 import random
+import threading
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from google.cloud import translate_v3
@@ -44,6 +48,7 @@ from ..provider_config_manager import ProviderConfigManager
 from app.infra.settings import SettingsService
 from app.infra.security import CredentialStore
 from app.services.mt_usage_tracker import MTUsageTracker
+from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,20 @@ class GoogleCloudTranslateProvider(BaseProvider):
     - Glossaries require separate setup (not implemented yet)
     - Requires Google Cloud project + billing enabled
     """
+
+    # Deferred usage queue for "database is locked" windows.
+    # Key: (provider_id, minute_key, day_key, month_key) -> [char_count, request_count]
+    _usage_pending: Dict[tuple[str, str, str, str], list[int]] = defaultdict(lambda: [0, 0])
+    _usage_pending_lock = threading.Lock()
+    _usage_suspend_until: float = 0.0
+    _usage_queue_loaded: bool = False
+    _usage_queue_path: Optional[Path] = None
+    _usage_locked_events: int = 0
+    _usage_locked_chars: int = 0
+    _usage_locked_requests: int = 0
+    _usage_last_warning_at: float = 0.0
+    _USAGE_WARNING_INTERVAL_SEC = 15.0
+    _MAX_PENDING_USAGE_BUCKETS = 2000
 
     def __init__(
         self,
@@ -357,23 +376,12 @@ class GoogleCloudTranslateProvider(BaseProvider):
                     f"(chars: {len(request.source_text)}, latency: {latency_ms}ms)"
                 )
 
-                # Record usage (if DBService available)
-                try:
-                    from app.services.db_service import DBService
-
-                    with DBService.get_instance().get_session() as session:
-                        tracker = MTUsageTracker(session)
-                        tracker.record_spend(
-                            self.provider_id,
-                            char_count=len(request.source_text),
-                            request_count=1,
-                        )
-                except Exception as e:
-                    # Don't fail translation if usage tracking fails
-                    logger.error(
-                        f"[{self.provider_id}] [{trace_id}] "
-                        f"Failed to record usage: {e}"
-                    )
+                # Record usage (non-fatal; deferred on lock contention)
+                self._record_usage_with_fallback(
+                    trace_id=trace_id,
+                    char_count=len(request.source_text),
+                    request_count=1,
+                )
 
                 return TranslationResult(
                     translated_text=translated_text,
@@ -482,6 +490,298 @@ class GoogleCloudTranslateProvider(BaseProvider):
             error_message="Retry loop exited unexpectedly",
             latency_ms=latency_ms,
         )
+
+    def _usage_keys_from_dt(self, dt_utc: datetime) -> tuple[str, str, str]:
+        """Build minute/day/month keys from UTC datetime."""
+        return (
+            dt_utc.strftime("%Y-%m-%dT%H:%M"),
+            dt_utc.strftime("%Y-%m-%d"),
+            dt_utc.strftime("%Y-%m"),
+        )
+
+    @classmethod
+    def _get_usage_queue_path(cls) -> Optional[Path]:
+        """Get persistent queue path near the active SQLite DB."""
+        if cls._usage_queue_path is not None:
+            return cls._usage_queue_path
+
+        try:
+            from app.services.db_service import DBService
+
+            db_path = DBService.get_instance().db_manager.db_path
+            cls._usage_queue_path = db_path.with_suffix(".mt_usage_pending.json")
+            return cls._usage_queue_path
+        except Exception:
+            return None
+
+    @classmethod
+    def _persist_usage_queue_locked(cls) -> None:
+        """Persist deferred usage queue atomically. Lock must be held."""
+        queue_path = cls._get_usage_queue_path()
+        if not queue_path:
+            return
+
+        if not cls._usage_pending:
+            try:
+                if queue_path.exists():
+                    queue_path.unlink()
+            except Exception as e:
+                logger.debug(f"[google_cloud_translate] Failed to cleanup usage queue file: {e}")
+            return
+
+        payload = {
+            "version": 1,
+            "items": [
+                {
+                    "provider_id": provider_id,
+                    "minute_key": minute_key,
+                    "day_key": day_key,
+                    "month_key": month_key,
+                    "char_count": delta[0],
+                    "request_count": delta[1],
+                }
+                for (provider_id, minute_key, day_key, month_key), delta
+                in sorted(cls._usage_pending.items())
+            ],
+        }
+
+        temp_path = queue_path.with_suffix(queue_path.suffix + ".tmp")
+        try:
+            queue_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.write_text(json.dumps(payload), encoding="utf-8")
+            temp_path.replace(queue_path)
+        except Exception as e:
+            logger.warning(f"[google_cloud_translate] Failed to persist usage queue: {e}")
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+
+    @classmethod
+    def _load_usage_queue_once(cls) -> None:
+        """Load deferred usage queue from disk one time per process."""
+        with cls._usage_pending_lock:
+            if cls._usage_queue_loaded:
+                return
+            cls._usage_queue_loaded = True
+
+        queue_path = cls._get_usage_queue_path()
+        if not queue_path or not queue_path.exists():
+            return
+
+        try:
+            payload = json.loads(queue_path.read_text(encoding="utf-8"))
+            items = payload.get("items", [])
+        except Exception as e:
+            logger.warning(f"[google_cloud_translate] Failed to load usage queue file: {e}")
+            return
+
+        loaded = 0
+        with cls._usage_pending_lock:
+            for item in items:
+                try:
+                    key = (
+                        str(item["provider_id"]),
+                        str(item["minute_key"]),
+                        str(item["day_key"]),
+                        str(item["month_key"]),
+                    )
+                    chars = int(item["char_count"])
+                    requests = int(item["request_count"])
+                    if chars <= 0 or requests <= 0:
+                        continue
+                    current = cls._usage_pending[key]
+                    current[0] += chars
+                    current[1] += requests
+                    loaded += 1
+                except Exception:
+                    continue
+
+        if loaded:
+            logger.info(f"[google_cloud_translate] Loaded {loaded} deferred usage buckets from disk")
+
+    def _consume_usage_lock_warning_locked(
+        self,
+        force: bool = False,
+    ) -> Optional[tuple[int, int, int, int]]:
+        """Return aggregated lock warning payload and reset counters. Lock must be held."""
+        cls = type(self)
+
+        if cls._usage_locked_events <= 0:
+            return None
+
+        now_ts = time.time()
+        if not force and cls._usage_last_warning_at > 0:
+            if now_ts - cls._usage_last_warning_at < cls._USAGE_WARNING_INTERVAL_SEC:
+                return None
+
+        payload = (
+            cls._usage_locked_events,
+            cls._usage_locked_chars,
+            cls._usage_locked_requests,
+            len(cls._usage_pending),
+        )
+        cls._usage_locked_events = 0
+        cls._usage_locked_chars = 0
+        cls._usage_locked_requests = 0
+        cls._usage_last_warning_at = now_ts
+        return payload
+
+    def _emit_usage_lock_warning_if_due(self, trace_id: str, force: bool = False) -> None:
+        """Emit aggregated warning for deferred usage queueing events."""
+        payload = None
+        with self._usage_pending_lock:
+            payload = self._consume_usage_lock_warning_locked(force=force)
+
+        if payload:
+            events, chars, requests, pending_buckets = payload
+            logger.warning(
+                f"[{self.provider_id}] [{trace_id}] Usage DB locked; queued {events} events "
+                f"({chars} chars, {requests} req), pending buckets={pending_buckets}"
+            )
+
+    def _queue_usage_delta(
+        self,
+        provider_id: str,
+        occurred_at_utc: datetime,
+        char_count: int,
+        request_count: int,
+        trace_id: str = "usage-lock",
+    ) -> None:
+        """Queue usage delta for deferred flush when DB lock clears."""
+        cls = type(self)
+        minute_key, day_key, month_key = self._usage_keys_from_dt(occurred_at_utc)
+        usage_key = (provider_id, minute_key, day_key, month_key)
+
+        with cls._usage_pending_lock:
+            if usage_key not in cls._usage_pending and len(cls._usage_pending) >= cls._MAX_PENDING_USAGE_BUCKETS:
+                logger.warning(
+                    f"[{self.provider_id}] Usage queue full ({cls._MAX_PENDING_USAGE_BUCKETS} buckets), "
+                    f"dropping deferred usage bucket {usage_key[1]}"
+                )
+                return
+
+            current = cls._usage_pending[usage_key]
+            current[0] += char_count
+            current[1] += request_count
+            cls._usage_queue_loaded = True
+            cls._usage_locked_events += 1
+            cls._usage_locked_chars += char_count
+            cls._usage_locked_requests += request_count
+
+            cls._persist_usage_queue_locked()
+
+        # Emit outside lock (throttled aggregate warning).
+        self._emit_usage_lock_warning_if_due(trace_id=trace_id, force=False)
+
+    def _flush_pending_usage(self, trace_id: str, force: bool = False) -> None:
+        """Flush deferred usage deltas best-effort."""
+        cls = type(self)
+        self._load_usage_queue_once()
+
+        now_ts = time.time()
+        if not force and now_ts < cls._usage_suspend_until:
+            return
+
+        with cls._usage_pending_lock:
+            if not cls._usage_pending:
+                return
+            pending_items = [
+                (key, (delta[0], delta[1]))
+                for key, delta in cls._usage_pending.items()
+            ]
+
+        try:
+            from app.services.db_service import DBService
+
+            with DBService.get_instance().get_session() as session:
+                tracker = MTUsageTracker(session)
+                for (provider_id, minute_key, day_key, month_key), (chars, requests) in pending_items:
+                    tracker.record_spend_for_keys(
+                        provider_id=provider_id,
+                        minute_key=minute_key,
+                        day_key=day_key,
+                        month_key=month_key,
+                        char_count=chars,
+                        request_count=requests,
+                        commit=False,
+                    )
+                session.commit()
+
+            # Remove only flushed deltas. Newer concurrent queue entries stay intact.
+            with cls._usage_pending_lock:
+                for key, delta in pending_items:
+                    current = cls._usage_pending.get(key)
+                    if not current:
+                        continue
+                    current[0] -= delta[0]
+                    current[1] -= delta[1]
+                    if current[0] <= 0 and current[1] <= 0:
+                        cls._usage_pending.pop(key, None)
+                cls._persist_usage_queue_locked()
+        except OperationalError as e:
+            if "database is locked" in str(e).lower():
+                # Avoid repeated blocking attempts inside same lock window.
+                cls._usage_suspend_until = time.time() + 1.0
+                logger.debug(
+                    f"[{self.provider_id}] [{trace_id}] Deferred usage flush blocked (database locked), will retry"
+                )
+                return
+            raise
+        except Exception as e:
+            logger.warning(
+                f"[{self.provider_id}] [{trace_id}] Deferred usage flush failed: {e}"
+            )
+
+    @classmethod
+    def flush_deferred_usage_now(cls, trace_id: str = "batch-end") -> None:
+        """Force flush deferred usage queue (used at batch completion)."""
+        cls._load_usage_queue_once()
+        cls._usage_suspend_until = 0.0
+
+        provider = cls()
+        provider._flush_pending_usage(trace_id=trace_id, force=True)
+        provider._emit_usage_lock_warning_if_due(trace_id=trace_id, force=True)
+
+    def _record_usage_with_fallback(self, trace_id: str, char_count: int, request_count: int) -> None:
+        """Record usage immediately; queue deltas when DB is locked."""
+        cls = type(self)
+        self._load_usage_queue_once()
+
+        occurred_at = datetime.utcnow()
+        self._flush_pending_usage(trace_id)
+
+        try:
+            from app.services.db_service import DBService
+
+            with DBService.get_instance().get_session() as session:
+                tracker = MTUsageTracker(session)
+                tracker.record_spend(
+                    self.provider_id,
+                    char_count=char_count,
+                    request_count=request_count,
+                    timestamp_utc=occurred_at,
+                )
+        except OperationalError as e:
+            if "database is locked" in str(e).lower():
+                self._queue_usage_delta(
+                    self.provider_id,
+                    occurred_at,
+                    char_count,
+                    request_count,
+                    trace_id=trace_id,
+                )
+                cls._usage_suspend_until = time.time() + 1.0
+                return
+            logger.error(
+                f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}"
+            )
+        except Exception as e:
+            # Non-lock failures are logged but don't fail translation.
+            logger.error(
+                f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}"
+            )
 
     def _calculate_backoff(
         self,

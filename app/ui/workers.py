@@ -11,6 +11,18 @@ from PyQt6.QtCore import QThread, pyqtSignal
 logger = logging.getLogger(__name__)
 
 
+def _flush_mt_usage_queue(reason: str) -> None:
+    """Best-effort flush for deferred MT usage counters at batch boundaries."""
+    try:
+        from app.infra.translators.providers.google_cloud_translate_provider import (
+            GoogleCloudTranslateProvider,
+        )
+
+        GoogleCloudTranslateProvider.flush_deferred_usage_now(trace_id=reason)
+    except Exception as e:
+        logger.debug(f"MT usage queue flush skipped ({reason}): {e}")
+
+
 class Worker(QThread):
     """Generic worker thread."""
 
@@ -1520,6 +1532,7 @@ class BatchTranslateWorker(QThread):
                     cancel_check=lambda: self._cancel_requested,
                 )
 
+                _flush_mt_usage_queue(f"batch_translate:{self.tab_type}")
                 self.finished.emit(result)
 
                 logger.info(
@@ -1528,6 +1541,7 @@ class BatchTranslateWorker(QThread):
                 )
 
         except Exception as e:
+            _flush_mt_usage_queue(f"batch_translate:{self.tab_type}:error")
             logger.exception("BatchTranslateWorker failed")
             error_msg = self._make_user_friendly_error(str(e))
             self.error.emit(error_msg)
@@ -1745,6 +1759,7 @@ class TranslateAllFilteredWorker(QThread):
                         trace_id="empty",
                         elapsed_ms=0,
                     )
+                    _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:empty")
                     self.finished.emit(empty_result)
                     return
 
@@ -1774,6 +1789,7 @@ class TranslateAllFilteredWorker(QThread):
                             trace_id="cancelled",
                             elapsed_ms=0,
                         )
+                        _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:cancelled")
                         self.finished.emit(result)
                         return
 
@@ -1945,8 +1961,10 @@ class TranslateAllFilteredWorker(QThread):
                     trace_id="all_filtered",
                     elapsed_ms=0,  # We don't track elapsed time at worker level
                 )
+                _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:completed")
                 self.finished.emit(final_result)
 
         except Exception as e:
+            _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:error")
             logger.error(f"TranslateAllFilteredWorker error: {e}", exc_info=True)
             self.error.emit(str(e))
