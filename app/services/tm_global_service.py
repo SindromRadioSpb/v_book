@@ -73,6 +73,7 @@ class TMGlobalService:
         noise_reason: Optional[str] = None,
         notes: Optional[str] = None,
         source_tm_id: Optional[int] = None,
+        force_update: bool = False,
     ) -> TMGlobal:
         """Upsert a tm_global row. If exists, update only if new entry wins scoring.
 
@@ -91,6 +92,8 @@ class TMGlobalService:
             noise_reason: Noise reason code
             notes: Notes
             source_tm_id: tm_entry.tm_id that won the merge
+            force_update: If True, update existing row regardless of scoring.
+                Use for explicit user actions (e.g. clear translation, overwrite mode).
 
         Returns:
             TMGlobal row (existing or newly created)
@@ -120,7 +123,7 @@ class TMGlobalService:
                 ORIGIN_RANK.get(existing.origin, 0),
             )
 
-            if new_score >= old_score:
+            if force_update or new_score >= old_score:
                 # Update existing with better data
                 existing.translation = translation
                 existing.status = status
@@ -159,7 +162,8 @@ class TMGlobalService:
         self,
         session: Session,
         entry: TMEntry,
-        immediate_propagate: bool = True
+        immediate_propagate: bool = True,
+        force_global_update: bool = False,
     ) -> TMGlobal:
         """Convenience: upsert tm_global from TMEntry fields, set entry.tm_global_id.
 
@@ -171,6 +175,7 @@ class TMGlobalService:
             immediate_propagate: If True, propagate to all entries immediately.
                                 If False, caller must manually call propagate_to_entries later.
                                 Set to False for batch operations to reduce lock contention.
+            force_global_update: If True, force tm_global update regardless of scoring.
 
         Returns:
             TMGlobal row (existing or newly created)
@@ -190,6 +195,7 @@ class TMGlobalService:
             noise_reason=entry.noise_reason,
             notes=entry.notes,
             source_tm_id=entry.tm_id,
+            force_update=force_global_update,
         )
         entry.tm_global_id = g.tm_global_id
 

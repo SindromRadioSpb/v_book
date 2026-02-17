@@ -18,9 +18,10 @@ from app.services.batch_mt_translate_service import (
     BatchTranslateItem,
     BatchTranslateOptions,
 )
-from app.infra.sa_models import TMEntry
+from app.infra.sa_models import TMEntry, TMGlobal
 from app.services.translation_service import TranslationResult
 from app.services.db_service import DBService
+from app.services.tm_global_service import TMGlobalService
 
 
 class MockTranslationService:
@@ -231,6 +232,61 @@ def test_batch_translate_overwrite_existing(temp_db):
     assert result.row_results[0].new_translation == "NEW_HELLO"
     assert result.row_results[1].new_translation == "NEW_WORLD"
     assert result.row_results[1].old_translation == "old_translation"
+
+
+def test_batch_translate_overwrite_forces_tm_global_update(temp_db):
+    """OVERWRITE should replace existing higher-ranked tm_global translation."""
+    service = BatchMTTranslateService()
+    service.translation_service = MockTranslationService(
+        translation_map={"alpha": "MT_NEW"}
+    )
+
+    db_service = DBService.get_instance()
+    with db_service.get_session() as session:
+        existing = TMEntry(
+            project_id=None,
+            kind="lemma",
+            src_lang="he",
+            tgt_lang="ru",
+            src_text="alpha",
+            src_norm="alpha",
+            translation="USER_OLD",
+            status="approved",
+            origin="user_edit",
+        )
+        session.add(existing)
+        session.flush()
+        TMGlobalService().upsert_and_link(session, existing)
+        session.commit()
+
+    items = [
+        BatchTranslateItem(
+            entity_type="lemma",
+            entity_id="alpha",
+            source_text="alpha",
+            src_lang="he",
+            tgt_lang="ru",
+            current_translation="USER_OLD",
+            project_id=None,
+        ),
+    ]
+    options = BatchTranslateOptions(
+        provider_mode="chain",
+        write_mode="OVERWRITE",
+        chunk_size=10,
+    )
+
+    with db_service.get_session() as session:
+        result = service.execute_batch(session, items, options)
+
+    assert result.succeeded == 1
+    assert result.failed == 0
+
+    with db_service.get_session() as session:
+        entry = session.query(TMEntry).filter_by(kind="lemma", src_norm="alpha", project_id=None).one()
+        global_row = session.query(TMGlobal).filter_by(kind="lemma", src_norm="alpha").one()
+        assert entry.translation == "MT_NEW"
+        assert global_row.translation == "MT_NEW"
 
 
 def test_batch_translate_per_row_error_continue(temp_db):

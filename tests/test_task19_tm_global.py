@@ -151,6 +151,56 @@ def test_upsert_global_scoring_lower_loses(in_memory_db):
     assert g2.origin == "user_edit"
 
 
+def test_upsert_and_link_force_update_allows_clear_translation(in_memory_db):
+    """Explicit clear should be able to overwrite higher-scored existing global."""
+    session = in_memory_db
+    service = TMGlobalService()
+
+    e1 = TMEntry(
+        project_id=1,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="clear-me",
+        src_norm="clear_key",
+        translation="existing_translation",
+        status="approved",
+        origin="user_edit",
+    )
+    e2 = TMEntry(
+        project_id=2,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="clear-me",
+        src_norm="clear_key",
+        translation="existing_translation",
+        status="approved",
+        origin="user_edit",
+    )
+    session.add_all([e1, e2])
+    session.flush()
+
+    service.upsert_and_link(session, e1)
+    service.upsert_and_link(session, e2)
+    session.commit()
+
+    # Explicit user clear: force global update and propagation
+    e2.translation = ""
+    e2.origin = "user_edit"
+    e2.status = "approved"
+    service.upsert_and_link(session, e2, force_global_update=True)
+    session.commit()
+
+    g = session.execute(select(TMGlobal).where(TMGlobal.src_norm == "clear_key")).scalar_one()
+    session.refresh(e1)
+    session.refresh(e2)
+
+    assert g.translation == ""
+    assert e1.translation == ""
+    assert e2.translation == ""
+
+
 def test_backfill_creates_global_entries(in_memory_db):
     """Test 4: Backfill creates tm_global from tm_entry."""
     session = in_memory_db

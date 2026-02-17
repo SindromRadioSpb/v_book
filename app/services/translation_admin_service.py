@@ -600,7 +600,11 @@ class TranslationAdminService:
 
         # PATCH-19-02: Upsert tm_global and link
         session.flush()
-        TMGlobalService().upsert_and_link(session, entry)
+        TMGlobalService().upsert_and_link(
+            session,
+            entry,
+            force_global_update=(not bool((entry.translation or "").strip())),
+        )
 
         session.commit()
 
@@ -642,7 +646,11 @@ class TranslationAdminService:
 
         # PATCH-19-02: Upsert tm_global and link
         session.flush()
-        TMGlobalService().upsert_and_link(session, entry)
+        TMGlobalService().upsert_and_link(
+            session,
+            entry,
+            force_global_update=(not bool((translation or "").strip())),
+        )
 
         session.commit()
 

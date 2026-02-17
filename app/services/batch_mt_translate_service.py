@@ -379,7 +379,12 @@ class BatchMTTranslateService:
                 )
 
             # Write to DB (tab-specific logic)
-            self._write_to_db(session, item, translation_result.translation)
+            self._write_to_db(
+                session,
+                item,
+                translation_result.translation,
+                write_mode=options.write_mode,
+            )
 
             latency_ms = int((time.perf_counter() - row_start) * 1000)
 
@@ -428,6 +433,7 @@ class BatchMTTranslateService:
         session: Session,
         item: BatchTranslateItem,
         translation: str,
+        write_mode: str,
     ) -> None:
         """Write translation to DB using tab-specific logic.
 
@@ -439,12 +445,14 @@ class BatchMTTranslateService:
         Raises:
             Exception: If write fails
         """
+        force_global_update = write_mode == "OVERWRITE"
+
         if item.entity_type == "lemma":
-            self._write_lemma(session, item, translation)
+            self._write_lemma(session, item, translation, force_global_update=force_global_update)
         elif item.entity_type == "term_cluster":
-            self._write_term_cluster(session, item, translation)
+            self._write_term_cluster(session, item, translation, force_global_update=force_global_update)
         elif item.entity_type == "tm_entry":
-            self._write_tm_entry(session, item, translation)
+            self._write_tm_entry(session, item, translation, force_global_update=force_global_update)
         else:
             raise ValueError(f"Unknown entity_type: {item.entity_type}")
 
@@ -453,6 +461,7 @@ class BatchMTTranslateService:
         session: Session,
         item: BatchTranslateItem,
         translation: str,
+        force_global_update: bool = False,
     ) -> None:
         """Write lemma translation (Dictionary tab pattern)."""
         # PATCH-18-01: Compute src_norm (same as dictionary_view.py inline edit)
@@ -475,7 +484,11 @@ class BatchMTTranslateService:
             existing.updated_at = datetime.now()
             # PATCH-19-02: Upsert tm_global and link
             session.flush()
-            TMGlobalService().upsert_and_link(session, existing)
+            TMGlobalService().upsert_and_link(
+                session,
+                existing,
+                force_global_update=force_global_update,
+            )
         else:
             # Look up source lemma for is_noise synchronization
             lemma_stmt = select(Lemma).where(
@@ -502,13 +515,18 @@ class BatchMTTranslateService:
             session.add(tm_entry)
             # PATCH-19-02: Upsert tm_global and link
             session.flush()
-            TMGlobalService().upsert_and_link(session, tm_entry)
+            TMGlobalService().upsert_and_link(
+                session,
+                tm_entry,
+                force_global_update=force_global_update,
+            )
 
     def _write_term_cluster(
         self,
         session: Session,
         item: BatchTranslateItem,
         translation: str,
+        force_global_update: bool = False,
     ) -> None:
         """Write term cluster translation (Terms tab pattern)."""
         # Compute src_norm (same as terms_view.py)
@@ -531,7 +549,11 @@ class BatchMTTranslateService:
             existing.updated_at = datetime.now()
             # PATCH-19-02: Upsert tm_global and link
             session.flush()
-            TMGlobalService().upsert_and_link(session, existing)
+            TMGlobalService().upsert_and_link(
+                session,
+                existing,
+                force_global_update=force_global_update,
+            )
         else:
             # Look up source cluster for is_noise synchronization
             cluster_stmt = select(TermCluster).where(
@@ -559,13 +581,18 @@ class BatchMTTranslateService:
             session.add(tm_entry)
             # PATCH-19-02: Upsert tm_global and link
             session.flush()
-            TMGlobalService().upsert_and_link(session, tm_entry)
+            TMGlobalService().upsert_and_link(
+                session,
+                tm_entry,
+                force_global_update=force_global_update,
+            )
 
     def _write_tm_entry(
         self,
         session: Session,
         item: BatchTranslateItem,
         translation: str,
+        force_global_update: bool = False,
     ) -> None:
         """Write TM entry translation (Translation Management tab pattern).
 
@@ -584,7 +611,11 @@ class BatchMTTranslateService:
         entry.updated_at = datetime.now()
         # PATCH-19-02: Upsert tm_global and link
         session.flush()
-        TMGlobalService().upsert_and_link(session, entry)
+        TMGlobalService().upsert_and_link(
+            session,
+            entry,
+            force_global_update=force_global_update,
+        )
 
         # Note: We don't create history here (TranslationAdminService does that)
         # For batch operations, we prioritize performance over history granularity
