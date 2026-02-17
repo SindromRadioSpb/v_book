@@ -2,148 +2,133 @@
 WorkspaceManager - Professional workspace layout with collapsible sidebar.
 
 Provides a QSplitter-based layout with:
-- Collapsible sidebar with quick action buttons
+- Collapsible sidebar with primary navigation
 - Main content area (QStackedWidget for navigation)
 - Layout persistence (save/restore splitter state)
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QSplitter, QFrame, QStackedWidget, QLabel
+    QWidget,
+    QVBoxLayout,
+    QPushButton,
+    QSplitter,
+    QFrame,
+    QStackedWidget,
+    QLabel,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
 
 
 class SidebarWidget(QFrame):
-    """
-    Collapsible sidebar with quick action buttons.
+    """Collapsible sidebar with workspace and tool actions."""
 
-    Provides quick access to common workflows without menu navigation.
-    """
-
-    action_triggered = pyqtSignal(str)  # Emits action ID
+    action_triggered = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumWidth(150)
-        self.setMaximumWidth(250)
-
+        self.setMinimumWidth(170)
+        self.setMaximumWidth(280)
         self.init_ui()
 
     def init_ui(self):
-        """Initialize sidebar UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
 
-        # Header
-        header = QLabel("<b>Quick Actions</b>")
+        header = QLabel("<b>Workspace</b>")
         layout.addWidget(header)
 
-        # Navigation section
-        nav_label = QLabel("<i>Navigation</i>")
+        nav_label = QLabel("<i>Primary Navigation</i>")
         nav_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(nav_label)
 
-        self.dashboard_btn = QPushButton("📊 Back to Dashboard")
-        self.dashboard_btn.setToolTip("Return to projects dashboard")
-        self.dashboard_btn.clicked.connect(lambda: self.action_triggered.emit("navigate.dashboard"))
-        layout.addWidget(self.dashboard_btn)
+        self.projects_btn = QPushButton("Projects")
+        self.projects_btn.setToolTip("Open Projects dashboard")
+        self.projects_btn.clicked.connect(lambda: self.action_triggered.emit("workspace.projects"))
+        layout.addWidget(self.projects_btn)
 
-        # Separator
+        # Backward-compatible alias for older tests/callers.
+        self.dashboard_btn = self.projects_btn
+
+        self.tm_btn = QPushButton("Translation Management")
+        self.tm_btn.setToolTip("Open Translation Management (Ctrl+Shift+T)")
+        self.tm_btn.clicked.connect(lambda: self.action_triggered.emit("workspace.tm"))
+        layout.addWidget(self.tm_btn)
+
+        self.user_dict_btn = QPushButton("User Dictionaries")
+        self.user_dict_btn.setToolTip("Open User Dictionaries (Ctrl+Shift+U)")
+        self.user_dict_btn.clicked.connect(lambda: self.action_triggered.emit("workspace.user_dictionaries"))
+        layout.addWidget(self.user_dict_btn)
+
         layout.addSpacing(8)
         tools_label = QLabel("<i>Tools</i>")
         tools_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(tools_label)
 
-        # Quick action buttons
         self.import_btn = QPushButton("Import Dictionary")
         self.import_btn.setToolTip("Import dictionary from CSV (Ctrl+Shift+I)")
         self.import_btn.clicked.connect(lambda: self.action_triggered.emit("tools.import_dictionary"))
         layout.addWidget(self.import_btn)
 
-        self.tm_btn = QPushButton("Translation Memory")
-        self.tm_btn.setToolTip("Manage translation memory (Ctrl+Shift+T)")
-        self.tm_btn.clicked.connect(lambda: self.action_triggered.emit("premium.tm"))
-        layout.addWidget(self.tm_btn)
+        self.coverage_btn = QPushButton("QA / Coverage")
+        self.coverage_btn.setToolTip("Open QA/Coverage (Ctrl+Shift+C)")
+        self.coverage_btn.clicked.connect(lambda: self.action_triggered.emit("premium.coverage"))
+        layout.addWidget(self.coverage_btn)
 
         self.verify_btn = QPushButton("P1 Verification")
         self.verify_btn.setToolTip("Run P1 verification suite (Ctrl+Shift+V)")
         self.verify_btn.clicked.connect(lambda: self.action_triggered.emit("tools.verification"))
         layout.addWidget(self.verify_btn)
 
-        # Spacer to push buttons to top
         layout.addStretch()
-
         logger.debug("Sidebar initialized")
 
 
 class WorkspaceManager(QWidget):
-    """
-    Professional workspace layout manager.
+    """Professional workspace layout manager."""
 
-    Structure:
-      QSplitter (Horizontal)
-        ├── SidebarWidget (collapsible, hidden by default)
-        └── QStackedWidget (main navigation stack)
+    layout_changed = pyqtSignal()
 
-    Features:
-    - Ctrl+B to toggle sidebar visibility
-    - Save/restore layout (splitter state + sidebar visibility)
-    - Version-controlled layout schema for migration
-    """
-
-    layout_changed = pyqtSignal()  # Emitted when layout changes (debounced)
-
-    # Layout schema version for migration support
-    LAYOUT_SCHEMA_VERSION = 1
+    # v2: Sidebar switched to primary workspace navigation.
+    LAYOUT_SCHEMA_VERSION = 2
 
     def __init__(self):
         super().__init__()
 
-        # Create widgets
         self.sidebar = SidebarWidget()
         self.stack = QStackedWidget()
 
-        # Splitter for resizable panels
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(self.sidebar)
         self.splitter.addWidget(self.stack)
-        self.splitter.setCollapsible(0, True)  # Sidebar can collapse
-        self.splitter.setCollapsible(1, False)  # Stack cannot collapse
+        self.splitter.setCollapsible(0, True)
+        self.splitter.setCollapsible(1, False)
 
-        # Default: hide sidebar
         self.sidebar.hide()
 
-        # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
 
-        # Debounce timer for layout_changed signal (500ms)
         self._debounce_timer = QTimer()
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.setInterval(500)
         self._debounce_timer.timeout.connect(self.layout_changed.emit)
 
-        # Connect splitter moves to debounced signal
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         logger.debug("WorkspaceManager initialized")
 
     def _on_splitter_moved(self):
-        """Handle splitter move (debounced)."""
         self._debounce_timer.start()
 
     def toggle_sidebar(self):
-        """Toggle sidebar visibility (Ctrl+B)."""
         if self.sidebar.isVisible():
             self.sidebar.hide()
             logger.debug("Sidebar hidden")
@@ -151,73 +136,49 @@ class WorkspaceManager(QWidget):
             self.sidebar.show()
             logger.debug("Sidebar shown")
 
-        # Emit layout changed immediately (not debounced) for toggle
         self.layout_changed.emit()
 
     def save_layout(self) -> Dict[str, Any]:
-        """
-        Serialize current layout state.
-
-        Returns:
-            dict: Layout data with schema version, sidebar visibility, splitter state
-        """
         return {
             "layout_schema_version": self.LAYOUT_SCHEMA_VERSION,
             "sidebar_visible": self.sidebar.isVisible(),
-            "splitter_state": bytes(self.splitter.saveState()).hex()
+            "splitter_state": bytes(self.splitter.saveState()).hex(),
         }
 
     def restore_layout(self, data: Dict[str, Any]) -> bool:
-        """
-        Restore layout from serialized data.
-
-        Args:
-            data: Layout data dict
-
-        Returns:
-            bool: True if restored successfully, False on error (triggers fallback)
-        """
         try:
-            # Version check
             version = data.get("layout_schema_version")
             if version != self.LAYOUT_SCHEMA_VERSION:
-                logger.warning(f"Layout schema version mismatch: got {version}, expected {self.LAYOUT_SCHEMA_VERSION}")
+                logger.warning(
+                    "Layout schema version mismatch: got %s, expected %s",
+                    version,
+                    self.LAYOUT_SCHEMA_VERSION,
+                )
                 return False
 
-            # Check required keys
             if "sidebar_visible" not in data or "splitter_state" not in data:
                 logger.warning("Layout data missing required keys")
                 return False
 
-            # Restore sidebar visibility
-            sidebar_visible = data.get("sidebar_visible", False)
-            if sidebar_visible:
+            if data.get("sidebar_visible", False):
                 self.sidebar.show()
             else:
                 self.sidebar.hide()
 
-            # Restore splitter state
             splitter_state_hex = data.get("splitter_state")
             if splitter_state_hex:
                 splitter_state = bytes.fromhex(splitter_state_hex)
-                success = self.splitter.restoreState(splitter_state)
-                if not success:
+                if not self.splitter.restoreState(splitter_state):
                     logger.warning("Failed to restore splitter state")
                     return False
 
             logger.info("Layout restored successfully")
             return True
-
         except (KeyError, ValueError, TypeError) as e:
-            logger.error(f"Failed to restore layout: {e}")
+            logger.error("Failed to restore layout: %s", e)
             return False
 
     def reset_to_default(self):
-        """Reset layout to default state."""
-        # Hide sidebar
         self.sidebar.hide()
-
-        # Reset splitter to default proportions (200px sidebar, rest for stack)
-        self.splitter.setSizes([200, 1000])
-
+        self.splitter.setSizes([220, 980])
         logger.info("Layout reset to default")

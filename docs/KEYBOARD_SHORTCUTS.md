@@ -17,6 +17,7 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 
 ### Premium Features
 - **Ctrl+Shift+T**: Translation Management
+- **Ctrl+Shift+U**: User Dictionaries
 - **Ctrl+Shift+C**: QA / Coverage (requires project context)
 
 ---
@@ -26,7 +27,6 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 ### Sorting
 - **Click** column header: Sort by that column (single-column sort)
 - **Shift+Click** column header: Add column to sort keys (multi-column sort)
-  - Example: Click "Frequency" → Shift+Click "Lemma" sorts by frequency first, then lemma
 
 ### Selection
 - **Click** row: Select single row
@@ -44,9 +44,6 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **F2** or **Enter**: Edit selected cell
 - **Esc**: Cancel editing
 
-### Context Menu
-- **Right-Click** row: Show context menu with "Why this translation?" option
-
 ---
 
 ## Command Palette Shortcuts
@@ -54,7 +51,7 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 When command palette is open (Ctrl+P):
 
 - **Type**: Filter actions by fuzzy search
-- **↑** / **↓**: Navigate results
+- **Up / Down**: Navigate results
 - **Enter**: Execute selected action
 - **Esc**: Close palette without executing
 
@@ -62,30 +59,27 @@ When command palette is open (Ctrl+P):
 
 ## Navigation
 
-- **Dashboard**: No shortcut (use command palette "Go to Dashboard" or sidebar "📊 Back to Dashboard" button)
+- **Projects Dashboard**: command palette action `Projects` or sidebar **Projects**
+- **Translation Management**: sidebar **Translation Management** or **Ctrl+Shift+T**
+- **User Dictionaries**: sidebar **User Dictionaries** or **Ctrl+Shift+U**
 - **Projects**: Double-click project in dashboard to open
 
 ---
 
 ## Tips
 
-1. **Keyboard-First Workflow**: Use Ctrl+P to access any feature without memorizing individual shortcuts
-2. **Multi-Column Sort**: Shift+Click multiple headers to build complex sort orders (e.g., POS → Frequency → Lemma)
-3. **Column Persistence**: Column order and widths are saved automatically for Dictionary, Terms, Documents, Term Cards, and Translation Management
-4. **Bulk Operations**: Select multiple rows with Ctrl+Click or Shift+Click for bulk actions (future feature)
+1. **Keyboard-First Workflow**: Use Ctrl+P to access any feature without memorizing individual shortcuts.
+2. **Column Persistence**: Column order and widths are saved automatically for Dictionary, Terms, Documents, Term Cards, and Translation Management.
+3. **Bulk Operations**: Select multiple rows with Ctrl+Click or Shift+Click for bulk actions.
 
 ---
 
 ## Shortcut Conflicts
 
-No known conflicts. All shortcuts use Ctrl+Shift+ combinations to avoid conflicts with:
-- System shortcuts (Alt+Tab, Windows key)
-- Browser shortcuts (Ctrl+T, Ctrl+N)
-- Text editing shortcuts (Ctrl+C, Ctrl+V, Ctrl+Z)
+No known conflicts.
 
 ---
 
 ## Customization
 
-Keyboard shortcuts are not currently customizable. If you need custom shortcuts, please file an issue at:
-https://github.com/anthropics/claude-code/issues
+Keyboard shortcuts are not currently customizable.

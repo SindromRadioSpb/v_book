@@ -32,19 +32,23 @@ class TestSidebarWidget:
         sidebar = SidebarWidget()
         qtbot.addWidget(sidebar)
 
-        # Navigation buttons
+        # Primary navigation buttons
         assert sidebar.dashboard_btn is not None
-        assert "Dashboard" in sidebar.dashboard_btn.text()
+        assert "Projects" in sidebar.dashboard_btn.text()
+        assert sidebar.tm_btn is not None
+        assert sidebar.user_dict_btn is not None
 
         # Tool buttons
         assert sidebar.import_btn is not None
-        assert sidebar.tm_btn is not None
         assert sidebar.verify_btn is not None
+        assert sidebar.coverage_btn is not None
 
         # Verify tooltips contain shortcuts
         assert "Ctrl+Shift+I" in sidebar.import_btn.toolTip()
         assert "Ctrl+Shift+T" in sidebar.tm_btn.toolTip()
+        assert "Ctrl+Shift+U" in sidebar.user_dict_btn.toolTip()
         assert "Ctrl+Shift+V" in sidebar.verify_btn.toolTip()
+        assert "Ctrl+Shift+C" in sidebar.coverage_btn.toolTip()
 
 
 class TestWorkspaceManager:

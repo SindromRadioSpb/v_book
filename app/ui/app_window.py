@@ -1,6 +1,7 @@
 """Main application window."""
 import logging
 from pathlib import Path
+from typing import Optional
 
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMenuBar
 from PyQt6.QtCore import Qt
@@ -13,6 +14,7 @@ from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.verification_panel import VerificationPanel
 from app.ui.translation_management_panel import TranslationManagementPanel
+from app.ui.user_dictionaries_view import UserDictionariesView
 from app.ui.coverage_panel import CoveragePanel
 from app.ui.import_wizard import ImportWizard
 
@@ -130,6 +132,12 @@ class AppWindow(QMainWindow):
         tm_action.triggered.connect(self.open_translation_management)
         premium_menu.addAction(tm_action)
 
+        # User Dictionaries
+        user_dict_action = QAction("&User Dictionaries", self)
+        user_dict_action.setShortcut("Ctrl+Shift+U")
+        user_dict_action.triggered.connect(self.open_user_dictionaries)
+        premium_menu.addAction(user_dict_action)
+
         # QA/Coverage (requires project context)
         coverage_action = QAction("&QA / Coverage", self)
         coverage_action.setShortcut("Ctrl+Shift+C")
@@ -175,17 +183,47 @@ class AppWindow(QMainWindow):
         self.stack.addWidget(import_wizard)
         self.stack.setCurrentWidget(import_wizard)
 
-    def open_translation_management(self):
+    def _get_active_project_id(self) -> Optional[int]:
+        """Best-effort active project context for workspace-level panels."""
+        current = self.stack.currentWidget()
+        if current is None:
+            return None
+        if hasattr(current, "project_id"):
+            value = getattr(current, "project_id", None)
+            if isinstance(value, int):
+                return value
+        return None
+
+    def open_translation_management(self, project_id: Optional[int] = None):
         """Open translation management panel."""
         logger.info("Opening translation management panel")
 
-        # Create panel (global TM by default)
-        tm_panel = TranslationManagementPanel(project_id=None)
+        context_project_id = project_id if project_id is not None else self._get_active_project_id()
+
+        # Create panel (uses context project scope when available).
+        tm_panel = TranslationManagementPanel(project_id=context_project_id)
         tm_panel.back_requested.connect(self.back_to_dashboard)
+        tm_panel.open_user_dictionaries_requested.connect(
+            lambda pid=context_project_id: self.open_user_dictionaries(project_id=pid)
+        )
 
         # Add to stack and show
         self.stack.addWidget(tm_panel)
         self.stack.setCurrentWidget(tm_panel)
+
+    def open_user_dictionaries(self, project_id: Optional[int] = None):
+        """Open User Dictionaries workspace."""
+        logger.info("Opening user dictionaries workspace")
+
+        context_project_id = project_id if project_id is not None else self._get_active_project_id()
+
+        panel = UserDictionariesView(project_id=context_project_id, show_back_button=True)
+        panel.back_requested.connect(self.back_to_dashboard)
+        panel.open_translation_management_requested.connect(
+            lambda pid=context_project_id: self.open_translation_management(project_id=pid)
+        )
+        self.stack.addWidget(panel)
+        self.stack.setCurrentWidget(panel)
 
     def open_coverage(self):
         """Open coverage panel."""
@@ -239,6 +277,7 @@ class AppWindow(QMainWindow):
         # Create project view
         project_view = ProjectView(project_id)
         project_view.back_to_dashboard.connect(self.back_to_dashboard)
+        project_view.open_translation_management_requested.connect(self.open_translation_management)
 
         # Add to stack and show
         self.stack.addWidget(project_view)
@@ -292,6 +331,15 @@ class AppWindow(QMainWindow):
         ))
 
         registry.register(ActionSpec(
+            action_id="premium.user_dictionaries",
+            title="User Dictionaries",
+            keywords=["dictionary", "user", "deck", "study", "vocabulary"],
+            shortcut="Ctrl+Shift+U",
+            callback=self.open_user_dictionaries,
+            category="Premium"
+        ))
+
+        registry.register(ActionSpec(
             action_id="premium.coverage",
             title="QA / Coverage",
             keywords=["qa", "coverage", "quality", "test"],
@@ -322,7 +370,7 @@ class AppWindow(QMainWindow):
         # Navigate category
         registry.register(ActionSpec(
             action_id="navigate.dashboard",
-            title="Go to Dashboard",
+            title="Projects",
             keywords=["dashboard", "home", "projects"],
             shortcut="",
             callback=self.back_to_dashboard,
@@ -371,10 +419,14 @@ class AppWindow(QMainWindow):
     def _on_sidebar_action(self, action_id: str):
         """Route sidebar action to appropriate handler."""
         action_map = {
+            "workspace.projects": self.back_to_dashboard,
+            "workspace.tm": self.open_translation_management,
+            "workspace.user_dictionaries": self.open_user_dictionaries,
             "navigate.dashboard": self.back_to_dashboard,
             "tools.verification": self.open_verification,
             "tools.import_dictionary": self.open_import_wizard,
             "premium.tm": self.open_translation_management,
+            "premium.coverage": self.open_coverage,
         }
 
         handler = action_map.get(action_id)

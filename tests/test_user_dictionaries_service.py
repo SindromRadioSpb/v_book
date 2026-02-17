@@ -164,6 +164,14 @@ def test_bulk_add_skips_noise_by_default_include_noise_option(user_dict_engine):
 def test_query_items_filters_kind_search_hide_noise_study_state(user_dict_engine):
     service = UserDictionaryService()
     with Session(user_dict_engine) as session:
+        library = Library(name="Scope Lib")
+        session.add(library)
+        session.flush()
+        project_a = DictProject(library_id=library.library_id, name="Project A")
+        project_b = DictProject(library_id=library.library_id, name="Project B")
+        session.add_all([project_a, project_b])
+        session.flush()
+
         dictionary_id = _create_dictionary(session, service, "Deck Filters")
         service.bulk_add_items(
             session,
@@ -177,6 +185,7 @@ def test_query_items_filters_kind_search_hide_noise_study_state(user_dict_engine
                     "src_norm": "alpha",
                     "study_state": "new",
                     "is_noise": 0,
+                    "origin_project_id": project_a.project_id,
                 },
                 {
                     "kind": "term_cluster",
@@ -186,6 +195,7 @@ def test_query_items_filters_kind_search_hide_noise_study_state(user_dict_engine
                     "src_norm": "beta_term",
                     "study_state": "learning",
                     "is_noise": 1,
+                    "origin_project_id": project_a.project_id,
                 },
                 {
                     "kind": "lemma",
@@ -195,6 +205,7 @@ def test_query_items_filters_kind_search_hide_noise_study_state(user_dict_engine
                     "src_norm": "gamma",
                     "study_state": "mastered",
                     "is_noise": 0,
+                    "origin_project_id": project_b.project_id,
                 },
             ],
             include_noise=True,
@@ -262,6 +273,19 @@ def test_query_items_filters_kind_search_hide_noise_study_state(user_dict_engine
         )
         assert total == 1
         assert rows[0].translation == "RU GAMMA"
+
+        rows, total = service.query_items(
+            session,
+            dictionary_id=dictionary_id,
+            filters={
+                "origin_project_id": project_b.project_id,
+                "hide_noise": True,
+            },
+            limit=100,
+            offset=0,
+        )
+        assert total == 1
+        assert rows[0].src_text == "gamma"
 
 
 def test_resolve_translations_bulk_left_join_tm_global_no_persist(user_dict_engine):

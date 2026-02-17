@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -114,15 +114,22 @@ class ManualUserDictionaryItemDialog(QDialog):
 
 
 class UserDictionariesView(QWidget):
-    """Project-scoped user dictionaries workspace."""
+    """User Dictionaries workspace."""
 
-    def __init__(self, project_id: int):
+    back_requested = pyqtSignal()
+    open_translation_management_requested = pyqtSignal()
+
+    def __init__(self, project_id: Optional[int] = None, show_back_button: bool = False):
         super().__init__()
         self.project_id = project_id
+        self.show_back_button = show_back_button
         self.db_service = DBService.get_instance()
         self.user_dict_service = UserDictionaryService()
         self.audio_service = AudioAssetService()
         self.settings = SettingsService.get_instance()
+        self._scope_setting_key = (
+            "user_dict/scope_mode_project" if self.project_id is not None else "user_dict/scope_mode_global"
+        )
 
         self.current_dictionary_id: Optional[int] = self.settings.get_int("user_dict/current_dictionary_id", 0) or None
         self.current_page = 1
@@ -130,6 +137,14 @@ class UserDictionariesView(QWidget):
         self.total_count = 0
         self.sort_column = self.settings.get_string("user_dict/sort_column", "updated_at")
         self.sort_direction = self.settings.get_string("user_dict/sort_direction", "desc")
+        self.scope_mode = self.settings.get_string(
+            self._scope_setting_key,
+            "current_project" if self.project_id is not None else "all",
+        )
+        if self.scope_mode not in ("current_project", "all"):
+            self.scope_mode = "all"
+        if self.scope_mode == "current_project" and self.project_id is None:
+            self.scope_mode = "all"
         self._bulk_worker = None
         self._translate_worker = None
 
@@ -160,9 +175,43 @@ class UserDictionariesView(QWidget):
     def _init_ui(self):
         layout = QVBoxLayout(self)
 
+        header_layout = QHBoxLayout()
         header = QLabel("User Dictionaries")
         header.setStyleSheet("font-size: 16px; font-weight: bold;")
-        layout.addWidget(header)
+        header_layout.addWidget(header)
+
+        self.open_tm_btn = QPushButton("Open Translation Management")
+        self.open_tm_btn.clicked.connect(self.open_translation_management_requested.emit)
+        header_layout.addWidget(self.open_tm_btn)
+        header_layout.addStretch()
+
+        self.back_btn = QPushButton("Projects Dashboard")
+        self.back_btn.clicked.connect(self.back_requested.emit)
+        self.back_btn.setVisible(self.show_back_button)
+        header_layout.addWidget(self.back_btn)
+        layout.addLayout(header_layout)
+
+        scope_layout = QHBoxLayout()
+        scope_layout.addWidget(QLabel("Scope:"))
+        self.scope_current_btn = QPushButton("Current Project")
+        self.scope_current_btn.setCheckable(True)
+        self.scope_current_btn.clicked.connect(lambda: self.on_scope_changed("current_project"))
+        scope_layout.addWidget(self.scope_current_btn)
+
+        self.scope_all_btn = QPushButton("All")
+        self.scope_all_btn.setCheckable(True)
+        self.scope_all_btn.clicked.connect(lambda: self.on_scope_changed("all"))
+        scope_layout.addWidget(self.scope_all_btn)
+
+        self.scope_status_label = QLabel("")
+        self.scope_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        scope_layout.addWidget(self.scope_status_label)
+
+        self.scope_show_all_btn = QPushButton("Show All")
+        self.scope_show_all_btn.clicked.connect(lambda: self.on_scope_changed("all"))
+        scope_layout.addWidget(self.scope_show_all_btn)
+        scope_layout.addStretch()
+        layout.addLayout(scope_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -313,6 +362,51 @@ class UserDictionariesView(QWidget):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
+        self._apply_scope_mode(reset_page=False)
+
+    def _apply_scope_mode(self, reset_page: bool = True):
+        """Apply scope chip state to current filters."""
+        if self.scope_mode == "current_project" and self.project_id is not None:
+            active_project_id = self.project_id
+        else:
+            self.scope_mode = "all"
+            active_project_id = None
+
+        self.scope_current_btn.blockSignals(True)
+        self.scope_all_btn.blockSignals(True)
+        self.scope_current_btn.setChecked(self.scope_mode == "current_project")
+        self.scope_all_btn.setChecked(self.scope_mode == "all")
+        self.scope_current_btn.setEnabled(self.project_id is not None)
+        self.scope_current_btn.blockSignals(False)
+        self.scope_all_btn.blockSignals(False)
+
+        self.scope_show_all_btn.setVisible(self.scope_mode == "current_project")
+        self.settings.set_value(self._scope_setting_key, self.scope_mode)
+
+        if active_project_id is not None:
+            self.scope_status_label.setText(f"Filtered by: Current Project ({active_project_id})")
+        else:
+            self.scope_status_label.setText("Filtered by: All projects")
+
+        if reset_page:
+            self.current_page = 1
+
+    def on_scope_changed(self, scope_mode: str):
+        """Handle scope chip click."""
+        if scope_mode not in ("current_project", "all"):
+            return
+        if scope_mode == "current_project" and self.project_id is None:
+            QMessageBox.information(
+                self,
+                "Project Context Required",
+                "Current Project scope is available only when opened from a project context.",
+            )
+            return
+        if self.scope_mode == scope_mode:
+            return
+        self.scope_mode = scope_mode
+        self._apply_scope_mode(reset_page=True)
+        self.load_items()
 
     def build_filters(self) -> Dict[str, object]:
         filters: Dict[str, object] = {"hide_noise": self.hide_noise_checkbox.isChecked()}
@@ -332,6 +426,9 @@ class UserDictionariesView(QWidget):
             filters["translation_filter"] = "non_empty"
         else:
             filters["translation_filter"] = "all"
+
+        if self.scope_mode == "current_project" and self.project_id is not None:
+            filters["origin_project_id"] = self.project_id
 
         return filters
 

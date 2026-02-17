@@ -243,6 +243,7 @@ class TranslationManagementPanel(QWidget):
     """P2 Translation Management Panel."""
 
     back_requested = pyqtSignal()
+    open_user_dictionaries_requested = pyqtSignal()
 
     def __init__(self, project_id: Optional[int] = None):
         super().__init__()
@@ -261,10 +262,21 @@ class TranslationManagementPanel(QWidget):
 
         # Settings service for persistence
         self.settings = SettingsService.get_instance()
+        self._scope_setting_key = (
+            "tm_panel/scope_mode_project" if self.project_id is not None else "tm_panel/scope_mode_global"
+        )
 
         # State: selected project IDs (None = all projects)
         self.selected_project_ids: Optional[List[int]] = None
         self.all_projects = []  # Loaded in init_ui
+        self.scope_mode = self.settings.get_string(
+            self._scope_setting_key,
+            "current_project" if self.project_id is not None else "global",
+        )
+        if self.scope_mode not in ("global", "current_project"):
+            self.scope_mode = "global"
+        if self.scope_mode == "current_project" and self.project_id is None:
+            self.scope_mode = "global"
 
         # State: pagination
         self.current_page = 1
@@ -311,13 +323,39 @@ class TranslationManagementPanel(QWidget):
         title = QLabel("Translation Management")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header_layout.addWidget(title)
+        self.open_user_dict_btn = QPushButton("Open User Dictionaries")
+        self.open_user_dict_btn.clicked.connect(self.open_user_dictionaries_requested.emit)
+        header_layout.addWidget(self.open_user_dict_btn)
         header_layout.addStretch()
 
-        back_btn = QPushButton("← Back")
+        back_btn = QPushButton("Projects Dashboard")
         back_btn.clicked.connect(self.on_back)
         header_layout.addWidget(back_btn)
 
         layout.addLayout(header_layout)
+
+        scope_layout = QHBoxLayout()
+        scope_layout.addWidget(QLabel("Scope:"))
+
+        self.scope_current_btn = QPushButton("Current Project")
+        self.scope_current_btn.setCheckable(True)
+        self.scope_current_btn.clicked.connect(lambda: self.on_scope_changed("current_project"))
+        scope_layout.addWidget(self.scope_current_btn)
+
+        self.scope_global_btn = QPushButton("Global")
+        self.scope_global_btn.setCheckable(True)
+        self.scope_global_btn.clicked.connect(lambda: self.on_scope_changed("global"))
+        scope_layout.addWidget(self.scope_global_btn)
+
+        self.scope_status_label = QLabel("")
+        self.scope_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        scope_layout.addWidget(self.scope_status_label)
+
+        self.scope_show_all_btn = QPushButton("Show All")
+        self.scope_show_all_btn.clicked.connect(lambda: self.on_scope_changed("global"))
+        scope_layout.addWidget(self.scope_show_all_btn)
+        scope_layout.addStretch()
+        layout.addLayout(scope_layout)
 
         # Filters
         filters_group = QGroupBox("Filters")
@@ -560,6 +598,7 @@ class TranslationManagementPanel(QWidget):
         layout.addWidget(self.status_label)
 
         self.setLayout(layout)
+        self._apply_scope_mode(reset_page=False)
 
     def on_search_text_changed(self):
         """Handle search text change with debounce."""
@@ -570,6 +609,52 @@ class TranslationManagementPanel(QWidget):
         self.current_page = 1  # Reset to first page when filters change
         self.perform_search()
 
+    def _apply_scope_mode(self, reset_page: bool = True):
+        """Apply scope selection to project filter state."""
+        if self.scope_mode == "current_project" and self.project_id is not None:
+            self.selected_project_ids = [self.project_id]
+        else:
+            self.scope_mode = "global"
+            self.selected_project_ids = None
+
+        self.scope_current_btn.blockSignals(True)
+        self.scope_global_btn.blockSignals(True)
+        self.scope_current_btn.setChecked(self.scope_mode == "current_project")
+        self.scope_global_btn.setChecked(self.scope_mode == "global")
+        self.scope_current_btn.setEnabled(self.project_id is not None)
+        self.scope_current_btn.blockSignals(False)
+        self.scope_global_btn.blockSignals(False)
+
+        self.projects_btn.setEnabled(self.scope_mode == "global")
+        self.scope_show_all_btn.setVisible(self.scope_mode == "current_project")
+        self.settings.set_value(self._scope_setting_key, self.scope_mode)
+
+        if self.scope_mode == "current_project" and self.project_id is not None:
+            self.scope_status_label.setText(f"Filtered by: Current Project ({self.project_id})")
+        else:
+            self.scope_status_label.setText("Filtered by: Global (All projects)")
+
+        self.update_projects_button_label()
+        if reset_page:
+            self.current_page = 1
+
+    def on_scope_changed(self, scope_mode: str):
+        """Handle scope chip click."""
+        if scope_mode not in ("global", "current_project"):
+            return
+        if scope_mode == "current_project" and self.project_id is None:
+            QMessageBox.information(
+                self,
+                "Project Context Required",
+                "Current Project scope is available only when opened from a project context.",
+            )
+            return
+        if self.scope_mode == scope_mode:
+            return
+        self.scope_mode = scope_mode
+        self._apply_scope_mode(reset_page=True)
+        self.perform_search()
+
     def on_clear_filters(self):
         """Clear all filters."""
         self.search_edit.clear()
@@ -577,9 +662,7 @@ class TranslationManagementPanel(QWidget):
         self.kind_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
         self.origin_combo.setCurrentIndex(0)
-        # Reset projects to "All"
-        self.selected_project_ids = None
-        self.update_projects_button_label()
+        self._apply_scope_mode(reset_page=False)
         self.perform_search()
 
     def on_refresh(self):
@@ -593,6 +676,13 @@ class TranslationManagementPanel(QWidget):
 
     def on_select_projects(self):
         """Open project selection dialog."""
+        if self.scope_mode != "global":
+            QMessageBox.information(
+                self,
+                "Scope Locked",
+                "Switch scope to Global to select custom project filters.",
+            )
+            return
         dialog = ProjectSelectDialog(self.all_projects, self.selected_project_ids, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.selected_project_ids = dialog.get_selected_ids()
@@ -602,6 +692,9 @@ class TranslationManagementPanel(QWidget):
 
     def update_projects_button_label(self):
         """Update projects button label to show selection."""
+        if self.scope_mode == "current_project" and self.project_id is not None:
+            self.projects_btn.setText(f"Project {self.project_id}")
+            return
         if self.selected_project_ids is None:
             self.projects_btn.setText("All ▾")
         else:

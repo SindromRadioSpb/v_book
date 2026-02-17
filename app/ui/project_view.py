@@ -26,6 +26,7 @@ class ProjectView(QWidget):
     """Main project workspace."""
 
     back_to_dashboard = pyqtSignal()
+    open_translation_management_requested = pyqtSignal(int)
 
     def __init__(self, project_id: int):
         super().__init__()
@@ -83,6 +84,9 @@ class ProjectView(QWidget):
 
         # User Dictionaries tab (P0)
         self.user_dictionaries_view = UserDictionariesView(self.project_id)
+        self.user_dictionaries_view.open_translation_management_requested.connect(
+            self.on_open_translation_management
+        )
         self.tabs.addTab(self.user_dictionaries_view, "User Dictionaries")
 
         # Export tab
@@ -129,3 +133,7 @@ class ProjectView(QWidget):
 
         # Highlight the document
         self.documents_view.highlight_document(doc_id, sentence_id)
+
+    def on_open_translation_management(self):
+        """Route User Dictionaries deep-link to app-level TM panel."""
+        self.open_translation_management_requested.emit(self.project_id)

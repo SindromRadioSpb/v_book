@@ -486,6 +486,9 @@ class UserDictionaryService:
         if filters.get("tgt_lang"):
             stmt = stmt.where(UserDictionaryItem.tgt_lang == filters["tgt_lang"])
 
+        if "origin_project_id" in filters and filters["origin_project_id"] is not None:
+            stmt = stmt.where(UserDictionaryItem.origin_project_id == filters["origin_project_id"])
+
         hide_noise = filters.get("hide_noise", True)
         if hide_noise:
             stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
