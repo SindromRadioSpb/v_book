@@ -664,6 +664,24 @@ class TMEntryHistory(Base):
     )
 
 
+class StudyProgress(Base):
+    """Global SRS progress keyed by canonical_hash."""
+
+    __tablename__ = "study_progress"
+
+    id = Column(Integer, primary_key=True)
+    canonical_hash = Column(String, nullable=False, unique=True)
+    first_seen_at = Column(String, nullable=False, default=utc_now)
+    last_review_at = Column(String)
+    due_at = Column(String, nullable=False, default=utc_now)
+    review_count = Column(Integer, nullable=False, default=0)
+    lapse_count = Column(Integer, nullable=False, default=0)
+    interval_days = Column(Integer, nullable=False, default=0)
+    ease_factor = Column(Float, nullable=False, default=2.5)
+    last_quality = Column(Integer)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+
 class UserDictionary(Base):
     """User dictionary container for study lists."""
 
@@ -700,6 +718,9 @@ class UserDictionaryItem(Base):
     is_noise = Column(Integer, nullable=False, default=0)
     noise_reason = Column(String)
     study_state = Column(String, nullable=False, default="new")
+    study_progress_id = Column(Integer, ForeignKey("study_progress.id", ondelete="SET NULL"))
+    is_suspended = Column(Integer, nullable=False, default=0)
+    suspended_reason = Column(String)
     last_seen_at = Column(String)
     seen_count = Column(Integer, nullable=False, default=0)
     origin_project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL"))
@@ -719,6 +740,7 @@ class UserDictionaryItem(Base):
             "study_state IN ('new', 'learning', 'mastered', 'suspended')",
             name="ck_user_dict_item_study_state",
         ),
+        CheckConstraint("is_suspended IN (0, 1)", name="ck_user_dict_item_suspended"),
     )
 
 

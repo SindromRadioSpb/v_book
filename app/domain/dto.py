@@ -31,6 +31,13 @@ class LemmaStats:
     is_noise: Optional[int] = None
     noise_reason: Optional[str] = None
     norm_text: Optional[str] = None
+    saved_to_ud: bool = False
+    in_user_dictionary_count: int = 0
+    study_state: Optional[str] = None
+    study_due_human: Optional[str] = None
+    translation_tier: Optional[str] = None
+    audio_status: Optional[str] = None
+    study_tooltip: Optional[str] = None
 
 
 @dataclass
@@ -116,6 +123,13 @@ class ClusterStats:
     is_noise: Optional[int] = None
     noise_reason: Optional[str] = None
     norm_text: Optional[str] = None
+    saved_to_ud: bool = False
+    in_user_dictionary_count: int = 0
+    study_state: Optional[str] = None
+    study_due_human: Optional[str] = None
+    translation_tier: Optional[str] = None
+    audio_status: Optional[str] = None
+    study_tooltip: Optional[str] = None
 
 
 @dataclass
@@ -172,6 +186,11 @@ class TMEntryDTO:
     ngram_id: Optional[int]
     # Global TM canonical link (Task 19)
     tm_global_id: Optional[int] = None
+    # Study/meta indicators (non-intrusive overlays)
+    in_user_dictionary_count: int = 0
+    study_state: Optional[str] = None
+    study_due_human: Optional[str] = None
+    study_tooltip: Optional[str] = None
 
 
 @dataclass
@@ -205,6 +224,9 @@ class UserDictionaryItemDTO:
     is_noise: int
     noise_reason: Optional[str]
     study_state: str
+    study_progress_id: Optional[int]
+    is_suspended: int
+    suspended_reason: Optional[str]
     last_seen_at: Optional[str]
     seen_count: int
     origin_project_id: Optional[int]
@@ -221,6 +243,58 @@ class UserDictionaryItemDTO:
     translation_confidence: Optional[float] = None
     tm_global_id: Optional[int] = None
     audio_status: str = "missing"
+    origin_kind: str = "manual"
+    computed_study_state: str = "new"
+    study_due_human: Optional[str] = None
+    study_review_count: int = 0
+    study_lapse_count: int = 0
+    study_interval_days: int = 0
+    study_ease_factor: float = 2.5
+    translation_tier: str = "missing"
+    status_tooltip: Optional[str] = None
+
+
+@dataclass
+class StudyProgressSummaryDTO:
+    """Computed SRS summary for one canonical hash."""
+
+    progress_id: Optional[int]
+    canonical_hash: str
+    first_seen_at: Optional[str]
+    last_review_at: Optional[str]
+    due_at: Optional[str]
+    review_count: int
+    lapse_count: int
+    interval_days: int
+    ease_factor: float
+    last_quality: Optional[int]
+    is_suspended: bool = False
+    study_state: str = "new"
+    due_human: Optional[str] = None
+
+
+@dataclass
+class StudyCardDTO:
+    """Review queue card payload."""
+
+    item_id: int
+    dictionary_id: int
+    canonical_hash: str
+    kind: str
+    src_lang: str
+    tgt_lang: str
+    src_text: str
+    src_norm: str
+    translation: str
+    translation_tier: str
+    origin_kind: str
+    study_state: str
+    due_human: Optional[str]
+    progress_id: Optional[int]
+    review_count: int
+    lapse_count: int
+    interval_days: int
+    ease_factor: float
 
 
 @dataclass
