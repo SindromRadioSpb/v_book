@@ -12,6 +12,7 @@ from PyQt6.QtGui import QAction
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
+from app.services.user_dictionary_service import UserDictionaryService
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
@@ -31,6 +32,7 @@ class TermCardView(QWidget):
         self.project_id = project_id
         self.db_service = DBService.get_instance()
         self.card_service = TermCardService()
+        self.user_dict_service = UserDictionaryService()
         self.settings = SettingsService.get_instance()
 
         self.current_card: Optional[TermCardDTO] = None
@@ -276,6 +278,7 @@ class TermCardView(QWidget):
                     order_by=order_by,
                     limit=1000,
                 )
+                self._apply_study_overlays(session, cards)
 
                 self.queue_model.update_cards(cards)
                 self.queue_status_label.setText(f"Showing {len(cards)} terms")
@@ -290,6 +293,30 @@ class TermCardView(QWidget):
         except Exception as e:
             logger.exception("Failed to load review queue")
             show_error(self, "Error", f"Failed to load review queue: {e}")
+
+    def _apply_study_overlays(self, session, cards: list) -> None:
+        """Attach saved-to-UD + study tooltip metadata for visible review queue rows."""
+        if not cards:
+            return
+        payloads = []
+        for card in cards:
+            src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            payloads.append(
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": card.representative_he,
+                    "src_norm": src_norm,
+                }
+            )
+        overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+        for card in cards:
+            src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+            overlay = overlay_map.get(canonical_hash) or {}
+            card.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
+            card.study_tooltip = overlay.get("study_tooltip")
 
     def on_queue_item_clicked(self, index):
         """Handle click on review queue item."""

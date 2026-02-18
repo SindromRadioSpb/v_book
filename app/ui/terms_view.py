@@ -12,6 +12,7 @@ from PyQt6.QtGui import QAction
 from app.infra.settings import SettingsService
 from app.services.term_extraction_service import TermExtractionService
 from app.services.translation_service import TranslationService
+from app.services.user_dictionary_service import UserDictionaryService
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
 from app.ui.dialogs import show_batch_translate_dialog
@@ -39,6 +40,7 @@ class TermsView(QWidget):
         super().__init__()
         self.project_id = project_id
         self.term_service = TermExtractionService()
+        self.user_dict_service = UserDictionaryService()
         self.db_service = DBService.get_instance()
         self.translation_service = TranslationService()
         self.settings = SettingsService.get_instance()
@@ -424,6 +426,8 @@ class TermsView(QWidget):
         # Update total count
         self.total_count = total_count
 
+        self._apply_study_overlays(clusters)
+
         # Update model with clusters
         self.terms_model.update_clusters(clusters)
 
@@ -452,6 +456,50 @@ class TermsView(QWidget):
         if self.search_worker:
             self.search_worker.deleteLater()
             self.search_worker = None
+
+    def _apply_study_overlays(self, clusters: list) -> None:
+        """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
+        if not clusters:
+            return
+        payloads = []
+        for cluster in clusters:
+            src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            payloads.append(
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": cluster.representative_he,
+                    "src_norm": src_norm,
+                }
+            )
+
+        try:
+            with self.db_service.get_session() as session:
+                overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+        except Exception as e:
+            logger.warning("Failed to resolve terms study overlays: %s", e)
+            return
+
+        for cluster in clusters:
+            src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+            overlay = overlay_map.get(canonical_hash)
+            if not overlay:
+                cluster.in_user_dictionary_count = 0
+                cluster.study_tooltip = None
+                cluster.study_state = None
+                cluster.study_due_human = None
+                cluster.translation_tier = None
+                cluster.audio_status = None
+                continue
+
+            cluster.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
+            cluster.study_tooltip = overlay.get("study_tooltip")
+            cluster.study_state = overlay.get("study_state")
+            cluster.study_due_human = overlay.get("study_due_human")
+            cluster.translation_tier = overlay.get("translation_tier")
+            cluster.audio_status = overlay.get("audio_status")
 
     def on_search_error(self, error_msg: str):
         """Handle search error."""

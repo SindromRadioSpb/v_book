@@ -552,9 +552,16 @@ class TermCardTableModel(QAbstractTableModel):
         card = self.cards[index.row()]
         col = index.column()
 
+        if role == Qt.ItemDataRole.ToolTipRole:
+            study_tooltip = getattr(card, "study_tooltip", None)
+            if study_tooltip and col in (0, 4):
+                return study_tooltip
+            return None
+
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 0:
-                return card.representative_he
+                count = int(getattr(card, "in_user_dictionary_count", 0) or 0)
+                return saved_indicator_text(card.representative_he, count)
             elif col == 1:
                 return card.representative_lemma or ""
             elif col == 2:

@@ -22,6 +22,7 @@ from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.translation_service import TranslationService
 from app.services.tm_global_service import TMGlobalService
+from app.services.user_dictionary_service import UserDictionaryService
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
@@ -42,6 +43,7 @@ class DictionaryView(QWidget):
         self.project_id = project_id
         self.db_service = DBService.get_instance()
         self.translation_service = TranslationService()
+        self.user_dict_service = UserDictionaryService()
         self.translation_worker: Optional[TranslationResolveWorker] = None
         self.settings = SettingsService.get_instance()
 
@@ -327,6 +329,8 @@ class DictionaryView(QWidget):
             )
             lemmas.append(lemma_dto)
 
+        self._apply_study_overlays(lemmas)
+
         # Update model
         self.lemma_model.update_lemmas(lemmas)
 
@@ -343,6 +347,50 @@ class DictionaryView(QWidget):
 
         # Start translation worker
         self.start_translation_worker(lemmas)
+
+    def _apply_study_overlays(self, lemmas: List[LemmaStats]) -> None:
+        """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
+        if not lemmas:
+            return
+        payloads = []
+        for lemma in lemmas:
+            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            payloads.append(
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "lemma",
+                    "src_text": lemma.lemma_text,
+                    "src_norm": src_norm,
+                }
+            )
+
+        try:
+            with self.db_service.get_session() as session:
+                overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+        except Exception as e:
+            logger.warning("Failed to resolve dictionary study overlays: %s", e)
+            return
+
+        for lemma in lemmas:
+            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "lemma", src_norm)
+            overlay = overlay_map.get(canonical_hash)
+            if not overlay:
+                lemma.in_user_dictionary_count = 0
+                lemma.study_tooltip = None
+                lemma.study_state = None
+                lemma.study_due_human = None
+                lemma.translation_tier = None
+                lemma.audio_status = None
+                continue
+
+            lemma.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
+            lemma.study_tooltip = overlay.get("study_tooltip")
+            lemma.study_state = overlay.get("study_state")
+            lemma.study_due_human = overlay.get("study_due_human")
+            lemma.translation_tier = overlay.get("translation_tier")
+            lemma.audio_status = overlay.get("audio_status")
 
     def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""

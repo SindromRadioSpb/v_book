@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, desc, func, or_, select, text, update
+from sqlalchemy import and_, asc, desc, func, or_, select, text, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDictionaryItemDTO
@@ -1009,6 +1009,162 @@ class UserDictionaryService:
         )
         return list(session.execute(stmt).scalars().all())
 
+    def resolve_cross_view_status(
+        self,
+        session: Session,
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Resolve membership + study summary + translation/audio status in batch for cross-view tooltips.
+
+        Input row format:
+            {
+                "src_lang": str,
+                "tgt_lang": str,
+                "kind": str,
+                "src_text": str,
+                "src_norm": str,  # optional, fallback to normalize_for_tm(src_text)
+            }
+        """
+        prepared: List[Dict[str, str]] = []
+        for raw in rows or []:
+            src_lang = (raw.get("src_lang") or "").strip()
+            tgt_lang = (raw.get("tgt_lang") or "").strip()
+            kind = (raw.get("kind") or "").strip()
+            src_text = (raw.get("src_text") or "").strip()
+            if not src_lang or not tgt_lang or not kind:
+                continue
+            src_norm = self._canonical_src_norm(
+                src_lang=src_lang,
+                src_text=src_text,
+                kind=kind,
+                fallback_norm=(raw.get("src_norm") or "").strip(),
+            )
+            if not src_norm:
+                continue
+            canonical_hash = self.build_canonical_hash(src_lang, tgt_lang, kind, src_norm)
+            prepared.append(
+                {
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "kind": kind,
+                    "src_norm": src_norm,
+                    "canonical_hash": canonical_hash,
+                }
+            )
+
+        if not prepared:
+            return {}
+
+        by_hash = {row["canonical_hash"]: row for row in prepared}
+        canonical_hashes = sorted(by_hash.keys())
+
+        membership_rows = session.execute(
+            select(
+                UserDictionaryItem.canonical_hash,
+                func.count(UserDictionaryItem.item_id),
+                func.max(UserDictionaryItem.is_suspended),
+            )
+            .where(UserDictionaryItem.canonical_hash.in_(canonical_hashes))
+            .group_by(UserDictionaryItem.canonical_hash)
+        ).all()
+        membership_count = {row[0]: int(row[1] or 0) for row in membership_rows}
+        suspended_any = {row[0]: bool(row[2] or 0) for row in membership_rows}
+
+        study_service = StudyService()
+        summaries = study_service.get_progress_summaries(session, canonical_hashes)
+        for canonical_hash, summary in summaries.items():
+            if suspended_any.get(canonical_hash):
+                summary.is_suspended = True
+                summary.study_state = "suspended"
+
+        tuple_keys = sorted(
+            {
+                (row["src_lang"], row["tgt_lang"], row["kind"], row["src_norm"])
+                for row in by_hash.values()
+            }
+        )
+        tm_rows = []
+        if tuple_keys:
+            tm_rows = session.execute(
+                select(TMGlobal).where(
+                    tuple_(TMGlobal.src_lang, TMGlobal.tgt_lang, TMGlobal.kind, TMGlobal.src_norm).in_(tuple_keys)
+                )
+            ).scalars().all()
+
+        tm_by_hash: Dict[str, TMGlobal] = {}
+        for tm_row in tm_rows:
+            canonical_hash = self.build_canonical_hash(
+                tm_row.src_lang,
+                tm_row.tgt_lang,
+                tm_row.kind,
+                tm_row.src_norm,
+            )
+            tm_by_hash[canonical_hash] = tm_row
+
+        audio_service = AudioAssetService()
+        audio_status: Dict[Tuple[str, str], str] = {}
+        by_lang_norms: Dict[str, List[str]] = {}
+        for row in by_hash.values():
+            by_lang_norms.setdefault(row["src_lang"], []).append(row["src_norm"])
+        for lang, norms in by_lang_norms.items():
+            try:
+                status_map = audio_service.bulk_get_status(
+                    session=session,
+                    lang=lang,
+                    norm_texts=norms,
+                    voice_id="default",
+                    speed=1.0,
+                    provider="none",
+                )
+            except Exception:
+                status_map = {}
+            for norm_text, status in status_map.items():
+                audio_status[(lang, norm_text)] = status
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for canonical_hash, row in by_hash.items():
+            summary = summaries.get(canonical_hash)
+            tm_row = tm_by_hash.get(canonical_hash)
+            if summary is None:
+                summary = StudyProgressSummaryDTO(
+                    progress_id=None,
+                    canonical_hash=canonical_hash,
+                    first_seen_at=None,
+                    last_review_at=None,
+                    due_at=None,
+                    review_count=0,
+                    lapse_count=0,
+                    interval_days=0,
+                    ease_factor=2.5,
+                    last_quality=None,
+                    is_suspended=suspended_any.get(canonical_hash, False),
+                )
+                summary.study_state = study_service.compute_study_state(summary)
+                summary.due_human = study_service.compute_due_human(summary)
+
+            translation_tier = study_service.compute_translation_tier(
+                translation=tm_row.translation if tm_row else None,
+                status=tm_row.status if tm_row else None,
+                origin=tm_row.origin if tm_row else None,
+            )
+            item_audio_status = audio_status.get((row["src_lang"], row["src_norm"]), "missing")
+            count_value = int(membership_count.get(canonical_hash, 0))
+            result[canonical_hash] = {
+                "in_user_dictionary_count": count_value,
+                "study_state": summary.study_state,
+                "study_due_human": summary.due_human,
+                "translation_tier": translation_tier,
+                "audio_status": item_audio_status,
+                "study_tooltip": self._build_cross_view_tooltip(
+                    in_user_dictionary_count=count_value,
+                    summary=summary,
+                    tm_global=tm_row,
+                    translation_tier=translation_tier,
+                    audio_status=item_audio_status,
+                ),
+            }
+        return result
+
     def _apply_item_filters(
         self,
         stmt,
@@ -1332,6 +1488,37 @@ class UserDictionaryService:
             f"Translation: {', '.join(translation_bits)}\n"
             f"Audio: {audio_status}\n"
             f"Noise: {'yes' if item.is_noise else 'no'}"
+        )
+
+    @staticmethod
+    def _build_cross_view_tooltip(
+        *,
+        in_user_dictionary_count: int,
+        summary: StudyProgressSummaryDTO,
+        tm_global: Optional[TMGlobal],
+        translation_tier: str,
+        audio_status: str,
+    ) -> str:
+        translation_bits = [
+            f"tier={translation_tier}",
+            f"status={(tm_global.status if tm_global else 'none') or 'none'}",
+            f"origin={(tm_global.origin if tm_global else 'none') or 'none'}",
+        ]
+        if tm_global and tm_global.confidence is not None:
+            translation_bits.append(f"confidence={tm_global.confidence:.2f}")
+        study_bits = [
+            f"state={summary.study_state}",
+            f"due={summary.due_human or 'n/a'}",
+            f"reviews={summary.review_count}",
+            f"lapses={summary.lapse_count}",
+            f"interval={summary.interval_days}d",
+            f"EF={summary.ease_factor:.2f}",
+        ]
+        return (
+            f"In User Dictionaries: {in_user_dictionary_count}\n"
+            f"Study: {', '.join(study_bits)}\n"
+            f"Translation: {', '.join(translation_bits)}\n"
+            f"Audio: {audio_status}"
         )
 
     def _dictionary_to_dto(self, row: UserDictionary, *, item_count: int) -> UserDictionaryDTO:
