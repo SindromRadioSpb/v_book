@@ -65,6 +65,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Path is relative to project root (one level up from installer folder)
 Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Seed database with reference corpus (Hebrew Wikipedia Baseline).
+; Install only on first install, preserve user data on upgrades/uninstall.
+Source: "..\hdle_premium.db"; DestDir: "{localappdata}\HDLE"; DestName: "hdle.db"; Flags: onlyifdoesntexist uninsneveruninstall
+
 ; NOTE: User data (database, logs, backups) is stored in:
 ; %LOCALAPPDATA%\HDLE\
 ; This directory is NOT managed by the installer and survives upgrades/uninstalls
