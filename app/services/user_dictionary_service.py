@@ -17,10 +17,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy import and_, asc, desc, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from app.domain.dto import UserDictionaryDTO, UserDictionaryItemDTO
+from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDictionaryItemDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import (
     Lemma,
+    StudyProgress,
     TMEntry,
     TMGlobal,
     TermCluster,
@@ -28,6 +29,8 @@ from app.infra.sa_models import (
     UserDictionaryItem,
 )
 from app.infra.security.sanitizer import sanitize_for_log
+from app.services.audio_asset_service import AudioAssetService
+from app.services.study_service import StudyService
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +272,20 @@ class UserDictionaryService:
 
         if pending:
             session.flush()
+
+        # Global SRS progress is keyed by canonical_hash and linked per item.
+        study_service = StudyService()
+        progress_cache: Dict[str, int] = {}
+        for row in added_rows:
+            progress_id = progress_cache.get(row.canonical_hash)
+            if progress_id is None:
+                progress_id = study_service.ensure_progress(session, row.canonical_hash)
+                progress_cache[row.canonical_hash] = progress_id
+            row.study_progress_id = progress_id
+            if row.study_state in ("learning", "mastered"):
+                study_service.seed_progress_state(session, progress_id, row.study_state)
+            if row.study_state == "suspended":
+                row.is_suspended = 1
 
         tm_created = 0
         tm_reused = 0
@@ -808,9 +825,10 @@ class UserDictionaryService:
     ) -> Tuple[List[UserDictionaryItemDTO], int]:
         """Query dictionary items with translation resolution from tm_global."""
         filters = filters or {}
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         base_stmt = (
-            select(UserDictionaryItem, TMGlobal)
+            select(UserDictionaryItem, TMGlobal, StudyProgress)
             .select_from(UserDictionaryItem)
             .outerjoin(
                 TMGlobal,
@@ -821,10 +839,11 @@ class UserDictionaryService:
                     TMGlobal.src_norm == UserDictionaryItem.src_norm,
                 ),
             )
+            .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
 
-        base_stmt = self._apply_item_filters(base_stmt, filters)
+        base_stmt = self._apply_item_filters(base_stmt, filters, now_str)
 
         # Count query (same filters)
         count_stmt = (
@@ -839,9 +858,10 @@ class UserDictionaryService:
                     TMGlobal.src_norm == UserDictionaryItem.src_norm,
                 ),
             )
+            .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
-        count_stmt = self._apply_item_filters(count_stmt, filters)
+        count_stmt = self._apply_item_filters(count_stmt, filters, now_str)
         total = session.execute(count_stmt).scalar() or 0
 
         order_col = self.ITEM_SORT_COLUMNS.get(sort_column, UserDictionaryItem.updated_at)
@@ -849,10 +869,50 @@ class UserDictionaryService:
         stmt = base_stmt.order_by(direction(order_col), asc(UserDictionaryItem.item_id)).limit(limit).offset(offset)
 
         rows = session.execute(stmt).all()
-        items = [
-            self._item_to_dto(item, self._resolve_tm_global_for_item(session, item, tm_global))
-            for item, tm_global in rows
-        ]
+        source_items = [item for item, _tm_global, _progress in rows]
+        hashes = [item.canonical_hash for item in source_items]
+
+        study_service = StudyService()
+        summaries = study_service.get_progress_summaries(session, hashes)
+
+        audio_status_by_item: Dict[int, str] = {}
+        if source_items:
+            audio_service = AudioAssetService()
+            by_lang: Dict[str, List[Tuple[int, str]]] = {}
+            for item in source_items:
+                by_lang.setdefault(item.src_lang, []).append((item.item_id, item.src_norm))
+            for lang, tuples in by_lang.items():
+                try:
+                    status_map = audio_service.bulk_get_status(
+                        session,
+                        lang=lang,
+                        norm_texts=[norm for _item_id, norm in tuples],
+                        voice_id="default",
+                        speed=1.0,
+                        provider="none",
+                    )
+                except Exception:
+                    # Keep backward compatibility for fixture DBs without audio_asset.
+                    status_map = {}
+                for item_id, norm_text in tuples:
+                    audio_status_by_item[item_id] = status_map.get(norm_text, "missing")
+
+        items = []
+        now_dt = datetime.now(timezone.utc)
+        for item, tm_global, _progress in rows:
+            resolved_tm_global = self._resolve_tm_global_for_item(session, item, tm_global)
+            summary = summaries.get(item.canonical_hash)
+            if summary:
+                summary.is_suspended = bool(item.is_suspended)
+                summary.study_state = study_service.compute_study_state(summary, now_dt)
+                summary.due_human = study_service.compute_due_human(summary, now_dt)
+            dto = self._item_to_dto(
+                item,
+                resolved_tm_global,
+                summary,
+                audio_status_by_item.get(item.item_id, "missing"),
+            )
+            items.append(dto)
         return items, total
 
     def count_item_ids_for_translation(
@@ -925,13 +985,35 @@ class UserDictionaryService:
         )
         return list(session.execute(stmt).scalars().all())
 
-    def _apply_item_filters(self, stmt, filters: Dict[str, Any]):
+    def _apply_item_filters(self, stmt, filters: Dict[str, Any], now_str: Optional[str] = None):
         """Apply supported filters to item query."""
         if filters.get("kind"):
             stmt = stmt.where(UserDictionaryItem.kind == filters["kind"])
 
-        if filters.get("study_state"):
-            stmt = stmt.where(UserDictionaryItem.study_state == filters["study_state"])
+        study_filter = (filters.get("study_state") or "").strip().lower()
+        now_value = now_str or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        mastered_clause = and_(
+            func.coalesce(StudyProgress.review_count, 0) >= StudyService.MASTERED_MIN_REVIEWS,
+            func.coalesce(StudyProgress.interval_days, 0) >= StudyService.MASTERED_INTERVAL_DAYS,
+            or_(StudyProgress.due_at.is_(None), StudyProgress.due_at > now_value),
+        )
+        if study_filter == "suspended":
+            stmt = stmt.where(UserDictionaryItem.is_suspended == 1)
+        elif study_filter == "new":
+            stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
+            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) <= 0)
+        elif study_filter == "due":
+            stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
+            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) > 0)
+            stmt = stmt.where(StudyProgress.due_at <= now_value)
+        elif study_filter == "mastered":
+            stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
+            stmt = stmt.where(mastered_clause)
+        elif study_filter == "learning":
+            stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
+            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) > 0)
+            stmt = stmt.where(or_(StudyProgress.due_at.is_(None), StudyProgress.due_at > now_value))
+            stmt = stmt.where(~mastered_clause)
 
         if filters.get("src_lang"):
             stmt = stmt.where(UserDictionaryItem.src_lang == filters["src_lang"])
@@ -941,6 +1023,20 @@ class UserDictionaryService:
 
         if "origin_project_id" in filters and filters["origin_project_id"] is not None:
             stmt = stmt.where(UserDictionaryItem.origin_project_id == filters["origin_project_id"])
+
+        origin_filter = (filters.get("origin_filter") or "").strip().lower()
+        if origin_filter == "project":
+            stmt = stmt.where(UserDictionaryItem.origin_project_id.is_not(None))
+        elif origin_filter == "manual":
+            stmt = stmt.where(UserDictionaryItem.origin_project_id.is_(None))
+            stmt = stmt.where(
+                or_(
+                    UserDictionaryItem.origin_source_ref.is_(None),
+                    ~func.lower(UserDictionaryItem.origin_source_ref).like("%import%"),
+                )
+            )
+        elif origin_filter == "imported":
+            stmt = stmt.where(func.lower(func.coalesce(UserDictionaryItem.origin_source_ref, "")).like("%import%"))
 
         hide_noise = filters.get("hide_noise", True)
         if hide_noise:
@@ -961,6 +1057,25 @@ class UserDictionaryService:
         if translation_filter == "empty":
             stmt = stmt.where(or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == ""))
         elif translation_filter == "non_empty":
+            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+
+        translation_tier = (filters.get("translation_tier") or "").strip().lower()
+        if translation_tier == "missing":
+            stmt = stmt.where(or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == ""))
+        elif translation_tier == "deprecated":
+            stmt = stmt.where(TMGlobal.status == "deprecated")
+            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+        elif translation_tier == "approved":
+            stmt = stmt.where(TMGlobal.status == "approved")
+            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+        elif translation_tier == "user":
+            stmt = stmt.where(
+                TMGlobal.origin.in_(["user_edit", "import", "mt_accept", "merge", "revert"])
+            )
+            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+            stmt = stmt.where(or_(TMGlobal.status.is_(None), ~TMGlobal.status.in_(["approved", "deprecated"])))
+        elif translation_tier == "mt":
+            stmt = stmt.where(TMGlobal.origin == "mt_auto")
             stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
 
         return stmt
@@ -1058,8 +1173,45 @@ class UserDictionaryService:
             )
         ).scalar_one_or_none()
 
-    def _item_to_dto(self, item: UserDictionaryItem, tm_global: Optional[TMGlobal]) -> UserDictionaryItemDTO:
+    def _item_to_dto(
+        self,
+        item: UserDictionaryItem,
+        tm_global: Optional[TMGlobal],
+        summary: Optional[StudyProgressSummaryDTO],
+        audio_status: str,
+    ) -> UserDictionaryItemDTO:
         """Convert ORM row to item DTO with resolved translation fields."""
+        study_service = StudyService()
+        effective_summary = summary or StudyProgressSummaryDTO(
+            progress_id=item.study_progress_id,
+            canonical_hash=item.canonical_hash,
+            first_seen_at=item.created_at,
+            last_review_at=None,
+            due_at=item.created_at,
+            review_count=0,
+            lapse_count=0,
+            interval_days=0,
+            ease_factor=2.5,
+            last_quality=None,
+            is_suspended=bool(item.is_suspended),
+        )
+        effective_summary.is_suspended = bool(item.is_suspended)
+        if not effective_summary.study_state:
+            effective_summary.study_state = study_service.compute_study_state(effective_summary)
+        if not effective_summary.due_human:
+            effective_summary.due_human = study_service.compute_due_human(effective_summary)
+
+        translation_tier = study_service.compute_translation_tier(
+            translation=tm_global.translation if tm_global else None,
+            status=tm_global.status if tm_global else None,
+            origin=tm_global.origin if tm_global else None,
+        )
+        origin_kind = study_service.compute_origin_kind(
+            origin_project_id=item.origin_project_id,
+            origin_source_ref=item.origin_source_ref,
+            origin_entity_type=item.origin_entity_type,
+        )
+
         return UserDictionaryItemDTO(
             item_id=item.item_id,
             dictionary_id=item.dictionary_id,
@@ -1092,7 +1244,56 @@ class UserDictionaryService:
             translation_origin=tm_global.origin if tm_global else None,
             translation_confidence=tm_global.confidence if tm_global else None,
             tm_global_id=tm_global.tm_global_id if tm_global else None,
-            audio_status="missing",
+            audio_status=audio_status,
+            origin_kind=origin_kind,
+            computed_study_state=effective_summary.study_state,
+            study_due_human=effective_summary.due_human,
+            study_review_count=effective_summary.review_count,
+            study_lapse_count=effective_summary.lapse_count,
+            study_interval_days=effective_summary.interval_days,
+            study_ease_factor=effective_summary.ease_factor,
+            translation_tier=translation_tier,
+            status_tooltip=self._build_status_tooltip(
+                item=item,
+                summary=effective_summary,
+                tm_global=tm_global,
+                audio_status=audio_status,
+                translation_tier=translation_tier,
+                origin_kind=origin_kind,
+            ),
+        )
+
+    @staticmethod
+    def _build_status_tooltip(
+        *,
+        item: UserDictionaryItem,
+        summary: StudyProgressSummaryDTO,
+        tm_global: Optional[TMGlobal],
+        audio_status: str,
+        translation_tier: str,
+        origin_kind: str,
+    ) -> str:
+        translation_bits = [
+            f"tier={translation_tier}",
+            f"status={(tm_global.status if tm_global else 'none') or 'none'}",
+            f"origin={(tm_global.origin if tm_global else 'none') or 'none'}",
+        ]
+        if tm_global and tm_global.confidence is not None:
+            translation_bits.append(f"confidence={tm_global.confidence:.2f}")
+        study_bits = [
+            f"state={summary.study_state}",
+            f"due={summary.due_human or 'n/a'}",
+            f"reviews={summary.review_count}",
+            f"lapses={summary.lapse_count}",
+            f"interval={summary.interval_days}d",
+            f"EF={summary.ease_factor:.2f}",
+        ]
+        return (
+            f"Origin: {origin_kind}\n"
+            f"Study: {', '.join(study_bits)}\n"
+            f"Translation: {', '.join(translation_bits)}\n"
+            f"Audio: {audio_status}\n"
+            f"Noise: {'yes' if item.is_noise else 'no'}"
         )
 
     def _dictionary_to_dto(self, row: UserDictionary, *, item_count: int) -> UserDictionaryDTO:
@@ -1110,6 +1311,9 @@ class UserDictionaryService:
 
     @staticmethod
     def _validate_study_state(study_state: str) -> str:
+        if study_state == "due":
+            # Legacy column doesn't support "due"; due is computed from progress.
+            return "learning"
         valid = {"new", "learning", "mastered", "suspended"}
         if study_state not in valid:
             raise ValueError(f"Invalid study_state: {study_state}")

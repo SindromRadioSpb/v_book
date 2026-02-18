@@ -14,6 +14,7 @@ from app.infra.sa_models import (
     Lemma,
     Library,
     SourceDocument,
+    StudyProgress,
     TMEntry,
     TMGlobal,
     UserDictionary,
@@ -38,6 +39,7 @@ def _create_schema(engine):
     TMEntry.__table__.create(engine, checkfirst=True)
     TMGlobal.__table__.create(engine, checkfirst=True)
     UserDictionary.__table__.create(engine, checkfirst=True)
+    StudyProgress.__table__.create(engine, checkfirst=True)
     UserDictionaryItem.__table__.create(engine, checkfirst=True)
     AudioAsset.__table__.create(engine, checkfirst=True)
 

@@ -16,6 +16,7 @@ from app.infra.sa_models import (
     Ngram,
     SourceCorpus,
     SourceDocument,
+    StudyProgress,
     TermCluster,
     TMEntry,
     TMGlobal,
@@ -44,6 +45,7 @@ def translate_engine():
         Ngram.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
         UserDictionary.__table__.create(engine, checkfirst=True)
+        StudyProgress.__table__.create(engine, checkfirst=True)
         UserDictionaryItem.__table__.create(engine, checkfirst=True)
         yield engine
     finally:
