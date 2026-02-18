@@ -1459,7 +1459,7 @@ class TranslationManagementPanel(QWidget):
 
         payloads = []
         for entry in selected_entries:
-            src_norm = entry.src_norm or normalize_for_tm(entry.src_lang, entry.src_text, entry.kind).norm
+            src_norm = normalize_for_tm(entry.src_lang, entry.src_text, entry.kind).norm
             payloads.append(
                 {
                     "kind": entry.kind,

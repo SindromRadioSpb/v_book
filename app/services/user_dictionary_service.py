@@ -14,12 +14,19 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, desc, func, or_, select, text
+from sqlalchemy import and_, asc, desc, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.dto import UserDictionaryDTO, UserDictionaryItemDTO
 from app.domain.normalization.normalizer import normalize_for_tm
-from app.infra.sa_models import TMGlobal, UserDictionary, UserDictionaryItem
+from app.infra.sa_models import (
+    Lemma,
+    TMEntry,
+    TMGlobal,
+    TermCluster,
+    UserDictionary,
+    UserDictionaryItem,
+)
 from app.infra.security.sanitizer import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -345,6 +352,273 @@ class UserDictionaryService:
             "cancelled": cancelled,
         }
 
+    def update_item_translation(
+        self,
+        session: Session,
+        item_id: int,
+        translation: Optional[str],
+    ) -> None:
+        """Update canonical translation for a dictionary item and propagate to TM entries."""
+        from app.services.tm_global_service import TMGlobalService
+
+        item = session.get(UserDictionaryItem, item_id)
+        if not item:
+            raise ValueError(f"User dictionary item not found: {item_id}")
+
+        translation_value = (translation or "").strip()
+        src_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        tm_global_service = TMGlobalService()
+
+        # Prefer existing TM entry (explicit origin link first, then project+canonical key)
+        entry = None
+        if item.origin_tm_entry_id:
+            entry = session.get(TMEntry, item.origin_tm_entry_id)
+            if entry and (
+                entry.kind != item.kind
+                or entry.src_lang != item.src_lang
+                or entry.tgt_lang != item.tgt_lang
+            ):
+                entry = None
+
+        if not entry and item.origin_project_id is not None:
+            entry = session.execute(
+                select(TMEntry).where(
+                    TMEntry.project_id == item.origin_project_id,
+                    TMEntry.kind == item.kind,
+                    TMEntry.src_lang == item.src_lang,
+                    TMEntry.tgt_lang == item.tgt_lang,
+                    TMEntry.src_norm == src_norm,
+                )
+            ).scalar_one_or_none()
+
+        if entry:
+            entry.translation = translation_value
+            entry.status = "approved"
+            entry.origin = "user_edit"
+            entry.updated_at = now_str
+            session.flush()
+            global_row = tm_global_service.upsert_and_link(
+                session,
+                entry,
+                force_global_update=True,
+            )
+        elif item.origin_project_id is not None:
+            # Ensure TM panel/project views see user-dictionary edits in project context.
+            created = TMEntry(
+                project_id=item.origin_project_id,
+                kind=item.kind,
+                src_lang=item.src_lang,
+                tgt_lang=item.tgt_lang,
+                src_text=item.src_text,
+                src_norm=src_norm,
+                translation=translation_value,
+                status="approved",
+                origin="user_edit",
+                source_ref="user_dictionary_inline_edit",
+                is_noise=item.is_noise or 0,
+                noise_reason=item.noise_reason,
+            )
+            if item.kind == "lemma" and item.origin_entity_type == "lemma" and item.origin_entity_id:
+                try:
+                    created.lemma_id = int(item.origin_entity_id)
+                except Exception:
+                    created.lemma_id = None
+            if item.kind == "term_cluster" and item.origin_entity_type in ("term_cluster", "term_card") and item.origin_entity_id:
+                try:
+                    created.cluster_id = int(item.origin_entity_id)
+                except Exception:
+                    created.cluster_id = None
+            session.add(created)
+            session.flush()
+            item.origin_tm_entry_id = created.tm_id
+            global_row = tm_global_service.upsert_and_link(
+                session,
+                created,
+                force_global_update=True,
+            )
+        else:
+            existing_global = session.execute(
+                select(TMGlobal).where(
+                    TMGlobal.src_lang == item.src_lang,
+                    TMGlobal.tgt_lang == item.tgt_lang,
+                    TMGlobal.kind == item.kind,
+                    TMGlobal.src_norm == src_norm,
+                )
+            ).scalar_one_or_none()
+            global_row = tm_global_service.upsert_global(
+                session=session,
+                src_lang=item.src_lang,
+                tgt_lang=item.tgt_lang,
+                kind=item.kind,
+                src_norm=src_norm,
+                src_text=item.src_text,
+                translation=translation_value,
+                status="approved",
+                origin="user_edit",
+                confidence=existing_global.confidence if existing_global else None,
+                is_noise=existing_global.is_noise if existing_global else (item.is_noise or 0),
+                noise_reason=existing_global.noise_reason if existing_global else item.noise_reason,
+                notes=existing_global.notes if existing_global else item.notes,
+                source_tm_id=item.origin_tm_entry_id,
+                force_update=True,
+            )
+            tm_global_service.propagate_to_entries(
+                session=session,
+                tm_global_id=global_row.tm_global_id,
+                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"],
+            )
+
+        item.updated_at = now_str
+
+        self._audit_event(
+            session,
+            event_type="user_dictionary_translation_update",
+            operation="update_user_dictionary_item_translation",
+            resource_id=str(item_id),
+            details={
+                "dictionary_id": item.dictionary_id,
+                "tm_global_id": global_row.tm_global_id if global_row else None,
+                "translation_empty": 1 if translation_value == "" else 0,
+            },
+        )
+
+    def set_items_noise_status_bulk(
+        self,
+        session: Session,
+        item_ids: List[int],
+        is_noise: bool,
+        noise_reason: Optional[str] = None,
+    ) -> int:
+        """Set noise status for selected user dictionary items and sync TM layers."""
+        if not item_ids:
+            return 0
+
+        from app.services.tm_global_service import TMGlobalService
+
+        noise_value = 1 if is_noise else 0
+        reason_value = noise_reason if is_noise else None
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        items = list(
+            session.execute(
+                select(UserDictionaryItem)
+                .where(UserDictionaryItem.item_id.in_(item_ids))
+                .order_by(asc(UserDictionaryItem.item_id))
+            ).scalars().all()
+        )
+        if not items:
+            return 0
+
+        touched_dictionary_ids = set()
+        key_rows: Dict[Tuple[str, str, str, str], UserDictionaryItem] = {}
+        for item in items:
+            item.is_noise = noise_value
+            item.noise_reason = reason_value
+            item.updated_at = now_str
+            touched_dictionary_ids.add(item.dictionary_id)
+            canonical_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+            key_rows[(item.src_lang, item.tgt_lang, item.kind, canonical_norm)] = item
+
+        tm_global_service = TMGlobalService()
+        touched_lemma_ids = set()
+        touched_cluster_ids = set()
+
+        for (src_lang, tgt_lang, kind, src_norm), sample_item in key_rows.items():
+            entries = list(
+                session.execute(
+                    select(TMEntry).where(
+                        TMEntry.src_lang == src_lang,
+                        TMEntry.tgt_lang == tgt_lang,
+                        TMEntry.kind == kind,
+                        TMEntry.src_norm == src_norm,
+                    )
+                ).scalars().all()
+            )
+
+            for entry in entries:
+                entry.is_noise = noise_value
+                entry.noise_reason = reason_value
+                entry.updated_at = now_str
+                if entry.kind == "lemma" and entry.lemma_id:
+                    touched_lemma_ids.add(entry.lemma_id)
+                if entry.kind == "term_cluster" and entry.cluster_id:
+                    touched_cluster_ids.add(entry.cluster_id)
+
+            global_row = session.execute(
+                select(TMGlobal).where(
+                    TMGlobal.src_lang == src_lang,
+                    TMGlobal.tgt_lang == tgt_lang,
+                    TMGlobal.kind == kind,
+                    TMGlobal.src_norm == src_norm,
+                )
+            ).scalar_one_or_none()
+
+            if global_row:
+                global_row.is_noise = noise_value
+                global_row.noise_reason = reason_value
+                global_row.updated_at = now_str
+                tm_global_service.propagate_to_entries(
+                    session=session,
+                    tm_global_id=global_row.tm_global_id,
+                    fields=["is_noise", "noise_reason"],
+                )
+            elif entries:
+                global_row = tm_global_service.upsert_global(
+                    session=session,
+                    src_lang=src_lang,
+                    tgt_lang=tgt_lang,
+                    kind=kind,
+                    src_norm=src_norm,
+                    src_text=sample_item.src_text,
+                    translation=entries[0].translation,
+                    status=entries[0].status,
+                    origin=entries[0].origin,
+                    confidence=entries[0].confidence,
+                    is_noise=noise_value,
+                    noise_reason=reason_value,
+                    notes=entries[0].notes,
+                    source_tm_id=entries[0].tm_id,
+                    force_update=True,
+                )
+                for entry in entries:
+                    entry.tm_global_id = global_row.tm_global_id
+                tm_global_service.propagate_to_entries(
+                    session=session,
+                    tm_global_id=global_row.tm_global_id,
+                    fields=["is_noise", "noise_reason"],
+                )
+
+        if touched_lemma_ids:
+            session.execute(
+                update(Lemma)
+                .where(Lemma.lemma_id.in_(sorted(touched_lemma_ids)))
+                .values(is_noise=noise_value, noise_reason=reason_value)
+            )
+        if touched_cluster_ids:
+            session.execute(
+                update(TermCluster)
+                .where(TermCluster.cluster_id.in_(sorted(touched_cluster_ids)))
+                .values(is_noise=noise_value, noise_reason=reason_value)
+            )
+        if touched_dictionary_ids:
+            session.execute(
+                update(UserDictionary)
+                .where(UserDictionary.dictionary_id.in_(sorted(touched_dictionary_ids)))
+                .values(updated_at=now_str)
+            )
+
+        self._audit_event(
+            session,
+            event_type="user_dictionary_noise_bulk_update",
+            operation="set_user_dictionary_items_noise_status_bulk",
+            details={
+                "count": len(items),
+                "is_noise": noise_value,
+            },
+        )
+        return len(items)
+
     def query_items(
         self,
         session: Session,
@@ -399,7 +673,10 @@ class UserDictionaryService:
         stmt = base_stmt.order_by(direction(order_col), asc(UserDictionaryItem.item_id)).limit(limit).offset(offset)
 
         rows = session.execute(stmt).all()
-        items = [self._item_to_dto(item, tm_global) for item, tm_global in rows]
+        items = [
+            self._item_to_dto(item, self._resolve_tm_global_for_item(session, item, tm_global))
+            for item, tm_global in rows
+        ]
         return items, total
 
     def count_item_ids_for_translation(
@@ -528,9 +805,12 @@ class UserDictionaryService:
         if not kind or not src_lang or not tgt_lang or not src_text:
             raise ValueError("Item requires kind, src_lang, tgt_lang, src_text")
 
-        src_norm = str(raw.get("src_norm") or "").strip()
-        if not src_norm:
-            src_norm = normalize_for_tm(src_lang, src_text, kind).norm
+        src_norm = self._canonical_src_norm(
+            src_lang=src_lang,
+            src_text=src_text,
+            kind=kind,
+            fallback_norm=str(raw.get("src_norm") or "").strip(),
+        )
         if not src_norm:
             raise ValueError("Failed to compute src_norm")
 
@@ -561,6 +841,46 @@ class UserDictionaryService:
             "origin_doc_id": raw.get("origin_doc_id"),
             "origin_source_ref": raw.get("origin_source_ref"),
         }
+
+    @staticmethod
+    def _canonical_src_norm(
+        src_lang: str,
+        src_text: str,
+        kind: str,
+        fallback_norm: str = "",
+    ) -> str:
+        """Compute canonical src_norm for TM key lookups with safe fallback."""
+        try:
+            normalized = normalize_for_tm(src_lang, src_text, kind).norm
+            normalized = (normalized or "").strip()
+            if normalized:
+                return normalized
+        except Exception as exc:
+            logger.warning("normalize_for_tm failed for user dictionary item: %s", exc)
+        return (fallback_norm or "").strip()
+
+    def _resolve_tm_global_for_item(
+        self,
+        session: Session,
+        item: UserDictionaryItem,
+        joined_tm_global: Optional[TMGlobal],
+    ) -> Optional[TMGlobal]:
+        """Resolve TMGlobal row, including fallback for legacy non-canonical src_norm."""
+        if joined_tm_global is not None:
+            return joined_tm_global
+
+        canonical_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+        if not canonical_norm or canonical_norm == item.src_norm:
+            return None
+
+        return session.execute(
+            select(TMGlobal).where(
+                TMGlobal.src_lang == item.src_lang,
+                TMGlobal.tgt_lang == item.tgt_lang,
+                TMGlobal.kind == item.kind,
+                TMGlobal.src_norm == canonical_norm,
+            )
+        ).scalar_one_or_none()
 
     def _item_to_dto(self, item: UserDictionaryItem, tm_global: Optional[TMGlobal]) -> UserDictionaryItemDTO:
         """Convert ORM row to item DTO with resolved translation fields."""

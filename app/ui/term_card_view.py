@@ -332,7 +332,7 @@ class TermCardView(QWidget):
         with self.db_service.get_session() as session:
             stmt = select(TermCluster).where(TermCluster.cluster_id.in_(cluster_ids))
             for cluster in session.execute(stmt).scalars().all():
-                src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+                src_norm = normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
                 payloads.append(
                     {
                         "kind": "term_cluster",

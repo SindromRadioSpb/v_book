@@ -28,6 +28,21 @@
 - Runs in background worker with cancel/pause/resume.
 - Writes canonical translation to `tm_global` and propagates to linked `tm_entry`.
 
+## Inline Edit + Context Menu
+
+- `Translation` column is editable directly in the table.
+- Inline edits write through canonical TM (`tm_global`) and propagate to linked `tm_entry`.
+- Right-click on selected rows provides:
+  - `Translate Selected (N rows)...`
+  - `Mark Selected as Noise (N rows)`
+  - `Mark Selected as Valid (N rows)`
+- Noise changes sync from User Dictionaries to `tm_global`, linked `tm_entry`, and linked source entities.
+
+## Legacy Canonical-Key Guard
+
+- Legacy user-dictionary rows with non-canonical `src_norm` still resolve translation by canonical fallback lookup.
+- New `Add to User Dictionary` payloads always use canonical `src_norm` from `normalize_for_tm(...)`.
+
 ## Deep Link
 
 - `User Dictionaries` header includes `Open Translation Management`.

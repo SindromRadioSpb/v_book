@@ -649,7 +649,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
 
         item = self.items[index.row()]
         col = index.column()
-        if role == Qt.ItemDataRole.DisplayRole:
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if col == 0:
                 return item.kind
             if col == 1:
@@ -667,6 +667,27 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             if col == 7:
                 return item.audio_status
         return None
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        flags = super().flags(index)
+        if index.column() == 2:
+            flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+            return False
+
+        if index.column() != 2:
+            return False
+
+        item = self.items[index.row()]
+        item.translation = "" if value is None else str(value)
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
+        return True
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:

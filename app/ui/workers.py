@@ -2199,17 +2199,31 @@ class UserDictTranslateWorker(QThread):
     def _is_non_empty(text_value: Optional[str]) -> bool:
         return bool(text_value and str(text_value).strip())
 
+    @staticmethod
+    def _canonical_item_norm(item) -> str:
+        from app.domain.normalization.normalizer import normalize_for_tm
+
+        try:
+            normalized = normalize_for_tm(item.src_lang, item.src_text, item.kind).norm
+            normalized = (normalized or "").strip()
+            if normalized:
+                return normalized
+        except Exception:
+            pass
+        return (item.src_norm or "").strip()
+
     def _fetch_current_global(self, session, item) -> Optional["TMGlobal"]:
         from sqlalchemy import select
         from app.infra.sa_models import TMGlobal
 
+        src_norm = self._canonical_item_norm(item)
         stmt = (
             select(TMGlobal)
             .where(
                 TMGlobal.src_lang == item.src_lang,
                 TMGlobal.tgt_lang == item.tgt_lang,
                 TMGlobal.kind == item.kind,
-                TMGlobal.src_norm == item.src_norm,
+                TMGlobal.src_norm == src_norm,
             )
             .limit(1)
         )
@@ -2270,13 +2284,14 @@ class UserDictTranslateWorker(QThread):
     ) -> None:
         from app.services.tm_global_service import TMGlobalService
 
+        src_norm = self._canonical_item_norm(item)
         tm_global_service = TMGlobalService()
         global_row = tm_global_service.upsert_global(
             session=session,
             src_lang=item.src_lang,
             tgt_lang=item.tgt_lang,
             kind=item.kind,
-            src_norm=item.src_norm,
+            src_norm=src_norm,
             src_text=item.src_text,
             translation=translation,
             status="approved",

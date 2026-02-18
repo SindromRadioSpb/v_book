@@ -9,9 +9,11 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import (
     AudioAsset,
     DictProject,
+    Lemma,
     Library,
     SourceDocument,
     TMEntry,
@@ -32,6 +34,7 @@ def user_dict_engine():
         Library.__table__.create(engine, checkfirst=True)
         DictProject.__table__.create(engine, checkfirst=True)
         SourceDocument.__table__.create(engine, checkfirst=True)
+        Lemma.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
         TMGlobal.__table__.create(engine, checkfirst=True)
         UserDictionary.__table__.create(engine, checkfirst=True)
@@ -100,6 +103,35 @@ def test_bulk_add_dedup_by_canonical_hash(user_dict_engine):
             select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
         ).scalars().all()
         assert len(count) == 1
+
+
+def test_bulk_add_canonicalizes_src_norm_from_text(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Canonical")
+        expected_norm = normalize_for_tm("he", "alpha term", "term_cluster").norm
+
+        result = service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "term_cluster",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "alpha term",
+                    "src_norm": "legacy_wrong_norm",
+                }
+            ],
+            include_noise=True,
+        )
+        session.commit()
+
+        assert result["added"] == 1
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+        assert item.src_norm == expected_norm
 
 
 def test_bulk_add_skips_noise_by_default_include_noise_option(user_dict_engine):
@@ -334,3 +366,229 @@ def test_resolve_translations_bulk_left_join_tm_global_no_persist(user_dict_engi
             select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
         ).scalar_one()
         assert item.src_text == "delta"
+
+
+def test_query_items_fallback_resolves_legacy_src_norm_mismatch(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Legacy")
+        canonical_norm = normalize_for_tm("he", "legacy source", "term_cluster").norm
+
+        legacy_item = UserDictionaryItem(
+            dictionary_id=dictionary_id,
+            kind="term_cluster",
+            src_lang="he",
+            tgt_lang="ru",
+            src_text="legacy source",
+            src_norm="legacy_bad_norm",
+            canonical_hash=service.build_canonical_hash("he", "ru", "term_cluster", "legacy_bad_norm"),
+            tags_json="[]",
+            is_noise=0,
+            study_state="new",
+            seen_count=0,
+        )
+        session.add(legacy_item)
+        session.add(
+            TMGlobal(
+                src_lang="he",
+                tgt_lang="ru",
+                kind="term_cluster",
+                src_norm=canonical_norm,
+                src_text="legacy source",
+                translation="RU LEGACY",
+                status="approved",
+                origin="user_edit",
+            )
+        )
+        session.commit()
+
+        rows, total = service.query_items(
+            session,
+            dictionary_id=dictionary_id,
+            filters={"hide_noise": True},
+            limit=100,
+            offset=0,
+        )
+
+        assert total == 1
+        assert rows[0].translation == "RU LEGACY"
+
+
+def test_update_item_translation_updates_tm_global_and_tm_entry(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        library = Library(name="Link Lib")
+        session.add(library)
+        session.flush()
+        project = DictProject(library_id=library.library_id, name="Link Project")
+        session.add(project)
+        session.flush()
+
+        lemma = Lemma(project_id=project.project_id, lemma_text="alpha", norm_text="alpha", is_noise=0)
+        session.add(lemma)
+        session.flush()
+
+        src_norm = normalize_for_tm("he", "alpha", "lemma").norm
+        global_row = TMGlobal(
+            src_lang="he",
+            tgt_lang="ru",
+            kind="lemma",
+            src_norm=src_norm,
+            src_text="alpha",
+            translation="OLD",
+            status="draft",
+            origin="mt_auto",
+            is_noise=0,
+        )
+        session.add(global_row)
+        session.flush()
+
+        entry = TMEntry(
+            project_id=project.project_id,
+            kind="lemma",
+            src_lang="he",
+            tgt_lang="ru",
+            src_text="alpha",
+            src_norm=src_norm,
+            translation="OLD",
+            status="draft",
+            origin="mt_auto",
+            lemma_id=lemma.lemma_id,
+            is_noise=0,
+            tm_global_id=global_row.tm_global_id,
+        )
+        session.add(entry)
+        session.flush()
+
+        dictionary_id = _create_dictionary(session, service, "Deck Edit")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "alpha",
+                    "src_norm": src_norm,
+                    "origin_project_id": project.project_id,
+                    "origin_entity_type": "lemma",
+                    "origin_entity_id": lemma.lemma_id,
+                    "origin_tm_entry_id": entry.tm_id,
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item_id = session.execute(
+            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+
+        service.update_item_translation(session, item_id=item_id, translation="NEW VALUE")
+        session.commit()
+
+        updated_global = session.execute(
+            select(TMGlobal).where(TMGlobal.src_lang == "he", TMGlobal.tgt_lang == "ru", TMGlobal.kind == "lemma", TMGlobal.src_norm == src_norm)
+        ).scalar_one()
+        updated_entry = session.execute(select(TMEntry).where(TMEntry.tm_id == entry.tm_id)).scalar_one()
+
+        assert updated_global.translation == "NEW VALUE"
+        assert updated_global.status == "approved"
+        assert updated_global.origin == "user_edit"
+        assert updated_entry.translation == "NEW VALUE"
+        assert updated_entry.status == "approved"
+        assert updated_entry.origin == "user_edit"
+
+
+def test_set_items_noise_status_bulk_syncs_tm_and_lemma(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        library = Library(name="Noise Lib")
+        session.add(library)
+        session.flush()
+        project = DictProject(library_id=library.library_id, name="Noise Project")
+        session.add(project)
+        session.flush()
+
+        lemma = Lemma(project_id=project.project_id, lemma_text="beta", norm_text="beta", is_noise=0)
+        session.add(lemma)
+        session.flush()
+
+        src_norm = normalize_for_tm("he", "beta", "lemma").norm
+        global_row = TMGlobal(
+            src_lang="he",
+            tgt_lang="ru",
+            kind="lemma",
+            src_norm=src_norm,
+            src_text="beta",
+            translation="BETA",
+            status="approved",
+            origin="user_edit",
+            is_noise=0,
+        )
+        session.add(global_row)
+        session.flush()
+
+        entry = TMEntry(
+            project_id=project.project_id,
+            kind="lemma",
+            src_lang="he",
+            tgt_lang="ru",
+            src_text="beta",
+            src_norm=src_norm,
+            translation="BETA",
+            status="approved",
+            origin="user_edit",
+            lemma_id=lemma.lemma_id,
+            is_noise=0,
+            tm_global_id=global_row.tm_global_id,
+        )
+        session.add(entry)
+        session.flush()
+
+        dictionary_id = _create_dictionary(session, service, "Deck Noise")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "beta",
+                    "src_norm": src_norm,
+                    "origin_project_id": project.project_id,
+                    "origin_entity_type": "lemma",
+                    "origin_entity_id": lemma.lemma_id,
+                    "origin_tm_entry_id": entry.tm_id,
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item_id = session.execute(
+            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+
+        changed = service.set_items_noise_status_bulk(
+            session,
+            item_ids=[item_id],
+            is_noise=True,
+            noise_reason="NOISE_USER_MARKED",
+        )
+        session.commit()
+
+        assert changed == 1
+        updated_item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
+        updated_global = session.execute(select(TMGlobal).where(TMGlobal.tm_global_id == global_row.tm_global_id)).scalar_one()
+        updated_entry = session.execute(select(TMEntry).where(TMEntry.tm_id == entry.tm_id)).scalar_one()
+        updated_lemma = session.execute(select(Lemma).where(Lemma.lemma_id == lemma.lemma_id)).scalar_one()
+
+        assert updated_item.is_noise == 1
+        assert updated_item.noise_reason == "NOISE_USER_MARKED"
+        assert updated_global.is_noise == 1
+        assert updated_global.noise_reason == "NOISE_USER_MARKED"
+        assert updated_entry.is_noise == 1
+        assert updated_entry.noise_reason == "NOISE_USER_MARKED"
+        assert updated_lemma.is_noise == 1
+        assert updated_lemma.noise_reason == "NOISE_USER_MARKED"

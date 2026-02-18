@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,6 +16,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QProgressDialog,
     QPushButton,
@@ -286,8 +288,11 @@ class UserDictionariesView(QWidget):
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.horizontalHeader().setSectionsClickable(True)
         self.items_table.horizontalHeader().sectionClicked.connect(self.on_items_header_clicked)
+        self.items_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.items_table.customContextMenuRequested.connect(self.on_context_menu)
         right_layout.addWidget(self.items_table, 1)
         self.items_table.selectionModel().selectionChanged.connect(self.on_items_selection_changed)
+        self.items_model.dataChanged.connect(self.on_translation_edited)
 
         self.table_layout_controller = TableLayoutController(
             settings=self.settings,
@@ -552,6 +557,86 @@ class UserDictionariesView(QWidget):
         count = len(self.items_table.selectionModel().selectedRows())
         self.remove_selected_btn.setEnabled(count > 0)
         self.translate_selected_btn.setEnabled(count > 0)
+
+    def on_context_menu(self, pos):
+        selected_rows = self.items_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        count = len(selected_rows)
+        menu = QMenu(self)
+
+        translate_action = QAction(f"Translate Selected ({count} rows)...", self)
+        translate_action.triggered.connect(self.on_translate_selected)
+        menu.addAction(translate_action)
+        menu.addSeparator()
+
+        mark_noise_action = QAction(f"Mark Selected as Noise ({count} rows)", self)
+        mark_noise_action.triggered.connect(lambda: self.set_selected_noise_status(True))
+        menu.addAction(mark_noise_action)
+
+        mark_valid_action = QAction(f"Mark Selected as Valid ({count} rows)", self)
+        mark_valid_action.triggered.connect(lambda: self.set_selected_noise_status(False))
+        menu.addAction(mark_valid_action)
+
+        menu.exec(self.items_table.viewport().mapToGlobal(pos))
+
+    def on_translation_edited(self, top_left, bottom_right, roles):
+        if top_left.column() != 2:
+            return
+        if roles and Qt.ItemDataRole.EditRole not in roles:
+            return
+
+        item = self.items_model.get_item(top_left.row())
+        if not item:
+            return
+
+        try:
+            with self.db_service.get_session() as session:
+                self.user_dict_service.update_item_translation(
+                    session=session,
+                    item_id=item.item_id,
+                    translation=item.translation or "",
+                )
+                session.commit()
+            self.load_items()
+        except Exception as e:
+            logger.error("Failed to update user dictionary translation: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Save Error", f"Failed to save translation:\n{e}")
+            self.load_items()
+
+    def set_selected_noise_status(self, is_noise: bool):
+        item_ids = self._selected_item_ids()
+        if not item_ids:
+            return
+
+        count = len(item_ids)
+        status_text = "noise" if is_noise else "valid"
+        if count > 100:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Bulk Action",
+                f"You are about to mark {count:,} rows as {status_text}.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            with self.db_service.get_session() as session:
+                changed = self.user_dict_service.set_items_noise_status_bulk(
+                    session=session,
+                    item_ids=item_ids,
+                    is_noise=is_noise,
+                    noise_reason="NOISE_USER_MARKED" if is_noise else None,
+                )
+                session.commit()
+            QMessageBox.information(self, "Success", f"Updated {changed:,} rows.")
+            self.load_items()
+        except Exception as e:
+            logger.error("Failed to set user dictionary noise status: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Update Failed", f"Failed to update noise status:\n{e}")
 
     def on_new_dictionary(self):
         name, ok = QInputDialog.getText(self, "New Dictionary", "Dictionary name:")

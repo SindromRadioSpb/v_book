@@ -685,7 +685,7 @@ class DictionaryView(QWidget):
         for proxy_index in selected_rows:
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             lemma = self.lemma_model.lemmas[source_row]
-            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm
             payloads.append(
                 {
                     "kind": "lemma",

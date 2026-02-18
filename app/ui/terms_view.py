@@ -864,7 +864,7 @@ class TermsView(QWidget):
         for proxy_index in selected_rows:
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             cluster = self.terms_model.clusters[source_row]
-            src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            src_norm = normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
             payloads.append(
                 {
                     "kind": "term_cluster",

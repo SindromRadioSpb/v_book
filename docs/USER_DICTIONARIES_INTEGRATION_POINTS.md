@@ -14,6 +14,8 @@
   - Scope chip: `Current Project` / `All`
   - Deep-link CTA: `Open Translation Management`
   - Actions: add manual, remove selected, translate selected, refresh
+  - Context menu: translate selected + mark selected as noise/valid
+  - Inline translation edit: writes to canonical TM and propagates
 
 ## Translation Management Deep Link
 
