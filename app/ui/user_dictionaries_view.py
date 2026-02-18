@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QStackedWidget,
     QSplitter,
     QTableView,
     QVBoxLayout,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
 from app.services.db_service import DBService
+from app.services.study_service import StudyService
 from app.services.user_dictionary_service import UserDictionaryService
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
@@ -128,6 +130,7 @@ class UserDictionariesView(QWidget):
         self.db_service = DBService.get_instance()
         self.user_dict_service = UserDictionaryService()
         self.audio_service = AudioAssetService()
+        self.study_service = StudyService()
         self.settings = SettingsService.get_instance()
         self._scope_setting_key = (
             "user_dict/scope_mode_project" if self.project_id is not None else "user_dict/scope_mode_global"
@@ -149,6 +152,9 @@ class UserDictionariesView(QWidget):
             self.scope_mode = "all"
         self._bulk_worker = None
         self._translate_worker = None
+        self._review_cards = []
+        self._review_index = -1
+        self._view_mode = "browse"
 
         self.dictionary_model = UserDictionaryListModel()
         self.items_model = UserDictionaryItemsTableModel()
@@ -214,6 +220,22 @@ class UserDictionariesView(QWidget):
         scope_layout.addWidget(self.scope_show_all_btn)
         scope_layout.addStretch()
         layout.addLayout(scope_layout)
+
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("Mode:"))
+        self.mode_browse_btn = QPushButton("Browse")
+        self.mode_browse_btn.setCheckable(True)
+        self.mode_browse_btn.clicked.connect(lambda: self.on_mode_changed("browse"))
+        mode_layout.addWidget(self.mode_browse_btn)
+        self.mode_review_btn = QPushButton("Review")
+        self.mode_review_btn.setCheckable(True)
+        self.mode_review_btn.clicked.connect(lambda: self.on_mode_changed("review"))
+        mode_layout.addWidget(self.mode_review_btn)
+        self.review_refresh_btn = QPushButton("Refresh Due Queue")
+        self.review_refresh_btn.clicked.connect(lambda: self.load_review_queue(reset_index=True))
+        mode_layout.addWidget(self.review_refresh_btn)
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -384,7 +406,61 @@ class UserDictionariesView(QWidget):
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter, 1)
+
+        review_page = QWidget()
+        review_layout = QVBoxLayout(review_page)
+        self.review_scope_label = QLabel("")
+        self.review_scope_label.setStyleSheet("color: #666; font-size: 11px;")
+        review_layout.addWidget(self.review_scope_label)
+        self.review_queue_label = QLabel("Due queue: 0")
+        review_layout.addWidget(self.review_queue_label)
+        self.review_source_label = QLabel("Source: -")
+        self.review_source_label.setWordWrap(True)
+        review_layout.addWidget(self.review_source_label)
+        self.review_translation_label = QLabel("Current translation: -")
+        self.review_translation_label.setWordWrap(True)
+        review_layout.addWidget(self.review_translation_label)
+
+        review_edit_row = QHBoxLayout()
+        review_edit_row.addWidget(QLabel("Edit translation:"))
+        self.review_translation_edit = QLineEdit()
+        self.review_translation_edit.setPlaceholderText("Type translation and press Save")
+        review_edit_row.addWidget(self.review_translation_edit, 1)
+        self.review_save_translation_btn = QPushButton("Save Translation")
+        self.review_save_translation_btn.clicked.connect(self.on_review_save_translation)
+        review_edit_row.addWidget(self.review_save_translation_btn)
+        review_layout.addLayout(review_edit_row)
+
+        self.review_meta_label = QLabel("")
+        self.review_meta_label.setWordWrap(True)
+        review_layout.addWidget(self.review_meta_label)
+
+        rating_row = QHBoxLayout()
+        self.review_again_btn = QPushButton("Again")
+        self.review_again_btn.clicked.connect(lambda: self.on_review_rate("again"))
+        rating_row.addWidget(self.review_again_btn)
+        self.review_hard_btn = QPushButton("Hard")
+        self.review_hard_btn.clicked.connect(lambda: self.on_review_rate("hard"))
+        rating_row.addWidget(self.review_hard_btn)
+        self.review_good_btn = QPushButton("Good")
+        self.review_good_btn.clicked.connect(lambda: self.on_review_rate("good"))
+        rating_row.addWidget(self.review_good_btn)
+        self.review_easy_btn = QPushButton("Easy")
+        self.review_easy_btn.clicked.connect(lambda: self.on_review_rate("easy"))
+        rating_row.addWidget(self.review_easy_btn)
+        rating_row.addStretch()
+        review_layout.addLayout(rating_row)
+
+        self.review_status_label = QLabel("Ready")
+        self.review_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        review_layout.addWidget(self.review_status_label)
+        review_layout.addStretch()
+
+        self.main_stack = QStackedWidget()
+        self.main_stack.addWidget(splitter)
+        self.main_stack.addWidget(review_page)
+        layout.addWidget(self.main_stack, 1)
+        self.on_mode_changed("browse")
         self._apply_scope_mode(reset_page=False)
 
     def _apply_scope_mode(self, reset_page: bool = True):
@@ -430,6 +506,146 @@ class UserDictionariesView(QWidget):
         self.scope_mode = scope_mode
         self._apply_scope_mode(reset_page=True)
         self.load_items()
+        if self._view_mode == "review":
+            self.load_review_queue(reset_index=True)
+
+    def on_mode_changed(self, mode: str):
+        """Switch between browse and review modes."""
+        if mode not in ("browse", "review"):
+            return
+        self._view_mode = mode
+        self.mode_browse_btn.blockSignals(True)
+        self.mode_review_btn.blockSignals(True)
+        self.mode_browse_btn.setChecked(mode == "browse")
+        self.mode_review_btn.setChecked(mode == "review")
+        self.mode_browse_btn.blockSignals(False)
+        self.mode_review_btn.blockSignals(False)
+        self.main_stack.setCurrentIndex(0 if mode == "browse" else 1)
+        if mode == "review":
+            self.load_review_queue(reset_index=True)
+
+    def _set_review_controls_enabled(self, enabled: bool):
+        self.review_save_translation_btn.setEnabled(enabled)
+        self.review_again_btn.setEnabled(enabled)
+        self.review_hard_btn.setEnabled(enabled)
+        self.review_good_btn.setEnabled(enabled)
+        self.review_easy_btn.setEnabled(enabled)
+
+    def _current_review_card(self):
+        if 0 <= self._review_index < len(self._review_cards):
+            return self._review_cards[self._review_index]
+        return None
+
+    def _render_review_card(self):
+        card = self._current_review_card()
+        if not card:
+            self.review_queue_label.setText("Due queue: 0")
+            self.review_source_label.setText("Source: -")
+            self.review_translation_label.setText("Current translation: -")
+            self.review_translation_edit.setText("")
+            self.review_meta_label.setText("No due items for current scope.")
+            self.review_status_label.setText("Queue empty")
+            self._set_review_controls_enabled(False)
+            return
+
+        self._set_review_controls_enabled(True)
+        scope_text = (
+            f"Current Project ({self.project_id})"
+            if self.scope_mode == "current_project" and self.project_id is not None
+            else "All projects"
+        )
+        self.review_scope_label.setText(f"Scope: {scope_text}")
+        self.review_queue_label.setText(
+            f"Due queue: {len(self._review_cards)} (card {self._review_index + 1}/{len(self._review_cards)})"
+        )
+        self.review_source_label.setText(f"Source: {card.src_text} ({card.kind})")
+        self.review_translation_label.setText(f"Current translation: {(card.translation or '').strip() or '-'}")
+        self.review_translation_edit.setText((card.translation or "").strip())
+        self.review_meta_label.setText(
+            f"Study: {card.study_state}, due: {card.due_human or 'n/a'}, "
+            f"reviews={card.review_count}, lapses={card.lapse_count}, "
+            f"interval={card.interval_days}d, EF={card.ease_factor:.2f}"
+        )
+        self.review_status_label.setText("Ready for rating")
+
+    def load_review_queue(self, reset_index: bool = False):
+        """Load due queue for review mode."""
+        scope_origin_project_id = self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        try:
+            with self.db_service.get_session() as session:
+                cards = self.study_service.get_due_queue(
+                    session=session,
+                    dictionary_id=self.current_dictionary_id,
+                    scope_origin_project_id=scope_origin_project_id,
+                    limit=500,
+                )
+            self._review_cards = cards
+            if reset_index or self._review_index < 0:
+                self._review_index = 0
+            if self._review_index >= len(self._review_cards):
+                self._review_index = 0
+            self._render_review_card()
+        except Exception as e:
+            logger.error("Failed to load due review queue: %s", e, exc_info=True)
+            self.review_status_label.setText(f"Failed to load queue: {e}")
+            self._review_cards = []
+            self._review_index = -1
+            self._render_review_card()
+
+    def on_review_save_translation(self):
+        """Persist translation edit for current review card via canonical write path."""
+        card = self._current_review_card()
+        if not card:
+            return
+        try:
+            with self.db_service.get_session() as session:
+                self.user_dict_service.update_item_translation(
+                    session=session,
+                    item_id=card.item_id,
+                    translation=self.review_translation_edit.text(),
+                )
+                session.commit()
+            card.translation = self.review_translation_edit.text().strip()
+            self.review_translation_label.setText(f"Current translation: {card.translation or '-'}")
+            self.review_status_label.setText("Translation saved")
+            self.load_items()
+        except Exception as e:
+            logger.error("Failed to save review translation: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Save Error", f"Failed to save translation:\n{e}")
+
+    def on_review_rate(self, rating: str):
+        """Apply SM-2 rating and move to next due card."""
+        card = self._current_review_card()
+        if not card or not card.progress_id:
+            return
+
+        try:
+            pending_translation = self.review_translation_edit.text().strip()
+            if pending_translation != (card.translation or "").strip():
+                with self.db_service.get_session() as session:
+                    self.user_dict_service.update_item_translation(
+                        session=session,
+                        item_id=card.item_id,
+                        translation=pending_translation,
+                    )
+                    session.commit()
+                card.translation = pending_translation
+
+            with self.db_service.get_session() as session:
+                summary = self.study_service.apply_review(
+                    session=session,
+                    progress_id=card.progress_id,
+                    rating=rating,
+                )
+                session.commit()
+            self.review_status_label.setText(
+                f"Rated '{rating}': next due {summary.due_human or 'n/a'}"
+            )
+            self.load_items()
+            self.load_review_queue(reset_index=False)
+        except Exception as e:
+            logger.error("Failed to apply review rating: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Review Error", f"Failed to apply rating:\n{e}")
 
     def build_filters(self) -> Dict[str, object]:
         filters: Dict[str, object] = {"hide_noise": self.hide_noise_checkbox.isChecked()}
@@ -576,12 +792,16 @@ class UserDictionariesView(QWidget):
             self.settings.set_value("user_dict/current_dictionary_id", self.current_dictionary_id)
             self.current_page = 1
             self.load_items()
+            if self._view_mode == "review":
+                self.load_review_queue(reset_index=True)
 
     def on_filter_changed(self):
         self.current_page = 1
         self.settings.set_value("user_dict/filter_kind", self.kind_combo.currentText())
         self.settings.set_value("user_dict/hide_noise", self.hide_noise_checkbox.isChecked())
         self.load_items()
+        if self._view_mode == "review":
+            self.load_review_queue(reset_index=True)
 
     def on_items_selection_changed(self):
         count = len(self.items_table.selectionModel().selectedRows())
@@ -748,6 +968,8 @@ class UserDictionariesView(QWidget):
                 session.commit()
             self.load_dictionaries()
             self.load_items()
+            if self._view_mode == "review":
+                self.load_review_queue(reset_index=True)
         except Exception as e:
             QMessageBox.warning(self, "Add Failed", str(e))
 
@@ -800,6 +1022,8 @@ class UserDictionariesView(QWidget):
         self._bulk_worker = None
         self.load_dictionaries()
         self.load_items()
+        if self._view_mode == "review":
+            self.load_review_queue(reset_index=True)
 
     def _on_remove_error(self, error_msg: str, progress_dialog):
         progress_dialog.close()
@@ -903,6 +1127,8 @@ class UserDictionariesView(QWidget):
 
         self._translate_worker = None
         self.load_items()
+        if self._view_mode == "review":
+            self.load_review_queue(reset_index=True)
 
     def _on_translate_error(self, error_msg: str, progress_dialog):
         progress_dialog.reject()
@@ -1053,6 +1279,8 @@ class UserDictionariesView(QWidget):
         self._bulk_worker = None
         self.load_dictionaries()
         self.load_items()
+        if self._view_mode == "review":
+            self.load_review_queue(reset_index=True)
 
     def _on_add_error(self, error_msg: str, progress_dialog):
         progress_dialog.close()
