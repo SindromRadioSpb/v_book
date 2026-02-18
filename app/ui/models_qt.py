@@ -9,6 +9,7 @@ from app.domain.dto import (
     UserDictionaryDTO,
     UserDictionaryItemDTO,
 )
+from app.ui.study_status_ui import compose_status_icons, origin_marker, saved_indicator_text, study_chip
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +127,14 @@ class LemmaTableModel(QAbstractTableModel):
         lemma = self.lemmas[index.row()]
         col = index.column()
 
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if lemma.study_tooltip and col in (0, 4, 6):
+                return lemma.study_tooltip
+            return None
+
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return lemma.lemma_text
+                return saved_indicator_text(lemma.lemma_text, lemma.in_user_dictionary_count)
             elif col == 1:
                 return lemma.pos or ""
             elif col == 2:
@@ -269,9 +275,14 @@ class TermClusterTableModel(QAbstractTableModel):
         cluster = self.clusters[index.row()]
         col = index.column()
 
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if cluster.study_tooltip and col in (0, 11, 13):
+                return cluster.study_tooltip
+            return None
+
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return cluster.representative_he
+                return saved_indicator_text(cluster.representative_he, cluster.in_user_dictionary_count)
             elif col == 1:
                 return cluster.representative_lemma or ""
             elif col == 2:
@@ -425,6 +436,11 @@ class TranslationManagementTableModel(QAbstractTableModel):
 
         entry = self.entries[index.row()]
         col = index.column()
+
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if entry.study_tooltip:
+                return entry.study_tooltip
+            return None
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
@@ -649,6 +665,11 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
 
         item = self.items[index.row()]
         col = index.column()
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if col in (3, 5, 6, 7):
+                return item.status_tooltip or ""
+            return None
+
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if col == 0:
                 return item.kind
@@ -657,13 +678,17 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             if col == 2:
                 return item.translation or ""
             if col == 3:
-                return item.translation_status or ""
+                return compose_status_icons(
+                    translation_tier=item.translation_tier,
+                    audio_status=item.audio_status,
+                    is_noise=item.is_noise,
+                )
             if col == 4:
                 return "Noise" if item.is_noise == 1 else "Valid"
             if col == 5:
-                return item.study_state
+                return study_chip(item.computed_study_state)
             if col == 6:
-                return item.origin_entity_type or ""
+                return origin_marker(item.origin_kind)
             if col == 7:
                 return item.audio_status
         return None
