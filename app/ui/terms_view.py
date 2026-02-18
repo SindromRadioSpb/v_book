@@ -462,9 +462,14 @@ class TermsView(QWidget):
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
         if not clusters:
             return
+
+        def _cluster_norm(cluster_obj) -> str:
+            normalized = normalize_for_tm("he", cluster_obj.representative_he, "term_cluster").norm
+            return normalized or (cluster_obj.norm_text or "")
+
         payloads = []
         for cluster in clusters:
-            src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            src_norm = _cluster_norm(cluster)
             payloads.append(
                 {
                     "src_lang": "he",
@@ -483,7 +488,7 @@ class TermsView(QWidget):
             return
 
         for cluster in clusters:
-            src_norm = cluster.norm_text or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            src_norm = _cluster_norm(cluster)
             canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
             overlay = overlay_map.get(canonical_hash)
             if not overlay:

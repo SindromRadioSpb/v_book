@@ -234,14 +234,15 @@ class TermCardView(QWidget):
             table_id="term_card_view",
             table=self.queue_table,
             default_widths={
-                0: 260,  # Term
-                1: 180,  # Lemma
-                2: 90,   # Freq
-                3: 100,  # DocFreq
-                4: 120,  # Status
-                5: 200,  # Pin Translation
-                6: 200,  # Aliases
-                7: 90,   # Stopword
+                0: 46,   # UD
+                1: 260,  # Term
+                2: 180,  # Lemma
+                3: 90,   # Freq
+                4: 100,  # DocFreq
+                5: 120,  # Status
+                6: 200,  # Pin Translation
+                7: 200,  # Aliases
+                8: 90,   # Stopword
             },
         )
         self.table_layout_controller.install()

@@ -1256,19 +1256,22 @@ class UserDictionaryService:
             )
             item_audio_status = audio_status.get((row["src_lang"], row["src_norm"]), "missing")
             count_value = int(membership_count.get(canonical_hash, 0))
+            tooltip_value = None
+            if count_value > 0:
+                tooltip_value = self._build_cross_view_tooltip(
+                    in_user_dictionary_count=count_value,
+                    summary=summary,
+                    tm_global=tm_row,
+                    translation_tier=translation_tier,
+                    audio_status=item_audio_status,
+                )
             result[canonical_hash] = {
                 "in_user_dictionary_count": count_value,
                 "study_state": summary.study_state,
                 "study_due_human": summary.due_human,
                 "translation_tier": translation_tier,
                 "audio_status": item_audio_status,
-                "study_tooltip": self._build_cross_view_tooltip(
-                    in_user_dictionary_count=count_value,
-                    summary=summary,
-                    tm_global=tm_row,
-                    translation_tier=translation_tier,
-                    audio_status=item_audio_status,
-                ),
+                "study_tooltip": tooltip_value,
             }
         return result
 

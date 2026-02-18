@@ -353,9 +353,14 @@ class DictionaryView(QWidget):
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
         if not lemmas:
             return
+
+        def _lemma_norm(lemma_obj: LemmaStats) -> str:
+            normalized = normalize_for_tm("he", lemma_obj.lemma_text, "lemma").norm
+            return normalized or (lemma_obj.norm_text or "")
+
         payloads = []
         for lemma in lemmas:
-            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            src_norm = _lemma_norm(lemma)
             payloads.append(
                 {
                     "src_lang": "he",
@@ -374,7 +379,7 @@ class DictionaryView(QWidget):
             return
 
         for lemma in lemmas:
-            src_norm = lemma.norm_text or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            src_norm = _lemma_norm(lemma)
             canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "lemma", src_norm)
             overlay = overlay_map.get(canonical_hash)
             if not overlay:

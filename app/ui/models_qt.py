@@ -9,7 +9,7 @@ from app.domain.dto import (
     UserDictionaryDTO,
     UserDictionaryItemDTO,
 )
-from app.ui.study_status_ui import compose_status_icons, origin_marker, saved_indicator_text, study_chip
+from app.ui.study_status_ui import compose_status_icons, origin_marker, study_chip
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class LemmaTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if lemma.study_tooltip and col in (0, 1, 5, 7):
+            if lemma.study_tooltip and int(getattr(lemma, "in_user_dictionary_count", 0) or 0) > 0:
                 return lemma.study_tooltip
             return None
 
@@ -278,7 +278,7 @@ class TermClusterTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if cluster.study_tooltip and col in (0, 1, 12, 14):
+            if cluster.study_tooltip and int(getattr(cluster, "in_user_dictionary_count", 0) or 0) > 0:
                 return cluster.study_tooltip
             return None
 
@@ -442,7 +442,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if entry.study_tooltip:
+            if entry.study_tooltip and int(getattr(entry, "in_user_dictionary_count", 0) or 0) > 0:
                 return entry.study_tooltip
             return None
 
@@ -541,7 +541,7 @@ class TermCardTableModel(QAbstractTableModel):
         from app.domain.dto import TermCardDTO
         self.cards: List[TermCardDTO] = cards or []
         self.headers = [
-            "Term", "Lemma", "Freq", "DocFreq", "Status",
+            "UD", "Term", "Lemma", "Freq", "DocFreq", "Status",
             "Pin Translation", "Aliases", "Stopword"
         ]
 
@@ -560,27 +560,28 @@ class TermCardTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ToolTipRole:
             study_tooltip = getattr(card, "study_tooltip", None)
-            if study_tooltip and col in (0, 4):
+            if study_tooltip and int(getattr(card, "in_user_dictionary_count", 0) or 0) > 0:
                 return study_tooltip
             return None
 
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 0:
-                count = int(getattr(card, "in_user_dictionary_count", 0) or 0)
-                return saved_indicator_text(card.representative_he, count)
+                return "*" if int(getattr(card, "in_user_dictionary_count", 0) or 0) > 0 else ""
             elif col == 1:
-                return card.representative_lemma or ""
+                return card.representative_he
             elif col == 2:
-                return str(card.freq_abs)
+                return card.representative_lemma or ""
             elif col == 3:
-                return str(card.doc_freq)
+                return str(card.freq_abs)
             elif col == 4:
-                return card.curation_status
+                return str(card.doc_freq)
             elif col == 5:
-                return card.pinned_translation or ""
+                return card.curation_status
             elif col == 6:
-                return ", ".join(card.aliases) if card.aliases else ""
+                return card.pinned_translation or ""
             elif col == 7:
+                return ", ".join(card.aliases) if card.aliases else ""
+            elif col == 8:
                 return "Yes" if card.is_stopword else "No"
 
         return None
@@ -595,6 +596,44 @@ class TermCardTableModel(QAbstractTableModel):
         self.beginResetModel()
         self.cards = cards
         self.endResetModel()
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder):
+        """Enable deterministic header-click sorting for term cards."""
+        if not self.cards:
+            return
+
+        reverse = order == Qt.SortOrder.DescendingOrder
+
+        def _text(value) -> str:
+            return str(value or "").casefold()
+
+        def _key(card):
+            if column == 0:
+                return (int(getattr(card, "in_user_dictionary_count", 0) or 0), _text(card.representative_he), card.cluster_id)
+            if column == 1:
+                return (_text(card.representative_he), card.cluster_id)
+            if column == 2:
+                return (_text(card.representative_lemma), card.cluster_id)
+            if column == 3:
+                return (int(card.freq_abs or 0), card.cluster_id)
+            if column == 4:
+                return (int(card.doc_freq or 0), card.cluster_id)
+            if column == 5:
+                return (_text(card.curation_status), card.cluster_id)
+            if column == 6:
+                return (_text(card.pinned_translation), card.cluster_id)
+            if column == 7:
+                aliases = ", ".join(card.aliases) if card.aliases else ""
+                return (_text(aliases), card.cluster_id)
+            if column == 8:
+                return (1 if card.is_stopword else 0, card.cluster_id)
+            return (card.cluster_id,)
+
+        self.layoutAboutToBeChanged.emit()
+        try:
+            self.cards.sort(key=_key, reverse=reverse)
+        finally:
+            self.layoutChanged.emit()
 
     def get_card(self, row: int):
         """Get card at row."""
@@ -679,8 +718,8 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
         item = self.items[index.row()]
         col = index.column()
         if role == Qt.ItemDataRole.ToolTipRole:
-            if col in (3, 5, 6, 7):
-                return item.status_tooltip or ""
+            if item.status_tooltip:
+                return item.status_tooltip
             return None
 
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):

@@ -597,3 +597,58 @@ def test_set_items_noise_status_bulk_syncs_tm_and_lemma(user_dict_engine):
         assert updated_entry.noise_reason == "NOISE_USER_MARKED"
         assert updated_lemma.is_noise == 1
         assert updated_lemma.noise_reason == "NOISE_USER_MARKED"
+
+
+def test_resolve_cross_view_status_tooltip_only_for_user_dictionary_members(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Tooltip Scope")
+
+        in_ud_text = "in-ud-term"
+        out_ud_text = "out-ud-term"
+        in_ud_norm = normalize_for_tm("he", in_ud_text, "term_cluster").norm
+        out_ud_norm = normalize_for_tm("he", out_ud_text, "term_cluster").norm
+
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "term_cluster",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": in_ud_text,
+                    "src_norm": in_ud_norm,
+                }
+            ],
+            include_noise=True,
+        )
+        session.commit()
+
+        overlay = service.resolve_cross_view_status(
+            session,
+            rows=[
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": in_ud_text,
+                    "src_norm": in_ud_norm,
+                },
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": out_ud_text,
+                    "src_norm": out_ud_norm,
+                },
+            ],
+        )
+
+        in_hash = service.build_canonical_hash("he", "ru", "term_cluster", in_ud_norm)
+        out_hash = service.build_canonical_hash("he", "ru", "term_cluster", out_ud_norm)
+
+        assert overlay[in_hash]["in_user_dictionary_count"] == 1
+        assert overlay[in_hash]["study_tooltip"]
+        assert overlay[out_hash]["in_user_dictionary_count"] == 0
+        assert overlay[out_hash]["study_tooltip"] is None
