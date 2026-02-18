@@ -14,6 +14,19 @@
 - Added rows are also materialized into `tm_entry` anchors (`source_ref=user_dictionary_add`) so they are visible in `Translation Management`.
 - `origin_tm_entry_id` is stored on dictionary items and reused for future sync operations.
 
+## Unified Status System
+
+- Origin: `project` / `manual` / `imported` (reserved).
+- Study: `new` / `learning` / `due` / `mastered` / `suspended`.
+- Translation tier (truth from `tm_global`): `missing` / `mt` / `user` / `approved` / `deprecated`.
+- Audio status (stub): `missing` / `ready` / `failed` (`generating` reserved).
+- Noise: `is_noise` flag (with default `Hide Noise = ON`).
+
+UI composition in `User Dictionaries`:
+- `Origin` marker column
+- `Study` chip column
+- `Status` icon stack (translation/audio/noise) + full tooltip
+
 ## Scope
 
 - Scope chip: `Current Project` / `All`.
@@ -29,6 +42,18 @@
 - Uses progress UX `BatchProgressDialogV3`.
 - Runs in background worker with cancel/pause/resume.
 - Writes canonical translation to `tm_global` and propagates to linked `tm_entry`.
+
+## Review Mode (SRS / SM-2)
+
+- Toggle in header: `Browse` / `Review`.
+- Review queue shows only due items for current dictionary and active scope.
+- Scope-aware queue:
+  - `Current Project` (when project context exists)
+  - `All projects`
+- Rating buttons:
+  - `Again` / `Hard` / `Good` / `Easy`
+- Ratings update `study_progress` (global by `canonical_hash`) using SM-2.
+- Optional inline translation edit in Review mode writes via canonical path and propagates to linked TM.
 
 ## Inline Edit + Context Menu
 
@@ -49,6 +74,12 @@
 
 - `User Dictionaries` header includes `Open Translation Management`.
 - `Translation Management` header includes `Open User Dictionaries`.
+
+## Cross-View Indicators
+
+- `Dictionary`, `Terms`, and `Term Card` rows display a saved-to-UD marker and study tooltip.
+- `Translation Management` rows receive non-intrusive study tooltip enrichment.
+- Metadata is resolved by batch lookup per page (no per-row SQL loops).
 
 ## Audio Column (P0)
 

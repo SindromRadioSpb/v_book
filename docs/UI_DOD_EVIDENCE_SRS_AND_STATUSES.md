@@ -22,6 +22,7 @@
 
 - No per-row SQL for status data on page render
 - Status metadata is loaded in batch per page
+- Shared batch resolver: `UserDictionaryService.resolve_cross_view_status(...)`
 - No UI freeze during long operations
 - Existing long operations continue to use worker + `BatchProgressDialogV3`
 - Table content remains scrollable at small window sizes
@@ -34,4 +35,6 @@
   - UD Review
   - Dictionary saved-to-UD indicator
   - TM tooltip example
-
+- Suggested smoke capture set:
+  - Review mode: `Again` then `Good` on same item, verify interval/lapse transition
+  - Scope switch (`Current Project` -> `All`) in UD and TM, verify tooltip/state remains deterministic

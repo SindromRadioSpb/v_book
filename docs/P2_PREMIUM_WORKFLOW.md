@@ -16,6 +16,7 @@
 **Capabilities**:
 - Search and filter TM entries by kind, status, scope, origin, source reference
 - View all TM entries with metadata (ID, kind, source, translation, status, scope, origin, source ref, last updated)
+- Non-intrusive study tooltip enrichment (from User Dictionaries/SRS state) on TM rows
 - **Inline editing**: Click on translation column to edit directly
 - **Bulk operations**: Approve, reject, or deprecate multiple entries at once
 - **History viewer**: See all previous versions of a translation
