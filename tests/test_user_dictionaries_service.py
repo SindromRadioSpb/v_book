@@ -105,6 +105,9 @@ def test_bulk_add_dedup_by_canonical_hash(user_dict_engine):
             select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
         ).scalars().all()
         assert len(count) == 1
+        assert count[0].study_progress_id is not None
+        progress_rows = session.execute(select(StudyProgress).where(StudyProgress.canonical_hash == count[0].canonical_hash)).scalars().all()
+        assert len(progress_rows) == 1
 
 
 def test_bulk_add_canonicalizes_src_norm_from_text(user_dict_engine):
