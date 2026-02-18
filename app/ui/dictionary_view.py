@@ -212,14 +212,15 @@ class DictionaryView(QWidget):
             table_id="dictionary_view",
             table=self.lemma_table,
             default_widths={
-                0: 220,  # Lemma
-                1: 90,   # POS
-                2: 95,   # Frequency
-                3: 95,   # Doc Freq
-                4: 260,  # Translation
-                5: 120,  # Source
-                6: 110,  # Status
-                7: 90,   # Noise
+                0: 46,   # UD
+                1: 220,  # Lemma
+                2: 90,   # POS
+                3: 95,   # Frequency
+                4: 95,   # Doc Freq
+                5: 260,  # Translation
+                6: 120,  # Source
+                7: 110,  # Status
+                8: 90,   # Noise
             },
         )
         self.table_layout_controller.install()
@@ -579,8 +580,8 @@ class DictionaryView(QWidget):
 
     def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
         """M7 P1: Handle inline edit of translation - save to TM."""
-        # Check if Translation column was edited (col 4)
-        if top_left.column() != 4:
+        # Check if Translation column was edited (col 5)
+        if top_left.column() != 5:
             return
 
         row = top_left.row()
@@ -655,7 +656,7 @@ class DictionaryView(QWidget):
 
                 # Update status in model to "approved"
                 lemma.status = "approved"
-                status_idx = self.lemma_model.index(row, 6)  # Status column
+                status_idx = self.lemma_model.index(row, 7)  # Status column
                 self.lemma_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
                 logger.info(f"Saved TM entry for lemma: {lemma.lemma_text} -> {translation_value}")
@@ -1292,11 +1293,11 @@ class DictionaryView(QWidget):
                 if key == Qt.Key.Key_Return:
                     current_index = self.lemma_table.currentIndex()
                     if current_index.isValid():
-                        # Start editing Translation column (column 4 in source model)
+                        # Start editing Translation column (column 5 in source model)
                         # Map proxy index to source index
                         source_index = self.proxy_model.mapToSource(current_index)
                         # Create translation column index in source model
-                        translation_source_index = self.lemma_model.index(source_index.row(), 4)
+                        translation_source_index = self.lemma_model.index(source_index.row(), 5)
                         # Map back to proxy
                         translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
                         self.lemma_table.setCurrentIndex(translation_proxy_index)

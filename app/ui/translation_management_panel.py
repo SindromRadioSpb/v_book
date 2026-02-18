@@ -289,15 +289,15 @@ class TranslationManagementPanel(QWidget):
 
         # Column index to DB column mapping
         self.COLUMN_TO_DB = {
-            0: "tm_id",
-            1: "kind",
-            2: "src_text",
-            3: "translation",
-            4: "status",
-            5: "project_id",
-            6: "origin",
-            7: "source_ref",
-            8: "updated_at",
+            1: "tm_id",
+            2: "kind",
+            3: "src_text",
+            4: "translation",
+            5: "status",
+            6: "project_id",
+            7: "origin",
+            8: "source_ref",
+            9: "updated_at",
         }
 
         self.init_ui()
@@ -452,16 +452,17 @@ class TranslationManagementPanel(QWidget):
             table_id="tm_panel",
             table=self.table_view,
             default_widths={
-                0: 70,   # ID
-                1: 110,  # Kind
-                2: 220,  # Source
-                3: 220,  # Translation
-                4: 110,  # Status
-                5: 110,  # Scope
-                6: 110,  # Origin
-                7: 170,  # Source Ref
-                8: 120,  # Updated
-                9: 90,   # Noise
+                0: 46,   # UD
+                1: 70,   # ID
+                2: 110,  # Kind
+                3: 220,  # Source
+                4: 220,  # Translation
+                5: 110,  # Status
+                6: 110,  # Scope
+                7: 110,  # Origin
+                8: 170,  # Source Ref
+                9: 120,  # Updated
+                10: 90,  # Noise
             },
         )
         self.table_layout_controller.install()
@@ -1060,8 +1061,8 @@ class TranslationManagementPanel(QWidget):
             bottom_right: Bottom-right index of changed cells
             roles: Roles that changed
         """
-        # Check if Translation column was edited (col 3)
-        if top_left.column() != 3:
+        # Check if Translation column was edited (col 4)
+        if top_left.column() != 4:
             return
 
         row = top_left.row()
@@ -1120,8 +1121,8 @@ class TranslationManagementPanel(QWidget):
                 if key == Qt.Key.Key_Return:
                     current_index = self.table_view.currentIndex()
                     if current_index.isValid():
-                        # Start editing Translation column (column 3)
-                        translation_index = self.model.index(current_index.row(), 3)
+                        # Start editing Translation column (column 4)
+                        translation_index = self.model.index(current_index.row(), 4)
                         self.table_view.setCurrentIndex(translation_index)
                         self.table_view.edit(translation_index)
                         return True  # Event handled
@@ -1543,7 +1544,7 @@ class TranslationManagementPanel(QWidget):
             is_noise: True = mark as noise, False = mark as valid
         """
         # Get selected rows
-        selected_indexes = self.table_view.selectionModel().selectedRows(0)  # Column 0 = tm_id
+        selected_indexes = self.table_view.selectionModel().selectedRows(1)  # Column 1 = tm_id
         if not selected_indexes:
             return
 
@@ -1558,7 +1559,7 @@ class TranslationManagementPanel(QWidget):
             source_rows.append(source_row)
 
             # Get tm_id from model
-            tm_id_index = self.model.index(source_row, 0)
+            tm_id_index = self.model.index(source_row, 1)
             tm_id = self.model.data(tm_id_index, Qt.ItemDataRole.DisplayRole)
             if tm_id:
                 tm_ids.append(int(tm_id))

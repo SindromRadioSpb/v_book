@@ -196,21 +196,22 @@ class TermsView(QWidget):
             table_id="terms_view",
             table=self.terms_table,
             default_widths={
-                0: 260,  # Term
-                1: 180,  # Lemma
-                2: 85,   # Freq
-                3: 90,   # DocFreq
-                4: 90,   # Members
-                5: 90,   # PMI
-                6: 90,   # LLR
-                7: 90,   # Dice
-                8: 105,  # Weirdness
-                9: 105,  # Keyness
-                10: 105, # Termhood
-                11: 260, # Translation
-                12: 120, # Source
-                13: 110, # Status
-                14: 90,  # Noise
+                0: 46,   # UD
+                1: 260,  # Term
+                2: 180,  # Lemma
+                3: 85,   # Freq
+                4: 90,   # DocFreq
+                5: 90,   # Members
+                6: 90,   # PMI
+                7: 90,   # LLR
+                8: 90,   # Dice
+                9: 105,  # Weirdness
+                10: 105, # Keyness
+                11: 105, # Termhood
+                12: 260, # Translation
+                13: 120, # Source
+                14: 110, # Status
+                15: 90,  # Noise
             },
         )
         self.table_layout_controller.install()
@@ -746,8 +747,8 @@ class TermsView(QWidget):
 
     def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
         """M7 P1: Handle inline edit of translation - save to TM."""
-        # Check if Translation column was edited (col 11)
-        if top_left.column() != 11:
+        # Check if Translation column was edited (col 12)
+        if top_left.column() != 12:
             return
 
         row = top_left.row()
@@ -834,7 +835,7 @@ class TermsView(QWidget):
 
                 # Update status in model to "approved"
                 cluster.translation_status = "approved"
-                status_idx = self.terms_model.index(row, 13)  # Status column
+                status_idx = self.terms_model.index(row, 14)  # Status column
                 self.terms_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
                 logger.info(f"Saved TM entry for term: {cluster.representative_he} -> {translation_value}")
@@ -1487,8 +1488,8 @@ class TermsView(QWidget):
                     if current_index.isValid():
                         # Map proxy index to source
                         source_index = self.proxy_model.mapToSource(current_index)
-                        # Get Translation column (11) in source model
-                        translation_source_index = self.terms_model.index(source_index.row(), 11)
+                        # Get Translation column (12) in source model
+                        translation_source_index = self.terms_model.index(source_index.row(), 12)
                         # Map back to proxy
                         translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
                         # Set current and edit

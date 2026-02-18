@@ -109,7 +109,7 @@ class LemmaTableModel(QAbstractTableModel):
         self.lemmas = lemmas or []
         # M7: Added Source column between Translation and Status
         # Added Noise column for is_noise visualization
-        self.headers = ["Lemma", "POS", "Frequency", "Doc Freq", "Translation", "Source", "Status", "Noise"]
+        self.headers = ["UD", "Lemma", "POS", "Frequency", "Doc Freq", "Translation", "Source", "Status", "Noise"]
         # M7: Store full TranslationResult for each lemma (for Why dialog)
         from app.services.translation_service import TranslationResult
         self.translation_results = {}  # row_index -> TranslationResult
@@ -128,32 +128,34 @@ class LemmaTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if lemma.study_tooltip and col in (0, 4, 6):
+            if lemma.study_tooltip and col in (0, 1, 5, 7):
                 return lemma.study_tooltip
             return None
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return saved_indicator_text(lemma.lemma_text, lemma.in_user_dictionary_count)
+                return "*" if lemma.in_user_dictionary_count > 0 else ""
             elif col == 1:
-                return lemma.pos or ""
+                return lemma.lemma_text
             elif col == 2:
-                return str(lemma.freq_abs)
+                return lemma.pos or ""
             elif col == 3:
-                return str(lemma.doc_freq)
+                return str(lemma.freq_abs)
             elif col == 4:
+                return str(lemma.doc_freq)
+            elif col == 5:
                 # M7: Translation from DTO
                 return lemma.translation or ""
-            elif col == 5:
+            elif col == 6:
                 # M7: Source (tm|dict|mt_cache|mt|none)
                 tr_result = self.translation_results.get(index.row())
                 if tr_result:
                     return tr_result.source
                 return "none"
-            elif col == 6:
+            elif col == 7:
                 # M7: Status
                 return lemma.status
-            elif col == 7:
+            elif col == 8:
                 # Noise column
                 if lemma.is_noise == 1:
                     return "Noise"
@@ -171,8 +173,8 @@ class LemmaTableModel(QAbstractTableModel):
 
         flags = super().flags(index)
 
-        # Column 4 (Translation) is editable
-        if index.column() == 4:
+        # Column 5 (Translation) is editable
+        if index.column() == 5:
             flags |= Qt.ItemFlag.ItemIsEditable
 
         return flags
@@ -182,7 +184,7 @@ class LemmaTableModel(QAbstractTableModel):
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
 
-        if index.column() == 4:  # Translation column
+        if index.column() == 5:  # Translation column
             # Update DTO
             lemma = self.lemmas[index.row()]
             lemma.translation = value
@@ -191,8 +193,8 @@ class LemmaTableModel(QAbstractTableModel):
             # Emit data changed
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
 
-            # Also emit for Status column (col 6) since it changed
-            status_idx = self.index(index.row(), 6)
+            # Also emit for Status column (col 7) since it changed
+            status_idx = self.index(index.row(), 7)
             self.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
             return True
@@ -230,8 +232,8 @@ class LemmaTableModel(QAbstractTableModel):
                 self.translation_results[row] = tr_result
 
                 # Emit dataChanged for Translation, Source, Status columns
-                trans_idx = self.index(row, 4)
-                status_idx = self.index(row, 6)
+                trans_idx = self.index(row, 5)
+                status_idx = self.index(row, 7)
                 self.dataChanged.emit(trans_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
     def get_lemma(self, row: int) -> LemmaStats:
@@ -255,7 +257,7 @@ class TermClusterTableModel(QAbstractTableModel):
         # M7: Added Translation, Source, Status columns
         # Added Noise column for is_noise visualization
         self.headers = [
-            "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
+            "UD", "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
             "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise"
         ]
         # M7: Store full TranslationResult for each cluster
@@ -276,43 +278,45 @@ class TermClusterTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if cluster.study_tooltip and col in (0, 11, 13):
+            if cluster.study_tooltip and col in (0, 1, 12, 14):
                 return cluster.study_tooltip
             return None
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return saved_indicator_text(cluster.representative_he, cluster.in_user_dictionary_count)
+                return "*" if cluster.in_user_dictionary_count > 0 else ""
             elif col == 1:
-                return cluster.representative_lemma or ""
+                return cluster.representative_he
             elif col == 2:
-                return str(cluster.freq_abs)
+                return cluster.representative_lemma or ""
             elif col == 3:
-                return str(cluster.doc_freq)
+                return str(cluster.freq_abs)
             elif col == 4:
-                return str(cluster.members_count)
+                return str(cluster.doc_freq)
             elif col == 5:
-                return f"{cluster.best_pmi:.2f}" if cluster.best_pmi else "N/A"
+                return str(cluster.members_count)
             elif col == 6:
-                return f"{cluster.best_llr:.2f}" if cluster.best_llr else "N/A"
+                return f"{cluster.best_pmi:.2f}" if cluster.best_pmi else "N/A"
             elif col == 7:
-                return f"{cluster.best_dice:.3f}" if cluster.best_dice else "N/A"
+                return f"{cluster.best_llr:.2f}" if cluster.best_llr else "N/A"
             elif col == 8:
-                return f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
+                return f"{cluster.best_dice:.3f}" if cluster.best_dice else "N/A"
             elif col == 9:
-                return f"{cluster.keyness_llr:.2f}" if cluster.keyness_llr else "N/A"
+                return f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
             elif col == 10:
-                return f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
+                return f"{cluster.keyness_llr:.2f}" if cluster.keyness_llr else "N/A"
             elif col == 11:
+                return f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
+            elif col == 12:
                 # M7: Translation
                 return cluster.translation or ""
-            elif col == 12:
+            elif col == 13:
                 # M7: Source
                 return cluster.translation_source or "none"
-            elif col == 13:
+            elif col == 14:
                 # M7: Status
                 return cluster.translation_status or "none"
-            elif col == 14:
+            elif col == 15:
                 # Noise column
                 if cluster.is_noise == 1:
                     return "Noise"
@@ -330,8 +334,8 @@ class TermClusterTableModel(QAbstractTableModel):
 
         flags = super().flags(index)
 
-        # Column 11 (Translation) is editable
-        if index.column() == 11:
+        # Column 12 (Translation) is editable
+        if index.column() == 12:
             flags |= Qt.ItemFlag.ItemIsEditable
 
         return flags
@@ -341,7 +345,7 @@ class TermClusterTableModel(QAbstractTableModel):
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
 
-        if index.column() == 11:  # Translation column
+        if index.column() == 12:  # Translation column
             # Update DTO
             cluster = self.clusters[index.row()]
             cluster.translation = value
@@ -350,8 +354,8 @@ class TermClusterTableModel(QAbstractTableModel):
             # Emit data changed
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
 
-            # Also emit for Status column (col 13)
-            status_idx = self.index(index.row(), 13)
+            # Also emit for Status column (col 14)
+            status_idx = self.index(index.row(), 14)
             self.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
             return True
@@ -391,8 +395,8 @@ class TermClusterTableModel(QAbstractTableModel):
                 self.translation_results[row] = tr_result
 
                 # Emit dataChanged for Translation, Source, Status columns
-                trans_idx = self.index(row, 11)
-                status_idx = self.index(row, 13)
+                trans_idx = self.index(row, 12)
+                status_idx = self.index(row, 14)
                 self.dataChanged.emit(trans_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
     def get_cluster(self, row: int):
@@ -419,7 +423,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
         self.entries: List[TMEntryDTO] = entries or []
         # Added Noise column for is_noise visualization
         self.headers = [
-            "ID", "Kind", "Source", "Translation", "Status",
+            "UD", "ID", "Kind", "Source", "Translation", "Status",
             "Scope", "Origin", "Source Ref", "Updated", "Noise"
         ]
         self.total_count = 0  # Total matching entries (for pagination)
@@ -444,27 +448,29 @@ class TranslationManagementTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return str(entry.tm_id)
+                return "*" if int(entry.in_user_dictionary_count or 0) > 0 else ""
             elif col == 1:
-                return entry.kind
+                return str(entry.tm_id)
             elif col == 2:
-                return entry.src_text
+                return entry.kind
             elif col == 3:
-                return entry.translation
+                return entry.src_text
             elif col == 4:
-                return entry.status
+                return entry.translation
             elif col == 5:
-                return "Global" if entry.project_id is None else f"Project {entry.project_id}"
+                return entry.status
             elif col == 6:
-                return entry.origin
+                return "Global" if entry.project_id is None else f"Project {entry.project_id}"
             elif col == 7:
-                return entry.source_ref or ""
+                return entry.origin
             elif col == 8:
+                return entry.source_ref or ""
+            elif col == 9:
                 # Show just date part of updated_at
                 if entry.updated_at:
                     return entry.updated_at.split("T")[0]
                 return ""
-            elif col == 9:
+            elif col == 10:
                 # Noise column
                 if entry.is_noise == 1:
                     return "Noise"
@@ -487,8 +493,8 @@ class TranslationManagementTableModel(QAbstractTableModel):
 
         flags = super().flags(index)
 
-        # Column 3 (Translation) is editable
-        if index.column() == 3:
+        # Column 4 (Translation) is editable
+        if index.column() == 4:
             flags |= Qt.ItemFlag.ItemIsEditable
 
         return flags
@@ -498,7 +504,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
 
-        if index.column() == 3:  # Translation column
+        if index.column() == 4:  # Translation column
             # Update DTO
             entry = self.entries[index.row()]
             entry.translation = value
