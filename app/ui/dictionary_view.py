@@ -851,6 +851,7 @@ class DictionaryView(QWidget):
                     is_noise=1 if is_noise else 0
                 )
                 session.execute(stmt)
+                self.user_dict_service.sync_noise_from_lemmas(session, [lemma.lemma_id])
                 session.commit()
 
                 # Update local model
@@ -928,7 +929,8 @@ class DictionaryView(QWidget):
                 ).values(
                     is_noise=1 if is_noise else 0
                 )
-                result = session.execute(stmt)
+                session.execute(stmt)
+                self.user_dict_service.sync_noise_from_lemmas(session, lemma_ids)
                 session.commit()
 
                 # Update local model for all affected rows
@@ -973,6 +975,7 @@ class DictionaryView(QWidget):
         # Store source_rows for later model update
         self._pending_source_rows = source_rows
         self._pending_is_noise = is_noise
+        self._pending_lemma_ids = list(lemma_ids)
 
         # Create and start worker
         self.bulk_worker = BulkNoiseUpdateWorker(
@@ -1008,6 +1011,17 @@ class DictionaryView(QWidget):
         # Update local model for all affected rows
         for source_row in self._pending_source_rows:
             self.lemma_model.lemmas[source_row].is_noise = 1 if self._pending_is_noise else 0
+
+        # Sync source noise -> User Dictionaries after worker commit.
+        try:
+            with self.db_service.get_session() as session:
+                self.user_dict_service.sync_noise_from_lemmas(
+                    session,
+                    getattr(self, "_pending_lemma_ids", []),
+                )
+                session.commit()
+        except Exception as e:
+            logger.warning("Failed to sync lemma noise to User Dictionaries after bulk update: %s", e)
 
         status = "noise" if self._pending_is_noise else "valid"
         logger.info(f"Bulk update completed: {count} lemmas marked as {status}")

@@ -17,6 +17,7 @@ from app.infra.sa_models import (
     StudyProgress,
     TMEntry,
     TMGlobal,
+    TermCluster,
     UserDictionary,
     UserDictionaryItem,
 )
@@ -36,6 +37,7 @@ def _create_schema(engine):
     DictProject.__table__.create(engine, checkfirst=True)
     SourceDocument.__table__.create(engine, checkfirst=True)
     Lemma.__table__.create(engine, checkfirst=True)
+    TermCluster.__table__.create(engine, checkfirst=True)
     TMEntry.__table__.create(engine, checkfirst=True)
     TMGlobal.__table__.create(engine, checkfirst=True)
     UserDictionary.__table__.create(engine, checkfirst=True)
@@ -233,6 +235,128 @@ def test_bulk_add_materializes_global_tm_anchor_without_project():
                 offset=0,
             )
             assert any(row.tm_id == entry.tm_id for row in rows)
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)
+
+
+def test_sync_noise_from_lemmas_updates_user_dictionary_items():
+    engine, db_path = _build_engine()
+    try:
+        _create_schema(engine)
+        user_dict_service = UserDictionaryService()
+
+        with Session(engine) as session:
+            lib = Library(name="Noise Lemma Lib")
+            session.add(lib)
+            session.flush()
+            project = DictProject(library_id=lib.library_id, name="Noise Lemma Project")
+            session.add(project)
+            session.flush()
+
+            lemma = Lemma(
+                project_id=project.project_id,
+                lemma_text="lemma-noise",
+                norm_text="lemma-noise",
+                is_noise=0,
+                noise_reason=None,
+            )
+            session.add(lemma)
+            session.flush()
+
+            dictionary_id = user_dict_service.create_dictionary(session, "Noise Sync Lemmas").dictionary_id
+            user_dict_service.bulk_add_items(
+                session,
+                dictionary_id=dictionary_id,
+                items=[
+                    {
+                        "kind": "lemma",
+                        "src_lang": "he",
+                        "tgt_lang": "ru",
+                        "src_text": "lemma-noise",
+                        "origin_project_id": project.project_id,
+                        "origin_entity_type": "lemma",
+                        "origin_entity_id": lemma.lemma_id,
+                        "origin_source_ref": "test_noise_lemma",
+                    }
+                ],
+                include_noise=True,
+            )
+            session.commit()
+
+            lemma.is_noise = 1
+            lemma.noise_reason = "NOISE_TEST"
+            updated = user_dict_service.sync_noise_from_lemmas(session, [lemma.lemma_id])
+            session.commit()
+
+            assert updated >= 1
+            item = session.execute(
+                select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            ).scalar_one()
+            assert item.is_noise == 1
+            assert item.noise_reason == "NOISE_TEST"
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)
+
+
+def test_sync_noise_from_term_clusters_updates_user_dictionary_items():
+    engine, db_path = _build_engine()
+    try:
+        _create_schema(engine)
+        user_dict_service = UserDictionaryService()
+
+        with Session(engine) as session:
+            lib = Library(name="Noise Cluster Lib")
+            session.add(lib)
+            session.flush()
+            project = DictProject(library_id=lib.library_id, name="Noise Cluster Project")
+            session.add(project)
+            session.flush()
+
+            cluster = TermCluster(
+                project_id=project.project_id,
+                canonical_key="term_noise",
+                representative_he="term noise",
+                representative_lemma="term_noise",
+                is_noise=0,
+                noise_reason=None,
+                norm_text="term_noise",
+            )
+            session.add(cluster)
+            session.flush()
+
+            dictionary_id = user_dict_service.create_dictionary(session, "Noise Sync Terms").dictionary_id
+            user_dict_service.bulk_add_items(
+                session,
+                dictionary_id=dictionary_id,
+                items=[
+                    {
+                        "kind": "term_cluster",
+                        "src_lang": "he",
+                        "tgt_lang": "ru",
+                        "src_text": "term noise",
+                        "origin_project_id": project.project_id,
+                        "origin_entity_type": "term_cluster",
+                        "origin_entity_id": cluster.cluster_id,
+                        "origin_source_ref": "test_noise_cluster",
+                    }
+                ],
+                include_noise=True,
+            )
+            session.commit()
+
+            cluster.is_noise = 1
+            cluster.noise_reason = "NOISE_TEST_CLUSTER"
+            updated = user_dict_service.sync_noise_from_term_clusters(session, [cluster.cluster_id])
+            session.commit()
+
+            assert updated >= 1
+            item = session.execute(
+                select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            ).scalar_one()
+            assert item.is_noise == 1
+            assert item.noise_reason == "NOISE_TEST_CLUSTER"
     finally:
         engine.dispose()
         Path(db_path).unlink(missing_ok=True)

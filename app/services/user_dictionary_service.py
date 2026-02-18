@@ -813,6 +813,113 @@ class UserDictionaryService:
         )
         return len(items)
 
+    def sync_noise_from_lemmas(
+        self,
+        session: Session,
+        lemma_ids: List[int],
+    ) -> int:
+        """Sync lemma noise status to user_dictionary_item rows (source -> UD)."""
+        clean_ids = sorted({int(v) for v in (lemma_ids or []) if v is not None})
+        if not clean_ids:
+            return 0
+
+        rows = session.execute(
+            select(Lemma).where(Lemma.lemma_id.in_(clean_ids))
+        ).scalars().all()
+        if not rows:
+            return 0
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        updated = 0
+        for lemma in rows:
+            src_norm = self._canonical_src_norm("he", lemma.lemma_text, "lemma", lemma.norm_text or "")
+            canonical_hash = self.build_canonical_hash("he", "ru", "lemma", src_norm)
+            stmt = (
+                update(UserDictionaryItem)
+                .where(UserDictionaryItem.kind == "lemma")
+                .where(
+                    or_(
+                        UserDictionaryItem.canonical_hash == canonical_hash,
+                        and_(
+                            UserDictionaryItem.origin_entity_type == "lemma",
+                            UserDictionaryItem.origin_entity_id == str(lemma.lemma_id),
+                        ),
+                    )
+                )
+                .values(
+                    is_noise=1 if (lemma.is_noise or 0) == 1 else 0,
+                    noise_reason=lemma.noise_reason,
+                    updated_at=now_str,
+                )
+            )
+            result = session.execute(stmt)
+            updated += int(result.rowcount or 0)
+
+        if updated:
+            self._audit_event(
+                session,
+                event_type="user_dictionary_noise_sync_from_lemmas",
+                operation="sync_ud_noise_from_lemmas",
+                details={"rows_updated": updated, "source_count": len(rows)},
+            )
+        return updated
+
+    def sync_noise_from_term_clusters(
+        self,
+        session: Session,
+        cluster_ids: List[int],
+    ) -> int:
+        """Sync term_cluster noise status to user_dictionary_item rows (source -> UD)."""
+        clean_ids = sorted({int(v) for v in (cluster_ids or []) if v is not None})
+        if not clean_ids:
+            return 0
+
+        rows = session.execute(
+            select(TermCluster).where(TermCluster.cluster_id.in_(clean_ids))
+        ).scalars().all()
+        if not rows:
+            return 0
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        updated = 0
+        for cluster in rows:
+            src_norm = self._canonical_src_norm(
+                "he",
+                cluster.representative_he,
+                "term_cluster",
+                cluster.norm_text or "",
+            )
+            canonical_hash = self.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+            stmt = (
+                update(UserDictionaryItem)
+                .where(UserDictionaryItem.kind == "term_cluster")
+                .where(
+                    or_(
+                        UserDictionaryItem.canonical_hash == canonical_hash,
+                        and_(
+                            UserDictionaryItem.origin_entity_type.in_(["term_cluster", "term_card"]),
+                            UserDictionaryItem.origin_entity_id == str(cluster.cluster_id),
+                        ),
+                    )
+                )
+                .values(
+                    is_noise=1 if (cluster.is_noise or 0) == 1 else 0,
+                    noise_reason=cluster.noise_reason,
+                    updated_at=now_str,
+                )
+            )
+            result = session.execute(stmt)
+            updated += int(result.rowcount or 0)
+
+        if updated:
+            self._audit_event(
+                session,
+                event_type="user_dictionary_noise_sync_from_term_clusters",
+                operation="sync_ud_noise_from_term_clusters",
+                details={"rows_updated": updated, "source_count": len(rows)},
+            )
+        return updated
+
     def query_items(
         self,
         session: Session,
