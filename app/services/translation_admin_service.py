@@ -19,6 +19,7 @@ from sqlalchemy import select, func, or_, and_, update
 from app.infra.sa_models import TMEntry, TMEntryHistory, Lemma, TermCluster
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
 from app.services.tm_global_service import TMGlobalService
+from app.services.user_dictionary_service import UserDictionaryService
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,9 @@ class TranslationAdminService:
         results = session.execute(stmt).scalars().all()
 
         # Convert to DTOs
-        return [self._entry_to_dto(entry) for entry in results]
+        dtos = [self._entry_to_dto(entry) for entry in results]
+        self._apply_study_overlays(session, dtos)
+        return dtos
 
     def count_tm_entries(
         self,
@@ -764,6 +767,45 @@ class TranslationAdminService:
             ngram_id=entry.ngram_id,
             tm_global_id=entry.tm_global_id,  # PATCH-19-03
         )
+
+    def _apply_study_overlays(self, session: Session, entries: List[TMEntryDTO]) -> None:
+        """Attach non-intrusive study tooltip metadata for TM panel rows."""
+        if not entries:
+            return
+
+        user_dict_service = UserDictionaryService()
+        payloads = []
+        for entry in entries:
+            payloads.append(
+                {
+                    "src_lang": entry.src_lang,
+                    "tgt_lang": entry.tgt_lang,
+                    "kind": entry.kind,
+                    "src_text": entry.src_text,
+                    "src_norm": entry.src_norm,
+                }
+            )
+
+        try:
+            overlay_map = user_dict_service.resolve_cross_view_status(session, payloads)
+        except Exception as e:
+            logger.warning("Failed to resolve TM study overlays: %s", e)
+            return
+
+        for entry in entries:
+            canonical_hash = user_dict_service.build_canonical_hash(
+                entry.src_lang,
+                entry.tgt_lang,
+                entry.kind,
+                entry.src_norm,
+            )
+            overlay = overlay_map.get(canonical_hash)
+            if not overlay:
+                continue
+            entry.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
+            entry.study_state = overlay.get("study_state")
+            entry.study_due_human = overlay.get("study_due_human")
+            entry.study_tooltip = overlay.get("study_tooltip")
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:
         """Convert TMEntryHistory model to DTO."""
