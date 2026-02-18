@@ -703,6 +703,8 @@ class UserDictionariesView(QWidget):
             return
 
         payload = dialog.payload()
+        if self.project_id is not None and self.scope_mode == "current_project":
+            payload["origin_project_id"] = self.project_id
         try:
             with self.db_service.get_session() as session:
                 self.user_dict_service.bulk_add_items(

@@ -11,6 +11,8 @@
 - Dedupe inside each dictionary by canonical hash.
 - `Hide Noise` is enabled by default.
 - Translation is resolved from `tm_global`, not copied into dictionary items.
+- Added rows are also materialized into `tm_entry` anchors (`source_ref=user_dictionary_add`) so they are visible in `Translation Management`.
+- `origin_tm_entry_id` is stored on dictionary items and reused for future sync operations.
 
 ## Scope
 

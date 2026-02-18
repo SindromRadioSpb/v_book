@@ -173,6 +173,7 @@ class UserDictionaryService:
         *,
         include_noise: bool = False,
         skip_duplicates: bool = True,
+        materialize_tm: bool = True,
         chunk_size: int = 500,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
@@ -190,6 +191,7 @@ class UserDictionaryService:
         cancelled = False
         pending = 0
         existing_hashes = set()
+        added_rows: List[UserDictionaryItem] = []
         if skip_duplicates:
             existing_hashes = set(
                 session.execute(
@@ -248,6 +250,7 @@ class UserDictionaryService:
                     origin_source_ref=item_payload["origin_source_ref"],
                 )
                 session.add(row)
+                added_rows.append(row)
                 if skip_duplicates:
                     existing_hashes.add(canonical_hash)
                 added += 1
@@ -267,6 +270,18 @@ class UserDictionaryService:
         if pending:
             session.flush()
 
+        tm_created = 0
+        tm_reused = 0
+        tm_linked = 0
+        if materialize_tm and added_rows:
+            projection_stats = self._materialize_tm_entries_for_items(
+                session=session,
+                items=added_rows,
+            )
+            tm_created = projection_stats["created"]
+            tm_reused = projection_stats["reused"]
+            tm_linked = projection_stats["linked"]
+
         if dictionary_row:
             dictionary_row.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -275,14 +290,23 @@ class UserDictionaryService:
             event_type="user_dictionary_bulk_add",
             operation="bulk_add_user_dictionary_items",
             resource_id=str(dictionary_id),
-            details={"added": added, "skipped": skipped, "failed": failed},
+            details={
+                "added": added,
+                "skipped": skipped,
+                "failed": failed,
+                "tm_created": tm_created,
+                "tm_reused": tm_reused,
+                "tm_linked": tm_linked,
+            },
         )
         logger.info(
-            "User dictionary bulk add: dict_id=%s, added=%s, skipped=%s, failed=%s",
+            "User dictionary bulk add: dict_id=%s, added=%s, skipped=%s, failed=%s, tm_created=%s, tm_reused=%s",
             dictionary_id,
             added,
             skipped,
             failed,
+            tm_created,
+            tm_reused,
         )
         return {
             "added": added,
@@ -291,7 +315,159 @@ class UserDictionaryService:
             "processed": processed,
             "total": total,
             "cancelled": cancelled,
+            "tm_created": tm_created,
+            "tm_reused": tm_reused,
+            "tm_linked": tm_linked,
         }
+
+    def _materialize_tm_entries_for_items(
+        self,
+        session: Session,
+        items: List[UserDictionaryItem],
+    ) -> Dict[str, int]:
+        """Ensure user dictionary rows are represented in TM entries for TM panel visibility."""
+        from app.services.tm_global_service import TMGlobalService
+
+        if not items:
+            return {"created": 0, "reused": 0, "linked": 0}
+
+        tm_global_service = TMGlobalService()
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        cache: Dict[Tuple[Optional[int], str, str, str, str], TMEntry] = {}
+        touched_global_ids = set()
+        created = 0
+        reused = 0
+        linked = 0
+
+        for item in items:
+            src_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+            project_scope = item.origin_project_id if item.origin_project_id is not None else None
+            key = (project_scope, item.kind, item.src_lang, item.tgt_lang, src_norm)
+            entry = None
+            global_row = session.execute(
+                select(TMGlobal).where(
+                    TMGlobal.src_lang == item.src_lang,
+                    TMGlobal.tgt_lang == item.tgt_lang,
+                    TMGlobal.kind == item.kind,
+                    TMGlobal.src_norm == src_norm,
+                )
+            ).scalar_one_or_none()
+
+            if item.origin_tm_entry_id:
+                candidate = session.get(TMEntry, item.origin_tm_entry_id)
+                if self._tm_entry_matches_item(candidate, item, src_norm):
+                    entry = candidate
+
+            if not entry:
+                entry = cache.get(key)
+
+            if not entry:
+                stmt = (
+                    select(TMEntry)
+                    .where(
+                        TMEntry.kind == item.kind,
+                        TMEntry.src_lang == item.src_lang,
+                        TMEntry.tgt_lang == item.tgt_lang,
+                        TMEntry.src_norm == src_norm,
+                    )
+                    .order_by(asc(TMEntry.tm_id))
+                )
+                if project_scope is None:
+                    stmt = stmt.where(TMEntry.project_id.is_(None))
+                else:
+                    stmt = stmt.where(TMEntry.project_id == project_scope)
+                entry = session.execute(stmt).scalar_one_or_none()
+
+            if entry:
+                reused += 1
+            else:
+                entry = TMEntry(
+                    project_id=project_scope,
+                    kind=item.kind,
+                    src_lang=item.src_lang,
+                    tgt_lang=item.tgt_lang,
+                    src_text=item.src_text,
+                    src_norm=src_norm,
+                    translation=(global_row.translation if global_row else "") or "",
+                    status=(global_row.status if global_row else "draft") or "draft",
+                    origin=(global_row.origin if global_row else "import") or "import",
+                    source_ref="user_dictionary_add",
+                    is_noise=item.is_noise or 0,
+                    noise_reason=item.noise_reason,
+                    notes=item.notes,
+                )
+                self._attach_source_links(entry, item)
+                session.add(entry)
+                session.flush()
+                created += 1
+
+            if item.origin_tm_entry_id != entry.tm_id:
+                item.origin_tm_entry_id = entry.tm_id
+            item.src_norm = src_norm
+            item.updated_at = now_str
+
+            if entry.source_ref in (None, ""):
+                entry.source_ref = "user_dictionary_add"
+            if entry.src_text != item.src_text:
+                entry.src_text = item.src_text
+            if entry.is_noise != (item.is_noise or 0):
+                entry.is_noise = item.is_noise or 0
+            if entry.noise_reason != item.noise_reason:
+                entry.noise_reason = item.noise_reason
+
+            if entry.lemma_id is None and item.kind == "lemma":
+                self._attach_source_links(entry, item)
+            if entry.cluster_id is None and item.kind == "term_cluster":
+                self._attach_source_links(entry, item)
+
+            cache[key] = entry
+            if global_row:
+                if entry.tm_global_id != global_row.tm_global_id:
+                    entry.tm_global_id = global_row.tm_global_id
+                touched_global_ids.add(global_row.tm_global_id)
+            elif entry.tm_global_id:
+                touched_global_ids.add(entry.tm_global_id)
+            elif (entry.translation or "").strip():
+                linked_global = tm_global_service.upsert_and_link(session, entry, immediate_propagate=False)
+                touched_global_ids.add(linked_global.tm_global_id)
+            linked += 1
+
+        for tm_global_id in sorted(touched_global_ids):
+            tm_global_service.propagate_to_entries(
+                session=session,
+                tm_global_id=tm_global_id,
+                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"],
+            )
+
+        return {"created": created, "reused": reused, "linked": linked}
+
+    @staticmethod
+    def _tm_entry_matches_item(
+        entry: Optional[TMEntry],
+        item: UserDictionaryItem,
+        src_norm: str,
+    ) -> bool:
+        if not entry:
+            return False
+        if entry.kind != item.kind or entry.src_lang != item.src_lang or entry.tgt_lang != item.tgt_lang:
+            return False
+        if entry.src_norm != src_norm:
+            return False
+        item_scope = item.origin_project_id if item.origin_project_id is not None else None
+        entry_scope = entry.project_id if entry.project_id is not None else None
+        return entry_scope == item_scope
+
+    @staticmethod
+    def _attach_source_links(entry: TMEntry, item: UserDictionaryItem) -> None:
+        """Attach source entity IDs to TM entry when available."""
+        try:
+            entity_id = int(item.origin_entity_id) if item.origin_entity_id is not None else None
+        except Exception:
+            entity_id = None
+        if item.kind == "lemma" and item.origin_entity_type == "lemma" and entity_id is not None:
+            entry.lemma_id = entity_id
+        if item.kind == "term_cluster" and item.origin_entity_type in ("term_cluster", "term_card") and entity_id is not None:
+            entry.cluster_id = entity_id
 
     def bulk_remove_items(
         self,

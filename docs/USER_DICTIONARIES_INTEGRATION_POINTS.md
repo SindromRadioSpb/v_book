@@ -34,6 +34,7 @@
 
 - `app/services/user_dictionary_service.py`
   - CRUD, bulk add/remove, filtered query, safe sort, scope by `origin_project_id`
+  - TM projection: materialize/reuse `tm_entry` anchors on add and persist `origin_tm_entry_id`
 - `app/services/audio_asset_service.py`
   - Audio status lookup (`missing|ready|failed`)
 - `app/services/tm_global_service.py`
