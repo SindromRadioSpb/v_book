@@ -1243,7 +1243,7 @@ class TranslationManagementPanel(QWidget):
 
     def on_batch_translate(self):
         """Handle batch translation for selected TM entries."""
-        from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+        from app.ui.dialogs import show_batch_translate_dialog
         from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
         from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
         from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
@@ -1254,9 +1254,9 @@ class TranslationManagementPanel(QWidget):
             return
 
         filtered_count = 0
+        admin_service = TranslationAdminService()
         try:
             db_service = DBService.get_instance()
-            admin_service = TranslationAdminService()
             with db_service.get_session() as session:
                 filtered_count = admin_service.count_tm_ids_for_translation(
                     session,
@@ -1289,8 +1289,21 @@ class TranslationManagementPanel(QWidget):
                 if reply != QMessageBox.StandardButton.Yes:
                     return
 
-            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} tm_entry records")
-            progress_dialog = BatchProgressDialogV3(parent=self, total=filtered_count)
+            # Match User Dictionaries behavior: recalculate total with chosen write_mode.
+            total_for_scope = filtered_count
+            try:
+                db_service = DBService.get_instance()
+                with db_service.get_session() as session:
+                    total_for_scope = admin_service.count_tm_ids_for_translation(
+                        session,
+                        self.build_filters(),
+                        write_mode,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to recompute total_for_scope for TM batch translate: {e}")
+
+            logger.info(f"Starting TranslateAllFilteredWorker for {total_for_scope} tm_entry records")
+            progress_dialog = BatchProgressDialogV3(parent=self, total=total_for_scope)
             progress_dialog.show()
 
             worker = TranslateAllFilteredWorker(
@@ -1300,7 +1313,7 @@ class TranslationManagementPanel(QWidget):
                 provider_mode=provider_mode,
                 write_mode=write_mode,
                 id_fetch_chunk=200,
-                translation_chunk=25,
+                translation_chunk=1,
             )
 
             worker.progress.connect(progress_dialog.update_progress)
@@ -1337,11 +1350,11 @@ class TranslationManagementPanel(QWidget):
         options = BatchTranslateOptions(
             provider_mode=provider_mode,
             write_mode=write_mode,
-            chunk_size=50,
+            chunk_size=1,
             stop_on_error=False,
         )
 
-        progress_dialog = BatchProgressDialog(parent=self, total=len(items))
+        progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
         progress_dialog.show()
 
         worker = BatchTranslateWorker(
@@ -1350,9 +1363,14 @@ class TranslationManagementPanel(QWidget):
             tab_type="tm",
         )
         worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
         worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
         worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
 
         self.batch_translate_btn.setEnabled(False)
         worker.finished.connect(self.on_selection_changed)

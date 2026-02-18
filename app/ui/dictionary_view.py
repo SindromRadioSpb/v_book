@@ -596,7 +596,11 @@ class DictionaryView(QWidget):
                 def save_and_propagate():
                     session.flush()
                     tm_entry_to_link = existing if existing else tm_entry
-                    TMGlobalService().upsert_and_link(session, tm_entry_to_link)
+                    TMGlobalService().upsert_and_link(
+                        session,
+                        tm_entry_to_link,
+                        force_global_update=(translation_value == ""),
+                    )
                     session.commit()
 
                 with_retry_on_locked(save_and_propagate, max_retries=3)
@@ -994,7 +998,7 @@ class DictionaryView(QWidget):
     def on_batch_translate(self):
         """Task 15: Handle batch translate action with scope support."""
         from PyQt6.QtWidgets import QMessageBox
-        from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+        from app.ui.dialogs import show_batch_translate_dialog
         from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
         from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
         from app.services.batch_mt_translate_service import (
@@ -1011,9 +1015,9 @@ class DictionaryView(QWidget):
 
         # Task 15: Compute filtered count for "All pages" scope
         filtered_count = 0
+        dict_service = DictionaryService()
         try:
             db_service = DBService.get_instance()
-            dict_service = DictionaryService()
             with db_service.get_session() as session:
                 filtered_count = dict_service.count_lemma_ids_for_translation(
                     session, self.project_id, self.build_filters(), "FILL_EMPTY"
@@ -1048,9 +1052,19 @@ class DictionaryView(QWidget):
                 if reply != QMessageBox.StandardButton.Yes:
                     return
 
+            # Match User Dictionaries behavior: recalculate total with chosen write_mode.
+            total_for_scope = filtered_count
+            try:
+                with db_service.get_session() as session:
+                    total_for_scope = dict_service.count_lemma_ids_for_translation(
+                        session, self.project_id, self.build_filters(), write_mode
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to recompute total_for_scope: {e}")
+
             # Create TranslateAllFilteredWorker for chunked translation
-            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} lemmas")
-            progress_dialog = BatchProgressDialogV3(parent=self, total=filtered_count)
+            logger.info(f"Starting TranslateAllFilteredWorker for {total_for_scope} lemmas")
+            progress_dialog = BatchProgressDialogV3(parent=self, total=total_for_scope)
             progress_dialog.show()
 
             worker = TranslateAllFilteredWorker(
@@ -1060,7 +1074,7 @@ class DictionaryView(QWidget):
                 provider_mode=provider_mode,
                 write_mode=write_mode,
                 id_fetch_chunk=200,      # Fetch 200 IDs from DB per iteration
-                translation_chunk=25,     # Translate 25 items before commit (dynamic UX)
+                translation_chunk=1,      # Translate 1 item per commit (per-row semantics)
                 src_lang="he",
                 tgt_lang="ru",
             )
@@ -1085,7 +1099,7 @@ class DictionaryView(QWidget):
             worker.start()
             self._batch_worker = worker
 
-        else:  # scope == "current_page" (original behavior)
+        else:  # scope == "current_page"
             # Map proxy indices to source rows
             source_rows = [
                 self.proxy_model.map_to_source_row(index.row())
@@ -1111,12 +1125,12 @@ class DictionaryView(QWidget):
             options = BatchTranslateOptions(
                 provider_mode=provider_mode,
                 write_mode=write_mode,
-                chunk_size=50,
+                chunk_size=1,
                 stop_on_error=False,
             )
 
-            # Show progress dialog
-            progress_dialog = BatchProgressDialog(parent=self, total=len(items))
+            # Show premium V3 progress dialog (parity with all_filtered/User Dictionaries)
+            progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
             progress_dialog.show()
 
             # Create worker
@@ -1128,9 +1142,19 @@ class DictionaryView(QWidget):
 
             # Connect signals
             worker.progress.connect(progress_dialog.update_progress)
+            worker.stats_updated.connect(progress_dialog.update_counts)
+            worker.row_translated.connect(progress_dialog.add_recent_item)
+            worker.stage_updated.connect(progress_dialog.set_stage)
             worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
             worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
             progress_dialog.cancel_requested.connect(worker.cancel)
+            progress_dialog.pause_requested.connect(worker.pause)
+            progress_dialog.resume_requested.connect(worker.resume)
+
+            # Disable translate button while worker runs
+            self.batch_translate_btn.setEnabled(False)
+            worker.finished.connect(self.on_selection_changed)
+            worker.error.connect(self.on_selection_changed)
 
             # Start worker
             worker.start()
@@ -1162,7 +1186,8 @@ class DictionaryView(QWidget):
         # Refresh lemmas to show updated translations
         self.perform_search()
 
-        # Clean up worker
+        # Re-evaluate button state and clean up worker
+        self.on_selection_changed()
         if hasattr(self, '_batch_worker'):
             self._batch_worker.deleteLater()
             del self._batch_worker
@@ -1177,7 +1202,8 @@ class DictionaryView(QWidget):
         # Show error
         QMessageBox.critical(self, "Translation Error", error_msg)
 
-        # Clean up worker
+        # Re-evaluate button state and clean up worker
+        self.on_selection_changed()
         if hasattr(self, '_batch_worker'):
             self._batch_worker.deleteLater()
             del self._batch_worker

@@ -1487,8 +1487,13 @@ class BatchTranslateWorker(QThread):
 
     progress = pyqtSignal(int, int)  # (completed, total)
     row_completed = pyqtSignal(str, bool)  # (entity_id, success)
+    stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
+    stage_updated = pyqtSignal(str)
     finished = pyqtSignal(object)  # BatchTranslateResult
     error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
 
     def __init__(
         self,
@@ -1508,6 +1513,10 @@ class BatchTranslateWorker(QThread):
         self.options = options
         self.tab_type = tab_type
         self._cancel_requested = False
+        self._paused = False
+        self.succeeded = 0
+        self.skipped = 0
+        self.failed = 0
 
     def run(self):
         """Execute batch translation in background thread."""
@@ -1515,6 +1524,7 @@ class BatchTranslateWorker(QThread):
             from app.services.batch_mt_translate_service import BatchMTTranslateService
             from app.services.db_service import DBService
 
+            self.stage_updated.emit("Initializing...")
             logger.info(
                 f"BatchTranslateWorker started: tab={self.tab_type}, "
                 f"items={len(self.items)}, mode={self.options.provider_mode}"
@@ -1523,16 +1533,46 @@ class BatchTranslateWorker(QThread):
             service = BatchMTTranslateService()
             db_service = DBService.get_instance()
 
+            if not self.items:
+                self.stage_updated.emit("No targets found")
+                _flush_mt_usage_queue(f"batch_translate:{self.tab_type}:empty")
+                self.finished.emit(
+                    type("EmptyResult", (), {
+                        "total": 0,
+                        "succeeded": 0,
+                        "skipped": 0,
+                        "failed": 0,
+                        "row_results": [],
+                    })()
+                )
+                return
+
+            self.stage_updated.emit(f"Translating {len(self.items)} selected rows...")
+
+            def cancel_check() -> bool:
+                # Keep worker paused at safe boundaries until resume/cancel.
+                while self._paused and not self._cancel_requested:
+                    time.sleep(0.05)
+                return self._cancel_requested
+
             with db_service.get_session() as session:
                 result = service.execute_batch(
                     session=session,
                     items=self.items,
                     options=self.options,
                     progress_callback=self._on_progress,
-                    cancel_check=lambda: self._cancel_requested,
+                    cancel_check=cancel_check,
+                    item_callback=self._on_item_result,
                 )
 
+                self.succeeded = result.succeeded
+                self.skipped = result.skipped
+                self.failed = result.failed
+                self.stats_updated.emit(result.succeeded, result.skipped, result.failed)
                 _flush_mt_usage_queue(f"batch_translate:{self.tab_type}")
+                self.stage_updated.emit(
+                    f"Completed: {result.succeeded} succeeded, {result.skipped} skipped, {result.failed} failed"
+                )
                 self.finished.emit(result)
 
                 logger.info(
@@ -1555,9 +1595,41 @@ class BatchTranslateWorker(QThread):
         logger.info("BatchTranslateWorker cancel requested")
         self._cancel_requested = True
 
+    def pause(self):
+        """Pause processing at the next safe boundary."""
+        self._paused = True
+        self.stage_updated.emit("Paused")
+        self.paused.emit()
+
+    def resume(self):
+        """Resume processing."""
+        self._paused = False
+        self.stage_updated.emit("Resuming...")
+        self.resumed.emit()
+
     def _on_progress(self, completed: int, total: int):
         """Handle progress callback from service."""
         self.progress.emit(completed, total)
+        self.stage_updated.emit(f"Translating... {completed}/{total}")
+
+    def _on_item_result(self, row_result):
+        """Emit granular activity + running stats for V3 progress dialog."""
+        if row_result.skipped:
+            self.skipped += 1
+            message = "already translated"
+            success = False
+        elif row_result.error_message:
+            self.failed += 1
+            message = row_result.error_message[:80]
+            success = False
+        else:
+            self.succeeded += 1
+            message = (row_result.new_translation or "")[:80]
+            success = True
+
+        self.row_completed.emit(row_result.entity_id, success)
+        self.row_translated.emit(row_result.entity_id, message, success)
+        self.stats_updated.emit(self.succeeded, self.skipped, self.failed)
 
     def _make_user_friendly_error(self, error: str) -> str:
         """Convert technical error to user-friendly message."""
@@ -2188,7 +2260,14 @@ class UserDictTranslateWorker(QThread):
             "confidence": result.confidence,
         }
 
-    def _write_global(self, session, item, translation: str, confidence: Optional[float]) -> None:
+    def _write_global(
+        self,
+        session,
+        item,
+        translation: str,
+        confidence: Optional[float],
+        force_global_update: bool = False,
+    ) -> None:
         from app.services.tm_global_service import TMGlobalService
 
         tm_global_service = TMGlobalService()
@@ -2207,6 +2286,7 @@ class UserDictTranslateWorker(QThread):
             noise_reason=item.noise_reason,
             notes=item.notes,
             source_tm_id=item.origin_tm_entry_id,
+            force_update=force_global_update,
         )
         tm_global_service.propagate_to_entries(
             session=session,
@@ -2335,6 +2415,7 @@ class UserDictTranslateWorker(QThread):
                                     item=item,
                                     translation=text_value.strip(),
                                     confidence=translated.get("confidence"),
+                                    force_global_update=(self.write_mode == "OVERWRITE"),
                                 )
                             pending_writes += 1
                             if pending_writes >= self.translation_chunk:

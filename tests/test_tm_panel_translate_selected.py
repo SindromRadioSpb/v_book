@@ -203,6 +203,8 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
     class DummyProgressDialog:
         def __init__(self, parent=None, total=0):
             self.cancel_requested = DummySignal()
+            self.pause_requested = DummySignal()
+            self.resume_requested = DummySignal()
 
         def show(self):
             return None
@@ -214,6 +216,12 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
             return None
 
         def update_counts(self, *_args):
+            return None
+
+        def add_recent_item(self, *_args):
+            return None
+
+        def set_stage(self, *_args):
             return None
 
         def accept(self):
@@ -232,6 +240,9 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
                 "tab_type": tab_type,
             }
             self.progress = DummySignal()
+            self.stats_updated = DummySignal()
+            self.row_translated = DummySignal()
+            self.stage_updated = DummySignal()
             self.finished = DummySignal()
             self.error = DummySignal()
 
@@ -239,6 +250,12 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
             return None
 
         def cancel(self):
+            return None
+
+        def pause(self):
+            return None
+
+        def resume(self):
             return None
 
         def isRunning(self):
@@ -312,7 +329,7 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
     panel.perform_search = lambda: None
 
     monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"))
-    monkeypatch.setattr("app.ui.dialogs.BatchProgressDialog", DummyProgressDialog)
+    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
     monkeypatch.setattr("app.ui.workers.BatchTranslateWorker", DummyWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
     monkeypatch.setattr(
@@ -325,6 +342,7 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
     assert DummyWorker.captured is not None
     assert DummyWorker.captured["tab_type"] == "tm"
     assert DummyWorker.captured["options"].write_mode == "FILL_EMPTY"
+    assert DummyWorker.captured["options"].chunk_size == 1
     assert [item.entity_id for item in DummyWorker.captured["items"]] == ["101", "303"]
     assert all(item.entity_type == "tm_entry" for item in DummyWorker.captured["items"])
 

@@ -14,7 +14,7 @@ from app.services.term_extraction_service import TermExtractionService
 from app.services.translation_service import TranslationService
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
-from app.ui.dialogs import show_batch_translate_dialog, BatchProgressDialog
+from app.ui.dialogs import show_batch_translate_dialog
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
@@ -775,7 +775,11 @@ class TermsView(QWidget):
                 def save_and_propagate():
                     session.flush()
                     tm_entry_to_link = existing if existing else tm_entry
-                    TMGlobalService().upsert_and_link(session, tm_entry_to_link)
+                    TMGlobalService().upsert_and_link(
+                        session,
+                        tm_entry_to_link,
+                        force_global_update=(translation_value == ""),
+                    )
                     session.commit()
 
                 with_retry_on_locked(save_and_propagate, max_retries=3)
@@ -1180,9 +1184,9 @@ class TermsView(QWidget):
 
         # Task 15: Compute filtered count for "All pages" scope
         filtered_count = 0
+        term_service = TermExtractionService()
         try:
             db_service = DBService.get_instance()
-            term_service = TermExtractionService()
             with db_service.get_session() as session:
                 filtered_count = term_service.count_cluster_ids_for_translation(
                     session, self.project_id, self.build_filters(), "FILL_EMPTY"
@@ -1217,9 +1221,19 @@ class TermsView(QWidget):
                 if reply != QMessageBox.StandardButton.Yes:
                     return
 
+            # Match User Dictionaries behavior: recalculate total with chosen write_mode.
+            total_for_scope = filtered_count
+            try:
+                with db_service.get_session() as session:
+                    total_for_scope = term_service.count_cluster_ids_for_translation(
+                        session, self.project_id, self.build_filters(), write_mode
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to recompute total_for_scope: {e}")
+
             # Create TranslateAllFilteredWorker for chunked translation
-            logger.info(f"Starting TranslateAllFilteredWorker for {filtered_count} term_clusters")
-            progress_dialog = BatchProgressDialogV3(self, total=filtered_count)
+            logger.info(f"Starting TranslateAllFilteredWorker for {total_for_scope} term_clusters")
+            progress_dialog = BatchProgressDialogV3(self, total=total_for_scope)
             progress_dialog.show()
 
             worker = TranslateAllFilteredWorker(
@@ -1229,7 +1243,7 @@ class TermsView(QWidget):
                 provider_mode=provider_mode,
                 write_mode=write_mode,
                 id_fetch_chunk=200,      # Fetch 200 IDs from DB per iteration
-                translation_chunk=25,     # Translate 25 items before commit (dynamic UX)
+                translation_chunk=1,      # Translate 1 item per commit (per-row semantics)
                 src_lang="he",
                 tgt_lang="ru",
             )
@@ -1276,11 +1290,11 @@ class TermsView(QWidget):
             options = BatchTranslateOptions(
                 provider_mode=provider_mode,
                 write_mode=write_mode,
-                chunk_size=50,
+                chunk_size=1,
             )
 
-            # Show progress dialog
-            progress_dialog = BatchProgressDialog(self, total=len(items))
+            # Show premium V3 progress dialog (parity with all_filtered/User Dictionaries)
+            progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
             progress_dialog.show()
 
             # Create worker
@@ -1292,13 +1306,9 @@ class TermsView(QWidget):
 
             # Connect signals
             self.batch_translate_worker.progress.connect(progress_dialog.update_progress)
-            self.batch_translate_worker.row_completed.connect(
-                lambda entity_id, success: progress_dialog.update_counts(
-                    self.batch_translate_worker.succeeded,
-                    self.batch_translate_worker.skipped,
-                    self.batch_translate_worker.failed
-                )
-            )
+            self.batch_translate_worker.stats_updated.connect(progress_dialog.update_counts)
+            self.batch_translate_worker.row_translated.connect(progress_dialog.add_recent_item)
+            self.batch_translate_worker.stage_updated.connect(progress_dialog.set_stage)
             self.batch_translate_worker.finished.connect(
                 lambda result: self.on_batch_translate_finished(result, progress_dialog)
             )
@@ -1306,22 +1316,33 @@ class TermsView(QWidget):
                 lambda error: self.on_batch_translate_error(error, progress_dialog)
             )
             progress_dialog.cancel_requested.connect(self.batch_translate_worker.cancel)
+            progress_dialog.pause_requested.connect(self.batch_translate_worker.pause)
+            progress_dialog.resume_requested.connect(self.batch_translate_worker.resume)
+
+            self.batch_translate_btn.setEnabled(False)
+            self.batch_translate_worker.finished.connect(self.on_selection_changed)
+            self.batch_translate_worker.error.connect(self.on_selection_changed)
 
             # Start worker
             self.batch_translate_worker.start()
 
-    def on_batch_translate_finished(self, result, progress_dialog: BatchProgressDialog):
+    def on_batch_translate_finished(self, result, progress_dialog):
         """Handle batch translate completion."""
         progress_dialog.set_completed()
+        progress_dialog.update_counts(result.succeeded, result.skipped, result.failed)
 
         # Show summary
-        msg = f"Batch translation complete!\n\n"
-        msg += f"Total: {result.total}\n"
-        msg += f"Succeeded: {result.succeeded}\n"
-        msg += f"Skipped: {result.skipped}\n"
-        msg += f"Failed: {result.failed}"
-
-        show_info(self, "Batch Translate Complete", msg)
+        msg = (
+            "Translation completed.\n\n"
+            f"Total: {result.total}\n"
+            f"Succeeded: {result.succeeded}\n"
+            f"Skipped: {result.skipped}\n"
+            f"Failed: {result.failed}"
+        )
+        if result.failed > 0:
+            show_error(self, "Translation Complete (with errors)", msg)
+        else:
+            show_info(self, "Translation Complete", msg)
 
         # Close progress dialog
         progress_dialog.accept()
@@ -1334,9 +1355,9 @@ class TermsView(QWidget):
             self.batch_translate_worker.deleteLater()
             self.batch_translate_worker = None
 
-    def on_batch_translate_error(self, error_msg: str, progress_dialog: BatchProgressDialog):
+    def on_batch_translate_error(self, error_msg: str, progress_dialog):
         """Handle batch translate error."""
-        progress_dialog.close()
+        progress_dialog.reject()
         show_error(self, "Batch Translate Error", error_msg)
 
         # Clean up worker
