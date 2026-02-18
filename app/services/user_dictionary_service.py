@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDictionaryItemDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import (
+    AudioAsset,
     Lemma,
     StudyProgress,
     TMEntry,
@@ -826,6 +827,7 @@ class UserDictionaryService:
         """Query dictionary items with translation resolution from tm_global."""
         filters = filters or {}
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        audio_table_exists = self._table_exists(session, "audio_asset")
 
         base_stmt = (
             select(UserDictionaryItem, TMGlobal, StudyProgress)
@@ -842,8 +844,19 @@ class UserDictionaryService:
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
+        if audio_table_exists:
+            base_stmt = base_stmt.outerjoin(
+                AudioAsset,
+                and_(
+                    AudioAsset.lang == UserDictionaryItem.src_lang,
+                    AudioAsset.norm_text == UserDictionaryItem.src_norm,
+                    AudioAsset.voice_id == "default",
+                    AudioAsset.speed == 1.0,
+                    AudioAsset.provider == "none",
+                ),
+            )
 
-        base_stmt = self._apply_item_filters(base_stmt, filters, now_str)
+        base_stmt = self._apply_item_filters(base_stmt, filters, now_str, include_audio=audio_table_exists)
 
         # Count query (same filters)
         count_stmt = (
@@ -861,7 +874,18 @@ class UserDictionaryService:
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
-        count_stmt = self._apply_item_filters(count_stmt, filters, now_str)
+        if audio_table_exists:
+            count_stmt = count_stmt.outerjoin(
+                AudioAsset,
+                and_(
+                    AudioAsset.lang == UserDictionaryItem.src_lang,
+                    AudioAsset.norm_text == UserDictionaryItem.src_norm,
+                    AudioAsset.voice_id == "default",
+                    AudioAsset.speed == 1.0,
+                    AudioAsset.provider == "none",
+                ),
+            )
+        count_stmt = self._apply_item_filters(count_stmt, filters, now_str, include_audio=audio_table_exists)
         total = session.execute(count_stmt).scalar() or 0
 
         order_col = self.ITEM_SORT_COLUMNS.get(sort_column, UserDictionaryItem.updated_at)
@@ -985,7 +1009,14 @@ class UserDictionaryService:
         )
         return list(session.execute(stmt).scalars().all())
 
-    def _apply_item_filters(self, stmt, filters: Dict[str, Any], now_str: Optional[str] = None):
+    def _apply_item_filters(
+        self,
+        stmt,
+        filters: Dict[str, Any],
+        now_str: Optional[str] = None,
+        *,
+        include_audio: bool = False,
+    ):
         """Apply supported filters to item query."""
         if filters.get("kind"):
             stmt = stmt.where(UserDictionaryItem.kind == filters["kind"])
@@ -1077,6 +1108,13 @@ class UserDictionaryService:
         elif translation_tier == "mt":
             stmt = stmt.where(TMGlobal.origin == "mt_auto")
             stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+
+        audio_filter = (filters.get("audio_filter") or "").strip().lower()
+        if include_audio and audio_filter and audio_filter != "all":
+            if audio_filter == "missing":
+                stmt = stmt.where(or_(AudioAsset.asset_status.is_(None), AudioAsset.asset_status == "missing"))
+            else:
+                stmt = stmt.where(AudioAsset.asset_status == audio_filter)
 
         return stmt
 
@@ -1337,6 +1375,16 @@ class UserDictionaryService:
             UserDictionaryItem.dictionary_id == dictionary_id
         )
         return session.execute(stmt).scalar() or 0
+
+    @staticmethod
+    def _table_exists(session: Session, table_name: str) -> bool:
+        try:
+            stmt = text(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name LIMIT 1"
+            )
+            return session.execute(stmt, {"name": table_name}).scalar() is not None
+        except Exception:
+            return False
 
     @staticmethod
     def _audit_event(

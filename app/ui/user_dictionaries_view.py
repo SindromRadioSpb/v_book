@@ -267,11 +267,29 @@ class UserDictionariesView(QWidget):
         self.translation_combo.currentTextChanged.connect(self.on_filter_changed)
         filters_row.addWidget(self.translation_combo)
 
+        filters_row.addWidget(QLabel("Tier:"))
+        self.translation_tier_combo = QComboBox()
+        self.translation_tier_combo.addItems(["All", "Missing", "MT", "User", "Approved", "Deprecated"])
+        self.translation_tier_combo.currentTextChanged.connect(self.on_filter_changed)
+        filters_row.addWidget(self.translation_tier_combo)
+
         filters_row.addWidget(QLabel("Study:"))
         self.study_combo = QComboBox()
-        self.study_combo.addItems(["All", "new", "learning", "mastered", "suspended"])
+        self.study_combo.addItems(["All", "new", "learning", "due", "mastered", "suspended"])
         self.study_combo.currentTextChanged.connect(self.on_filter_changed)
         filters_row.addWidget(self.study_combo)
+
+        filters_row.addWidget(QLabel("Origin:"))
+        self.origin_combo = QComboBox()
+        self.origin_combo.addItems(["All", "project", "manual", "imported"])
+        self.origin_combo.currentTextChanged.connect(self.on_filter_changed)
+        filters_row.addWidget(self.origin_combo)
+
+        filters_row.addWidget(QLabel("Audio:"))
+        self.audio_combo = QComboBox()
+        self.audio_combo.addItems(["All", "missing", "ready", "failed"])
+        self.audio_combo.currentTextChanged.connect(self.on_filter_changed)
+        filters_row.addWidget(self.audio_combo)
 
         self.hide_noise_checkbox = QCheckBox("Hide Noise")
         self.hide_noise_checkbox.setChecked(self.settings.get_bool("user_dict/hide_noise", True))
@@ -431,6 +449,18 @@ class UserDictionariesView(QWidget):
             filters["translation_filter"] = "non_empty"
         else:
             filters["translation_filter"] = "all"
+
+        tier_filter = self.translation_tier_combo.currentText().strip().lower()
+        if tier_filter and tier_filter != "all":
+            filters["translation_tier"] = tier_filter
+
+        origin_filter = self.origin_combo.currentText().strip().lower()
+        if origin_filter and origin_filter != "all":
+            filters["origin_filter"] = origin_filter
+
+        audio_filter = self.audio_combo.currentText().strip().lower()
+        if audio_filter and audio_filter != "all":
+            filters["audio_filter"] = audio_filter
 
         if self.scope_mode == "current_project" and self.project_id is not None:
             filters["origin_project_id"] = self.project_id
