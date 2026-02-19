@@ -828,6 +828,15 @@ class UserDictionariesView(QWidget):
         mark_valid_action = QAction(f"Mark Selected as Valid ({count} rows)", self)
         mark_valid_action.triggered.connect(lambda: self.set_selected_noise_status(False))
         menu.addAction(mark_valid_action)
+        menu.addSeparator()
+
+        suspend_action = QAction(f"Suspend Selected ({count} rows)", self)
+        suspend_action.triggered.connect(lambda: self.set_selected_suspension(True))
+        menu.addAction(suspend_action)
+
+        resume_action = QAction(f"Resume Selected ({count} rows)", self)
+        resume_action.triggered.connect(lambda: self.set_selected_suspension(False))
+        menu.addAction(resume_action)
 
         menu.exec(self.items_table.viewport().mapToGlobal(pos))
 
@@ -887,6 +896,44 @@ class UserDictionariesView(QWidget):
         except Exception as e:
             logger.error("Failed to set user dictionary noise status: %s", e, exc_info=True)
             QMessageBox.warning(self, "Update Failed", f"Failed to update noise status:\n{e}")
+
+    def set_selected_suspension(self, is_suspended: bool):
+        item_ids = self._selected_item_ids()
+        if not item_ids:
+            return
+
+        action_text = "suspend" if is_suspended else "resume"
+        if len(item_ids) > 100:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Bulk Action",
+                f"You are about to {action_text} {len(item_ids):,} rows.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            with self.db_service.get_session() as session:
+                changed = self.user_dict_service.set_items_suspension_bulk(
+                    session=session,
+                    item_ids=item_ids,
+                    is_suspended=is_suspended,
+                    suspended_reason="USER_SUSPENDED" if is_suspended else None,
+                )
+                session.commit()
+            QMessageBox.information(
+                self,
+                "Success",
+                f"{'Suspended' if is_suspended else 'Resumed'} {changed:,} rows.",
+            )
+            self.load_items()
+            if self._view_mode == "review":
+                self.load_review_queue(reset_index=True)
+        except Exception as e:
+            logger.error("Failed to update user dictionary suspension flags: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Update Failed", f"Failed to update suspension:\n{e}")
 
     def on_new_dictionary(self):
         name, ok = QInputDialog.getText(self, "New Dictionary", "Dictionary name:")

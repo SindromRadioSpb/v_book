@@ -652,3 +652,53 @@ def test_resolve_cross_view_status_tooltip_only_for_user_dictionary_members(user
         assert overlay[in_hash]["study_tooltip"]
         assert overlay[out_hash]["in_user_dictionary_count"] == 0
         assert overlay[out_hash]["study_tooltip"] is None
+
+
+def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Suspend")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "suspend-me",
+                    "src_norm": "suspend-me",
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item_id = session.execute(
+            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+
+        changed = service.set_items_suspension_bulk(
+            session,
+            item_ids=[item_id],
+            is_suspended=True,
+            suspended_reason="USER_SUSPENDED",
+        )
+        session.commit()
+        assert changed == 1
+
+        item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
+        assert item.is_suspended == 1
+        assert item.suspended_reason == "USER_SUSPENDED"
+        assert item.study_state == "suspended"
+
+        changed = service.set_items_suspension_bulk(
+            session,
+            item_ids=[item_id],
+            is_suspended=False,
+        )
+        session.commit()
+        assert changed == 1
+
+        item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
+        assert item.is_suspended == 0
+        assert item.suspended_reason is None

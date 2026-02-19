@@ -813,6 +813,63 @@ class UserDictionaryService:
         )
         return len(items)
 
+    def set_items_suspension_bulk(
+        self,
+        session: Session,
+        item_ids: List[int],
+        is_suspended: bool,
+        suspended_reason: Optional[str] = None,
+    ) -> int:
+        """Set per-item suspension flags for selected dictionary items."""
+        if not item_ids:
+            return 0
+
+        suspend_value = 1 if is_suspended else 0
+        reason_value = (suspended_reason or "").strip() if is_suspended else ""
+        if not reason_value:
+            reason_value = None
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        items = list(
+            session.execute(
+                select(UserDictionaryItem)
+                .where(UserDictionaryItem.item_id.in_(item_ids))
+                .order_by(asc(UserDictionaryItem.item_id))
+            ).scalars().all()
+        )
+        if not items:
+            return 0
+
+        touched_dictionary_ids = set()
+        for item in items:
+            item.is_suspended = suspend_value
+            item.suspended_reason = reason_value
+            if suspend_value:
+                item.study_state = "suspended"
+            elif (item.study_state or "").strip().lower() == "suspended":
+                # Computed state comes from study_progress; fallback keeps legacy column valid.
+                item.study_state = "new"
+            item.updated_at = now_str
+            touched_dictionary_ids.add(item.dictionary_id)
+
+        if touched_dictionary_ids:
+            session.execute(
+                update(UserDictionary)
+                .where(UserDictionary.dictionary_id.in_(sorted(touched_dictionary_ids)))
+                .values(updated_at=now_str)
+            )
+
+        self._audit_event(
+            session,
+            event_type="user_dictionary_suspension_bulk_update",
+            operation="set_user_dictionary_items_suspension_bulk",
+            details={
+                "count": len(items),
+                "is_suspended": suspend_value,
+            },
+        )
+        return len(items)
+
     def sync_noise_from_lemmas(
         self,
         session: Session,
