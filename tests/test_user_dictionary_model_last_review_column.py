@@ -45,7 +45,7 @@ def test_background_role_applies_only_to_last_review_column():
     last_review_brush = model.data(model.index(0, 6), Qt.ItemDataRole.BackgroundRole)
     source_brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert last_review_brush is not None
-    assert last_review_brush.color().name().lower() == "#fff3e0"
+    assert last_review_brush.color().name().lower() == "#ffe3b8"
     assert source_brush is None
 
 

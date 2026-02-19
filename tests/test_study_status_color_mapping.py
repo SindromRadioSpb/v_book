@@ -39,4 +39,4 @@ def test_last_grade_row_brush_only_for_ud_rows():
     assert get_last_grade_row_brush(in_user_dictionary_count=0, last_grade="good") is None
     brush = get_last_grade_row_brush(in_user_dictionary_count=1, last_grade="again")
     assert brush is not None
-    assert brush.color().name().lower() == "#ffebee"
+    assert brush.color().name().lower() == "#ffd7d9"

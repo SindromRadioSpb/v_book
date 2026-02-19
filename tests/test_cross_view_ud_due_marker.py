@@ -29,7 +29,7 @@ def test_dictionary_ud_marker_is_due_aware():
     assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == "Again"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
-    assert brush.color().name().lower() == "#ffebee"
+    assert brush.color().name().lower() == "#ffd7d9"
 
 
 def test_terms_ud_marker_is_due_aware():
@@ -62,7 +62,7 @@ def test_terms_ud_marker_is_due_aware():
     assert model.data(model.index(0, 16), Qt.ItemDataRole.DisplayRole) == "Good"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
-    assert brush.color().name().lower() == "#e8f5e9"
+    assert brush.color().name().lower() == "#cdeed1"
 
 
 def test_tm_ud_marker_is_due_aware():
@@ -90,7 +90,7 @@ def test_tm_ud_marker_is_due_aware():
     assert model.data(model.index(0, 11), Qt.ItemDataRole.DisplayRole) == "Hard"
     brush = model.data(model.index(0, 3), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
-    assert brush.color().name().lower() == "#fff3e0"
+    assert brush.color().name().lower() == "#ffe3b8"
 
 
 def test_row_not_highlighted_when_not_in_user_dictionary():

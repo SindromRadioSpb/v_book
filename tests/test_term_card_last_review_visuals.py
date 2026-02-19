@@ -32,7 +32,7 @@ def test_term_card_last_review_column_and_row_highlight():
     assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == "Easy"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
-    assert brush.color().name().lower() == "#e0f2f1"
+    assert brush.color().name().lower() == "#c3e8e4"
 
 
 def test_term_card_no_ud_no_highlight():

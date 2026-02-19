@@ -71,11 +71,11 @@ NOISE_COLORS = {
 }
 
 LAST_REVIEW_GRADE_COLORS = {
-    "added": "#ECEFF1",
-    "again": "#FFEBEE",
-    "hard": "#FFF3E0",
-    "good": "#E8F5E9",
-    "easy": "#E0F2F1",
+    "added": "#DCE3E8",
+    "again": "#FFD7D9",
+    "hard": "#FFE3B8",
+    "good": "#CDEED1",
+    "easy": "#C3E8E4",
 }
 
 
