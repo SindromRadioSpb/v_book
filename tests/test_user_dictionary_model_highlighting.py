@@ -1,4 +1,4 @@
-"""Tests for UserDictionaryItemsTableModel study-status highlighting."""
+"""Legacy smoke tests for UserDictionaryItemsTableModel last-review highlighting."""
 
 from types import SimpleNamespace
 
@@ -18,6 +18,11 @@ def _item(study_state: str):
         computed_study_state=study_state,
         origin_kind="manual",
         status_tooltip="x",
+        last_grade="hard",
+        last_graded_at=None,
+        study_review_count=0,
+        study_due_at=None,
+        is_suspended=0,
     )
 
 
@@ -26,8 +31,9 @@ def test_user_dictionary_model_has_study_status_column_label():
     assert model.headerData(5, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Study Status"
 
 
-def test_row_background_uses_due_semantic_color():
+def test_last_review_cell_has_background_only_for_review_column():
     model = UserDictionaryItemsTableModel(items=[_item("due")])
-    brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
-    assert brush is not None
-    assert brush.color().name().lower() == "#fff3e0"
+    review_brush = model.data(model.index(0, 6), Qt.ItemDataRole.BackgroundRole)
+    source_brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
+    assert review_brush is not None
+    assert source_brush is None
