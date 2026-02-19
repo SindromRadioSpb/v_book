@@ -55,6 +55,9 @@ UI composition in `User Dictionaries`:
   - `Again` / `Hard` / `Good` / `Easy`
 - Ratings update `study_progress` (global by `canonical_hash`) using SM-2.
 - Optional inline translation edit in Review mode writes via canonical path and propagates to linked TM.
+- Manual due action is available in Browse mode: `Mark Due Now` / context action `Mark Selected as Due now (N rows)`.
+  - This sets linked `study_progress.due_at` to current time.
+  - Progress is global by canonical key, so duplicates linked to the same canonical hash become due together.
 
 ## Inline Edit + Context Menu
 
@@ -64,6 +67,7 @@ UI composition in `User Dictionaries`:
   - `Translate Selected (N rows)...`
   - `Mark Selected as Noise (N rows)`
   - `Mark Selected as Valid (N rows)`
+  - `Mark Selected as Due now (N rows)`
   - `Suspend Selected (N rows)`
   - `Resume Selected (N rows)`
 - Noise changes sync from User Dictionaries to `tm_global`, linked `tm_entry`, and linked source entities.

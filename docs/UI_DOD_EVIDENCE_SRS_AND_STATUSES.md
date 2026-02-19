@@ -19,6 +19,7 @@
 15. TM panel row tooltip shows study state for matching canonical key
 16. Cross-view UD marker switches from `*` to `*!` when row is due
 17. User Dictionaries context menu supports Suspend/Resume and due queue updates immediately
+18. User Dictionaries `Mark Due Now` action moves selected reviewed items into due queue after refresh
 
 ## Non-Functional Evidence
 

@@ -870,6 +870,63 @@ class UserDictionaryService:
         )
         return len(items)
 
+    def set_items_due_now_bulk(
+        self,
+        session: Session,
+        item_ids: List[int],
+    ) -> int:
+        """Force selected items' linked SRS progress due now (repeat immediately)."""
+        if not item_ids:
+            return 0
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        items = list(
+            session.execute(
+                select(UserDictionaryItem)
+                .where(UserDictionaryItem.item_id.in_(item_ids))
+                .order_by(asc(UserDictionaryItem.item_id))
+            ).scalars().all()
+        )
+        if not items:
+            return 0
+
+        study_service = StudyService()
+        progress_ids = set()
+        touched_dictionary_ids = set()
+        for item in items:
+            progress_id = item.study_progress_id
+            if not progress_id:
+                progress_id = study_service.ensure_progress(session, item.canonical_hash)
+                item.study_progress_id = progress_id
+            progress_ids.add(progress_id)
+            item.updated_at = now_str
+            touched_dictionary_ids.add(item.dictionary_id)
+
+        if progress_ids:
+            session.execute(
+                update(StudyProgress)
+                .where(StudyProgress.id.in_(sorted(progress_ids)))
+                .values(due_at=now_str, updated_at=now_str)
+            )
+
+        if touched_dictionary_ids:
+            session.execute(
+                update(UserDictionary)
+                .where(UserDictionary.dictionary_id.in_(sorted(touched_dictionary_ids)))
+                .values(updated_at=now_str)
+            )
+
+        self._audit_event(
+            session,
+            event_type="user_dictionary_due_now_bulk_update",
+            operation="set_user_dictionary_items_due_now_bulk",
+            details={
+                "item_count": len(items),
+                "progress_count": len(progress_ids),
+            },
+        )
+        return len(items)
+
     def sync_noise_from_lemmas(
         self,
         session: Session,

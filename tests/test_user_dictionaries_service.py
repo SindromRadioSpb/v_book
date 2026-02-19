@@ -702,3 +702,40 @@ def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
         item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
         assert item.is_suspended == 0
         assert item.suspended_reason is None
+
+
+def test_set_items_due_now_bulk_updates_linked_progress(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Due Now")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "due-me",
+                    "src_norm": "due-me",
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+        progress_before = session.execute(
+            select(StudyProgress).where(StudyProgress.id == item.study_progress_id)
+        ).scalar_one()
+        due_before = progress_before.due_at
+
+        changed = service.set_items_due_now_bulk(session, [item.item_id])
+        session.commit()
+        assert changed == 1
+
+        progress_after = session.execute(
+            select(StudyProgress).where(StudyProgress.id == item.study_progress_id)
+        ).scalar_one()
+        assert progress_after.due_at >= due_before

@@ -77,10 +77,11 @@ class FakeTable:
 def _build_view(selected_count: int):
     view = UserDictionariesView.__new__(UserDictionariesView)
     view.items_table = FakeTable(selected_count)
-    state = {"translate_called": 0, "noise_flags": [], "suspended_flags": []}
+    state = {"translate_called": 0, "noise_flags": [], "suspended_flags": [], "due_called": 0}
     view.on_translate_selected = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
     view.set_selected_noise_status = lambda flag: state["noise_flags"].append(flag)
     view.set_selected_suspension = lambda flag: state["suspended_flags"].append(flag)
+    view.set_selected_due_now = lambda: state.__setitem__("due_called", state["due_called"] + 1)
     return view, state
 
 
@@ -92,19 +93,22 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     UserDictionariesView.on_context_menu(view, pos=(0, 0))
 
     assert FakeMenu.last is not None
-    assert len(FakeMenu.last.actions) == 5
+    assert len(FakeMenu.last.actions) == 6
     assert FakeMenu.last.actions[0].text == "Translate Selected (3 rows)..."
     assert FakeMenu.last.actions[1].text == "Mark Selected as Noise (3 rows)"
     assert FakeMenu.last.actions[2].text == "Mark Selected as Valid (3 rows)"
-    assert FakeMenu.last.actions[3].text == "Suspend Selected (3 rows)"
-    assert FakeMenu.last.actions[4].text == "Resume Selected (3 rows)"
+    assert FakeMenu.last.actions[3].text == "Mark Selected as Due now (3 rows)"
+    assert FakeMenu.last.actions[4].text == "Suspend Selected (3 rows)"
+    assert FakeMenu.last.actions[5].text == "Resume Selected (3 rows)"
 
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
     FakeMenu.last.actions[2].triggered.emit()
     FakeMenu.last.actions[3].triggered.emit()
     FakeMenu.last.actions[4].triggered.emit()
+    FakeMenu.last.actions[5].triggered.emit()
 
     assert state["translate_called"] == 1
     assert state["noise_flags"] == [True, False]
+    assert state["due_called"] == 1
     assert state["suspended_flags"] == [True, False]

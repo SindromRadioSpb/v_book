@@ -392,6 +392,10 @@ class UserDictionariesView(QWidget):
         self.translate_selected_btn.clicked.connect(self.on_translate_selected)
         self.translate_selected_btn.setEnabled(False)
         actions_row.addWidget(self.translate_selected_btn)
+        self.mark_due_btn = QPushButton("Mark Due Now")
+        self.mark_due_btn.clicked.connect(self.set_selected_due_now)
+        self.mark_due_btn.setEnabled(False)
+        actions_row.addWidget(self.mark_due_btn)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.load_items)
         actions_row.addWidget(self.refresh_btn)
@@ -807,6 +811,7 @@ class UserDictionariesView(QWidget):
         count = len(self.items_table.selectionModel().selectedRows())
         self.remove_selected_btn.setEnabled(count > 0)
         self.translate_selected_btn.setEnabled(count > 0)
+        self.mark_due_btn.setEnabled(count > 0)
 
     def on_context_menu(self, pos):
         selected_rows = self.items_table.selectionModel().selectedRows()
@@ -829,6 +834,10 @@ class UserDictionariesView(QWidget):
         mark_valid_action.triggered.connect(lambda: self.set_selected_noise_status(False))
         menu.addAction(mark_valid_action)
         menu.addSeparator()
+
+        mark_due_action = QAction(f"Mark Selected as Due now ({count} rows)", self)
+        mark_due_action.triggered.connect(self.set_selected_due_now)
+        menu.addAction(mark_due_action)
 
         suspend_action = QAction(f"Suspend Selected ({count} rows)", self)
         suspend_action.triggered.connect(lambda: self.set_selected_suspension(True))
@@ -896,6 +905,42 @@ class UserDictionariesView(QWidget):
         except Exception as e:
             logger.error("Failed to set user dictionary noise status: %s", e, exc_info=True)
             QMessageBox.warning(self, "Update Failed", f"Failed to update noise status:\n{e}")
+
+    def set_selected_due_now(self):
+        item_ids = self._selected_item_ids()
+        if not item_ids:
+            return
+
+        if len(item_ids) > 100:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Bulk Action",
+                f"You are about to mark {len(item_ids):,} rows as due now.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            with self.db_service.get_session() as session:
+                changed = self.user_dict_service.set_items_due_now_bulk(
+                    session=session,
+                    item_ids=item_ids,
+                )
+                session.commit()
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Marked {changed:,} rows as due now.\n"
+                "Note: SRS progress is global by canonical key.",
+            )
+            self.load_items()
+            if self._view_mode == "review":
+                self.load_review_queue(reset_index=True)
+        except Exception as e:
+            logger.error("Failed to mark user dictionary rows due now: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Update Failed", f"Failed to mark due now:\n{e}")
 
     def set_selected_suspension(self, is_suspended: bool):
         item_ids = self._selected_item_ids()
