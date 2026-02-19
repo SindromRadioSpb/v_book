@@ -106,6 +106,7 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
 
         attempts = max(1, int(cfg.retry_max_attempts))
         backoff_ms = max(100, int(cfg.retry_backoff_base_ms))
+        can_retry_without_voice_name = bool(voice_name)
         for attempt in range(1, attempts + 1):
             try:
                 with urllib.request.urlopen(req, timeout=cfg.timeout_seconds) as response:
@@ -127,6 +128,19 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
                     )
             except urllib.error.HTTPError as http_err:
                 err_kind, err_message = self._classify_http_error(http_err)
+                if (
+                    can_retry_without_voice_name
+                    and int(http_err.code) == 400
+                    and "voice" in err_message.lower()
+                    and "does not exist" in err_message.lower()
+                ):
+                    # Saved voice IDs may become invalid across projects/regions.
+                    # Retry once with language-only selection to avoid hard failure.
+                    can_retry_without_voice_name = False
+                    body["voice"].pop("name", None)
+                    payload = json.dumps(body).encode("utf-8")
+                    req = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
+                    continue
                 if attempt < attempts and err_kind in {AudioErrorKind.NETWORK, AudioErrorKind.RATE_LIMIT, AudioErrorKind.SERVER}:
                     time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
                     continue

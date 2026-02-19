@@ -31,6 +31,13 @@ class _DummySettings:
         return default
 
 
+class _AudioDisabledSettings(_DummySettings):
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        if key == "audio/providers/enabled":
+            return False
+        return super().get_bool(key, default)
+
+
 def _workspace_temp_dir(prefix: str) -> Path:
     root = Path("build") / "tmp_tests"
     root.mkdir(parents=True, exist_ok=True)
@@ -110,6 +117,40 @@ def test_generate_one_rejects_invalid_source_payload(monkeypatch):
 
             count = int(session.execute(select(func.count(AudioAsset.asset_id))).scalar() or 0)
             assert count == 0
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_audio_dir, ignore_errors=True)
+
+
+def test_generate_one_records_failed_status_when_provider_chain_unavailable(monkeypatch):
+    temp_audio_dir = _workspace_temp_dir("audio_no_provider_")
+    db_path = temp_audio_dir / "audio_no_provider.db"
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+
+        service = AudioGenerationService(settings=_AudioDisabledSettings())
+        with Session(engine) as session:
+            result = service.generate_one(
+                session,
+                src_text="shalom",
+                src_lang="he",
+                source_norm="shalom",
+                provider_mode="chain",
+                force_regenerate=False,
+                trace_id="t-audio-no-provider",
+            )
+            session.commit()
+
+            assert result["ok"] is False
+            assert result["status"] == "failed"
+            assert "No audio provider available" in str(result["error"])
+
+            row = session.execute(select(AudioAsset).where(AudioAsset.norm_text == "shalom")).scalar_one()
+            assert row.asset_status == "failed"
+            assert "No audio provider available" in str(row.error_text)
     finally:
         engine.dispose()
         shutil.rmtree(temp_audio_dir, ignore_errors=True)

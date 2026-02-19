@@ -301,12 +301,24 @@ class AudioGenerationService:
         voice_id, speed = self._resolve_voice_speed()
         provider_chain = self._resolve_provider_chain(provider_mode)
         if not provider_chain:
-            return {"ok": False, "status": "failed", "provider_id": None, "error": "No audio provider available"}
+            last_error = "No audio provider available"
+            self.audio_asset_service.upsert_status(
+                session=session,
+                lang=source_lang_clean,
+                norm_text=source_norm_clean,
+                voice_id=voice_id,
+                speed=speed,
+                provider="none",
+                status="failed",
+                error_text=last_error,
+            )
+            return {"ok": False, "status": "failed", "provider_id": None, "error": last_error}
 
         registry = AudioProvidersRegistry()
         usage_tracker = AudioUsageTracker(session)
         req_trace = trace_id or str(uuid.uuid4())
         last_error = "All providers failed"
+        failed_recorded = False
         app_dir = _get_app_dir()
         source_char_count = len(source_text)
         pronunciation_payload = self._prepare_pronunciation_payload(
@@ -337,6 +349,7 @@ class AudioGenerationService:
                     status="failed",
                     error_text=last_error[:1000],
                 )
+                failed_recorded = True
                 continue
 
             limits = provider_cfg.to_budget_limits()
@@ -359,6 +372,7 @@ class AudioGenerationService:
                             status="failed",
                             error_text=last_error[:1000],
                         )
+                        failed_recorded = True
                         continue
                 except Exception as budget_err:
                     err_text = str(budget_err).lower()
@@ -381,6 +395,7 @@ class AudioGenerationService:
                             status="failed",
                             error_text=str(last_error)[:1000],
                         )
+                        failed_recorded = True
                         continue
                     logger.warning(
                         "Audio budget check failed for %s (%s), continuing (fail_open)",
@@ -417,6 +432,7 @@ class AudioGenerationService:
                     status="failed",
                     error_text=last_error[:1000],
                 )
+                failed_recorded = True
                 continue
 
             rel_path = self._asset_rel_path(
@@ -466,6 +482,18 @@ class AudioGenerationService:
                 "error": None,
                 "audio_rel_path": safe_rel,
             }
+
+        if not failed_recorded:
+            self.audio_asset_service.upsert_status(
+                session=session,
+                lang=source_lang_clean,
+                norm_text=source_norm_clean,
+                voice_id=voice_id,
+                speed=speed,
+                provider="none",
+                status="failed",
+                error_text=last_error[:1000],
+            )
 
         return {"ok": False, "status": "failed", "provider_id": None, "error": last_error}
 
