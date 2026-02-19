@@ -44,6 +44,34 @@ Target professional chain:
 - Fallback/dev: `mock_local_audio`, `mock_online_audio`
 - Optional local (not in default chain): `mms_tts_local` (license-gated, default disabled)
 
+Master switch:
+
+- `audio/providers/enabled` disables all audio providers when `False`.
+- In this state, generation exits early with `No audio provider available`.
+
+## Budget guards and usage tracking
+
+Audio budget guards mirror MT settings per provider:
+
+- `max_chars_per_request`
+- `max_requests_per_minute`
+- `max_chars_per_day`
+- `max_chars_per_month`
+- `max_requests_per_day`
+- `fail_closed`
+
+Usage is tracked in `audio_usage` table with minute/day/month buckets:
+
+- table: `audio_usage`
+- key: `(provider_id, period_type, period_key)` unique
+- counters: `char_count`, `request_count`
+
+Pipeline behavior:
+
+- per-request limit is validated before provider call;
+- when `fail_closed=true`, exceeding budget blocks provider call;
+- successful generation records usage (`char_count=len(source_text)`).
+
 ## Pronunciation layer contract
 
 Pronunciation enrichment is applied before synthesis:
@@ -85,7 +113,6 @@ Supported actions:
 - `Generate Audio Selected (N rows)...`
 - `Play Audio Selected (N rows)`
 - `Edit Pronunciation...` (manual override dialog for source norm)
-- `Play Audio Selected (N rows)`
 
 Write modes:
 
@@ -95,3 +122,18 @@ Write modes:
 Provider settings entrypoint:
 
 - `Tools -> Translation -> Audio Provider Settings...`
+
+Audio Provider Settings tabs:
+
+- `Rate Limits`
+- `Provider Chain`
+- `Advanced Settings`
+
+Advanced includes:
+
+- credentials (`Load from File...` / `Clear` for Google Service Account JSON),
+- Azure API key set/clear + region,
+- budget guards,
+- retry/timeout,
+- current usage summary (minute/day/month),
+- MMS license-gate + model path.
