@@ -36,10 +36,27 @@ Main fields:
 ## Generation Flow (P0)
 
 - Entry point: `User Dictionaries` -> `Generate Audio...` (toolbar or context menu).
+- Additional entry points:
+  - `Dictionary` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
+  - `Terms` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
+  - `Term Cards` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
+  - `Translation Management` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
 - Long operation runs in `UserDictGenerateAudioWorker` with `BatchProgressDialogV3` (cancel/pause/resume).
+- Cross-view selected-row flow uses `BatchGenerateAudioWorker` with the same `BatchProgressDialogV3` contract.
 - Provider mode:
   - `chain` (recommended)
   - `force:<provider_id>`
 - Write mode:
   - `MISSING_ONLY`
   - `REGENERATE_ALL`
+
+## Playback UX
+
+- `Play Audio` action is available for selected rows in:
+  - `User Dictionaries`
+  - `Dictionary`
+  - `Terms`
+  - `Term Cards`
+  - `Translation Management`
+- Playback opens first ready asset among selected rows via OS default player.
+- If no ready audio exists, UI shows a non-fatal hint to run `Generate Audio...`.

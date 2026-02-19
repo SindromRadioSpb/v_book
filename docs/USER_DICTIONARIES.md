@@ -110,4 +110,5 @@ UI composition in `User Dictionaries`:
   - toolbar button `Generate Audio...`
   - context menu `Generate Audio Selected (N rows)...`
 - Batch generation uses worker + `BatchProgressDialogV3` with cancel/pause/resume.
-- Playback is still out of scope for this patch line.
+- `Play Audio` is available for selected rows (opens first ready asset in system player).
+- Same Generate/Play entrypoints are available in `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.

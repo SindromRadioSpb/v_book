@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,17 @@ def _get_app_dir() -> Path:
 
 class AudioPlaybackService:
     """Resolve ready audio asset path for UI playback controls."""
+
+    @staticmethod
+    def launch_audio_file(path: Path) -> None:
+        """Open audio file with OS default player."""
+        if sys.platform == "win32":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+            return
+        subprocess.Popen(["xdg-open", str(path)])
 
     @staticmethod
     def resolve_ready_path(

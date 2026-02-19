@@ -14,12 +14,14 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QMenu,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, QModelIndex, QTimer
 from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
+from app.services.audio_playback_service import AudioPlaybackService
 from app.services.translation_service import TranslationService
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
@@ -29,8 +31,15 @@ from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, WhyTranslationDialog
+from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
+from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
-from app.ui.workers import TranslationResolveWorker, DictionarySearchWorker, UserDictionaryBulkAddWorker
+from app.ui.workers import (
+    TranslationResolveWorker,
+    DictionarySearchWorker,
+    UserDictionaryBulkAddWorker,
+    BatchGenerateAudioWorker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +52,10 @@ class DictionaryView(QWidget):
         self.project_id = project_id
         self.db_service = DBService.get_instance()
         self.translation_service = TranslationService()
+        self.audio_playback_service = AudioPlaybackService()
         self.user_dict_service = UserDictionaryService()
         self.translation_worker: Optional[TranslationResolveWorker] = None
+        self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
         self.settings = SettingsService.get_instance()
 
         # Pagination state
@@ -111,6 +122,16 @@ class DictionaryView(QWidget):
         self.batch_translate_btn.clicked.connect(self.on_batch_translate)
         self.batch_translate_btn.setEnabled(False)  # Disabled until selection
         header_layout.addWidget(self.batch_translate_btn)
+
+        self.generate_audio_btn = QPushButton("Generate Audio...")
+        self.generate_audio_btn.clicked.connect(self.on_generate_audio_selected)
+        self.generate_audio_btn.setEnabled(False)
+        header_layout.addWidget(self.generate_audio_btn)
+
+        self.play_audio_btn = QPushButton("Play Audio")
+        self.play_audio_btn.clicked.connect(self.on_play_audio_selected)
+        self.play_audio_btn.setEnabled(False)
+        header_layout.addWidget(self.play_audio_btn)
 
         layout.addLayout(header_layout)
 
@@ -676,6 +697,132 @@ class DictionaryView(QWidget):
             logger.exception("Failed to save TM entry")
             show_error(self, "Save Error", f"Failed to save translation: {e}")
 
+    def _selected_audio_items(self) -> List[dict]:
+        """Build source-audio payloads from selected lemma rows."""
+        selected_rows = self.lemma_table.selectionModel().selectedRows()
+        items: List[dict] = []
+        for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
+            source_row = self.proxy_model.map_to_source_row(proxy_index.row())
+            lemma = self.lemma_model.lemmas[source_row]
+            src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (lemma.norm_text or "")
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "row_id": str(lemma.lemma_id),
+                    "src_text": lemma.lemma_text,
+                    "src_lang": "he",
+                    "src_norm": src_norm,
+                }
+            )
+        return items
+
+    def on_generate_audio_selected(self):
+        """Generate source-audio for selected rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+
+        accepted, provider_mode, write_mode, _scope = show_batch_audio_dialog(
+            parent=self,
+            selected_count=len(items),
+            scope_enabled=False,
+            filtered_count=len(items),
+        )
+        if not accepted:
+            return
+
+        progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
+        progress_dialog.setWindowTitle("Batch Generate Source Audio")
+        progress_dialog.show()
+
+        worker = BatchGenerateAudioWorker(
+            items=items,
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            audio_chunk=25,
+        )
+        self.batch_audio_worker = worker
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
+
+        self.generate_audio_btn.setEnabled(False)
+        worker.finished.connect(self.on_selection_changed)
+        worker.error.connect(self.on_selection_changed)
+        worker.start()
+
+    def _on_generate_audio_finished(self, result: dict, progress_dialog: BatchProgressDialogV3):
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(
+            int(result.get("succeeded", 0)),
+            int(result.get("skipped", 0)),
+            int(result.get("failed", 0)),
+        )
+        progress_dialog.accept()
+
+        msg = (
+            "Audio generation completed.\n\n"
+            f"Total: {int(result.get('total', 0))}\n"
+            f"Ready: {int(result.get('succeeded', 0))}\n"
+            f"Skipped: {int(result.get('skipped', 0))}\n"
+            f"Failed: {int(result.get('failed', 0))}"
+        )
+        if int(result.get("failed", 0)) > 0:
+            QMessageBox.warning(self, "Audio Generation Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Audio Generation Complete", msg)
+
+        if self.batch_audio_worker:
+            self.batch_audio_worker.deleteLater()
+            self.batch_audio_worker = None
+        self.perform_search()
+
+    def _on_generate_audio_error(self, error_msg: str, progress_dialog: BatchProgressDialogV3):
+        progress_dialog.reject()
+        QMessageBox.warning(self, "Audio Generation Failed", error_msg)
+        if self.batch_audio_worker:
+            self.batch_audio_worker.deleteLater()
+            self.batch_audio_worker = None
+        self.on_selection_changed()
+
+    def on_play_audio_selected(self):
+        """Play first ready audio from selected rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+
+        try:
+            with self.db_service.get_session() as session:
+                ready_path = None
+                for item in items:
+                    ready_path = self.audio_playback_service.resolve_ready_path(
+                        session,
+                        lang=item["src_lang"],
+                        norm_text=item["src_norm"],
+                    )
+                    if ready_path:
+                        break
+
+            if not ready_path:
+                QMessageBox.information(
+                    self,
+                    "Audio Missing",
+                    "No ready audio found for selected rows.\nUse 'Generate Audio...' first.",
+                )
+                return
+
+            self.audio_playback_service.launch_audio_file(ready_path)
+        except Exception as e:
+            logger.error("Failed to play audio in Dictionary: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
+
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
         index = self.lemma_table.indexAt(pos)  # Returns PROXY index
@@ -695,6 +842,14 @@ class DictionaryView(QWidget):
             translate_action = QAction(f"Translate Selected ({len(selected_rows)} rows)...", self)
             translate_action.triggered.connect(self.on_batch_translate)
             menu.addAction(translate_action)
+
+            generate_audio_action = QAction(f"Generate Audio Selected ({len(selected_rows)} rows)...", self)
+            generate_audio_action.triggered.connect(self.on_generate_audio_selected)
+            menu.addAction(generate_audio_action)
+
+            play_audio_action = QAction(f"Play Audio Selected ({len(selected_rows)} rows)", self)
+            play_audio_action.triggered.connect(self.on_play_audio_selected)
+            menu.addAction(play_audio_action)
 
             add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
@@ -1067,7 +1222,10 @@ class DictionaryView(QWidget):
     def on_selection_changed(self):
         """PATCH-UI-BATCH-T02: Handle selection change - enable/disable batch translate button."""
         selected_rows = self.lemma_table.selectionModel().selectedRows()
-        self.batch_translate_btn.setEnabled(len(selected_rows) > 0)
+        has_selection = len(selected_rows) > 0
+        self.batch_translate_btn.setEnabled(has_selection)
+        self.generate_audio_btn.setEnabled(has_selection)
+        self.play_audio_btn.setEnabled(has_selection)
 
     def on_batch_translate(self):
         """Task 15: Handle batch translate action with scope support."""
@@ -1332,6 +1490,13 @@ class DictionaryView(QWidget):
             self.translation_worker.wait(1000)
             if self.translation_worker.isRunning():
                 self.translation_worker.terminate()
+
+        if self.batch_audio_worker and self.batch_audio_worker.isRunning():
+            logger.info("Stopping batch audio worker on close")
+            self.batch_audio_worker.cancel()
+            self.batch_audio_worker.wait(1000)
+            if self.batch_audio_worker.isRunning():
+                self.batch_audio_worker.terminate()
 
         # Save header state (column order, widths, sort)
         self.table_layout_controller.save_now()

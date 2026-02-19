@@ -11,6 +11,7 @@ from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
+from app.services.audio_playback_service import AudioPlaybackService
 from app.services.term_card_service import TermCardService
 from app.services.user_dictionary_service import UserDictionaryService
 from app.domain.normalization.normalizer import normalize_for_tm
@@ -18,8 +19,10 @@ from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, show_info
+from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
+from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
-from app.ui.workers import UserDictionaryBulkAddWorker
+from app.ui.workers import UserDictionaryBulkAddWorker, BatchGenerateAudioWorker
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +34,11 @@ class TermCardView(QWidget):
         super().__init__()
         self.project_id = project_id
         self.db_service = DBService.get_instance()
+        self.audio_playback_service = AudioPlaybackService()
         self.card_service = TermCardService()
         self.user_dict_service = UserDictionaryService()
         self.settings = SettingsService.get_instance()
+        self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
 
         self.current_card: Optional[TermCardDTO] = None
         self.current_queue_index = -1
@@ -185,6 +190,16 @@ class TermCardView(QWidget):
         self.unpin_translation_btn.clicked.connect(self.unpin_translation)
         other_actions_layout.addWidget(self.unpin_translation_btn)
 
+        self.generate_audio_btn = QPushButton("Generate Audio...")
+        self.generate_audio_btn.clicked.connect(self.on_generate_audio_selected)
+        self.generate_audio_btn.setEnabled(False)
+        other_actions_layout.addWidget(self.generate_audio_btn)
+
+        self.play_audio_btn = QPushButton("Play Audio")
+        self.play_audio_btn.clicked.connect(self.on_play_audio_selected)
+        self.play_audio_btn.setEnabled(False)
+        other_actions_layout.addWidget(self.play_audio_btn)
+
         other_actions_layout.addStretch()
         actions_layout.addLayout(other_actions_layout)
 
@@ -228,6 +243,7 @@ class TermCardView(QWidget):
         self.queue_table.clicked.connect(self.on_queue_item_clicked)
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_table.customContextMenuRequested.connect(self.on_queue_context_menu)
+        self.queue_table.selectionModel().selectionChanged.connect(self.on_queue_selection_changed)
 
         self.table_layout_controller = TableLayoutController(
             settings=self.settings,
@@ -285,6 +301,7 @@ class TermCardView(QWidget):
 
                 self.queue_model.update_cards(cards)
                 self.queue_status_label.setText(f"Showing {len(cards)} terms")
+                self.on_queue_selection_changed()
 
                 # If there are cards and no current card, load first one
                 if cards and not self.current_card:
@@ -332,6 +349,140 @@ class TermCardView(QWidget):
         self.current_queue_index = row
         self.load_card_at_index(row)
 
+    def on_queue_selection_changed(self):
+        """Enable/disable audio actions by queue selection."""
+        selected_rows = self.queue_table.selectionModel().selectedRows()
+        has_selection = len(selected_rows) > 0
+        self.generate_audio_btn.setEnabled(has_selection)
+        self.play_audio_btn.setEnabled(has_selection)
+
+    def _selected_audio_items(self) -> list[dict]:
+        """Build source-audio payloads from selected queue rows."""
+        selected_rows = self.queue_table.selectionModel().selectedRows()
+        items: list[dict] = []
+        for index in sorted(selected_rows, key=lambda idx: idx.row()):
+            card = self.queue_model.get_card(index.row())
+            if not card:
+                continue
+            src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "row_id": str(card.cluster_id),
+                    "src_text": card.representative_he,
+                    "src_lang": "he",
+                    "src_norm": src_norm,
+                }
+            )
+        return items
+
+    def on_generate_audio_selected(self):
+        """Generate source-audio for selected review-queue rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+
+        accepted, provider_mode, write_mode, _scope = show_batch_audio_dialog(
+            parent=self,
+            selected_count=len(items),
+            scope_enabled=False,
+            filtered_count=len(items),
+        )
+        if not accepted:
+            return
+
+        progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
+        progress_dialog.setWindowTitle("Batch Generate Source Audio")
+        progress_dialog.show()
+
+        worker = BatchGenerateAudioWorker(
+            items=items,
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            audio_chunk=25,
+        )
+        self.batch_audio_worker = worker
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
+
+        self.generate_audio_btn.setEnabled(False)
+        worker.finished.connect(self.on_queue_selection_changed)
+        worker.error.connect(self.on_queue_selection_changed)
+        worker.start()
+
+    def _on_generate_audio_finished(self, result: dict, progress_dialog: BatchProgressDialogV3):
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(
+            int(result.get("succeeded", 0)),
+            int(result.get("skipped", 0)),
+            int(result.get("failed", 0)),
+        )
+        progress_dialog.accept()
+
+        msg = (
+            "Audio generation completed.\n\n"
+            f"Total: {int(result.get('total', 0))}\n"
+            f"Ready: {int(result.get('succeeded', 0))}\n"
+            f"Skipped: {int(result.get('skipped', 0))}\n"
+            f"Failed: {int(result.get('failed', 0))}"
+        )
+        if int(result.get("failed", 0)) > 0:
+            QMessageBox.warning(self, "Audio Generation Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Audio Generation Complete", msg)
+
+        if self.batch_audio_worker:
+            self.batch_audio_worker.deleteLater()
+            self.batch_audio_worker = None
+        self.load_review_queue()
+
+    def _on_generate_audio_error(self, error_msg: str, progress_dialog: BatchProgressDialogV3):
+        progress_dialog.reject()
+        QMessageBox.warning(self, "Audio Generation Failed", error_msg)
+        if self.batch_audio_worker:
+            self.batch_audio_worker.deleteLater()
+            self.batch_audio_worker = None
+        self.on_queue_selection_changed()
+
+    def on_play_audio_selected(self):
+        """Play first ready audio from selected queue rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+
+        try:
+            with self.db_service.get_session() as session:
+                ready_path = None
+                for item in items:
+                    ready_path = self.audio_playback_service.resolve_ready_path(
+                        session,
+                        lang=item["src_lang"],
+                        norm_text=item["src_norm"],
+                    )
+                    if ready_path:
+                        break
+
+            if not ready_path:
+                QMessageBox.information(
+                    self,
+                    "Audio Missing",
+                    "No ready audio found for selected rows.\nUse 'Generate Audio...' first.",
+                )
+                return
+
+            self.audio_playback_service.launch_audio_file(ready_path)
+        except Exception as e:
+            logger.error("Failed to play audio in Term Cards: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
+
     def on_queue_context_menu(self, pos):
         """Context menu for review queue rows."""
         selected_rows = self.queue_table.selectionModel().selectedRows()
@@ -340,6 +491,13 @@ class TermCardView(QWidget):
 
         count = len(selected_rows)
         menu = QMenu(self)
+        generate_action = QAction(f"Generate Audio Selected ({count} rows)...", self)
+        generate_action.triggered.connect(self.on_generate_audio_selected)
+        menu.addAction(generate_action)
+        play_action = QAction(f"Play Audio Selected ({count} rows)", self)
+        play_action.triggered.connect(self.on_play_audio_selected)
+        menu.addAction(play_action)
+        menu.addSeparator()
         add_action = QAction(f"Add Selected to User Dictionary ({count} rows)...", self)
         add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
         menu.addAction(add_action)
@@ -787,5 +945,11 @@ class TermCardView(QWidget):
 
     def closeEvent(self, event):
         """Persist term-card queue table layout on close."""
+        if self.batch_audio_worker and self.batch_audio_worker.isRunning():
+            logger.info("Stopping term-card batch audio worker on close")
+            self.batch_audio_worker.cancel()
+            self.batch_audio_worker.wait(1000)
+            if self.batch_audio_worker.isRunning():
+                self.batch_audio_worker.terminate()
         self.table_layout_controller.save_now()
         super().closeEvent(event)

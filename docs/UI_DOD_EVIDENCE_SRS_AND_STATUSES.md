@@ -28,6 +28,10 @@
 24. After generation, `Audio` column updates (`missing -> ready` or `failed`) on refresh
 25. `Generate Audio Selected (N rows)...` exists in User Dictionaries context menu
 26. `Audio` column is visible in Dictionary, Terms, Term Cards, and TM Panel
+27. `Generate Audio...` button exists in Dictionary, Terms, Term Cards, and TM Panel
+28. Context menus in Dictionary/Terms/Term Cards/TM include `Generate Audio Selected (N rows)...`
+29. Context menus in Dictionary/Terms/Term Cards/TM include `Play Audio Selected (N rows)`
+30. `Play Audio` opens first ready asset from selected rows; missing case shows hint message
 
 ## Non-Functional Evidence
 
@@ -37,6 +41,7 @@
 - No UI freeze during long operations
 - Existing long operations continue to use worker + `BatchProgressDialogV3`
 - Audio generation follows worker-only long-op contract (`UserDictGenerateAudioWorker`)
+- Cross-view selected-row audio generation follows worker-only contract (`BatchGenerateAudioWorker`)
 - Table content remains scrollable at small window sizes
 - Semantic color layer is additive only (icons/text/tooltip remain primary semantic carriers)
 - Last Review highlighting is isolated to one column to avoid conflicts with due/noise/suspended semantics
