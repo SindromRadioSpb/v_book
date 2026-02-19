@@ -246,10 +246,13 @@ class UserDictionaryItemDTO:
     origin_kind: str = "manual"
     computed_study_state: str = "new"
     study_due_human: Optional[str] = None
+    study_due_at: Optional[str] = None
     study_review_count: int = 0
     study_lapse_count: int = 0
     study_interval_days: int = 0
     study_ease_factor: float = 2.5
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
     translation_tier: str = "missing"
     status_tooltip: Optional[str] = None
 
@@ -268,6 +271,8 @@ class StudyProgressSummaryDTO:
     interval_days: int
     ease_factor: float
     last_quality: Optional[int]
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
     is_suspended: bool = False
     study_state: str = "new"
     due_human: Optional[str] = None

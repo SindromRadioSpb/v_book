@@ -161,6 +161,8 @@ class StudyService:
                     interval_days=0,
                     ease_factor=2.5,
                     last_quality=None,
+                    last_grade=None,
+                    last_graded_at=None,
                 )
             else:
                 summary = StudyProgressSummaryDTO(
@@ -174,6 +176,8 @@ class StudyService:
                     interval_days=row.interval_days or 0,
                     ease_factor=float(row.ease_factor or 2.5),
                     last_quality=row.last_quality,
+                    last_grade=row.last_grade,
+                    last_graded_at=row.last_graded_at,
                 )
 
             summary.study_state = self.compute_study_state(summary, now_dt)
@@ -235,6 +239,8 @@ class StudyService:
                 interval_days=progress.interval_days or 0,
                 ease_factor=float(progress.ease_factor or 2.5),
                 last_quality=progress.last_quality,
+                last_grade=progress.last_grade,
+                last_graded_at=progress.last_graded_at,
             )
             summary.study_state = self.compute_study_state(summary, now_dt)
             summary.due_human = self.compute_due_human(summary, now_dt)
@@ -315,6 +321,8 @@ class StudyService:
         row.ease_factor = ef_after
         row.last_quality = q
         row.last_review_at = now_str
+        row.last_grade = rating_key
+        row.last_graded_at = now_str
         row.due_at = self._to_iso(now_dt + timedelta(days=int(row.interval_days or 0)))
         row.updated_at = now_str
         session.flush()
@@ -330,6 +338,8 @@ class StudyService:
             interval_days=row.interval_days or 0,
             ease_factor=float(row.ease_factor or 2.5),
             last_quality=row.last_quality,
+            last_grade=row.last_grade,
+            last_graded_at=row.last_graded_at,
         )
         summary.study_state = self.compute_study_state(summary, now_dt)
         summary.due_human = self.compute_due_human(summary, now_dt)
@@ -413,4 +423,3 @@ class StudyService:
         if (origin_entity_type or "").lower() == "manual":
             return "manual"
         return "manual"
-

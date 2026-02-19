@@ -679,7 +679,16 @@ class StudyProgress(Base):
     interval_days = Column(Integer, nullable=False, default=0)
     ease_factor = Column(Float, nullable=False, default=2.5)
     last_quality = Column(Integer)
+    last_grade = Column(String)
+    last_graded_at = Column(String)
     updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        CheckConstraint(
+            "last_grade IS NULL OR last_grade IN ('again', 'hard', 'good', 'easy')",
+            name="ck_study_progress_last_grade",
+        ),
+    )
 
 
 class UserDictionary(Base):
