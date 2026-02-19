@@ -568,7 +568,7 @@ class AudioProviderSettingsDialog(QDialog):
         for row in range(self.chain_list.count()):
             item = self.chain_list.item(row)
             chain.append(item.data(Qt.ItemDataRole.UserRole))
-        self.settings.set_value("audio/providers/chain", chain)
+        self.settings.set_json("audio/providers/chain", chain)
 
         self._save_google_advanced_settings()
         self._save_azure_advanced_settings()

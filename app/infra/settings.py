@@ -67,9 +67,13 @@ class SettingsService:
         if not json_str:
             return default
 
+        # Backward compatibility: some callers may have saved native list/dict.
+        if isinstance(json_str, (list, dict)):
+            return json_str
+
         try:
             return json.loads(json_str)
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(f"Failed to parse JSON for key '{key}': {e}")
             return default
 
