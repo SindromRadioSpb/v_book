@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -272,6 +273,7 @@ class AudioProviderSettingsDialog(QDialog):
         ) = self._create_retry_group(layout)
 
         self.google_usage_label = self._create_usage_group(layout, "google_cloud_tts")
+        self._create_diagnostics_group(layout, "google_cloud_tts")
 
         layout.addStretch()
         return page
@@ -323,6 +325,7 @@ class AudioProviderSettingsDialog(QDialog):
         ) = self._create_retry_group(layout)
 
         self.azure_usage_label = self._create_usage_group(layout, "azure_speech_tts")
+        self._create_diagnostics_group(layout, "azure_speech_tts")
 
         layout.addStretch()
         return page
@@ -363,6 +366,7 @@ class AudioProviderSettingsDialog(QDialog):
         layout.addWidget(info)
 
         self.mms_usage_label = self._create_usage_group(layout, "mms_tts_local")
+        self._create_diagnostics_group(layout, "mms_tts_local")
         layout.addStretch()
         return page
 
@@ -447,6 +451,15 @@ class AudioProviderSettingsDialog(QDialog):
 
         root_layout.addWidget(group)
         return label
+
+    def _create_diagnostics_group(self, root_layout: QVBoxLayout, provider_id: str) -> None:
+        group = QGroupBox("Diagnostics")
+        layout = QHBoxLayout(group)
+        test_btn = QPushButton("Test API Connection")
+        test_btn.clicked.connect(lambda _=False, pid=provider_id: self._test_provider_connection(pid))
+        layout.addWidget(test_btn)
+        layout.addStretch()
+        root_layout.addWidget(group)
 
     def _move_up(self):
         row = self.chain_list.currentRow()
@@ -701,6 +714,93 @@ class AudioProviderSettingsDialog(QDialog):
         selected = QFileDialog.getExistingDirectory(self, "Select MMS model directory")
         if selected:
             self.mms_model_path_label.setText(selected)
+
+    def _test_provider_connection(self, provider_id: str):
+        provider_title = self.PROVIDERS.get(provider_id, {}).get("name", provider_id)
+        try:
+            if provider_id == "google_cloud_tts":
+                self._save_google_advanced_settings()
+            elif provider_id == "azure_speech_tts":
+                self._save_azure_advanced_settings()
+            elif provider_id == "mms_tts_local":
+                self._save_mms_advanced_settings()
+            self.settings.sync()
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Settings Error",
+                f"Failed to apply {provider_title} settings before test:\n{e}",
+            )
+            return
+
+        try:
+            from app.domain.normalization.normalizer import normalize_for_tm
+            from app.infra.audio import AudioGenerationRequest
+            from app.infra.audio.local_providers_setup import register_default_audio_providers
+            from app.infra.audio.providers_registry import AudioProvidersRegistry
+
+            register_default_audio_providers()
+            provider = AudioProvidersRegistry().get(provider_id)
+            if not provider:
+                QMessageBox.warning(
+                    self,
+                    "Provider Not Found",
+                    f"{provider_title} is not registered. Restart the app and retry.",
+                )
+                return
+
+            source_text = "שלום"
+            source_norm = normalize_for_tm("he", source_text, "surface").norm or source_text
+            request = AudioGenerationRequest(
+                source_text=source_text,
+                source_lang="he",
+                source_norm=source_norm,
+                voice_id="default",
+                speed=1.0,
+                trace_id=f"ui-test-{provider_id}",
+            )
+
+            progress = QProgressDialog(
+                f"Testing {provider_title}...\nGenerating sample audio for '{source_text}'",
+                None,
+                0,
+                0,
+                self,
+            )
+            progress.setWindowTitle("Test API Connection")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setCancelButton(None)
+            progress.show()
+
+            result = provider.generate(request)
+            progress.close()
+
+            if result.is_success:
+                QMessageBox.information(
+                    self,
+                    "Connection Successful",
+                    f"✓ {provider_title} is working.\n\n"
+                    f"Sample: '{source_text}' (he)\n"
+                    f"Bytes: {len(result.audio_bytes or b'')}\n"
+                    f"MIME: {result.mime_type}",
+                )
+                return
+
+            details = str(result.error_message or "Unknown error")
+            if result.error_kind is not None:
+                details = f"{result.error_kind.value}: {details}"
+            QMessageBox.critical(
+                self,
+                "Connection Failed",
+                f"✗ {provider_title} test failed.\n\n{details}",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Test Error",
+                f"Failed to test {provider_title} connection:\n{e}",
+            )
 
     def _refresh_usage(self, provider_id: str):
         label_map = {

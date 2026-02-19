@@ -102,6 +102,9 @@ class BatchAudioDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch()
+        settings_btn = QPushButton("Settings...")
+        settings_btn.clicked.connect(self._open_audio_settings)
+        buttons.addWidget(settings_btn)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
@@ -157,6 +160,22 @@ class BatchAudioDialog(QDialog):
         if self.all_pages_radio.isChecked():
             return "all_filtered"
         return "current_page"
+
+    def _open_audio_settings(self):
+        """Open Audio Provider Settings and refresh provider list on save."""
+        from app.ui.audio_provider_settings_dialog import show_audio_provider_settings
+
+        current_provider = self.provider_combo.currentText()
+        changed = show_audio_provider_settings(parent=self)
+        if not changed:
+            return
+
+        providers = list_available_audio_providers()
+        self.provider_combo.clear()
+        self.provider_combo.addItems(providers or ["mock_local_audio"])
+        restored_index = self.provider_combo.findText(current_provider)
+        if restored_index >= 0:
+            self.provider_combo.setCurrentIndex(restored_index)
 
     def accept(self):
         if self.force_radio.isChecked() and self.provider_combo.currentText() == "mms_tts_local":
