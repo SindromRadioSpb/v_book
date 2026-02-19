@@ -94,7 +94,7 @@ def test_review_summary_counts_scope_hide_noise_and_search_independence():
                 dictionary_id=dictionary_id,
                 canonical_hash="h-again",
                 grade="again",
-                review_count=2,
+                review_count=0,
                 is_noise=0,
                 origin_project_id=10,
             )

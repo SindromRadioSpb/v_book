@@ -35,6 +35,11 @@ def test_last_review_column_label_and_values():
     assert model.data(model.index(1, 6), Qt.ItemDataRole.DisplayRole) == "Good"
 
 
+def test_last_review_uses_grade_even_when_review_count_zero_after_again():
+    model = UserDictionaryItemsTableModel(items=[_item(grade="again", review_count=0)])
+    assert model.data(model.index(0, 6), Qt.ItemDataRole.DisplayRole) == "Again"
+
+
 def test_background_role_applies_only_to_last_review_column():
     model = UserDictionaryItemsTableModel(items=[_item(grade="hard", review_count=2)])
     last_review_brush = model.data(model.index(0, 6), Qt.ItemDataRole.BackgroundRole)

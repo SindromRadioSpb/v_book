@@ -166,10 +166,11 @@ def noise_brush(is_noise: int) -> QBrush:
 
 
 def normalize_last_grade(last_grade: Optional[str], review_count: int = 0) -> str:
+    del review_count  # last_grade is authoritative for "Last Review" semantics.
     key = (last_grade or "").strip().lower()
-    if review_count <= 0 or key not in ("again", "hard", "good", "easy"):
-        return "added"
-    return key
+    if key in ("again", "hard", "good", "easy"):
+        return key
+    return "added"
 
 
 def last_review_label(last_grade: Optional[str], review_count: int = 0) -> str:

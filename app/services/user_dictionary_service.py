@@ -1252,13 +1252,7 @@ class UserDictionaryService:
     ) -> Dict[str, int]:
         """Return review counters for opened dictionary: Added/Again/Hard/Good/Easy."""
         grade_expr = case(
-            (
-                or_(
-                    func.coalesce(StudyProgress.review_count, 0) <= 0,
-                    StudyProgress.last_grade.is_(None),
-                ),
-                "added",
-            ),
+            (StudyProgress.last_grade.is_(None), "added"),
             (StudyProgress.last_grade == "again", "again"),
             (StudyProgress.last_grade == "hard", "hard"),
             (StudyProgress.last_grade == "good", "good"),
