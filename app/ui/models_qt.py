@@ -9,7 +9,18 @@ from app.domain.dto import (
     UserDictionaryDTO,
     UserDictionaryItemDTO,
 )
-from app.ui.study_status_ui import compose_status_icons, origin_marker, study_chip
+from app.ui.study_status_ui import (
+    audio_status_brush,
+    compose_status_icons,
+    noise_brush,
+    origin_brush,
+    origin_marker,
+    study_brush,
+    study_chip,
+    translation_tier_brush,
+    ud_indicator_brush,
+    ud_indicator_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +143,18 @@ class LemmaTableModel(QAbstractTableModel):
                 return lemma.study_tooltip
             return None
 
+        if role == Qt.ItemDataRole.ForegroundRole and col == 0:
+            return ud_indicator_brush(
+                int(getattr(lemma, "in_user_dictionary_count", 0) or 0),
+                getattr(lemma, "study_state", None),
+            )
+
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return "*" if lemma.in_user_dictionary_count > 0 else ""
+                return ud_indicator_text(
+                    int(getattr(lemma, "in_user_dictionary_count", 0) or 0),
+                    getattr(lemma, "study_state", None),
+                )
             elif col == 1:
                 return lemma.lemma_text
             elif col == 2:
@@ -282,9 +302,18 @@ class TermClusterTableModel(QAbstractTableModel):
                 return cluster.study_tooltip
             return None
 
+        if role == Qt.ItemDataRole.ForegroundRole and col == 0:
+            return ud_indicator_brush(
+                int(getattr(cluster, "in_user_dictionary_count", 0) or 0),
+                getattr(cluster, "study_state", None),
+            )
+
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return "*" if cluster.in_user_dictionary_count > 0 else ""
+                return ud_indicator_text(
+                    int(getattr(cluster, "in_user_dictionary_count", 0) or 0),
+                    getattr(cluster, "study_state", None),
+                )
             elif col == 1:
                 return cluster.representative_he
             elif col == 2:
@@ -446,9 +475,18 @@ class TranslationManagementTableModel(QAbstractTableModel):
                 return entry.study_tooltip
             return None
 
+        if role == Qt.ItemDataRole.ForegroundRole and col == 0:
+            return ud_indicator_brush(
+                int(getattr(entry, "in_user_dictionary_count", 0) or 0),
+                getattr(entry, "study_state", None),
+            )
+
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
-                return "*" if int(entry.in_user_dictionary_count or 0) > 0 else ""
+                return ud_indicator_text(
+                    int(getattr(entry, "in_user_dictionary_count", 0) or 0),
+                    getattr(entry, "study_state", None),
+                )
             elif col == 1:
                 return str(entry.tm_id)
             elif col == 2:
@@ -564,9 +602,18 @@ class TermCardTableModel(QAbstractTableModel):
                 return study_tooltip
             return None
 
+        if role == Qt.ItemDataRole.ForegroundRole and col == 0:
+            return ud_indicator_brush(
+                int(getattr(card, "in_user_dictionary_count", 0) or 0),
+                getattr(card, "study_state", None),
+            )
+
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 0:
-                return "*" if int(getattr(card, "in_user_dictionary_count", 0) or 0) > 0 else ""
+                return ud_indicator_text(
+                    int(getattr(card, "in_user_dictionary_count", 0) or 0),
+                    getattr(card, "study_state", None),
+                )
             elif col == 1:
                 return card.representative_he
             elif col == 2:
@@ -720,6 +767,19 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ToolTipRole:
             if item.status_tooltip:
                 return item.status_tooltip
+            return None
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if col == 3:
+                return translation_tier_brush(item.translation_tier)
+            if col == 4:
+                return noise_brush(item.is_noise)
+            if col == 5:
+                return study_brush(item.computed_study_state)
+            if col == 6:
+                return origin_brush(item.origin_kind)
+            if col == 7:
+                return audio_status_brush(item.audio_status)
             return None
 
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):

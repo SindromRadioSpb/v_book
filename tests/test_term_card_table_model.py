@@ -20,6 +20,7 @@ def _card(
     is_stopword: bool = False,
     in_ud_count: int = 0,
     tooltip: str | None = None,
+    study_state: str | None = None,
 ):
     return SimpleNamespace(
         cluster_id=cluster_id,
@@ -33,6 +34,7 @@ def _card(
         is_stopword=is_stopword,
         in_user_dictionary_count=in_ud_count,
         study_tooltip=tooltip,
+        study_state=study_state,
     )
 
 
@@ -78,3 +80,21 @@ def test_tooltip_visible_only_for_ud_members():
 
     assert model.data(model.index(0, 1), Qt.ItemDataRole.ToolTipRole) == "saved tooltip"
     assert model.data(model.index(1, 1), Qt.ItemDataRole.ToolTipRole) is None
+
+
+def test_ud_due_marker_uses_star_bang():
+    model = TermCardTableModel(
+        cards=[
+            _card(
+                cluster_id=1,
+                term="due_term",
+                lemma="due_term",
+                freq=1,
+                doc_freq=1,
+                in_ud_count=1,
+                study_state="due",
+            ),
+        ]
+    )
+
+    assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"

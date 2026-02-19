@@ -318,6 +318,8 @@ class TermCardView(QWidget):
             overlay = overlay_map.get(canonical_hash) or {}
             card.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
             card.study_tooltip = overlay.get("study_tooltip")
+            card.study_state = overlay.get("study_state")
+            card.study_due_human = overlay.get("study_due_human")
 
     def on_queue_item_clicked(self, index):
         """Handle click on review queue item."""
