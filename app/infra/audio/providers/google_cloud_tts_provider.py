@@ -7,8 +7,9 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Tuple
+from typing import Optional, Tuple
 
 from app.infra.audio.audio_provider_config import AudioProviderAuthMode
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
@@ -170,6 +171,46 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
             error_kind=AudioErrorKind.UNKNOWN,
             error_message="Google TTS failed after retries",
         )
+
+    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], Optional[str]]:
+        """Return available voice names for a language."""
+        cfg = self._config_manager.load_config(self.provider_id)
+        if cfg.auth_mode != AudioProviderAuthMode.SERVICE_ACCOUNT_JSON:
+            return [], "google_cloud_tts requires service account auth mode"
+
+        try:
+            token, project_id = self._resolve_access_token_and_project(cfg)
+        except Exception as exc:
+            return [], str(exc)
+
+        endpoint = (
+            "https://texttospeech.googleapis.com/v1/voices?"
+            + urllib.parse.urlencode({"languageCode": language_code})
+        )
+        req = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "x-goog-user-project": project_id,
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=cfg.timeout_seconds) as response:
+                raw = response.read()
+            data = json.loads(raw.decode("utf-8"))
+            voices = []
+            for row in data.get("voices", []):
+                name = str(row.get("name") or "").strip()
+                if name:
+                    voices.append(name)
+            voices = sorted(set(voices))
+            return voices, None
+        except urllib.error.HTTPError as http_err:
+            _kind, message = self._classify_http_error(http_err)
+            return [], message
+        except Exception as exc:
+            return [], str(exc)
 
     def _resolve_access_token_and_project(self, cfg) -> Tuple[str, str]:
         sa_info = self._config_manager.get_service_account_info(cfg)

@@ -3,11 +3,12 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMenuBar
+from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStackedWidget, QMenuBar
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 
 from app.infra.settings import SettingsService
+from app.services.audio_player_service import AudioPlayerService
 from app.ui.workspace_manager import WorkspaceManager
 from app.ui.command_palette import ActionsRegistry, ActionSpec, CommandPaletteDialog
 from app.ui.project_dashboard import ProjectDashboard
@@ -17,6 +18,7 @@ from app.ui.translation_management_panel import TranslationManagementPanel
 from app.ui.user_dictionaries_view import UserDictionariesView
 from app.ui.coverage_panel import CoveragePanel
 from app.ui.import_wizard import ImportWizard
+from app.ui.widgets.audio_player_panel import AudioPlayerPanel
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +41,15 @@ class AppWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the UI."""
+        # Shared internal audio player singleton.
+        self.audio_player = AudioPlayerService.get_instance()
+
         # Central widget - workspace manager (create BEFORE menu bar)
         self.workspace = WorkspaceManager()
         self.setCentralWidget(self.workspace)
+
+        # Mini player dock (hidden by default).
+        self._init_audio_player_dock()
 
         # Alias for existing code (zero changes to navigation)
         self.stack = self.workspace.stack
@@ -74,7 +82,32 @@ class AppWindow(QMainWindow):
         self.palette_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
         self.palette_shortcut.activated.connect(self._open_command_palette)
 
+        # Global toggle for audio player dock.
+        self.audio_panel_shortcut = QShortcut(QKeySequence("Ctrl+Alt+L"), self)
+        self.audio_panel_shortcut.activated.connect(self.toggle_audio_player_panel)
+
         logger.info("AppWindow initialized")
+
+    def _init_audio_player_dock(self):
+        """Initialize Now Playing dock."""
+        self.audio_player_dock = QDockWidget("Audio Player", self)
+        self.audio_player_dock.setObjectName("audio_player_dock")
+        self.audio_player_dock.setAllowedAreas(
+            Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.audio_player_panel = AudioPlayerPanel(player=self.audio_player, parent=self.audio_player_dock)
+        self.audio_player_dock.setWidget(self.audio_player_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.audio_player_dock)
+
+        is_visible = self.settings.get_bool("audio/playback/panel_visible", False)
+        self.audio_player_dock.setVisible(is_visible)
+        self.audio_player_dock.visibilityChanged.connect(
+            lambda visible: self.settings.set_value("audio/playback/panel_visible", bool(visible))
+        )
+
+    def toggle_audio_player_panel(self):
+        """Toggle Now Playing panel visibility."""
+        self.audio_player_dock.setVisible(not self.audio_player_dock.isVisible())
 
     def create_menu_bar(self):
         """Create menu bar."""
@@ -164,6 +197,11 @@ class AppWindow(QMainWindow):
         reset_layout_action.setShortcut("Ctrl+Shift+R")
         reset_layout_action.triggered.connect(self.workspace.reset_to_default)
         view_menu.addAction(reset_layout_action)
+
+        toggle_audio_panel_action = QAction("Toggle &Audio Player", self)
+        toggle_audio_panel_action.setShortcut("Ctrl+Alt+L")
+        toggle_audio_panel_action.triggered.connect(self.toggle_audio_player_panel)
+        view_menu.addAction(toggle_audio_panel_action)
 
     def open_verification(self):
         """Open verification panel."""
@@ -359,6 +397,15 @@ class AppWindow(QMainWindow):
             shortcut="Ctrl+Alt+A",
             callback=self.open_audio_provider_settings,
             category="Tools"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="premium.audio_player",
+            title="Toggle Audio Player",
+            keywords=["audio", "playback", "now playing", "queue", "dock"],
+            shortcut="Ctrl+Alt+L",
+            callback=self.toggle_audio_player_panel,
+            category="Premium"
         ))
 
         registry.register(ActionSpec(

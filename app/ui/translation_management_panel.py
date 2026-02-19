@@ -39,6 +39,7 @@ from app.services.audio_playback_service import AudioPlaybackService
 from app.ui.models_qt import TranslationManagementTableModel
 from app.ui.workers import TMSearchWorker, TMExportWorker
 from app.ui.table_layout_controller import TableLayoutController
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.domain.dto import TMEntryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
@@ -475,6 +476,11 @@ class TranslationManagementPanel(QWidget):
             },
         )
         self.table_layout_controller.install()
+        self.audio_play_delegate = AudioPlayDelegate(
+            self.table_view,
+            on_play_clicked=self.on_audio_cell_play_clicked,
+        )
+        self.table_view.setItemDelegateForColumn(12, self.audio_play_delegate)
 
         # Install event filter for Enter key editing
         self.table_view.installEventFilter(self)
@@ -1539,24 +1545,39 @@ class TranslationManagementPanel(QWidget):
         self.on_selection_changed()
 
     def on_play_audio_selected(self):
-        """Play first ready audio from selected TM rows."""
+        """Play ready audio from selected TM rows using queue mode."""
         items = self._get_selected_audio_items()
         if not items:
             return
+        self._play_audio_items(items, play_mode="enqueue")
 
+    def on_audio_cell_play_clicked(self, index):
+        """Delegate callback: play one row from Audio column."""
+        entry = self.model.get_entry(index.row())
+        if not entry:
+            return
+        src_norm = (entry.src_norm or "").strip() or normalize_for_tm(
+            entry.src_lang, entry.src_text, entry.kind
+        ).norm
+        if not src_norm:
+            return
+        self._play_audio_items(
+            [
+                {
+                    "src_lang": entry.src_lang,
+                    "src_norm": src_norm,
+                    "src_text": entry.src_text,
+                }
+            ],
+            play_mode="interrupt",
+        )
+
+    def _play_audio_items(self, items: list[dict], *, play_mode: str):
         try:
             with DBService.get_instance().get_session() as session:
-                ready_path = None
-                for item in items:
-                    ready_path = self.audio_playback_service.resolve_ready_path(
-                        session,
-                        lang=item["src_lang"],
-                        norm_text=item["src_norm"],
-                    )
-                    if ready_path:
-                        break
+                ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
 
-            if not ready_path:
+            if not ready_items:
                 QMessageBox.information(
                     self,
                     "Audio Missing",
@@ -1564,7 +1585,9 @@ class TranslationManagementPanel(QWidget):
                 )
                 return
 
-            self.audio_playback_service.launch_audio_file(ready_path)
+            paths = [row[0] for row in ready_items]
+            labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
+            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
         except Exception as e:
             logger.error("Failed to play audio in TM Panel: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")

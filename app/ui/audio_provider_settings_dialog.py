@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Dict
 
 from PyQt6.QtCore import Qt
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QDoubleSpinBox,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -40,6 +42,8 @@ from app.infra.audio.audio_provider_config_manager import AudioProviderConfigMan
 from app.infra.settings import SettingsService
 from app.services.audio_usage_tracker import AudioUsageTracker
 from app.ui.dialogs.mms_license_gate_dialog import MMS_LICENSE_ACCEPTED_KEY, ensure_mms_license_accepted
+
+logger = logging.getLogger(__name__)
 
 
 class AudioProviderSettingsDialog(QDialog):
@@ -116,6 +120,7 @@ class AudioProviderSettingsDialog(QDialog):
         self.tabs.addTab(self._create_rate_limits_tab(), "Rate Limits")
         self.tabs.addTab(self._create_chain_tab(), "Provider Chain")
         self.tabs.addTab(self._create_advanced_tab(), "Advanced Settings")
+        self.tabs.addTab(self._create_playback_tab(), "Playback")
         root.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(
@@ -230,6 +235,63 @@ class AudioProviderSettingsDialog(QDialog):
 
         return widget
 
+    def _create_playback_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        info = QLabel(
+            "Configure built-in playback cadence and queue behavior.\n"
+            "These settings affect Play Audio actions in all main tables."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        cadence_group = QGroupBox("Cadence (ms)")
+        cadence_form = QFormLayout(cadence_group)
+
+        self.playback_pre_roll_spin = QSpinBox()
+        self.playback_pre_roll_spin.setRange(0, 10000)
+        self.playback_pre_roll_spin.setSuffix(" ms")
+        cadence_form.addRow("Pre-roll:", self.playback_pre_roll_spin)
+
+        self.playback_gap_spin = QSpinBox()
+        self.playback_gap_spin.setRange(0, 10000)
+        self.playback_gap_spin.setSuffix(" ms")
+        cadence_form.addRow("Gap between items:", self.playback_gap_spin)
+
+        self.playback_post_roll_spin = QSpinBox()
+        self.playback_post_roll_spin.setRange(0, 10000)
+        self.playback_post_roll_spin.setSuffix(" ms")
+        cadence_form.addRow("Post-roll:", self.playback_post_roll_spin)
+
+        layout.addWidget(cadence_group)
+
+        mode_group = QGroupBox("Play Mode")
+        mode_form = QFormLayout(mode_group)
+        self.playback_mode_combo = QComboBox()
+        self.playback_mode_combo.addItem("Interrupt current playback", userData="interrupt")
+        self.playback_mode_combo.addItem("Enqueue new items", userData="enqueue")
+        mode_form.addRow("Behavior:", self.playback_mode_combo)
+        layout.addWidget(mode_group)
+
+        preset_group = QGroupBox("Cadence Presets")
+        preset_layout = QHBoxLayout(preset_group)
+        preset_layout.addWidget(QLabel("Preset:"))
+        self.playback_preset_combo = QComboBox()
+        self.playback_preset_combo.addItems(["Normal", "Study", "Fast"])
+        preset_layout.addWidget(self.playback_preset_combo)
+        apply_preset_btn = QPushButton("Apply")
+        apply_preset_btn.clicked.connect(self._apply_playback_preset)
+        preset_layout.addWidget(apply_preset_btn)
+        reset_btn = QPushButton("Reset Defaults")
+        reset_btn.clicked.connect(self._reset_playback_defaults)
+        preset_layout.addWidget(reset_btn)
+        preset_layout.addStretch()
+        layout.addWidget(preset_group)
+
+        layout.addStretch()
+        return widget
+
     def _create_google_advanced_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -256,6 +318,22 @@ class AudioProviderSettingsDialog(QDialog):
         self.google_sa_preview.setWordWrap(True)
         auth_layout.addWidget(self.google_sa_preview)
         layout.addWidget(auth_group)
+
+        voice_group = QGroupBox("Voice / Speech")
+        voice_form = QFormLayout(voice_group)
+        self.google_voice_combo = QComboBox()
+        self.google_voice_combo.setEditable(True)
+        voice_form.addRow("Voice ID:", self.google_voice_combo)
+        self.google_refresh_voices_btn = QPushButton("Refresh voices")
+        self.google_refresh_voices_btn.clicked.connect(self._refresh_google_voices)
+        voice_form.addRow("", self.google_refresh_voices_btn)
+        self.google_speech_rate = QDoubleSpinBox()
+        self.google_speech_rate.setRange(0.5, 2.0)
+        self.google_speech_rate.setSingleStep(0.05)
+        self.google_speech_rate.setDecimals(2)
+        self.google_speech_rate.setSuffix(" x")
+        voice_form.addRow("Speech rate:", self.google_speech_rate)
+        layout.addWidget(voice_group)
 
         (
             self.google_max_chars_per_request,
@@ -308,6 +386,22 @@ class AudioProviderSettingsDialog(QDialog):
         self.azure_api_preview.setWordWrap(True)
         auth_layout.addWidget(self.azure_api_preview)
         layout.addWidget(auth_group)
+
+        voice_group = QGroupBox("Voice / Speech")
+        voice_form = QFormLayout(voice_group)
+        self.azure_voice_combo = QComboBox()
+        self.azure_voice_combo.setEditable(True)
+        voice_form.addRow("Voice ID:", self.azure_voice_combo)
+        self.azure_refresh_voices_btn = QPushButton("Refresh voices")
+        self.azure_refresh_voices_btn.clicked.connect(self._refresh_azure_voices)
+        voice_form.addRow("", self.azure_refresh_voices_btn)
+        self.azure_speech_rate = QDoubleSpinBox()
+        self.azure_speech_rate.setRange(0.5, 2.0)
+        self.azure_speech_rate.setSingleStep(0.05)
+        self.azure_speech_rate.setDecimals(2)
+        self.azure_speech_rate.setSuffix(" x")
+        voice_form.addRow("Speech rate:", self.azure_speech_rate)
+        layout.addWidget(voice_group)
 
         (
             self.azure_max_chars_per_request,
@@ -364,6 +458,19 @@ class AudioProviderSettingsDialog(QDialog):
         )
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        voice_group = QGroupBox("Voice / Speech")
+        voice_form = QFormLayout(voice_group)
+        self.mms_voice_edit = QLineEdit()
+        self.mms_voice_edit.setPlaceholderText("mms-he")
+        voice_form.addRow("Voice ID:", self.mms_voice_edit)
+        self.mms_speech_rate = QDoubleSpinBox()
+        self.mms_speech_rate.setRange(0.5, 2.0)
+        self.mms_speech_rate.setSingleStep(0.05)
+        self.mms_speech_rate.setDecimals(2)
+        self.mms_speech_rate.setSuffix(" x")
+        voice_form.addRow("Speech rate:", self.mms_speech_rate)
+        layout.addWidget(voice_group)
 
         self.mms_usage_label = self._create_usage_group(layout, "mms_tts_local")
         self._create_diagnostics_group(layout, "mms_tts_local")
@@ -487,6 +594,26 @@ class AudioProviderSettingsDialog(QDialog):
             self.advanced_stack.setCurrentWidget(page)
         self._refresh_usage(provider_id)
 
+    def _apply_playback_preset(self):
+        preset = (self.playback_preset_combo.currentText() or "").strip().lower()
+        if preset == "study":
+            values = (300, 800, 450)
+        elif preset == "fast":
+            values = (100, 250, 120)
+        else:
+            values = (200, 550, 300)
+        self.playback_pre_roll_spin.setValue(values[0])
+        self.playback_gap_spin.setValue(values[1])
+        self.playback_post_roll_spin.setValue(values[2])
+
+    def _reset_playback_defaults(self):
+        self.playback_pre_roll_spin.setValue(200)
+        self.playback_gap_spin.setValue(550)
+        self.playback_post_roll_spin.setValue(300)
+        idx = self.playback_mode_combo.findData("interrupt")
+        if idx >= 0:
+            self.playback_mode_combo.setCurrentIndex(idx)
+
     def _load_settings(self):
         self.master_enable_checkbox.setChecked(self.settings.get_bool("audio/providers/enabled", True))
 
@@ -509,10 +636,15 @@ class AudioProviderSettingsDialog(QDialog):
         self._load_google_advanced_settings()
         self._load_azure_advanced_settings()
         self._load_mms_advanced_settings()
+        self._reset_playback_defaults()
+        self._load_playback_settings()
         self._on_advanced_provider_changed(self.advanced_provider_combo.currentIndex())
 
     def _load_google_advanced_settings(self):
         config = self.config_manager.load_config("google_cloud_tts")
+        self._load_voice_cache(self.google_voice_combo, "google_cloud_tts")
+        self.google_voice_combo.setCurrentText(config.default_voice or "")
+        self.google_speech_rate.setValue(float(config.speech_rate or 1.0))
         self.google_max_chars_per_request.setValue(int(config.max_chars_per_request))
         self.google_max_chars_per_day.setValue(int(config.max_chars_per_day or 0))
         self.google_max_chars_per_month.setValue(int(config.max_chars_per_month or 0))
@@ -540,6 +672,9 @@ class AudioProviderSettingsDialog(QDialog):
 
     def _load_azure_advanced_settings(self):
         config = self.config_manager.load_config("azure_speech_tts")
+        self._load_voice_cache(self.azure_voice_combo, "azure_speech_tts")
+        self.azure_voice_combo.setCurrentText(config.default_voice or "")
+        self.azure_speech_rate.setValue(float(config.speech_rate or 1.0))
         self.azure_region_combo.setCurrentText(config.region or "eastus")
         self.azure_max_chars_per_request.setValue(int(config.max_chars_per_request))
         self.azure_max_chars_per_day.setValue(int(config.max_chars_per_day or 0))
@@ -562,11 +697,40 @@ class AudioProviderSettingsDialog(QDialog):
 
     def _load_mms_advanced_settings(self):
         config = self.config_manager.load_config("mms_tts_local")
+        self.mms_voice_edit.setText(config.default_voice or "mms-he")
+        self.mms_speech_rate.setValue(float(config.speech_rate or 1.0))
         model_path = (config.model_path or "").strip()
         self.mms_model_path_label.setText(model_path or "(not configured)")
         accepted = self.settings.get_bool(MMS_LICENSE_ACCEPTED_KEY, False)
         self.mms_license_state.setText("Accepted" if accepted else "Not accepted")
         self.mms_license_state.setStyleSheet("color: #2e7d32;" if accepted else "color: #d32f2f;")
+
+    def _load_playback_settings(self):
+        self.playback_pre_roll_spin.setValue(self.settings.get_int("audio/playback/pre_roll_ms", 200))
+        self.playback_gap_spin.setValue(self.settings.get_int("audio/playback/gap_ms", 550))
+        self.playback_post_roll_spin.setValue(self.settings.get_int("audio/playback/post_roll_ms", 300))
+        mode = (self.settings.get_string("audio/playback/play_mode", "interrupt") or "interrupt").strip().lower()
+        idx = self.playback_mode_combo.findData("enqueue" if mode == "enqueue" else "interrupt")
+        self.playback_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _save_playback_settings(self):
+        self.settings.set_value("audio/playback/pre_roll_ms", int(self.playback_pre_roll_spin.value()))
+        self.settings.set_value("audio/playback/gap_ms", int(self.playback_gap_spin.value()))
+        self.settings.set_value("audio/playback/post_roll_ms", int(self.playback_post_roll_spin.value()))
+        mode = self.playback_mode_combo.currentData() or "interrupt"
+        self.settings.set_value("audio/playback/play_mode", str(mode))
+        try:
+            from app.services.audio_player_service import AudioPlayerService
+
+            player = AudioPlayerService.get_instance()
+            player.set_cadence(
+                pre_roll_ms=int(self.playback_pre_roll_spin.value()),
+                gap_ms=int(self.playback_gap_spin.value()),
+                post_roll_ms=int(self.playback_post_roll_spin.value()),
+            )
+            player.set_play_mode(str(mode))
+        except Exception as e:
+            logger.debug("Audio player settings apply deferred: %s", e)
 
     def _save_settings(self):
         self.settings.set_value("audio/providers/enabled", self.master_enable_checkbox.isChecked())
@@ -586,6 +750,7 @@ class AudioProviderSettingsDialog(QDialog):
         self._save_google_advanced_settings()
         self._save_azure_advanced_settings()
         self._save_mms_advanced_settings()
+        self._save_playback_settings()
 
         self.settings.sync()
 
@@ -593,6 +758,8 @@ class AudioProviderSettingsDialog(QDialog):
         config = self.config_manager.load_config("google_cloud_tts")
         config.auth_mode = AudioProviderAuthMode.SERVICE_ACCOUNT_JSON
         config.service_account_credential_id = get_service_account_credential_id("google_cloud_tts")
+        config.default_voice = self.google_voice_combo.currentText().strip() or None
+        config.speech_rate = float(self.google_speech_rate.value())
         config.max_chars_per_request = int(self.google_max_chars_per_request.value())
         config.max_chars_per_day = int(self.google_max_chars_per_day.value()) or None
         config.max_chars_per_month = int(self.google_max_chars_per_month.value()) or None
@@ -609,6 +776,8 @@ class AudioProviderSettingsDialog(QDialog):
         config.auth_mode = AudioProviderAuthMode.API_KEY
         config.api_key_credential_id = get_api_key_credential_id("azure_speech_tts")
         config.region = self.azure_region_combo.currentText().strip() or "eastus"
+        config.default_voice = self.azure_voice_combo.currentText().strip() or None
+        config.speech_rate = float(self.azure_speech_rate.value())
         config.max_chars_per_request = int(self.azure_max_chars_per_request.value())
         config.max_chars_per_day = int(self.azure_max_chars_per_day.value()) or None
         config.max_chars_per_month = int(self.azure_max_chars_per_month.value()) or None
@@ -623,6 +792,8 @@ class AudioProviderSettingsDialog(QDialog):
     def _save_mms_advanced_settings(self):
         config = self.config_manager.load_config("mms_tts_local")
         config.auth_mode = AudioProviderAuthMode.NONE
+        config.default_voice = self.mms_voice_edit.text().strip() or "mms-he"
+        config.speech_rate = float(self.mms_speech_rate.value())
         model_path = self.mms_model_path_label.text().strip()
         config.model_path = None if model_path in {"", "(not configured)"} else model_path
         self.config_manager.save_config(config)
@@ -715,6 +886,72 @@ class AudioProviderSettingsDialog(QDialog):
         if selected:
             self.mms_model_path_label.setText(selected)
 
+    def _voice_cache_key(self, provider_id: str) -> str:
+        return f"audio/providers/{provider_id}/voices_cache"
+
+    def _load_voice_cache(self, combo: QComboBox, provider_id: str) -> None:
+        combo.clear()
+        cached = self.settings.get_json(self._voice_cache_key(provider_id), [])
+        if isinstance(cached, list):
+            unique = []
+            seen = set()
+            for raw in cached:
+                value = str(raw or "").strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                unique.append(value)
+            combo.addItems(unique)
+
+    def _save_voice_cache(self, provider_id: str, voices: list[str]) -> None:
+        normalized: list[str] = []
+        seen = set()
+        for raw in voices:
+            value = str(raw or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        self.settings.set_json(self._voice_cache_key(provider_id), normalized[:200])
+
+    def _refresh_google_voices(self):
+        try:
+            from app.infra.audio.providers.google_cloud_tts_provider import GoogleCloudTTSProvider
+
+            self._save_google_advanced_settings()
+            provider = GoogleCloudTTSProvider(config_manager=self.config_manager)
+            voices, error = provider.list_voices(language_code="he-IL")
+            if error:
+                QMessageBox.warning(self, "Voice Refresh Failed", error)
+                return
+            self._save_voice_cache("google_cloud_tts", voices)
+            current = self.google_voice_combo.currentText().strip()
+            self._load_voice_cache(self.google_voice_combo, "google_cloud_tts")
+            if current:
+                self.google_voice_combo.setCurrentText(current)
+            QMessageBox.information(self, "Voices Refreshed", f"Loaded {len(voices)} voices.")
+        except Exception as e:
+            QMessageBox.warning(self, "Voice Refresh Failed", str(e))
+
+    def _refresh_azure_voices(self):
+        try:
+            from app.infra.audio.providers.azure_speech_tts_provider import AzureSpeechTTSProvider
+
+            self._save_azure_advanced_settings()
+            provider = AzureSpeechTTSProvider(config_manager=self.config_manager)
+            voices, error = provider.list_voices(language_code="he-IL")
+            if error:
+                QMessageBox.warning(self, "Voice Refresh Failed", error)
+                return
+            self._save_voice_cache("azure_speech_tts", voices)
+            current = self.azure_voice_combo.currentText().strip()
+            self._load_voice_cache(self.azure_voice_combo, "azure_speech_tts")
+            if current:
+                self.azure_voice_combo.setCurrentText(current)
+            QMessageBox.information(self, "Voices Refreshed", f"Loaded {len(voices)} voices.")
+        except Exception as e:
+            QMessageBox.warning(self, "Voice Refresh Failed", str(e))
+
     def _test_provider_connection(self, provider_id: str):
         provider_title = self.PROVIDERS.get(provider_id, {}).get("name", provider_id)
         try:
@@ -751,12 +988,13 @@ class AudioProviderSettingsDialog(QDialog):
 
             source_text = "שלום"
             source_norm = normalize_for_tm("he", source_text, "surface").norm or source_text
+            provider_cfg = self.config_manager.load_config(provider_id)
             request = AudioGenerationRequest(
                 source_text=source_text,
                 source_lang="he",
                 source_norm=source_norm,
-                voice_id="default",
-                speed=1.0,
+                voice_id=provider_cfg.default_voice or "default",
+                speed=float(provider_cfg.speech_rate or 1.0),
                 trace_id=f"ui-test-{provider_id}",
             )
 

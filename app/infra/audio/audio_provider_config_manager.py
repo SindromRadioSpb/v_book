@@ -27,6 +27,7 @@ from .audio_provider_config import (
     get_max_requests_per_day_key,
     get_max_requests_per_minute_key,
     get_region_key,
+    get_speech_rate_key,
     get_model_path_key,
     get_retry_attempts_key,
     get_retry_backoff_key,
@@ -91,6 +92,19 @@ class AudioProviderConfigManager:
                 get_default_voice_key(provider_id), defaults.default_voice or ""
             ).strip()
             or None,
+            speech_rate=max(
+                0.5,
+                min(
+                    2.0,
+                    float(
+                        self.settings.get_string(
+                            get_speech_rate_key(provider_id),
+                            str(defaults.speech_rate),
+                        )
+                        or defaults.speech_rate
+                    ),
+                ),
+            ),
             audio_format=self.settings.get_string(get_format_key(provider_id), defaults.audio_format).strip()
             or defaults.audio_format,
             sample_rate_hz=max(8000, self.settings.get_int(get_sample_rate_key(provider_id), defaults.sample_rate_hz)),
@@ -147,6 +161,7 @@ class AudioProviderConfigManager:
         self.settings.set_value(get_auth_mode_key(provider_id), config.auth_mode.value)
         self.settings.set_value(get_region_key(provider_id), config.region or "")
         self.settings.set_value(get_default_voice_key(provider_id), config.default_voice or "")
+        self.settings.set_value(get_speech_rate_key(provider_id), float(config.speech_rate))
         self.settings.set_value(get_format_key(provider_id), config.audio_format)
         self.settings.set_value(get_sample_rate_key(provider_id), int(config.sample_rate_hz))
         self.settings.set_value(get_timeout_key(provider_id), float(config.timeout_seconds))

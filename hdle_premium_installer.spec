@@ -37,6 +37,7 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
+        'PyQt6.QtMultimedia',
 
         # SQLAlchemy
         'sqlalchemy.dialects.sqlite',
@@ -108,6 +109,11 @@ a = Analysis(
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',
         'app.ui.audio_provider_settings_dialog',
+        'app.ui.delegates.audio_play_delegate',
+        'app.ui.widgets.audio_player_panel',
+
+        # Internal playback
+        'app.services.audio_player_service',
 
         # Audio providers
         'app.infra.audio.providers.google_cloud_tts_provider',

@@ -38,6 +38,7 @@ from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import (
@@ -338,6 +339,11 @@ class UserDictionariesView(QWidget):
         self.items_table.setAlternatingRowColors(True)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.horizontalHeader().setSectionsClickable(True)
+        self.audio_play_delegate = AudioPlayDelegate(
+            self.items_table,
+            on_play_clicked=self.on_audio_cell_play_clicked,
+        )
+        self.items_table.setItemDelegateForColumn(8, self.audio_play_delegate)
         self.items_table.horizontalHeader().sectionClicked.connect(self.on_items_header_clicked)
         self.items_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.items_table.customContextMenuRequested.connect(self.on_context_menu)
@@ -1352,20 +1358,29 @@ class UserDictionariesView(QWidget):
         items = self._selected_audio_items()
         if not items:
             return
+        self._play_audio_items(items, play_mode="enqueue")
 
+    def on_audio_cell_play_clicked(self, index):
+        item = self.items_model.get_item(index.row())
+        if not item:
+            return
+        self._play_audio_items(
+            [
+                {
+                    "src_lang": (item.src_lang or "").strip(),
+                    "src_norm": (item.src_norm or "").strip(),
+                    "src_text": (item.src_text or "").strip(),
+                }
+            ],
+            play_mode="interrupt",
+        )
+
+    def _play_audio_items(self, items: List[Dict[str, str]], *, play_mode: str):
         try:
             with self.db_service.get_session() as session:
-                ready_path = None
-                for item in items:
-                    ready_path = self.audio_playback_service.resolve_ready_path(
-                        session,
-                        lang=item["src_lang"],
-                        norm_text=item["src_norm"],
-                    )
-                    if ready_path:
-                        break
+                ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
 
-            if not ready_path:
+            if not ready_items:
                 QMessageBox.information(
                     self,
                     "Audio Missing",
@@ -1373,7 +1388,9 @@ class UserDictionariesView(QWidget):
                 )
                 return
 
-            self.audio_playback_service.launch_audio_file(ready_path)
+            paths = [row[0] for row in ready_items]
+            labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
+            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
         except Exception as e:
             logger.error("Failed to play audio in User Dictionaries: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")

@@ -18,6 +18,7 @@ from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
 from app.ui.table_layout_controller import TableLayoutController
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.dialogs import show_error, show_info
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
@@ -265,6 +266,11 @@ class TermCardView(QWidget):
             },
         )
         self.table_layout_controller.install()
+        self.audio_play_delegate = AudioPlayDelegate(
+            self.queue_table,
+            on_play_clicked=self.on_audio_cell_play_clicked,
+        )
+        self.queue_table.setItemDelegateForColumn(10, self.audio_play_delegate)
 
         queue_layout.addWidget(self.queue_table)
 
@@ -454,24 +460,37 @@ class TermCardView(QWidget):
         self.on_queue_selection_changed()
 
     def on_play_audio_selected(self):
-        """Play first ready audio from selected queue rows."""
+        """Play ready audio from selected rows using queue mode."""
         items = self._selected_audio_items()
         if not items:
             return
+        self._play_audio_items(items, play_mode="enqueue")
 
+    def on_audio_cell_play_clicked(self, index):
+        """Delegate callback: play one row from Audio column."""
+        card = self.queue_model.get_card(index.row())
+        if not card:
+            return
+        src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+        if not src_norm:
+            return
+        self._play_audio_items(
+            [
+                {
+                    "src_lang": "he",
+                    "src_norm": src_norm,
+                    "src_text": card.representative_he,
+                }
+            ],
+            play_mode="interrupt",
+        )
+
+    def _play_audio_items(self, items: list[dict], *, play_mode: str):
         try:
             with self.db_service.get_session() as session:
-                ready_path = None
-                for item in items:
-                    ready_path = self.audio_playback_service.resolve_ready_path(
-                        session,
-                        lang=item["src_lang"],
-                        norm_text=item["src_norm"],
-                    )
-                    if ready_path:
-                        break
+                ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
 
-            if not ready_path:
+            if not ready_items:
                 QMessageBox.information(
                     self,
                     "Audio Missing",
@@ -479,7 +498,9 @@ class TermCardView(QWidget):
                 )
                 return
 
-            self.audio_playback_service.launch_audio_file(ready_path)
+            paths = [row[0] for row in ready_items]
+            labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
+            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
         except Exception as e:
             logger.error("Failed to play audio in Term Cards: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")

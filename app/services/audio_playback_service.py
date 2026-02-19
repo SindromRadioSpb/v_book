@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional, Sequence
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
@@ -33,7 +33,7 @@ class AudioPlaybackService:
     """Resolve ready audio asset path for UI playback controls."""
 
     @staticmethod
-    def launch_audio_file(path: Path) -> None:
+    def _launch_external(path: Path) -> None:
         """Open audio file with OS default player."""
         if sys.platform == "win32":
             os.startfile(str(path))  # type: ignore[attr-defined]
@@ -42,6 +42,71 @@ class AudioPlaybackService:
             subprocess.Popen(["open", str(path)])
             return
         subprocess.Popen(["xdg-open", str(path)])
+
+    @staticmethod
+    def launch_audio_file(path: Path, *, label: str = "", play_mode: Optional[str] = None) -> None:
+        """Play one audio file using internal player (fallback: external launcher)."""
+        try:
+            from app.services.audio_player_service import AudioPlayerService
+
+            player = AudioPlayerService.get_instance()
+            if player.is_available:
+                player.play_path(path, label=label or path.stem, play_mode=play_mode or "interrupt")
+                return
+        except Exception:
+            # Fall back to external playback for environments without QtMultimedia.
+            pass
+        AudioPlaybackService._launch_external(path)
+
+    @staticmethod
+    def launch_audio_files(
+        paths: Sequence[Path],
+        *,
+        labels: Optional[Sequence[str]] = None,
+        play_mode: str = "enqueue",
+    ) -> int:
+        """Play/enqueue many audio files using internal player (fallback: first external)."""
+        valid_paths = [Path(p) for p in paths if p and Path(p).exists()]
+        if not valid_paths:
+            return 0
+
+        try:
+            from app.services.audio_player_service import AudioPlayerService
+
+            player = AudioPlayerService.get_instance()
+            if player.is_available:
+                return player.play_paths(valid_paths, labels=labels, play_mode=play_mode)
+        except Exception:
+            pass
+
+        # External fallback cannot safely queue cross-platform; open first file.
+        AudioPlaybackService._launch_external(valid_paths[0])
+        return 1
+
+    @staticmethod
+    def resolve_ready_paths(
+        session: Session,
+        *,
+        items: Iterable[dict],
+    ) -> list[tuple[Path, dict]]:
+        """Resolve ready audio paths for many source items in deterministic order."""
+        resolved: list[tuple[Path, dict]] = []
+        for item in items:
+            try:
+                lang = str(item.get("src_lang") or "").strip()
+                norm_text = str(item.get("src_norm") or "").strip()
+            except Exception:
+                continue
+            if not lang or not norm_text:
+                continue
+            path = AudioPlaybackService.resolve_ready_path(
+                session,
+                lang=lang,
+                norm_text=norm_text,
+            )
+            if path:
+                resolved.append((path, item))
+        return resolved
 
     @staticmethod
     def resolve_ready_path(

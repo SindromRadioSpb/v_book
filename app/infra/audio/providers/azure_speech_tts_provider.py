@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Tuple
+from typing import Optional, Tuple
 
 from app.infra.audio.audio_provider_config import AudioProviderAuthMode
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
@@ -141,6 +142,44 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
             error_kind=AudioErrorKind.UNKNOWN,
             error_message="Azure TTS failed after retries",
         )
+
+    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], Optional[str]]:
+        """Return available Azure voice names for a language."""
+        cfg = self._config_manager.load_config(self.provider_id)
+        if cfg.auth_mode != AudioProviderAuthMode.API_KEY:
+            return [], "azure_speech_tts requires api_key auth mode"
+
+        api_key = self._config_manager.get_credential(cfg.api_key_credential_id)
+        region = (cfg.region or "").strip()
+        if not api_key or not region:
+            return [], "Azure TTS requires region and API key credentials"
+
+        endpoint = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list"
+        req = urllib.request.Request(
+            endpoint,
+            headers={"Ocp-Apim-Subscription-Key": api_key},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=cfg.timeout_seconds) as response:
+                raw = response.read()
+            data = json.loads(raw.decode("utf-8"))
+            voices = []
+            target_prefix = (language_code or "").lower()
+            for row in data if isinstance(data, list) else []:
+                locale = str(row.get("Locale") or "").strip().lower()
+                if target_prefix and locale and locale != target_prefix:
+                    continue
+                name = str(row.get("ShortName") or row.get("Name") or "").strip()
+                if name:
+                    voices.append(name)
+            voices = sorted(set(voices))
+            return voices, None
+        except urllib.error.HTTPError as http_err:
+            _kind, message = self._classify_http_error(http_err)
+            return [], message
+        except Exception as exc:
+            return [], str(exc)
 
     @staticmethod
     def _language_code(raw_lang: str) -> str:

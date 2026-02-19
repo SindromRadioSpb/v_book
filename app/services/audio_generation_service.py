@@ -298,7 +298,7 @@ class AudioGenerationService:
         ):
             return {"ok": True, "status": "skipped", "provider_id": None, "error": None}
 
-        voice_id, speed = self._resolve_voice_speed()
+        global_voice_id, global_speed = self._resolve_voice_speed()
         provider_chain = self._resolve_provider_chain(provider_mode)
         if not provider_chain:
             last_error = "No audio provider available"
@@ -306,8 +306,8 @@ class AudioGenerationService:
                 session=session,
                 lang=source_lang_clean,
                 norm_text=source_norm_clean,
-                voice_id=voice_id,
-                speed=speed,
+                voice_id=global_voice_id,
+                speed=global_speed,
                 provider="none",
                 status="failed",
                 error_text=last_error,
@@ -333,6 +333,14 @@ class AudioGenerationService:
             if not provider:
                 continue
             provider_cfg = self.audio_provider_config.load_config(provider_id)
+            provider_voice_id = (
+                global_voice_id
+                if global_voice_id and global_voice_id != "default"
+                else (provider_cfg.default_voice or "default")
+            )
+            provider_speed = global_speed
+            if abs(provider_speed - 1.0) < 1e-6:
+                provider_speed = max(0.5, min(2.0, float(provider_cfg.speech_rate or 1.0)))
 
             if source_char_count > int(provider_cfg.max_chars_per_request):
                 last_error = (
@@ -343,8 +351,8 @@ class AudioGenerationService:
                     session=session,
                     lang=source_lang_clean,
                     norm_text=source_norm_clean,
-                    voice_id=voice_id,
-                    speed=speed,
+                    voice_id=provider_voice_id,
+                    speed=provider_speed,
                     provider=provider_id,
                     status="failed",
                     error_text=last_error[:1000],
@@ -366,8 +374,8 @@ class AudioGenerationService:
                             session=session,
                             lang=source_lang_clean,
                             norm_text=source_norm_clean,
-                            voice_id=voice_id,
-                            speed=speed,
+                            voice_id=provider_voice_id,
+                            speed=provider_speed,
                             provider=provider_id,
                             status="failed",
                             error_text=last_error[:1000],
@@ -389,8 +397,8 @@ class AudioGenerationService:
                             session=session,
                             lang=source_lang_clean,
                             norm_text=source_norm_clean,
-                            voice_id=voice_id,
-                            speed=speed,
+                            voice_id=provider_voice_id,
+                            speed=provider_speed,
                             provider=provider_id,
                             status="failed",
                             error_text=str(last_error)[:1000],
@@ -414,8 +422,8 @@ class AudioGenerationService:
                 source_text=prepared_text,
                 source_lang=source_lang_clean,
                 source_norm=source_norm_clean,
-                voice_id=voice_id,
-                speed=speed,
+                voice_id=provider_voice_id,
+                speed=provider_speed,
                 trace_id=req_trace,
                 options=options,
             )
@@ -426,8 +434,8 @@ class AudioGenerationService:
                     session=session,
                     lang=source_lang_clean,
                     norm_text=source_norm_clean,
-                    voice_id=voice_id,
-                    speed=speed,
+                    voice_id=provider_voice_id,
+                    speed=provider_speed,
                     provider=provider_id,
                     status="failed",
                     error_text=last_error[:1000],
@@ -439,8 +447,8 @@ class AudioGenerationService:
                 provider_id=provider_id,
                 src_lang=source_lang_clean,
                 source_norm=source_norm_clean,
-                voice_id=voice_id,
-                speed=speed,
+                voice_id=provider_voice_id,
+                speed=provider_speed,
             )
             safe_rel = self.audio_asset_service.sanitize_relative_path(rel_path)
             abs_path = app_dir / safe_rel
@@ -451,8 +459,8 @@ class AudioGenerationService:
                 session=session,
                 lang=source_lang_clean,
                 norm_text=source_norm_clean,
-                voice_id=voice_id,
-                speed=speed,
+                voice_id=provider_voice_id,
+                speed=provider_speed,
                 provider=provider_id,
                 status="ready",
                 audio_rel_path=safe_rel,
@@ -488,8 +496,8 @@ class AudioGenerationService:
                 session=session,
                 lang=source_lang_clean,
                 norm_text=source_norm_clean,
-                voice_id=voice_id,
-                speed=speed,
+                voice_id=global_voice_id,
+                speed=global_speed,
                 provider="none",
                 status="failed",
                 error_text=last_error[:1000],

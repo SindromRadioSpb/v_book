@@ -29,6 +29,7 @@ class AudioProviderConfig:
     service_account_path: Optional[str] = None
     region: Optional[str] = None
     default_voice: Optional[str] = None
+    speech_rate: float = 1.0
     audio_format: str = "wav"
     sample_rate_hz: int = 24000
     timeout_seconds: float = 15.0
@@ -91,6 +92,10 @@ def get_region_key(provider_id: str) -> str:
 
 def get_default_voice_key(provider_id: str) -> str:
     return f"audio/providers/{provider_id}/default_voice"
+
+
+def get_speech_rate_key(provider_id: str) -> str:
+    return f"audio/providers/{provider_id}/speech_rate"
 
 
 def get_format_key(provider_id: str) -> str:

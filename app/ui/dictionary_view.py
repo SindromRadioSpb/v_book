@@ -30,6 +30,7 @@ from app.domain.dto import LemmaStats
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.dialogs import show_error, WhyTranslationDialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
@@ -248,6 +249,11 @@ class DictionaryView(QWidget):
             },
         )
         self.table_layout_controller.install()
+        self.audio_play_delegate = AudioPlayDelegate(
+            self.lemma_table,
+            on_play_clicked=self.on_audio_cell_play_clicked,
+        )
+        self.lemma_table.setItemDelegateForColumn(10, self.audio_play_delegate)
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
@@ -794,24 +800,37 @@ class DictionaryView(QWidget):
         self.on_selection_changed()
 
     def on_play_audio_selected(self):
-        """Play first ready audio from selected rows."""
+        """Play ready audio from selected rows using queue mode."""
         items = self._selected_audio_items()
         if not items:
             return
+        self._play_audio_items(items, play_mode="enqueue")
 
+    def on_audio_cell_play_clicked(self, index: QModelIndex):
+        """Delegate callback: play one row from Audio column."""
+        source_row = self.proxy_model.map_to_source_row(index.row())
+        lemma = self.lemma_model.lemmas[source_row]
+        src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (lemma.norm_text or "")
+        if not src_norm:
+            return
+        self._play_audio_items(
+            [
+                {
+                    "src_lang": "he",
+                    "src_norm": src_norm,
+                    "src_text": lemma.lemma_text,
+                }
+            ],
+            play_mode="interrupt",
+        )
+
+    def _play_audio_items(self, items: List[dict], *, play_mode: str) -> None:
+        """Resolve ready assets and route playback through internal player."""
         try:
             with self.db_service.get_session() as session:
-                ready_path = None
-                for item in items:
-                    ready_path = self.audio_playback_service.resolve_ready_path(
-                        session,
-                        lang=item["src_lang"],
-                        norm_text=item["src_norm"],
-                    )
-                    if ready_path:
-                        break
+                ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
 
-            if not ready_path:
+            if not ready_items:
                 QMessageBox.information(
                     self,
                     "Audio Missing",
@@ -819,7 +838,9 @@ class DictionaryView(QWidget):
                 )
                 return
 
-            self.audio_playback_service.launch_audio_file(ready_path)
+            paths = [row[0] for row in ready_items]
+            labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
+            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
         except Exception as e:
             logger.error("Failed to play audio in Dictionary: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
