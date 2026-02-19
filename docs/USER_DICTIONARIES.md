@@ -74,6 +74,8 @@ UI composition in `User Dictionaries`:
 - Right-click on selected rows provides:
   - `Translate Selected (N rows)...`
   - `Generate Audio Selected (N rows)...`
+  - `Play Audio Selected (N rows)`
+  - `Edit Pronunciation...`
   - `Mark Selected as Noise (N rows)`
   - `Mark Selected as Valid (N rows)`
   - `Mark Selected as Due now (N rows)`
@@ -104,7 +106,8 @@ UI composition in `User Dictionaries`:
 
 ## Audio Column (P0)
 
-- `Audio` column shows `missing|ready|failed` from `audio_asset`.
+- `Audio` column shows persisted statuses `missing|ready|failed` from `audio_asset`.
+- `generating` is runtime-only and shown in progress/activity stream (not persisted in DB).
 - Generation is source-only (`src_text`/`src_norm`), not translation-based.
 - Batch generation entry points:
   - toolbar button `Generate Audio...`
@@ -112,3 +115,4 @@ UI composition in `User Dictionaries`:
 - Batch generation uses worker + `BatchProgressDialogV3` with cancel/pause/resume.
 - `Play Audio` is available for selected rows (opens first ready asset in system player).
 - Same Generate/Play entrypoints are available in `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.
+- Optional local provider `mms_tts_local` is behind explicit license-gate and disabled by default.

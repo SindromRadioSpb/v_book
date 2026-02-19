@@ -1,62 +1,97 @@
-# Audio Asset Architecture (P0 Stub)
+# Audio Asset Architecture
 
-## Scope
+## Scope and invariants
 
-P0 includes source-audio generation pipeline with mock providers and persistent asset storage.
+Hard rules:
 
-Hard rule:
+- Audio is generated only from source payload (`src_text`, canonical `src_norm`, `src_lang`).
+- Translation value is never used to synthesize audio.
+- Long operations run in workers with `BatchProgressDialogV3`; no UI-thread generation.
 
-- Audio is generated for `source` text only (`src_text` / canonical `src_norm`).
-- Translation text is not used for TTS generation.
+## Storage contract
 
-## Table
+`audio_asset` canonical key:
 
-`audio_asset` key:
+- `(lang, norm_text, voice_id, speed, provider)` unique.
 
-- `(lang, norm_text, voice_id, speed, provider)` unique
+Persisted status contract in DB:
+
+- `missing | ready | failed`.
+
+Runtime-only stage contract:
+
+- `generating` is shown only in progress UX and activity stream.
+- `generating` is not persisted in `audio_asset.asset_status`.
 
 Main fields:
 
-- `asset_status`: `missing | ready | failed`
-- `audio_rel_path`: relative path only (sanitized)
-- `duration_ms`, `sha256`, `error_text`
+- `asset_status`, `audio_rel_path`, `duration_ms`, `sha256`, `error_text`, timestamps.
 
-## Security Rules
+## Provider chain contract
+
+Default chain mode:
+
+- `chain` tries providers in configured order.
+
+Forced mode:
+
+- `force:<provider_id>` runs only one provider.
+
+Target professional chain:
+
+- Primary: `google_cloud_tts`
+- Secondary: `azure_speech_tts`
+- Fallback/dev: `mock_local_audio`, `mock_online_audio`
+- Optional local (not in default chain): `mms_tts_local` (license-gated, default disabled)
+
+## Pronunciation layer contract
+
+Pronunciation enrichment is applied before synthesis:
+
+- Provider with SSML phoneme support: build SSML/phoneme payload.
+- Other providers: token-level niqqud substitution fallback.
+
+Precedence:
+
+- `manual override` entries always win over `auto` entries.
+
+## MMS local provider contract (license-gate)
+
+- Provider id: `mms_tts_local` (optional offline provider).
+- Default: `OFF`.
+- Must pass explicit license gate acceptance before provider can be enabled.
+- Model weights are external-path based by default; not bundled into base installer.
+
+## Security rules
 
 - Store relative paths only.
 - Reject absolute paths, drive paths, and parent traversal (`..`).
-- Keep SQL parameterized.
+- Keep SQL parameterized and sort columns allowlisted.
+- Credentials are loaded via `CredentialStore`; no plaintext secrets in QSettings or logs.
 
-## UI
+## UX surface (current)
 
-- `User Dictionaries`, `Dictionary`, `Terms`, `Term Cards`, and `Translation Management` expose `Audio` status column.
-- Status is resolved in bulk via `AudioAssetService.bulk_get_status_any(...)`.
-- Default shown status: `missing`.
+Audio column and actions exist in:
 
-## Generation Flow (P0)
+- `User Dictionaries`
+- `Dictionary`
+- `Terms`
+- `Term Cards`
+- `Translation Management`
 
-- Entry point: `User Dictionaries` -> `Generate Audio...` (toolbar or context menu).
-- Additional entry points:
-  - `Dictionary` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
-  - `Terms` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
-  - `Term Cards` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
-  - `Translation Management` -> `Generate Audio...` / `Generate Audio Selected (N rows)...`
-- Long operation runs in `UserDictGenerateAudioWorker` with `BatchProgressDialogV3` (cancel/pause/resume).
-- Cross-view selected-row flow uses `BatchGenerateAudioWorker` with the same `BatchProgressDialogV3` contract.
-- Provider mode:
-  - `chain` (recommended)
-  - `force:<provider_id>`
-- Write mode:
-  - `MISSING_ONLY`
-  - `REGENERATE_ALL`
+Supported actions:
 
-## Playback UX
+- `Generate Audio...`
+- `Generate Audio Selected (N rows)...`
+- `Play Audio Selected (N rows)`
+- `Edit Pronunciation...` (manual override dialog for source norm)
+- `Play Audio Selected (N rows)`
 
-- `Play Audio` action is available for selected rows in:
-  - `User Dictionaries`
-  - `Dictionary`
-  - `Terms`
-  - `Term Cards`
-  - `Translation Management`
-- Playback opens first ready asset among selected rows via OS default player.
-- If no ready audio exists, UI shows a non-fatal hint to run `Generate Audio...`.
+Write modes:
+
+- `MISSING_ONLY`
+- `REGENERATE_ALL`
+
+Provider settings entrypoint:
+
+- `Tools -> Translation -> Audio Provider Settings...`
