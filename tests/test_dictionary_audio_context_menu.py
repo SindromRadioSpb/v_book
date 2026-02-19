@@ -96,11 +96,12 @@ def _build_dictionary_view(selected_count: int):
     view.set_lemmas_noise_status_bulk = lambda _is_noise: None
     view.set_lemma_noise_status = lambda _row, _is_noise: None
 
-    state = {"translate": 0, "generate": 0, "play": 0, "add": 0}
+    state = {"translate": 0, "generate": 0, "play": 0, "add": 0, "edit_pron": 0}
     view.on_batch_translate = lambda: state.__setitem__("translate", state["translate"] + 1)
     view.on_generate_audio_selected = lambda: state.__setitem__("generate", state["generate"] + 1)
     view.on_play_audio_selected = lambda: state.__setitem__("play", state["play"] + 1)
     view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add", state["add"] + 1)
+    view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron", state["edit_pron"] + 1)
     return view, state
 
 
@@ -116,10 +117,12 @@ def test_dictionary_context_menu_includes_audio_actions(monkeypatch):
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (2 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (2 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (2 rows)..."
+    assert FakeMenu.last.actions[4].text == "Edit Pronunciation..."
 
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
     FakeMenu.last.actions[2].triggered.emit()
     FakeMenu.last.actions[3].triggered.emit()
+    FakeMenu.last.actions[4].triggered.emit()
 
-    assert state == {"translate": 1, "generate": 1, "play": 1, "add": 1}
+    assert state == {"translate": 1, "generate": 1, "play": 1, "add": 1, "edit_pron": 1}
