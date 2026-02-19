@@ -13,6 +13,7 @@ Task #15 from Translation Management Panel UX Overhaul plan.
 import pytest
 import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ from app.infra.sa_models import Base, TMEntry, DictProject
 from app.services.translation_admin_service import TranslationAdminService
 from app.services.export_service import ExportService
 from app.infra.settings import SettingsService
+from app.services.user_dictionary_service import UserDictionaryService
 
 
 # ============================================================================
@@ -37,10 +39,20 @@ def temp_db():
         engine = create_engine(f"sqlite:///{db_path}")
 
         # Create only essential tables for tests (avoid problematic indexes)
-        from app.infra.sa_models import TMEntry, DictProject, Library
+        from app.infra.sa_models import (
+            TMEntry,
+            DictProject,
+            Library,
+            StudyProgress,
+            UserDictionary,
+            UserDictionaryItem,
+        )
         Library.__table__.create(engine, checkfirst=True)
         DictProject.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
+        StudyProgress.__table__.create(engine, checkfirst=True)
+        UserDictionary.__table__.create(engine, checkfirst=True)
+        UserDictionaryItem.__table__.create(engine, checkfirst=True)
 
         yield engine, db_path
     finally:
@@ -157,6 +169,74 @@ def populated_db(temp_db):
                 origin='user_edit',
             )
             session.add(entry)
+
+        # User dictionary overlays for sorting tests (UD + Last Review)
+        from app.infra.sa_models import StudyProgress, UserDictionary, UserDictionaryItem
+        ud_service = UserDictionaryService()
+        deck = UserDictionary(name="Deck Sort")
+        session.add(deck)
+        session.flush()
+
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        progress_again = StudyProgress(
+            canonical_hash="hash-alpha-src-0",
+            first_seen_at=now_iso,
+            due_at=now_iso,
+            review_count=0,
+            lapse_count=1,
+            interval_days=1,
+            ease_factor=2.3,
+            last_quality=1,
+            last_grade="again",
+            last_graded_at=now_iso,
+            updated_at=now_iso,
+        )
+        progress_good = StudyProgress(
+            canonical_hash="hash-global-src-0",
+            first_seen_at=now_iso,
+            due_at=now_iso,
+            review_count=2,
+            lapse_count=0,
+            interval_days=6,
+            ease_factor=2.5,
+            last_quality=4,
+            last_grade="good",
+            last_graded_at=now_iso,
+            updated_at=now_iso,
+        )
+        session.add_all([progress_again, progress_good])
+        session.flush()
+
+        session.add_all(
+            [
+                UserDictionaryItem(
+                    dictionary_id=deck.dictionary_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="alpha_src_0",
+                    src_norm="alpha_src_0",
+                    canonical_hash=ud_service.build_canonical_hash("he", "ru", "lemma", "alpha_src_0"),
+                    tags_json="[]",
+                    is_noise=0,
+                    study_state="learning",
+                    study_progress_id=progress_again.id,
+                ),
+                UserDictionaryItem(
+                    dictionary_id=deck.dictionary_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="global_src_0",
+                    src_norm="global_src_0",
+                    canonical_hash=ud_service.build_canonical_hash("he", "ru", "lemma", "global_src_0"),
+                    tags_json="[]",
+                    is_noise=0,
+                    study_state="learning",
+                    study_progress_id=progress_good.id,
+                ),
+            ]
+        )
 
         session.commit()
 
@@ -379,6 +459,44 @@ def test_sort_by_src_text(populated_db):
 
     src_texts = [entry.src_text for entry in results]
     assert src_texts == sorted(src_texts), "src_text should be sorted ascending"
+
+
+def test_sort_by_ud_marker_desc(populated_db):
+    """TM must support sorting by UD marker column."""
+    session, _project_ids = populated_db
+    service = TranslationAdminService()
+
+    results = service.search_tm_entries(
+        session=session,
+        filters={},
+        limit=100,
+        offset=0,
+        sort_column="ud_marker",
+        sort_direction="desc",
+    )
+
+    first_two = {results[0].src_text, results[1].src_text}
+    assert first_two == {"alpha_src_0", "global_src_0"}
+
+
+def test_sort_by_last_review_desc(populated_db):
+    """TM must support sorting by Last Review column."""
+    session, _project_ids = populated_db
+    service = TranslationAdminService()
+
+    results = service.search_tm_entries(
+        session=session,
+        filters={},
+        limit=100,
+        offset=0,
+        sort_column="last_review",
+        sort_direction="desc",
+    )
+
+    idx_good = next(i for i, entry in enumerate(results) if entry.src_text == "global_src_0")
+    idx_again = next(i for i, entry in enumerate(results) if entry.src_text == "alpha_src_0")
+    idx_none = next(i for i, entry in enumerate(results) if entry.src_text == "global_src_1")
+    assert idx_good < idx_again < idx_none
 
 
 # ============================================================================

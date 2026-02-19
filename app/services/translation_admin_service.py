@@ -14,9 +14,16 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_, and_, update
+from sqlalchemy import select, func, or_, and_, update, case
 
-from app.infra.sa_models import TMEntry, TMEntryHistory, Lemma, TermCluster
+from app.infra.sa_models import (
+    TMEntry,
+    TMEntryHistory,
+    Lemma,
+    TermCluster,
+    StudyProgress,
+    UserDictionaryItem,
+)
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
@@ -39,6 +46,55 @@ class TranslationAdminService:
         "source_ref": TMEntry.source_ref,
         "updated_at": TMEntry.updated_at,
     }
+
+    @staticmethod
+    def _canonical_match_clause():
+        return and_(
+            UserDictionaryItem.src_lang == TMEntry.src_lang,
+            UserDictionaryItem.tgt_lang == TMEntry.tgt_lang,
+            UserDictionaryItem.kind == TMEntry.kind,
+            UserDictionaryItem.src_norm == TMEntry.src_norm,
+        )
+
+    def _ud_marker_sort_expression(self):
+        """Sortable rank for UD marker column: 0=none, 1=saved."""
+        ud_count_subq = (
+            select(func.count(UserDictionaryItem.item_id))
+            .where(self._canonical_match_clause())
+            .correlate(TMEntry)
+            .scalar_subquery()
+        )
+        return case(
+            (func.coalesce(ud_count_subq, 0) > 0, 1),
+            else_=0,
+        )
+
+    def _last_review_sort_expression(self):
+        """Sortable rank for Last Review column: Added(0), Again(1), Hard(2), Good(3), Easy(4)."""
+        grade_rank = case(
+            (StudyProgress.last_grade == "again", 1),
+            (StudyProgress.last_grade == "hard", 2),
+            (StudyProgress.last_grade == "good", 3),
+            (StudyProgress.last_grade == "easy", 4),
+            else_=0,
+        )
+        rank_subq = (
+            select(func.max(grade_rank))
+            .select_from(UserDictionaryItem)
+            .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
+            .where(self._canonical_match_clause())
+            .correlate(TMEntry)
+            .scalar_subquery()
+        )
+        return func.coalesce(rank_subq, 0)
+
+    def _resolve_sort_column(self, sort_column: str):
+        """Return safe sort expression for requested column."""
+        if sort_column == "ud_marker":
+            return self._ud_marker_sort_expression()
+        if sort_column == "last_review":
+            return self._last_review_sort_expression()
+        return self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
 
     def search_tm_entries(
         self,
@@ -134,11 +190,11 @@ class TranslationAdminService:
             stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Server-side sorting
-        sort_col = self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
+        sort_col = self._resolve_sort_column(sort_column)
         if sort_direction == "asc":
-            stmt = stmt.order_by(sort_col.asc())
+            stmt = stmt.order_by(sort_col.asc(), TMEntry.tm_id.asc())
         else:
-            stmt = stmt.order_by(sort_col.desc())
+            stmt = stmt.order_by(sort_col.desc(), TMEntry.tm_id.asc())
 
         # Pagination
         stmt = stmt.limit(limit).offset(offset)

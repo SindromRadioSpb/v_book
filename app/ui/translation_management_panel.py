@@ -289,6 +289,7 @@ class TranslationManagementPanel(QWidget):
 
         # Column index to DB column mapping
         self.COLUMN_TO_DB = {
+            0: "ud_marker",
             1: "tm_id",
             2: "kind",
             3: "src_text",
@@ -298,6 +299,7 @@ class TranslationManagementPanel(QWidget):
             7: "origin",
             8: "source_ref",
             9: "updated_at",
+            11: "last_review",
         }
 
         self.init_ui()
