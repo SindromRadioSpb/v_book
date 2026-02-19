@@ -26,6 +26,7 @@ UI composition in `User Dictionaries`:
 - `Origin` marker column
 - `Study` chip column
 - `Status` icon stack (translation/audio/noise) + full tooltip
+- Semantic colors applied to Study/Origin/Status/Audio/Noise for instant scanning
 
 ## Scope
 
@@ -63,7 +64,10 @@ UI composition in `User Dictionaries`:
   - `Translate Selected (N rows)...`
   - `Mark Selected as Noise (N rows)`
   - `Mark Selected as Valid (N rows)`
+  - `Suspend Selected (N rows)`
+  - `Resume Selected (N rows)`
 - Noise changes sync from User Dictionaries to `tm_global`, linked `tm_entry`, and linked source entities.
+- Suspension is per-item (does not delete progress) and excludes items from Review queue.
 
 ## Legacy Canonical-Key Guard
 
@@ -78,6 +82,7 @@ UI composition in `User Dictionaries`:
 ## Cross-View Indicators
 
 - `Dictionary`, `Terms`, and `Term Card` rows display a saved-to-UD marker and study tooltip.
+- Marker contract: `*` for saved in UD, `*!` for saved and due.
 - `Translation Management` rows receive non-intrusive study tooltip enrichment.
 - Metadata is resolved by batch lookup per page (no per-row SQL loops).
 

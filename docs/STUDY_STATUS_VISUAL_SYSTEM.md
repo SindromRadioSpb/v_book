@@ -70,6 +70,10 @@ Each study entity may expose up to five dimensions:
 - Study chip: icon + text label
 - Status icons: translation tier + audio + noise in one status column
 - Tooltips: full text explanation for each visual token
+- Semantic color layer:
+  - `new` neutral, `learning` blue, `due` amber, `mastered` green, `suspended` muted
+  - Translation/audio/noise/origin use stable semantic colors
+  - Cross-view UD marker is `*` and `*!` for `due`
 
 Color is never the only signal.
 
@@ -85,4 +89,3 @@ Color is never the only signal.
 - Scrollable lists/tables at all window sizes
 - Keyboard focus/activation must remain functional
 - Long operations use worker + V3 progress UX
-

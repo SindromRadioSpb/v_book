@@ -17,6 +17,8 @@
 13. Suspended item is excluded from due queue
 14. Dictionary/Terms show saved-to-UD indicator and tooltip
 15. TM panel row tooltip shows study state for matching canonical key
+16. Cross-view UD marker switches from `*` to `*!` when row is due
+17. User Dictionaries context menu supports Suspend/Resume and due queue updates immediately
 
 ## Non-Functional Evidence
 
@@ -26,6 +28,7 @@
 - No UI freeze during long operations
 - Existing long operations continue to use worker + `BatchProgressDialogV3`
 - Table content remains scrollable at small window sizes
+- Semantic color layer is additive only (icons/text/tooltip remain primary semantic carriers)
 
 ## Evidence Artifacts
 
