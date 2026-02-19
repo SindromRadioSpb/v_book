@@ -12,10 +12,11 @@ from app.domain.dto import (
 from app.ui.study_status_ui import (
     audio_status_brush,
     compose_status_icons,
+    get_last_grade_cell_brush,
+    last_review_label,
     noise_brush,
     origin_brush,
     origin_marker,
-    study_row_background_brush,
     study_brush,
     study_chip,
     translation_tier_brush,
@@ -748,6 +749,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             "Status",
             "Noise",
             "Study Status",
+            "Last Review",
             "Origin",
             "Audio",
         ]
@@ -766,12 +768,29 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
         item = self.items[index.row()]
         col = index.column()
         if role == Qt.ItemDataRole.ToolTipRole:
+            if col == 6:
+                last_review = last_review_label(item.last_grade, item.study_review_count)
+                graded_at = item.last_graded_at or "n/a"
+                due_at = item.study_due_at or "n/a"
+                tooltip = (
+                    f"Last review: {last_review}\n"
+                    f"Last graded at: {graded_at}\n"
+                    f"Review count: {item.study_review_count}\n"
+                    f"Due at: {due_at}"
+                )
+                if int(item.is_noise or 0) == 1:
+                    tooltip += "\nNoise: yes"
+                if int(item.is_suspended or 0) == 1:
+                    tooltip += "\nSuspended: yes"
+                return tooltip
             if item.status_tooltip:
                 return item.status_tooltip
             return None
 
         if role == Qt.ItemDataRole.BackgroundRole:
-            return study_row_background_brush(item.computed_study_state)
+            if col == 6:
+                return get_last_grade_cell_brush(item.last_grade, review_count=item.study_review_count)
+            return None
 
         if role == Qt.ItemDataRole.ForegroundRole:
             if col == 3:
@@ -780,9 +799,9 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
                 return noise_brush(item.is_noise)
             if col == 5:
                 return study_brush(item.computed_study_state)
-            if col == 6:
-                return origin_brush(item.origin_kind)
             if col == 7:
+                return origin_brush(item.origin_kind)
+            if col == 8:
                 return audio_status_brush(item.audio_status)
             return None
 
@@ -804,8 +823,10 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             if col == 5:
                 return study_chip(item.computed_study_state)
             if col == 6:
-                return origin_marker(item.origin_kind)
+                return last_review_label(item.last_grade, item.study_review_count)
             if col == 7:
+                return origin_marker(item.origin_kind)
+            if col == 8:
                 return item.audio_status
         return None
 

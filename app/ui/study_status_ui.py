@@ -70,12 +70,12 @@ NOISE_COLORS = {
     1: "#C62828",
 }
 
-STUDY_ROW_BG_COLORS = {
-    "new": "#ECEFF1",
-    "learning": "#E3F2FD",
-    "due": "#FFF3E0",
-    "mastered": "#E8F5E9",
-    "suspended": "#F3E5F5",
+LAST_REVIEW_GRADE_COLORS = {
+    "added": "#ECEFF1",
+    "again": "#FFEBEE",
+    "hard": "#FFF3E0",
+    "good": "#E8F5E9",
+    "easy": "#E0F2F1",
 }
 
 
@@ -165,10 +165,29 @@ def noise_brush(is_noise: int) -> QBrush:
     return _brush(NOISE_COLORS[1 if int(is_noise or 0) == 1 else 0])
 
 
-def study_row_background_brush(study_state: Optional[str]) -> QBrush:
-    return _brush(
-        STUDY_ROW_BG_COLORS.get(
-            (study_state or "new").lower(),
-            STUDY_ROW_BG_COLORS["new"],
-        )
-    )
+def normalize_last_grade(last_grade: Optional[str], review_count: int = 0) -> str:
+    key = (last_grade or "").strip().lower()
+    if review_count <= 0 or key not in ("again", "hard", "good", "easy"):
+        return "added"
+    return key
+
+
+def last_review_label(last_grade: Optional[str], review_count: int = 0) -> str:
+    key = normalize_last_grade(last_grade, review_count)
+    return {
+        "added": "Added",
+        "again": "Again",
+        "hard": "Hard",
+        "good": "Good",
+        "easy": "Easy",
+    }[key]
+
+
+def get_last_grade_cell_brush(
+    last_grade: Optional[str],
+    theme_context: Optional[object] = None,
+    review_count: int = 0,
+) -> QBrush:
+    del theme_context  # Reserved for future palette-aware adaptation.
+    key = normalize_last_grade(last_grade, review_count)
+    return _brush(LAST_REVIEW_GRADE_COLORS[key])
