@@ -821,3 +821,46 @@ def test_get_study_summary_counts_by_computed_states(user_dict_engine):
         assert counters["due"] == 1
         assert counters["mastered"] == 1
         assert counters["suspended"] == 1
+
+
+def test_get_study_summary_counts_treats_again_with_zero_review_as_learning(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Summary Again")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "again-zero",
+                    "src_norm": "again-zero",
+                    "origin_project_id": 200,
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+        progress = session.get(StudyProgress, item.study_progress_id)
+        now_dt = datetime.now(timezone.utc)
+        progress.review_count = 0
+        progress.last_grade = "again"
+        progress.last_graded_at = (now_dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        progress.due_at = (now_dt + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        session.commit()
+
+        counters = service.get_study_summary_counts(
+            session=session,
+            dictionary_id=dictionary_id,
+            scope_origin_project_id=200,
+            hide_noise=True,
+        )
+
+        assert counters["total"] == 1
+        assert counters["new"] == 0
+        assert counters["learning"] == 1

@@ -48,7 +48,7 @@ def test_again_resets_progress_and_sets_due_tomorrow():
             due_dt = _parse_iso(row.due_at)
             now_dt = datetime.now(timezone.utc)
             assert 0 <= (due_dt.date() - now_dt.date()).days <= 1
-            assert summary.study_state == "new"
+            assert summary.study_state == "learning"
     finally:
         engine.dispose()
         path.unlink(missing_ok=True)
@@ -108,4 +108,3 @@ def test_ef_clamped_min_1_3():
     finally:
         engine.dispose()
         path.unlink(missing_ok=True)
-

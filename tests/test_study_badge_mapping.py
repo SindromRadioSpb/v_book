@@ -83,3 +83,22 @@ def test_badge_mastered_when_interval_threshold_met():
     )
     assert service.compute_study_state(summary, now) == "mastered"
 
+
+def test_badge_learning_after_again_with_zero_review_count():
+    service = StudyService()
+    now = datetime.now(timezone.utc)
+    summary = StudyProgressSummaryDTO(
+        progress_id=1,
+        canonical_hash="hash-again-learning",
+        first_seen_at=_iso(now - timedelta(days=3)),
+        last_review_at=_iso(now - timedelta(hours=1)),
+        due_at=_iso(now + timedelta(days=1)),
+        review_count=0,
+        lapse_count=1,
+        interval_days=1,
+        ease_factor=2.3,
+        last_quality=1,
+        last_grade="again",
+        last_graded_at=_iso(now - timedelta(hours=1)),
+    )
+    assert service.compute_study_state(summary, now) == "learning"

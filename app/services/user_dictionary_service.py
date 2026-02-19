@@ -1200,9 +1200,13 @@ class UserDictionaryService:
     ) -> Dict[str, int]:
         """Return deterministic study-state counters for one opened dictionary."""
         now_value = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        is_new_expr = and_(
+            func.coalesce(StudyProgress.review_count, 0) <= 0,
+            StudyProgress.last_grade.is_(None),
+        )
         state_expr = case(
             (UserDictionaryItem.is_suspended == 1, "suspended"),
-            (func.coalesce(StudyProgress.review_count, 0) <= 0, "new"),
+            (is_new_expr, "new"),
             (StudyProgress.due_at <= now_value, "due"),
             (
                 and_(
@@ -1502,6 +1506,10 @@ class UserDictionaryService:
 
         study_filter = (filters.get("study_state") or "").strip().lower()
         now_value = now_str or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        is_new_clause = and_(
+            func.coalesce(StudyProgress.review_count, 0) <= 0,
+            StudyProgress.last_grade.is_(None),
+        )
         mastered_clause = and_(
             func.coalesce(StudyProgress.review_count, 0) >= StudyService.MASTERED_MIN_REVIEWS,
             func.coalesce(StudyProgress.interval_days, 0) >= StudyService.MASTERED_INTERVAL_DAYS,
@@ -1511,17 +1519,17 @@ class UserDictionaryService:
             stmt = stmt.where(UserDictionaryItem.is_suspended == 1)
         elif study_filter == "new":
             stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
-            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) <= 0)
+            stmt = stmt.where(is_new_clause)
         elif study_filter == "due":
             stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
-            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) > 0)
+            stmt = stmt.where(~is_new_clause)
             stmt = stmt.where(StudyProgress.due_at <= now_value)
         elif study_filter == "mastered":
             stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
             stmt = stmt.where(mastered_clause)
         elif study_filter == "learning":
             stmt = stmt.where(UserDictionaryItem.is_suspended == 0)
-            stmt = stmt.where(func.coalesce(StudyProgress.review_count, 0) > 0)
+            stmt = stmt.where(~is_new_clause)
             stmt = stmt.where(or_(StudyProgress.due_at.is_(None), StudyProgress.due_at > now_value))
             stmt = stmt.where(~mastered_clause)
 

@@ -353,7 +353,7 @@ class StudyService:
         """Compute semantic study state from summary."""
         if summary.is_suspended:
             return "suspended"
-        if int(summary.review_count or 0) <= 0:
+        if int(summary.review_count or 0) <= 0 and not (summary.last_grade or "").strip():
             return "new"
 
         now_dt = self._now(now)
