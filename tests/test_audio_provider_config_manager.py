@@ -60,6 +60,8 @@ def test_audio_config_persists_budget_and_retry_fields():
     cfg.timeout_seconds = 21.0
     cfg.retry_max_attempts = 4
     cfg.retry_backoff_base_ms = 750
+    cfg.default_voice = "he-IL-HilaNeural"
+    cfg.speech_rate = 0.85
 
     manager.save_config(cfg)
 
@@ -75,3 +77,5 @@ def test_audio_config_persists_budget_and_retry_fields():
     assert int(loaded.timeout_seconds) == 21
     assert loaded.retry_max_attempts == 4
     assert loaded.retry_backoff_base_ms == 750
+    assert loaded.default_voice == "he-IL-HilaNeural"
+    assert abs(float(loaded.speech_rate) - 0.85) < 1e-6
