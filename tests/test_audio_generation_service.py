@@ -24,6 +24,12 @@ class _DummySettings:
     def get_json(self, _key: str, default):
         return default
 
+    def get_bool(self, _key: str, default: bool = False) -> bool:
+        return default
+
+    def get_int(self, _key: str, default: int = 0) -> int:
+        return default
+
 
 def _workspace_temp_dir(prefix: str) -> Path:
     root = Path("build") / "tmp_tests"

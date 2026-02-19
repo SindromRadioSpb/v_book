@@ -31,6 +31,10 @@ class _SettingsStub:
         return default
 
     def get_bool(self, _key: str, default: bool = False) -> bool:
+        if _key == "audio/providers/enabled":
+            return True
+        if _key == "audio/providers/google_cloud_tts/enabled":
+            return True
         return default
 
     def get_int(self, _key: str, default: int = 0) -> int:
