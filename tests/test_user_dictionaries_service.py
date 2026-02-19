@@ -655,6 +655,44 @@ def test_resolve_cross_view_status_tooltip_only_for_user_dictionary_members(user
         assert overlay[out_hash]["study_tooltip"] is None
 
 
+def test_resolve_cross_view_status_includes_failed_audio_for_non_ud_rows(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        src_text = "audio-failed-term"
+        src_norm = normalize_for_tm("he", src_text, "term_cluster").norm
+        canonical_hash = service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+
+        session.add(
+            AudioAsset(
+                lang="he",
+                norm_text=src_norm,
+                voice_id="default",
+                speed=1.0,
+                provider="google_cloud_tts",
+                asset_status="failed",
+                error_text="auth failed",
+            )
+        )
+        session.commit()
+
+        overlay = service.resolve_cross_view_status(
+            session,
+            rows=[
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": src_text,
+                    "src_norm": src_norm,
+                }
+            ],
+        )
+
+        assert overlay[canonical_hash]["in_user_dictionary_count"] == 0
+        assert overlay[canonical_hash]["audio_status"] == "failed"
+        assert overlay[canonical_hash]["study_tooltip"] is None
+
+
 def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
     service = UserDictionaryService()
     with Session(user_dict_engine) as session:
