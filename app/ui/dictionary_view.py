@@ -222,6 +222,7 @@ class DictionaryView(QWidget):
                 7: 110,  # Status
                 8: 90,   # Noise
                 9: 110,  # Last Review
+                10: 90,  # Audio
             },
         )
         self.table_layout_controller.install()

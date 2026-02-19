@@ -33,6 +33,7 @@ from app.services.db_service import DBService
 from app.services.study_service import StudyService
 from app.services.user_dictionary_service import UserDictionaryService
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
@@ -40,6 +41,7 @@ from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import (
     UserDictionaryBulkAddWorker,
     UserDictionaryBulkRemoveWorker,
+    UserDictGenerateAudioWorker,
     UserDictTranslateWorker,
 )
 
@@ -152,6 +154,7 @@ class UserDictionariesView(QWidget):
             self.scope_mode = "all"
         self._bulk_worker = None
         self._translate_worker = None
+        self._audio_worker = None
         self._review_cards = []
         self._review_index = -1
         self._view_mode = "browse"
@@ -397,6 +400,10 @@ class UserDictionariesView(QWidget):
         self.translate_selected_btn.clicked.connect(self.on_translate_selected)
         self.translate_selected_btn.setEnabled(False)
         actions_row.addWidget(self.translate_selected_btn)
+        self.generate_audio_btn = QPushButton("Generate Audio...")
+        self.generate_audio_btn.clicked.connect(self.on_generate_audio_selected)
+        self.generate_audio_btn.setEnabled(False)
+        actions_row.addWidget(self.generate_audio_btn)
         self.mark_due_btn = QPushButton("Mark Due Now")
         self.mark_due_btn.clicked.connect(self.set_selected_due_now)
         self.mark_due_btn.setEnabled(False)
@@ -730,27 +737,16 @@ class UserDictionariesView(QWidget):
         if not items:
             return
 
-        voice_id = self.settings.get_string("user_dict/audio_voice_id", "default")
-        provider = self.settings.get_string("user_dict/audio_provider", "none")
-        speed_raw = self.settings.get_string("user_dict/audio_speed", "1.0")
-        try:
-            speed = float(speed_raw)
-        except Exception:
-            speed = 1.0
-
         by_lang: Dict[str, List[str]] = {}
         for item in items:
             by_lang.setdefault(item.src_lang, []).append(item.src_norm)
 
         status_map = {}
         for lang, norms in by_lang.items():
-            mapping = self.audio_service.bulk_get_status(
+            mapping = self.audio_service.bulk_get_status_any(
                 session,
                 lang=lang,
                 norm_texts=norms,
-                voice_id=voice_id,
-                speed=speed,
-                provider=provider,
             )
             for norm, status in mapping.items():
                 status_map[(lang, norm)] = status
@@ -819,6 +815,7 @@ class UserDictionariesView(QWidget):
         count = len(self.items_table.selectionModel().selectedRows())
         self.remove_selected_btn.setEnabled(count > 0)
         self.translate_selected_btn.setEnabled(count > 0)
+        self.generate_audio_btn.setEnabled(count > 0)
         self.mark_due_btn.setEnabled(count > 0)
 
     def _update_study_summary(self):
@@ -861,6 +858,9 @@ class UserDictionariesView(QWidget):
         translate_action = QAction(f"Translate Selected ({count} rows)...", self)
         translate_action.triggered.connect(self.on_translate_selected)
         menu.addAction(translate_action)
+        generate_audio_action = QAction(f"Generate Audio Selected ({count} rows)...", self)
+        generate_audio_action.triggered.connect(self.on_generate_audio_selected)
+        menu.addAction(generate_audio_action)
         menu.addSeparator()
 
         mark_noise_action = QAction(f"Mark Selected as Noise ({count} rows)", self)
@@ -1237,6 +1237,92 @@ class UserDictionariesView(QWidget):
         worker.error.connect(self.on_items_selection_changed)
         worker.start()
 
+    def on_generate_audio_selected(self):
+        if not self.current_dictionary_id:
+            return
+
+        selected_ids = self._selected_item_ids()
+        if not selected_ids:
+            return
+
+        with self.db_service.get_session() as session:
+            filtered_count = self.user_dict_service.count_item_ids_for_translation(
+                session=session,
+                dictionary_id=self.current_dictionary_id,
+                filters=self.build_filters(),
+                write_mode="OVERWRITE",
+            )
+
+        accepted, provider_mode, write_mode, scope = show_batch_audio_dialog(
+            parent=self,
+            selected_count=len(selected_ids),
+            scope_enabled=True,
+            filtered_count=filtered_count,
+        )
+        if not accepted:
+            return
+
+        total = filtered_count if scope == "all_filtered" else len(selected_ids)
+        progress_dialog = BatchProgressDialogV3(parent=self, total=total)
+        progress_dialog.setWindowTitle("Batch Generate Source Audio")
+        progress_dialog.show()
+
+        worker = UserDictGenerateAudioWorker(
+            dictionary_id=self.current_dictionary_id,
+            scope=scope,
+            selected_item_ids=selected_ids,
+            filters=self.build_filters(),
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            id_fetch_chunk=200,
+            audio_chunk=25,
+        )
+        self._audio_worker = worker
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
+
+        self.generate_audio_btn.setEnabled(False)
+        worker.finished.connect(self.on_items_selection_changed)
+        worker.error.connect(self.on_items_selection_changed)
+        worker.start()
+
+    def _on_generate_audio_finished(self, result: Dict[str, int], progress_dialog):
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(
+            int(result.get("succeeded", 0)),
+            int(result.get("skipped", 0)),
+            int(result.get("failed", 0)),
+        )
+        progress_dialog.accept()
+
+        msg = (
+            "Audio generation completed.\n\n"
+            f"Total: {int(result.get('total', 0))}\n"
+            f"Ready: {int(result.get('succeeded', 0))}\n"
+            f"Skipped: {int(result.get('skipped', 0))}\n"
+            f"Failed: {int(result.get('failed', 0))}"
+        )
+        if int(result.get("failed", 0)) > 0:
+            QMessageBox.warning(self, "Audio Generation Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Audio Generation Complete", msg)
+
+        self._audio_worker = None
+        self.load_items()
+
+    def _on_generate_audio_error(self, error_msg: str, progress_dialog):
+        progress_dialog.reject()
+        QMessageBox.warning(self, "Audio Generation Failed", error_msg)
+        self._audio_worker = None
+        self.on_items_selection_changed()
+
     def _on_translate_finished(self, result, progress_dialog):
         progress_dialog.set_completed()
         progress_dialog.update_counts(result.succeeded, result.skipped, result.failed)
@@ -1415,3 +1501,16 @@ class UserDictionariesView(QWidget):
         progress_dialog.close()
         QMessageBox.warning(self, "Add Failed", error_msg)
         self._bulk_worker = None
+
+    def closeEvent(self, event):
+        """Graceful worker shutdown on panel close."""
+        for worker in (self._bulk_worker, self._translate_worker, self._audio_worker):
+            try:
+                if worker and worker.isRunning():
+                    if hasattr(worker, "cancel"):
+                        worker.cancel()
+                    worker.wait(2000)
+            except Exception:
+                pass
+        self.table_layout_controller.save_now()
+        super().closeEvent(event)

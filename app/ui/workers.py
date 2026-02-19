@@ -2503,3 +2503,213 @@ class UserDictTranslateWorker(QThread):
             _flush_mt_usage_queue(f"{self._trace}:error")
             logger.error("UserDictTranslateWorker error: %s", e, exc_info=True)
             self.error.emit(str(e))
+
+
+class UserDictGenerateAudioWorker(QThread):
+    """Generate source-audio for user dictionary rows in background."""
+
+    progress = pyqtSignal(int, int)        # (completed, total)
+    stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(dict)            # {total, succeeded, skipped, failed}
+    error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
+
+    def __init__(
+        self,
+        dictionary_id: int,
+        scope: str,  # "current_page" | "all_filtered"
+        selected_item_ids: List[int],
+        filters: Dict[str, Any],
+        provider_mode: str,
+        write_mode: str,  # "MISSING_ONLY" | "REGENERATE_ALL"
+        *,
+        id_fetch_chunk: int = 200,
+        audio_chunk: int = 25,
+    ):
+        super().__init__()
+        self.dictionary_id = dictionary_id
+        self.scope = scope
+        self.selected_item_ids = selected_item_ids
+        self.filters = filters
+        self.provider_mode = provider_mode
+        self.write_mode = write_mode
+        self.id_fetch_chunk = id_fetch_chunk
+        self.audio_chunk = audio_chunk
+        self._cancel_requested = False
+        self._paused = False
+        self._trace = f"user_dict_audio:{dictionary_id}"
+
+    def cancel(self):
+        self._cancel_requested = True
+
+    def pause(self):
+        self._paused = True
+        self.paused.emit()
+
+    def resume(self):
+        self._paused = False
+        self.resumed.emit()
+
+    def _wait_if_paused(self) -> None:
+        while self._paused and not self._cancel_requested:
+            time.sleep(0.1)
+
+    def run(self):
+        from app.services.audio_asset_service import AudioAssetService
+        from app.services.audio_generation_service import AudioGenerationService
+        from app.services.db_service import DBService
+        from app.services.user_dictionary_service import UserDictionaryService
+
+        try:
+            self.stage_updated.emit("Initializing...")
+            db_service = DBService.get_instance()
+            user_dict_service = UserDictionaryService()
+            audio_service = AudioGenerationService()
+            asset_service = AudioAssetService()
+
+            succeeded = 0
+            skipped = 0
+            failed = 0
+            completed = 0
+            pending_writes = 0
+
+            with db_service.get_session() as session:
+                self.stage_updated.emit("Counting targets...")
+
+                if self.scope == "all_filtered":
+                    total = user_dict_service.count_item_ids_for_translation(
+                        session=session,
+                        dictionary_id=self.dictionary_id,
+                        filters=self.filters,
+                        write_mode="OVERWRITE",
+                    )
+                    source_ids = None
+                else:
+                    source_ids = sorted(set(self.selected_item_ids))
+                    total = len(source_ids)
+
+                if total == 0:
+                    self.stage_updated.emit("No targets found")
+                    self.finished.emit(
+                        {
+                            "total": 0,
+                            "succeeded": 0,
+                            "skipped": 0,
+                            "failed": 0,
+                            "cancelled": False,
+                        }
+                    )
+                    return
+
+                chunk_offset = 0
+                total_batches = (total + self.id_fetch_chunk - 1) // self.id_fetch_chunk
+
+                while True:
+                    self._wait_if_paused()
+                    if self._cancel_requested:
+                        break
+
+                    if self.scope == "all_filtered":
+                        batch_ids = user_dict_service.fetch_item_ids_for_translation(
+                            session=session,
+                            dictionary_id=self.dictionary_id,
+                            filters=self.filters,
+                            write_mode="OVERWRITE",
+                            limit=self.id_fetch_chunk,
+                            offset=chunk_offset,
+                        )
+                    else:
+                        if source_ids is None or chunk_offset >= len(source_ids):
+                            break
+                        batch_ids = source_ids[chunk_offset : chunk_offset + self.id_fetch_chunk]
+
+                    if not batch_ids:
+                        break
+
+                    chunk_offset += len(batch_ids)
+                    batch_num = ((chunk_offset - 1) // self.id_fetch_chunk) + 1
+                    self.stage_updated.emit(f"Generating audio batch {batch_num}/{max(total_batches, 1)}...")
+                    items = user_dict_service.get_items_by_ids(session, batch_ids)
+
+                    for item in items:
+                        self._wait_if_paused()
+                        if self._cancel_requested:
+                            break
+
+                        row_id = str(item.item_id)
+                        try:
+                            if self.write_mode == "MISSING_ONLY":
+                                current = asset_service.bulk_get_status_any(
+                                    session=session,
+                                    lang=item.src_lang,
+                                    norm_texts=[item.src_norm],
+                                )
+                                if current.get(item.src_norm) == "ready":
+                                    skipped += 1
+                                    completed += 1
+                                    self.row_translated.emit(row_id, "audio already exists", False)
+                                    self.progress.emit(completed, total)
+                                    self.stats_updated.emit(succeeded, skipped, failed)
+                                    continue
+
+                            result = audio_service.generate_one(
+                                session=session,
+                                src_text=item.src_text,
+                                src_lang=item.src_lang,
+                                source_norm=item.src_norm,
+                                provider_mode=self.provider_mode,
+                                force_regenerate=(self.write_mode == "REGENERATE_ALL"),
+                                trace_id=f"{self._trace}:{row_id}",
+                            )
+                            pending_writes += 1
+                            if pending_writes >= self.audio_chunk:
+                                session.commit()
+                                pending_writes = 0
+
+                            if result.get("ok"):
+                                if result.get("status") == "skipped":
+                                    skipped += 1
+                                    self.row_translated.emit(row_id, "audio already exists", False)
+                                else:
+                                    succeeded += 1
+                                    provider_id = str(result.get("provider_id") or "provider")
+                                    self.row_translated.emit(row_id, f"ready via {provider_id}", True)
+                            else:
+                                failed += 1
+                                err_msg = str(result.get("error") or "audio generation failed")
+                                self.row_translated.emit(row_id, err_msg[:50], False)
+                        except Exception as row_err:
+                            failed += 1
+                            self.row_translated.emit(row_id, str(row_err)[:50], False)
+                        finally:
+                            completed += 1
+                            self.progress.emit(completed, total)
+                            self.stats_updated.emit(succeeded, skipped, failed)
+
+                    if self._cancel_requested:
+                        break
+
+                if pending_writes:
+                    session.commit()
+
+            if self._cancel_requested:
+                self.stage_updated.emit("Cancelled")
+            else:
+                self.stage_updated.emit(
+                    f"Completed: {succeeded} succeeded, {skipped} skipped, {failed} failed"
+                )
+            self.finished.emit(
+                {
+                    "total": completed,
+                    "succeeded": succeeded,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "cancelled": bool(self._cancel_requested),
+                }
+            )
+        except Exception as exc:
+            logger.error("UserDictGenerateAudioWorker error: %s", exc, exc_info=True)
+            self.error.emit(str(exc))

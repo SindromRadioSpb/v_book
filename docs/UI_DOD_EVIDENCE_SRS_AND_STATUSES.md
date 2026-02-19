@@ -24,6 +24,10 @@
 20. `Last Review` column shows `Added/Again/Hard/Good/Easy` and applies highlight only to that cell (no row tint)
 21. Last Review tooltip includes `last_graded_at`, `review_count`, `due_at`
 22. Due-now action updates queue eligibility without resetting last-grade history
+23. User Dictionaries `Generate Audio...` runs in progress dialog without UI freeze
+24. After generation, `Audio` column updates (`missing -> ready` or `failed`) on refresh
+25. `Generate Audio Selected (N rows)...` exists in User Dictionaries context menu
+26. `Audio` column is visible in Dictionary, Terms, Term Cards, and TM Panel
 
 ## Non-Functional Evidence
 
@@ -32,6 +36,7 @@
 - Shared batch resolver: `UserDictionaryService.resolve_cross_view_status(...)`
 - No UI freeze during long operations
 - Existing long operations continue to use worker + `BatchProgressDialogV3`
+- Audio generation follows worker-only long-op contract (`UserDictGenerateAudioWorker`)
 - Table content remains scrollable at small window sizes
 - Semantic color layer is additive only (icons/text/tooltip remain primary semantic carriers)
 - Last Review highlighting is isolated to one column to avoid conflicts with due/noise/suspended semantics

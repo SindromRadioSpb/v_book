@@ -244,6 +244,7 @@ class TermCardView(QWidget):
                 7: 200,  # Aliases
                 8: 90,   # Stopword
                 9: 110,  # Last Review
+                10: 90,  # Audio
             },
         )
         self.table_layout_controller.install()
@@ -323,6 +324,7 @@ class TermCardView(QWidget):
             card.study_due_human = overlay.get("study_due_human")
             card.last_grade = overlay.get("last_grade")
             card.last_graded_at = overlay.get("last_graded_at")
+            card.audio_status = overlay.get("audio_status")
 
     def on_queue_item_clicked(self, index):
         """Handle click on review queue item."""

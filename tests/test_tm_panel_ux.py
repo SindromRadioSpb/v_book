@@ -43,6 +43,7 @@ def temp_db():
             TMEntry,
             DictProject,
             Library,
+            AudioAsset,
             StudyProgress,
             UserDictionary,
             UserDictionaryItem,
@@ -50,6 +51,7 @@ def temp_db():
         Library.__table__.create(engine, checkfirst=True)
         DictProject.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
+        AudioAsset.__table__.create(engine, checkfirst=True)
         StudyProgress.__table__.create(engine, checkfirst=True)
         UserDictionary.__table__.create(engine, checkfirst=True)
         UserDictionaryItem.__table__.create(engine, checkfirst=True)
@@ -171,7 +173,7 @@ def populated_db(temp_db):
             session.add(entry)
 
         # User dictionary overlays for sorting tests (UD + Last Review)
-        from app.infra.sa_models import StudyProgress, UserDictionary, UserDictionaryItem
+        from app.infra.sa_models import AudioAsset, StudyProgress, UserDictionary, UserDictionaryItem
         ud_service = UserDictionaryService()
         deck = UserDictionary(name="Deck Sort")
         session.add(deck)
@@ -234,6 +236,28 @@ def populated_db(temp_db):
                     is_noise=0,
                     study_state="learning",
                     study_progress_id=progress_good.id,
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                AudioAsset(
+                    lang="he",
+                    norm_text="alpha_src_0",
+                    voice_id="default",
+                    speed=1.0,
+                    provider="mock_local_audio",
+                    asset_status="ready",
+                    audio_rel_path="audio/mock_local_audio/he/alpha_src_0.wav",
+                ),
+                AudioAsset(
+                    lang="he",
+                    norm_text="alpha_src_1",
+                    voice_id="default",
+                    speed=1.0,
+                    provider="mock_local_audio",
+                    asset_status="failed",
+                    error_text="provider failed",
                 ),
             ]
         )
@@ -497,6 +521,26 @@ def test_sort_by_last_review_desc(populated_db):
     idx_again = next(i for i, entry in enumerate(results) if entry.src_text == "alpha_src_0")
     idx_none = next(i for i, entry in enumerate(results) if entry.src_text == "global_src_1")
     assert idx_good < idx_again < idx_none
+
+
+def test_sort_by_audio_status_desc(populated_db):
+    """TM must support sorting by Audio column."""
+    session, _project_ids = populated_db
+    service = TranslationAdminService()
+
+    results = service.search_tm_entries(
+        session=session,
+        filters={},
+        limit=100,
+        offset=0,
+        sort_column="audio_status",
+        sort_direction="desc",
+    )
+
+    idx_ready = next(i for i, entry in enumerate(results) if entry.src_text == "alpha_src_0")
+    idx_failed = next(i for i, entry in enumerate(results) if entry.src_text == "alpha_src_1")
+    idx_missing = next(i for i, entry in enumerate(results) if entry.src_text == "alpha_src_2")
+    assert idx_ready < idx_failed < idx_missing
 
 
 # ============================================================================

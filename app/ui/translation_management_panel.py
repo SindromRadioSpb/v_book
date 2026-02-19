@@ -300,6 +300,7 @@ class TranslationManagementPanel(QWidget):
             8: "source_ref",
             9: "updated_at",
             11: "last_review",
+            12: "audio_status",
         }
 
         self.init_ui()
@@ -466,6 +467,7 @@ class TranslationManagementPanel(QWidget):
                 9: 120,  # Updated
                 10: 90,  # Noise
                 11: 110, # Last Review
+                12: 90,  # Audio
             },
         )
         self.table_layout_controller.install()

@@ -213,6 +213,7 @@ class TermsView(QWidget):
                 14: 110, # Status
                 15: 90,  # Noise
                 16: 110, # Last Review
+                17: 90,  # Audio
             },
         )
         self.table_layout_controller.install()

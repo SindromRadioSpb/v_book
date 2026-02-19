@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, and_, update, case
 
 from app.infra.sa_models import (
+    AudioAsset,
     TMEntry,
     TMEntryHistory,
     Lemma,
@@ -88,12 +89,46 @@ class TranslationAdminService:
         )
         return func.coalesce(rank_subq, 0)
 
+    def _audio_status_sort_expression(self):
+        """Sortable rank for audio status: missing(0), failed(1), ready(2)."""
+        ready_subq = (
+            select(func.count(AudioAsset.asset_id))
+            .where(
+                and_(
+                    AudioAsset.lang == TMEntry.src_lang,
+                    AudioAsset.norm_text == TMEntry.src_norm,
+                    AudioAsset.asset_status == "ready",
+                )
+            )
+            .correlate(TMEntry)
+            .scalar_subquery()
+        )
+        failed_subq = (
+            select(func.count(AudioAsset.asset_id))
+            .where(
+                and_(
+                    AudioAsset.lang == TMEntry.src_lang,
+                    AudioAsset.norm_text == TMEntry.src_norm,
+                    AudioAsset.asset_status == "failed",
+                )
+            )
+            .correlate(TMEntry)
+            .scalar_subquery()
+        )
+        return case(
+            (func.coalesce(ready_subq, 0) > 0, 2),
+            (func.coalesce(failed_subq, 0) > 0, 1),
+            else_=0,
+        )
+
     def _resolve_sort_column(self, sort_column: str):
         """Return safe sort expression for requested column."""
         if sort_column == "ud_marker":
             return self._ud_marker_sort_expression()
         if sort_column == "last_review":
             return self._last_review_sort_expression()
+        if sort_column == "audio_status":
+            return self._audio_status_sort_expression()
         return self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
 
     def search_tm_entries(
@@ -864,6 +899,7 @@ class TranslationAdminService:
             entry.last_grade = overlay.get("last_grade")
             entry.last_graded_at = overlay.get("last_graded_at")
             entry.study_tooltip = overlay.get("study_tooltip")
+            entry.audio_status = overlay.get("audio_status")
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:
         """Convert TMEntryHistory model to DTO."""

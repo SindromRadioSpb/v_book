@@ -73,6 +73,7 @@ UI composition in `User Dictionaries`:
 - Inline edits write through canonical TM (`tm_global`) and propagate to linked `tm_entry`.
 - Right-click on selected rows provides:
   - `Translate Selected (N rows)...`
+  - `Generate Audio Selected (N rows)...`
   - `Mark Selected as Noise (N rows)`
   - `Mark Selected as Valid (N rows)`
   - `Mark Selected as Due now (N rows)`
@@ -104,4 +105,9 @@ UI composition in `User Dictionaries`:
 ## Audio Column (P0)
 
 - `Audio` column shows `missing|ready|failed` from `audio_asset`.
-- No generation/playback in P0.
+- Generation is source-only (`src_text`/`src_norm`), not translation-based.
+- Batch generation entry points:
+  - toolbar button `Generate Audio...`
+  - context menu `Generate Audio Selected (N rows)...`
+- Batch generation uses worker + `BatchProgressDialogV3` with cancel/pause/resume.
+- Playback is still out of scope for this patch line.

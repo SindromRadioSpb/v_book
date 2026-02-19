@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, case, desc, func, or_, select, text, tuple_, update
+from sqlalchemy import and_, asc, case, desc, exists, func, or_, select, text, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDictionaryItemDTO
@@ -1050,8 +1050,6 @@ class UserDictionaryService:
         """Query dictionary items with translation resolution from tm_global."""
         filters = filters or {}
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        audio_table_exists = self._table_exists(session, "audio_asset")
-
         base_stmt = (
             select(UserDictionaryItem, TMGlobal, StudyProgress)
             .select_from(UserDictionaryItem)
@@ -1067,19 +1065,7 @@ class UserDictionaryService:
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
-        if audio_table_exists:
-            base_stmt = base_stmt.outerjoin(
-                AudioAsset,
-                and_(
-                    AudioAsset.lang == UserDictionaryItem.src_lang,
-                    AudioAsset.norm_text == UserDictionaryItem.src_norm,
-                    AudioAsset.voice_id == "default",
-                    AudioAsset.speed == 1.0,
-                    AudioAsset.provider == "none",
-                ),
-            )
-
-        base_stmt = self._apply_item_filters(base_stmt, filters, now_str, include_audio=audio_table_exists)
+        base_stmt = self._apply_item_filters(base_stmt, filters, now_str, include_audio=True)
 
         # Count query (same filters)
         count_stmt = (
@@ -1097,18 +1083,7 @@ class UserDictionaryService:
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
-        if audio_table_exists:
-            count_stmt = count_stmt.outerjoin(
-                AudioAsset,
-                and_(
-                    AudioAsset.lang == UserDictionaryItem.src_lang,
-                    AudioAsset.norm_text == UserDictionaryItem.src_norm,
-                    AudioAsset.voice_id == "default",
-                    AudioAsset.speed == 1.0,
-                    AudioAsset.provider == "none",
-                ),
-            )
-        count_stmt = self._apply_item_filters(count_stmt, filters, now_str, include_audio=audio_table_exists)
+        count_stmt = self._apply_item_filters(count_stmt, filters, now_str, include_audio=True)
         total = session.execute(count_stmt).scalar() or 0
 
         order_col = self.ITEM_SORT_COLUMNS.get(sort_column, UserDictionaryItem.updated_at)
@@ -1130,13 +1105,10 @@ class UserDictionaryService:
                 by_lang.setdefault(item.src_lang, []).append((item.item_id, item.src_norm))
             for lang, tuples in by_lang.items():
                 try:
-                    status_map = audio_service.bulk_get_status(
+                    status_map = audio_service.bulk_get_status_any(
                         session,
                         lang=lang,
                         norm_texts=[norm for _item_id, norm in tuples],
-                        voice_id="default",
-                        speed=1.0,
-                        provider="none",
                     )
                 except Exception:
                     # Keep backward compatibility for fixture DBs without audio_asset.
@@ -1432,13 +1404,10 @@ class UserDictionaryService:
             by_lang_norms.setdefault(row["src_lang"], []).append(row["src_norm"])
         for lang, norms in by_lang_norms.items():
             try:
-                status_map = audio_service.bulk_get_status(
+                status_map = audio_service.bulk_get_status_any(
                     session=session,
                     lang=lang,
                     norm_texts=norms,
-                    voice_id="default",
-                    speed=1.0,
-                    provider="none",
                 )
             except Exception:
                 status_map = {}
@@ -1600,10 +1569,34 @@ class UserDictionaryService:
 
         audio_filter = (filters.get("audio_filter") or "").strip().lower()
         if include_audio and audio_filter and audio_filter != "all":
+            ready_exists = exists(
+                select(AudioAsset.asset_id).where(
+                    and_(
+                        AudioAsset.lang == UserDictionaryItem.src_lang,
+                        AudioAsset.norm_text == UserDictionaryItem.src_norm,
+                        AudioAsset.asset_status == "ready",
+                    )
+                )
+            )
+            failed_exists = exists(
+                select(AudioAsset.asset_id).where(
+                    and_(
+                        AudioAsset.lang == UserDictionaryItem.src_lang,
+                        AudioAsset.norm_text == UserDictionaryItem.src_norm,
+                        AudioAsset.asset_status == "failed",
+                    )
+                )
+            )
             if audio_filter == "missing":
-                stmt = stmt.where(or_(AudioAsset.asset_status.is_(None), AudioAsset.asset_status == "missing"))
+                stmt = stmt.where(~ready_exists)
+                stmt = stmt.where(~failed_exists)
+            elif audio_filter == "ready":
+                stmt = stmt.where(ready_exists)
+            elif audio_filter == "failed":
+                stmt = stmt.where(failed_exists)
+                stmt = stmt.where(~ready_exists)
             else:
-                stmt = stmt.where(AudioAsset.asset_status == audio_filter)
+                stmt = stmt.where(False)
 
         return stmt
 

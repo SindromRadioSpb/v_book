@@ -56,6 +56,15 @@ def test_audio_asset_bulk_status_lookup_ready_missing_failed():
             assert statuses["alpha"] == "ready"
             assert statuses["beta"] == "failed"
             assert statuses["gamma"] == "missing"
+
+            any_statuses = service.bulk_get_status_any(
+                session,
+                lang="he",
+                norm_texts=["alpha", "beta", "gamma"],
+            )
+            assert any_statuses["alpha"] == "ready"
+            assert any_statuses["beta"] == "failed"
+            assert any_statuses["gamma"] == "missing"
     finally:
         engine.dispose()
         Path(db_path).unlink(missing_ok=True)

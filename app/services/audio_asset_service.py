@@ -24,6 +24,11 @@ class AudioAssetService:
     """Service for audio asset metadata lookup."""
 
     VALID_STATUSES = {"missing", "ready", "failed"}
+    STATUS_PRIORITY = {
+        "missing": 0,
+        "failed": 1,
+        "ready": 2,
+    }
 
     @staticmethod
     def sanitize_relative_path(path_value: str) -> str:
@@ -73,6 +78,33 @@ class AudioAssetService:
         )
         for norm_text, status in session.execute(stmt).all():
             status_map[norm_text] = status if status in self.VALID_STATUSES else "failed"
+        return status_map
+
+    def bulk_get_status_any(
+        self,
+        session: Session,
+        *,
+        lang: str,
+        norm_texts: Iterable[str],
+    ) -> Dict[str, str]:
+        """Resolve status across all provider/voice variants for given source norms."""
+        norm_list = [n for n in norm_texts if n]
+        if not norm_list:
+            return {}
+
+        status_map = {norm: "missing" for norm in norm_list}
+        stmt = (
+            select(AudioAsset.norm_text, AudioAsset.asset_status)
+            .where(
+                AudioAsset.lang == lang,
+                AudioAsset.norm_text.in_(norm_list),
+            )
+        )
+        for norm_text, status in session.execute(stmt).all():
+            current = status_map.get(norm_text, "missing")
+            candidate = status if status in self.VALID_STATUSES else "failed"
+            if self.STATUS_PRIORITY.get(candidate, 0) >= self.STATUS_PRIORITY.get(current, 0):
+                status_map[norm_text] = candidate
         return status_map
 
     def upsert_status(

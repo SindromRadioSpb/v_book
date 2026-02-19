@@ -2,7 +2,12 @@
 
 ## Scope
 
-P0 introduces storage and lookup contracts only. Audio generation and playback are out of scope.
+P0 includes source-audio generation pipeline with mock providers and persistent asset storage.
+
+Hard rule:
+
+- Audio is generated for `source` text only (`src_text` / canonical `src_norm`).
+- Translation text is not used for TTS generation.
 
 ## Table
 
@@ -24,6 +29,17 @@ Main fields:
 
 ## UI
 
-- `User Dictionaries` has `Audio` column.
-- Status resolved in bulk via `AudioAssetService.bulk_get_status(...)`.
+- `User Dictionaries`, `Dictionary`, `Terms`, `Term Cards`, and `Translation Management` expose `Audio` status column.
+- Status is resolved in bulk via `AudioAssetService.bulk_get_status_any(...)`.
 - Default shown status: `missing`.
+
+## Generation Flow (P0)
+
+- Entry point: `User Dictionaries` -> `Generate Audio...` (toolbar or context menu).
+- Long operation runs in `UserDictGenerateAudioWorker` with `BatchProgressDialogV3` (cancel/pause/resume).
+- Provider mode:
+  - `chain` (recommended)
+  - `force:<provider_id>`
+- Write mode:
+  - `MISSING_ONLY`
+  - `REGENERATE_ALL`

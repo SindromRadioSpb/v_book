@@ -197,6 +197,7 @@ class TMEntryDTO:
     last_grade: Optional[str] = None
     last_graded_at: Optional[str] = None
     study_tooltip: Optional[str] = None
+    audio_status: Optional[str] = None
 
 
 @dataclass
@@ -453,3 +454,4 @@ class TermCardDTO:
     last_grade: Optional[str] = None
     last_graded_at: Optional[str] = None
     study_tooltip: Optional[str] = None
+    audio_status: Optional[str] = None
