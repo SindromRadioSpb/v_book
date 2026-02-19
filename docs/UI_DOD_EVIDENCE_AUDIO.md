@@ -12,7 +12,7 @@
 8. Run `Generate Audio...` in `Term Cards`.
 9. Run `Generate Audio...` in `Translation Management`.
 10. Verify all views keep UI responsive while worker is running.
-11. `Play Audio` on rows with ready assets opens system player.
+11. `Play Audio` on rows with ready assets starts internal in-app playback.
 12. `Play Audio` on rows without ready assets shows non-fatal guidance.
 13. Switch provider mode to `force:<provider>` and verify activity log shows chosen provider.
 14. Use write mode `MISSING_ONLY` and verify existing ready assets are skipped.
@@ -20,7 +20,7 @@
 16. Confirm source-only contract by generating on rows where translation is empty/non-empty and output behavior is identical.
 17. Validate TM `Audio` sorting still works and remains stable across pages.
 18. Open `Tools -> Translation -> Audio Provider Settings...` and verify `mms_tts_local` is disabled by default.
-19. Verify tabs exist: `Rate Limits`, `Provider Chain`, `Advanced Settings`.
+19. Verify tabs exist: `Rate Limits`, `Provider Chain`, `Advanced Settings`, `Playback`.
 20. In `Advanced Settings` for `Google Cloud TTS` click `Load from File...`, load Service Account JSON, verify preview shows configured project.
 21. Click `Clear` and verify credential preview returns to \"No Service Account JSON configured\".
 22. In `Advanced Settings` verify `Budget Guards` fields can be edited and saved.
@@ -30,6 +30,15 @@
 26. In any lexical view, run `Edit Pronunciation...`, save manual niqqud/IPA override, then regenerate audio and verify status refresh.
 27. Export pronunciation dictionary to TSV, import back, and verify `manual override > auto` remains unchanged.
 28. Verify `Play Audio Selected (N rows)` exists in context menu for UD/Dictionary/Terms/Term Cards/TM.
+29. Verify row-level play control is visible in Audio column and uses delegate rendering (no widget-per-row lag).
+30. Click row-level play on `ready` item and confirm internal playback starts in-app (no external player by default).
+31. Click row-level play on `missing|failed` item and confirm safe non-fatal guidance.
+32. Select 3 rows and run `Play Audio Selected (N rows)` in enqueue mode; verify queued sequential playback.
+33. Open mini-player panel and verify `Now Playing`, queue list, and `Pause/Resume/Stop`.
+34. Change cadence (`pre/gap/post`) in playback settings and verify interval behavior changes on next queue.
+35. Switch playback mode `interrupt` and verify new play request stops current queue and starts immediate playback.
+36. Switch playback mode `enqueue` and verify new play request appends to queue.
+37. Confirm no UI freeze while playback queue advances.
 
 ## Non-functional evidence checklist
 
@@ -38,6 +47,8 @@
 - DB writes are chunked and cancellable at safe boundaries.
 - `audio_rel_path` remains relative and sanitized.
 - Provider failures are aggregated in activity log/final summary (no modal spam in loop).
+- Playback actions resolve paths in one batch-safe call path and never trust absolute/parent paths.
+- Delegate-based play controls are used (no `setIndexWidget` per row).
 
 ## Screenshot/log checklist
 
@@ -49,3 +60,6 @@
 - Audio Provider Settings dialog with MMS license-gate state.
 - Audio Provider Settings dialog with 3 tabs and Google credentials preview.
 - Edit Pronunciation dialog and regenerated audio result.
+- Audio column with delegate play icon in each main workspace.
+- Mini-player panel with active queue and now-playing item.
+- Playback settings controls (`pre/gap/post`, `interrupt/enqueue`).

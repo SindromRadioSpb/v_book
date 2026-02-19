@@ -113,7 +113,20 @@ UI composition in `User Dictionaries`:
   - toolbar button `Generate Audio...`
   - context menu `Generate Audio Selected (N rows)...`
 - Batch generation uses worker + `BatchProgressDialogV3` with cancel/pause/resume.
-- `Play Audio` is available for selected rows (opens first ready asset in system player).
+- `Play Audio` is available for selected rows (internal player, queue-aware).
 - Same Generate/Play entrypoints are available in `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.
 - Optional local provider `mms_tts_local` is behind explicit license-gate and disabled by default.
 - Online provider credentials and budget limits are configured via `Tools -> Translation -> Audio Provider Settings...` (Rate Limits / Provider Chain / Advanced Settings).
+
+Playback UX contract:
+
+- Row-level play is available in the Audio column via delegate (no per-row widget inflation).
+- Queue behavior is controlled by playback mode:
+  - `interrupt`: stop and replace queue
+  - `enqueue`: append to queue
+- Cadence applies between queued items:
+  - `pre_roll_ms`, `gap_ms`, `post_roll_ms`
+- Mini-player panel shows:
+  - now playing source
+  - queue list
+  - play/pause/stop controls

@@ -19,6 +19,7 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **Ctrl+Shift+T**: Translation Management
 - **Ctrl+Shift+U**: User Dictionaries
 - **Ctrl+Shift+C**: QA / Coverage (requires project context)
+- **Ctrl+Alt+L**: Toggle Audio Player panel
 
 ---
 
@@ -43,6 +44,10 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **Double-Click** cell: Edit cell (Translation column in Dictionary/Terms views)
 - **F2** or **Enter**: Edit selected cell
 - **Esc**: Cancel editing
+
+### Audio Playback
+- **Space**: Play/Pause current audio queue
+- **Esc**: Stop audio playback (when player focus/context is active)
 
 ---
 

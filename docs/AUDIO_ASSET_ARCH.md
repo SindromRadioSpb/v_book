@@ -7,6 +7,7 @@ Hard rules:
 - Audio is generated only from source payload (`src_text`, canonical `src_norm`, `src_lang`).
 - Translation value is never used to synthesize audio.
 - Long operations run in workers with `BatchProgressDialogV3`; no UI-thread generation.
+- Internal playback uses sanitized relative paths resolved from `audio_asset`.
 
 ## Storage contract
 
@@ -97,6 +98,36 @@ Precedence:
 - Keep SQL parameterized and sort columns allowlisted.
 - Credentials are loaded via `CredentialStore`; no plaintext secrets in QSettings or logs.
 
+## Playback architecture contract
+
+Default playback engine:
+
+- Internal player (`QtMultimedia`) with queue and cadence.
+- External OS player fallback remains optional; not default.
+
+Playback cadence settings (persisted):
+
+- `audio/playback/pre_roll_ms` (default `200`)
+- `audio/playback/gap_ms` (default `550`)
+- `audio/playback/post_roll_ms` (default `300`)
+- `audio/playback/play_mode` (`interrupt|enqueue`, default `interrupt`)
+
+Queue semantics:
+
+- `interrupt`: clear queue + stop current track + play new request.
+- `enqueue`: append request; if player is idle, start immediately.
+
+Playback state machine:
+
+- `IDLE -> PRE_ROLL -> PLAYING -> POST_ROLL -> GAP -> NEXT`
+- No heavy processing in callbacks; transitions run from signal/timer handlers.
+
+UI integration constraints:
+
+- Table playback controls are implemented via `QStyledItemDelegate`.
+- `setIndexWidget` per-row controls are forbidden (performance/regression risk).
+- No per-row SQL queries during playback actions.
+
 ## UX surface (current)
 
 Audio column and actions exist in:
@@ -114,6 +145,12 @@ Supported actions:
 - `Play Audio Selected (N rows)`
 - `Edit Pronunciation...` (manual override dialog for source norm)
 
+Playback UX surface (target):
+
+- Row-level play button via delegate in existing Audio column.
+- Queue playback for selected rows (`Play Audio Selected`).
+- Mini player panel/dock with now playing, queue, and pause/resume/stop.
+
 Write modes:
 
 - `MISSING_ONLY`
@@ -128,12 +165,21 @@ Audio Provider Settings tabs:
 - `Rate Limits`
 - `Provider Chain`
 - `Advanced Settings`
+- `Playback`
 
 Advanced includes:
 
 - credentials (`Load from File...` / `Clear` for Google Service Account JSON),
 - Azure API key set/clear + region,
+- provider voice selection + speech rate,
+- voice refresh (`Google` / `Azure`) with local cache,
 - budget guards,
 - retry/timeout,
 - current usage summary (minute/day/month),
 - MMS license-gate + model path.
+
+Playback tab includes:
+
+- cadence controls (`pre_roll_ms`, `gap_ms`, `post_roll_ms`)
+- queue mode (`interrupt` / `enqueue`)
+- cadence presets (`Normal` / `Study` / `Fast`)
