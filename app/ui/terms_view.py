@@ -212,6 +212,7 @@ class TermsView(QWidget):
                 13: 120, # Source
                 14: 110, # Status
                 15: 90,  # Noise
+                16: 110, # Last Review
             },
         )
         self.table_layout_controller.install()
@@ -496,6 +497,8 @@ class TermsView(QWidget):
                 cluster.study_tooltip = None
                 cluster.study_state = None
                 cluster.study_due_human = None
+                cluster.last_grade = None
+                cluster.last_graded_at = None
                 cluster.translation_tier = None
                 cluster.audio_status = None
                 continue
@@ -504,6 +507,8 @@ class TermsView(QWidget):
             cluster.study_tooltip = overlay.get("study_tooltip")
             cluster.study_state = overlay.get("study_state")
             cluster.study_due_human = overlay.get("study_due_human")
+            cluster.last_grade = overlay.get("last_grade")
+            cluster.last_graded_at = overlay.get("last_graded_at")
             cluster.translation_tier = overlay.get("translation_tier")
             cluster.audio_status = overlay.get("audio_status")
 

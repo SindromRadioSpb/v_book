@@ -1486,6 +1486,8 @@ class UserDictionaryService:
                 "in_user_dictionary_count": count_value,
                 "study_state": summary.study_state,
                 "study_due_human": summary.due_human,
+                "last_grade": summary.last_grade,
+                "last_graded_at": summary.last_graded_at,
                 "translation_tier": translation_tier,
                 "audio_status": item_audio_status,
                 "study_tooltip": tooltip_value,

@@ -74,6 +74,8 @@ Each study entity may expose up to five dimensions:
   - `new` neutral, `learning` blue, `due` amber, `mastered` green, `suspended` muted
   - Translation/audio/noise/origin use stable semantic colors
   - Cross-view UD marker is `*` and `*!` for `due`
+  - Cross-view row fill for UD-linked rows is keyed by `last_review`:
+    `Added` / `Again` / `Hard` / `Good` / `Easy`
 
 Color is never the only signal.
 
@@ -81,6 +83,7 @@ Color is never the only signal.
 
 - `User Dictionaries`: full study visuals (origin + study + status icons + tooltips)
 - `Dictionary / Terms / Term Card / TM`: minimal non-intrusive study indicators
+  plus `Last Review` column and grade-based row fill only when row is present in User Dictionaries
 - `Hide noise`: default `ON` in all relevant views
 
 ## Accessibility / Responsiveness

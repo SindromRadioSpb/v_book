@@ -21,10 +21,15 @@ def test_dictionary_ud_marker_is_due_aware():
                 translation="",
                 status="none",
                 is_noise=0,
+                last_grade="again",
             )
         ]
     )
     assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"
+    assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == "Again"
+    brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
+    assert brush is not None
+    assert brush.color().name().lower() == "#ffebee"
 
 
 def test_terms_ud_marker_is_due_aware():
@@ -49,10 +54,15 @@ def test_terms_ud_marker_is_due_aware():
                 translation_source="none",
                 translation_status="none",
                 is_noise=0,
+                last_grade="good",
             )
         ]
     )
     assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"
+    assert model.data(model.index(0, 16), Qt.ItemDataRole.DisplayRole) == "Good"
+    brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
+    assert brush is not None
+    assert brush.color().name().lower() == "#e8f5e9"
 
 
 def test_tm_ud_marker_is_due_aware():
@@ -72,7 +82,34 @@ def test_tm_ud_marker_is_due_aware():
                 source_ref=None,
                 updated_at=None,
                 is_noise=0,
+                last_grade="hard",
             )
         ]
     )
     assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"
+    assert model.data(model.index(0, 11), Qt.ItemDataRole.DisplayRole) == "Hard"
+    brush = model.data(model.index(0, 3), Qt.ItemDataRole.BackgroundRole)
+    assert brush is not None
+    assert brush.color().name().lower() == "#fff3e0"
+
+
+def test_row_not_highlighted_when_not_in_user_dictionary():
+    model = LemmaTableModel(
+        lemmas=[
+            SimpleNamespace(
+                in_user_dictionary_count=0,
+                study_state=None,
+                study_tooltip=None,
+                lemma_text="alpha",
+                pos=None,
+                freq_abs=1,
+                doc_freq=1,
+                translation="",
+                status="none",
+                is_noise=0,
+                last_grade=None,
+            )
+        ]
+    )
+    assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == ""
+    assert model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole) is None

@@ -2,6 +2,7 @@
 
 from app.ui.study_status_ui import (
     audio_status_brush,
+    get_last_grade_row_brush,
     origin_brush,
     study_brush,
     translation_tier_brush,
@@ -32,3 +33,10 @@ def test_origin_and_ud_indicator_brushes():
     assert origin_brush("project").color().name().lower() == "#1565c0"
     assert ud_indicator_brush(0, "due") is None
     assert ud_indicator_brush(1, "due").color().name().lower() == "#ef6c00"
+
+
+def test_last_grade_row_brush_only_for_ud_rows():
+    assert get_last_grade_row_brush(in_user_dictionary_count=0, last_grade="good") is None
+    brush = get_last_grade_row_brush(in_user_dictionary_count=1, last_grade="again")
+    assert brush is not None
+    assert brush.color().name().lower() == "#ffebee"

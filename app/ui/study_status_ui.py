@@ -192,3 +192,15 @@ def get_last_grade_cell_brush(
     del theme_context  # Reserved for future palette-aware adaptation.
     key = normalize_last_grade(last_grade, review_count)
     return _brush(LAST_REVIEW_GRADE_COLORS[key])
+
+
+def get_last_grade_row_brush(
+    *,
+    in_user_dictionary_count: int,
+    last_grade: Optional[str],
+    review_count: int = 0,
+) -> Optional[QBrush]:
+    """Cross-view row highlight brush (only for items present in User Dictionaries)."""
+    if int(in_user_dictionary_count or 0) <= 0:
+        return None
+    return get_last_grade_cell_brush(last_grade, review_count=review_count)

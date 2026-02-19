@@ -221,6 +221,7 @@ class DictionaryView(QWidget):
                 6: 120,  # Source
                 7: 110,  # Status
                 8: 90,   # Noise
+                9: 110,  # Last Review
             },
         )
         self.table_layout_controller.install()
@@ -387,6 +388,8 @@ class DictionaryView(QWidget):
                 lemma.study_tooltip = None
                 lemma.study_state = None
                 lemma.study_due_human = None
+                lemma.last_grade = None
+                lemma.last_graded_at = None
                 lemma.translation_tier = None
                 lemma.audio_status = None
                 continue
@@ -395,6 +398,8 @@ class DictionaryView(QWidget):
             lemma.study_tooltip = overlay.get("study_tooltip")
             lemma.study_state = overlay.get("study_state")
             lemma.study_due_human = overlay.get("study_due_human")
+            lemma.last_grade = overlay.get("last_grade")
+            lemma.last_graded_at = overlay.get("last_graded_at")
             lemma.translation_tier = overlay.get("translation_tier")
             lemma.audio_status = overlay.get("audio_status")
 

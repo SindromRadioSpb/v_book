@@ -463,6 +463,7 @@ class TranslationManagementPanel(QWidget):
                 8: 170,  # Source Ref
                 9: 120,  # Updated
                 10: 90,  # Noise
+                11: 110, # Last Review
             },
         )
         self.table_layout_controller.install()

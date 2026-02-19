@@ -805,6 +805,8 @@ class TranslationAdminService:
             entry.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
             entry.study_state = overlay.get("study_state")
             entry.study_due_human = overlay.get("study_due_human")
+            entry.last_grade = overlay.get("last_grade")
+            entry.last_graded_at = overlay.get("last_graded_at")
             entry.study_tooltip = overlay.get("study_tooltip")
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:

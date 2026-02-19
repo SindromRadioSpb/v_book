@@ -13,6 +13,7 @@ from app.ui.study_status_ui import (
     audio_status_brush,
     compose_status_icons,
     get_last_grade_cell_brush,
+    get_last_grade_row_brush,
     last_review_label,
     noise_brush,
     origin_brush,
@@ -122,7 +123,18 @@ class LemmaTableModel(QAbstractTableModel):
         self.lemmas = lemmas or []
         # M7: Added Source column between Translation and Status
         # Added Noise column for is_noise visualization
-        self.headers = ["UD", "Lemma", "POS", "Frequency", "Doc Freq", "Translation", "Source", "Status", "Noise"]
+        self.headers = [
+            "UD",
+            "Lemma",
+            "POS",
+            "Frequency",
+            "Doc Freq",
+            "Translation",
+            "Source",
+            "Status",
+            "Noise",
+            "Last Review",
+        ]
         # M7: Store full TranslationResult for each lemma (for Why dialog)
         from app.services.translation_service import TranslationResult
         self.translation_results = {}  # row_index -> TranslationResult
@@ -144,6 +156,12 @@ class LemmaTableModel(QAbstractTableModel):
             if lemma.study_tooltip and int(getattr(lemma, "in_user_dictionary_count", 0) or 0) > 0:
                 return lemma.study_tooltip
             return None
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return get_last_grade_row_brush(
+                in_user_dictionary_count=int(getattr(lemma, "in_user_dictionary_count", 0) or 0),
+                last_grade=getattr(lemma, "last_grade", None),
+            )
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 0:
             return ud_indicator_brush(
@@ -185,6 +203,10 @@ class LemmaTableModel(QAbstractTableModel):
                     return "Valid"
                 else:
                     return ""  # NULL - legacy records
+            elif col == 9:
+                if int(getattr(lemma, "in_user_dictionary_count", 0) or 0) <= 0:
+                    return ""
+                return last_review_label(getattr(lemma, "last_grade", None))
 
         return None
 
@@ -280,7 +302,7 @@ class TermClusterTableModel(QAbstractTableModel):
         # Added Noise column for is_noise visualization
         self.headers = [
             "UD", "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
-            "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise"
+            "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise", "Last Review"
         ]
         # M7: Store full TranslationResult for each cluster
         from app.services.translation_service import TranslationResult
@@ -303,6 +325,12 @@ class TermClusterTableModel(QAbstractTableModel):
             if cluster.study_tooltip and int(getattr(cluster, "in_user_dictionary_count", 0) or 0) > 0:
                 return cluster.study_tooltip
             return None
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return get_last_grade_row_brush(
+                in_user_dictionary_count=int(getattr(cluster, "in_user_dictionary_count", 0) or 0),
+                last_grade=getattr(cluster, "last_grade", None),
+            )
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 0:
             return ud_indicator_brush(
@@ -355,6 +383,10 @@ class TermClusterTableModel(QAbstractTableModel):
                     return "Valid"
                 else:
                     return ""  # NULL - legacy records
+            elif col == 16:
+                if int(getattr(cluster, "in_user_dictionary_count", 0) or 0) <= 0:
+                    return ""
+                return last_review_label(getattr(cluster, "last_grade", None))
 
         return None
 
@@ -455,7 +487,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
         # Added Noise column for is_noise visualization
         self.headers = [
             "UD", "ID", "Kind", "Source", "Translation", "Status",
-            "Scope", "Origin", "Source Ref", "Updated", "Noise"
+            "Scope", "Origin", "Source Ref", "Updated", "Noise", "Last Review"
         ]
         self.total_count = 0  # Total matching entries (for pagination)
 
@@ -476,6 +508,12 @@ class TranslationManagementTableModel(QAbstractTableModel):
             if entry.study_tooltip and int(getattr(entry, "in_user_dictionary_count", 0) or 0) > 0:
                 return entry.study_tooltip
             return None
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return get_last_grade_row_brush(
+                in_user_dictionary_count=int(getattr(entry, "in_user_dictionary_count", 0) or 0),
+                last_grade=getattr(entry, "last_grade", None),
+            )
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 0:
             return ud_indicator_brush(
@@ -518,6 +556,10 @@ class TranslationManagementTableModel(QAbstractTableModel):
                     return "Valid"
                 else:
                     return ""  # NULL - legacy records
+            elif col == 11:
+                if int(getattr(entry, "in_user_dictionary_count", 0) or 0) <= 0:
+                    return ""
+                return last_review_label(getattr(entry, "last_grade", None))
 
         return None
 
@@ -582,7 +624,7 @@ class TermCardTableModel(QAbstractTableModel):
         self.cards: List[TermCardDTO] = cards or []
         self.headers = [
             "UD", "Term", "Lemma", "Freq", "DocFreq", "Status",
-            "Pin Translation", "Aliases", "Stopword"
+            "Pin Translation", "Aliases", "Stopword", "Last Review"
         ]
 
     def rowCount(self, parent=QModelIndex()):
@@ -603,6 +645,12 @@ class TermCardTableModel(QAbstractTableModel):
             if study_tooltip and int(getattr(card, "in_user_dictionary_count", 0) or 0) > 0:
                 return study_tooltip
             return None
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return get_last_grade_row_brush(
+                in_user_dictionary_count=int(getattr(card, "in_user_dictionary_count", 0) or 0),
+                last_grade=getattr(card, "last_grade", None),
+            )
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 0:
             return ud_indicator_brush(
@@ -632,6 +680,10 @@ class TermCardTableModel(QAbstractTableModel):
                 return ", ".join(card.aliases) if card.aliases else ""
             elif col == 8:
                 return "Yes" if card.is_stopword else "No"
+            elif col == 9:
+                if int(getattr(card, "in_user_dictionary_count", 0) or 0) <= 0:
+                    return ""
+                return last_review_label(getattr(card, "last_grade", None))
 
         return None
 
@@ -676,6 +728,8 @@ class TermCardTableModel(QAbstractTableModel):
                 return (_text(aliases), card.cluster_id)
             if column == 8:
                 return (1 if card.is_stopword else 0, card.cluster_id)
+            if column == 9:
+                return (_text(last_review_label(getattr(card, "last_grade", None))), card.cluster_id)
             return (card.cluster_id,)
 
         self.layoutAboutToBeChanged.emit()

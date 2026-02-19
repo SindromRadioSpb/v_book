@@ -95,6 +95,9 @@ UI composition in `User Dictionaries`:
 
 - `Dictionary`, `Terms`, and `Term Card` rows display a saved-to-UD marker and study tooltip.
 - Marker contract: `*` for saved in UD, `*!` for saved and due.
+- `Dictionary`, `Terms`, `Term Card`, and `Translation Management` include a `Last Review` column.
+- Cross-view rows get semantic fill by last review grade (`Added/Again/Hard/Good/Easy`) only when item is in UD.
+- Rows not present in UD are not filled.
 - `Translation Management` rows receive non-intrusive study tooltip enrichment.
 - Metadata is resolved by batch lookup per page (no per-row SQL loops).
 

@@ -35,6 +35,8 @@ class LemmaStats:
     in_user_dictionary_count: int = 0
     study_state: Optional[str] = None
     study_due_human: Optional[str] = None
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
     translation_tier: Optional[str] = None
     audio_status: Optional[str] = None
     study_tooltip: Optional[str] = None
@@ -127,6 +129,8 @@ class ClusterStats:
     in_user_dictionary_count: int = 0
     study_state: Optional[str] = None
     study_due_human: Optional[str] = None
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
     translation_tier: Optional[str] = None
     audio_status: Optional[str] = None
     study_tooltip: Optional[str] = None
@@ -190,6 +194,8 @@ class TMEntryDTO:
     in_user_dictionary_count: int = 0
     study_state: Optional[str] = None
     study_due_human: Optional[str] = None
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
     study_tooltip: Optional[str] = None
 
 
@@ -441,3 +447,9 @@ class TermCardDTO:
     is_stopword: bool
     created_at: str
     updated_at: str
+    in_user_dictionary_count: int = 0
+    study_state: Optional[str] = None
+    study_due_human: Optional[str] = None
+    last_grade: Optional[str] = None
+    last_graded_at: Optional[str] = None
+    study_tooltip: Optional[str] = None
