@@ -45,6 +45,8 @@ class UserDictionaryService:
         "src_text": UserDictionaryItem.src_text,
         "src_norm": UserDictionaryItem.src_norm,
         "study_state": UserDictionaryItem.study_state,
+        "last_grade": StudyProgress.last_grade,
+        "last_graded_at": StudyProgress.last_graded_at,
         "is_noise": UserDictionaryItem.is_noise,
         "created_at": UserDictionaryItem.created_at,
         "updated_at": UserDictionaryItem.updated_at,
@@ -1240,6 +1242,57 @@ class UserDictionaryService:
             counters["total"] += count_int
         return counters
 
+    def get_dictionary_review_summary(
+        self,
+        session: Session,
+        dictionary_id: int,
+        *,
+        scope_origin_project_id: Optional[int] = None,
+        hide_noise: bool = True,
+    ) -> Dict[str, int]:
+        """Return review counters for opened dictionary: Added/Again/Hard/Good/Easy."""
+        grade_expr = case(
+            (
+                or_(
+                    func.coalesce(StudyProgress.review_count, 0) <= 0,
+                    StudyProgress.last_grade.is_(None),
+                ),
+                "added",
+            ),
+            (StudyProgress.last_grade == "again", "again"),
+            (StudyProgress.last_grade == "hard", "hard"),
+            (StudyProgress.last_grade == "good", "good"),
+            (StudyProgress.last_grade == "easy", "easy"),
+            else_="added",
+        )
+        stmt = (
+            select(grade_expr.label("review_bucket"), func.count(UserDictionaryItem.item_id))
+            .select_from(UserDictionaryItem)
+            .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
+            .where(UserDictionaryItem.dictionary_id == dictionary_id)
+        )
+        if scope_origin_project_id is not None:
+            stmt = stmt.where(UserDictionaryItem.origin_project_id == scope_origin_project_id)
+        if hide_noise:
+            stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
+        stmt = stmt.group_by(grade_expr)
+
+        counters = {
+            "words": 0,
+            "added": 0,
+            "again": 0,
+            "hard": 0,
+            "good": 0,
+            "easy": 0,
+        }
+        for review_bucket, count_value in session.execute(stmt).all():
+            key = (review_bucket or "").strip().lower()
+            count_int = int(count_value or 0)
+            if key in counters:
+                counters[key] = count_int
+            counters["words"] += count_int
+        return counters
+
     def fetch_item_ids_for_translation(
         self,
         session: Session,
@@ -1663,6 +1716,8 @@ class UserDictionaryService:
             interval_days=0,
             ease_factor=2.5,
             last_quality=None,
+            last_grade=None,
+            last_graded_at=None,
             is_suspended=bool(item.is_suspended),
         )
         effective_summary.is_suspended = bool(item.is_suspended)
@@ -1718,10 +1773,13 @@ class UserDictionaryService:
             origin_kind=origin_kind,
             computed_study_state=effective_summary.study_state,
             study_due_human=effective_summary.due_human,
+            study_due_at=effective_summary.due_at,
             study_review_count=effective_summary.review_count,
             study_lapse_count=effective_summary.lapse_count,
             study_interval_days=effective_summary.interval_days,
             study_ease_factor=effective_summary.ease_factor,
+            last_grade=effective_summary.last_grade,
+            last_graded_at=effective_summary.last_graded_at,
             translation_tier=translation_tier,
             status_tooltip=self._build_status_tooltip(
                 item=item,
@@ -1757,6 +1815,7 @@ class UserDictionaryService:
             f"lapses={summary.lapse_count}",
             f"interval={summary.interval_days}d",
             f"EF={summary.ease_factor:.2f}",
+            f"last_grade={summary.last_grade or 'added'}",
         ]
         return (
             f"Origin: {origin_kind}\n"
