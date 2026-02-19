@@ -31,6 +31,7 @@ from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, WhyTranslationDialog
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
@@ -823,6 +824,21 @@ class DictionaryView(QWidget):
             logger.error("Failed to play audio in Dictionary: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
+    def on_edit_pronunciation_selected(self):
+        """Open pronunciation editor for the first selected row."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+        first = items[0]
+        changed = show_edit_pronunciation_dialog(
+            parent=self,
+            src_lang=str(first.get("src_lang") or ""),
+            src_norm=str(first.get("src_norm") or ""),
+            src_text=str(first.get("src_text") or ""),
+        )
+        if changed:
+            self.perform_search()
+
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
         index = self.lemma_table.indexAt(pos)  # Returns PROXY index
@@ -854,6 +870,10 @@ class DictionaryView(QWidget):
             add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
             menu.addAction(add_action)
+
+            edit_pron_action = QAction("Edit Pronunciation...", self)
+            edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
+            menu.addAction(edit_pron_action)
             menu.addSeparator()
 
         # "Why?" action - show explainability

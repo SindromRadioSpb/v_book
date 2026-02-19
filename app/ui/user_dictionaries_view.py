@@ -30,12 +30,14 @@ from PyQt6.QtWidgets import (
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
 from app.services.db_service import DBService
+from app.services.audio_playback_service import AudioPlaybackService
 from app.services.study_service import StudyService
 from app.services.user_dictionary_service import UserDictionaryService
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import (
@@ -132,6 +134,7 @@ class UserDictionariesView(QWidget):
         self.db_service = DBService.get_instance()
         self.user_dict_service = UserDictionaryService()
         self.audio_service = AudioAssetService()
+        self.audio_playback_service = AudioPlaybackService()
         self.study_service = StudyService()
         self.settings = SettingsService.get_instance()
         self._scope_setting_key = (
@@ -404,6 +407,10 @@ class UserDictionariesView(QWidget):
         self.generate_audio_btn.clicked.connect(self.on_generate_audio_selected)
         self.generate_audio_btn.setEnabled(False)
         actions_row.addWidget(self.generate_audio_btn)
+        self.play_audio_btn = QPushButton("Play Audio")
+        self.play_audio_btn.clicked.connect(self.on_play_audio_selected)
+        self.play_audio_btn.setEnabled(False)
+        actions_row.addWidget(self.play_audio_btn)
         self.mark_due_btn = QPushButton("Mark Due Now")
         self.mark_due_btn.clicked.connect(self.set_selected_due_now)
         self.mark_due_btn.setEnabled(False)
@@ -816,6 +823,7 @@ class UserDictionariesView(QWidget):
         self.remove_selected_btn.setEnabled(count > 0)
         self.translate_selected_btn.setEnabled(count > 0)
         self.generate_audio_btn.setEnabled(count > 0)
+        self.play_audio_btn.setEnabled(count > 0)
         self.mark_due_btn.setEnabled(count > 0)
 
     def _update_study_summary(self):
@@ -861,6 +869,12 @@ class UserDictionariesView(QWidget):
         generate_audio_action = QAction(f"Generate Audio Selected ({count} rows)...", self)
         generate_audio_action.triggered.connect(self.on_generate_audio_selected)
         menu.addAction(generate_audio_action)
+        play_audio_action = QAction(f"Play Audio Selected ({count} rows)", self)
+        play_audio_action.triggered.connect(self.on_play_audio_selected)
+        menu.addAction(play_audio_action)
+        edit_pron_action = QAction("Edit Pronunciation...", self)
+        edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
+        menu.addAction(edit_pron_action)
         menu.addSeparator()
 
         mark_noise_action = QAction(f"Mark Selected as Noise ({count} rows)", self)
@@ -885,6 +899,26 @@ class UserDictionariesView(QWidget):
         menu.addAction(resume_action)
 
         menu.exec(self.items_table.viewport().mapToGlobal(pos))
+
+    def on_edit_pronunciation_selected(self):
+        """Edit pronunciation for the first selected item."""
+        item_ids = self._selected_item_ids()
+        if not item_ids:
+            return
+        item = self.items_model.get_item(0)
+        selected_rows = self.items_table.selectionModel().selectedRows()
+        if selected_rows:
+            item = self.items_model.get_item(selected_rows[0].row())
+        if not item:
+            return
+        changed = show_edit_pronunciation_dialog(
+            parent=self,
+            src_lang=item.src_lang,
+            src_norm=item.src_norm,
+            src_text=item.src_text,
+        )
+        if changed:
+            self.load_items()
 
     def on_translation_edited(self, top_left, bottom_right, roles):
         if top_left.column() != 2:
@@ -1111,6 +1145,27 @@ class UserDictionariesView(QWidget):
                 ids.append(item.item_id)
         return sorted(set(ids))
 
+    def _selected_audio_items(self) -> List[Dict[str, str]]:
+        selected_rows = self.items_table.selectionModel().selectedRows()
+        items: List[Dict[str, str]] = []
+        for idx in selected_rows:
+            item = self.items_model.get_item(idx.row())
+            if not item:
+                continue
+            src_lang = (item.src_lang or "").strip()
+            src_norm = (item.src_norm or "").strip()
+            src_text = (item.src_text or "").strip()
+            if not src_lang or not src_norm:
+                continue
+            items.append(
+                {
+                    "src_lang": src_lang,
+                    "src_norm": src_norm,
+                    "src_text": src_text,
+                }
+            )
+        return items
+
     def on_remove_selected(self):
         item_ids = self._selected_item_ids()
         if not item_ids:
@@ -1292,6 +1347,36 @@ class UserDictionariesView(QWidget):
         worker.finished.connect(self.on_items_selection_changed)
         worker.error.connect(self.on_items_selection_changed)
         worker.start()
+
+    def on_play_audio_selected(self):
+        items = self._selected_audio_items()
+        if not items:
+            return
+
+        try:
+            with self.db_service.get_session() as session:
+                ready_path = None
+                for item in items:
+                    ready_path = self.audio_playback_service.resolve_ready_path(
+                        session,
+                        lang=item["src_lang"],
+                        norm_text=item["src_norm"],
+                    )
+                    if ready_path:
+                        break
+
+            if not ready_path:
+                QMessageBox.information(
+                    self,
+                    "Audio Missing",
+                    "No ready audio found for selected rows.\nUse 'Generate Audio...' first.",
+                )
+                return
+
+            self.audio_playback_service.launch_audio_file(ready_path)
+        except Exception as e:
+            logger.error("Failed to play audio in User Dictionaries: %s", e, exc_info=True)
+            QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
     def _on_generate_audio_finished(self, result: Dict[str, int], progress_dialog):
         progress_dialog.set_completed()

@@ -43,6 +43,7 @@ from app.domain.dto import TMEntryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
@@ -1568,6 +1569,21 @@ class TranslationManagementPanel(QWidget):
             logger.error("Failed to play audio in TM Panel: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
+    def on_edit_pronunciation_selected(self):
+        """Open pronunciation editor for the first selected TM row."""
+        items = self._get_selected_audio_items()
+        if not items:
+            return
+        first = items[0]
+        changed = show_edit_pronunciation_dialog(
+            parent=self,
+            src_lang=str(first.get("src_lang") or ""),
+            src_norm=str(first.get("src_norm") or ""),
+            src_text=str(first.get("src_text") or ""),
+        )
+        if changed:
+            self.perform_search()
+
     # ========================================================================
     # Noise Marking (Hide Noise + Bulk Mark as Valid/Noise)
     # ========================================================================
@@ -1600,6 +1616,10 @@ class TranslationManagementPanel(QWidget):
         add_to_dict_action = QAction(f"Add Selected to User Dictionary ({count:,} rows)...", self)
         add_to_dict_action.triggered.connect(self.on_add_selected_to_user_dictionary)
         menu.addAction(add_to_dict_action)
+
+        edit_pron_action = QAction("Edit Pronunciation...", self)
+        edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
+        menu.addAction(edit_pron_action)
         menu.addSeparator()
 
         # Mark as Noise action

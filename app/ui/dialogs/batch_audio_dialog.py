@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 
 from app.infra.settings import SettingsService
 from app.services.audio_generation_service import list_available_audio_providers
+from app.ui.dialogs.mms_license_gate_dialog import ensure_mms_license_accepted
 
 
 class BatchAudioDialog(QDialog):
@@ -158,6 +159,9 @@ class BatchAudioDialog(QDialog):
         return "current_page"
 
     def accept(self):
+        if self.force_radio.isChecked() and self.provider_combo.currentText() == "mms_tts_local":
+            if not ensure_mms_license_accepted(parent=self):
+                return
         self._save_settings()
         super().accept()
 

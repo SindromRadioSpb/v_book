@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -14,12 +16,15 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
 from app.infra.audio import AudioGenerationRequest
 from app.infra.audio.local_providers_setup import register_default_audio_providers
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.sa_models import AudioAsset
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
+from app.services.pronunciation_service import PronunciationService
+from app.domain.normalization.normalizer import normalize_for_tm
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +54,12 @@ def list_available_audio_providers() -> List[str]:
 class AudioGenerationService:
     """Generate and persist audio for canonical source terms."""
 
-    DEFAULT_CHAIN = ["mock_local_audio", "mock_online_audio"]
+    DEFAULT_CHAIN = [
+        "google_cloud_tts",
+        "azure_speech_tts",
+        "mock_local_audio",
+        "mock_online_audio",
+    ]
 
     def __init__(
         self,
@@ -59,6 +69,8 @@ class AudioGenerationService:
     ):
         self.settings = settings or SettingsService.get_instance()
         self.audio_asset_service = audio_asset_service or AudioAssetService()
+        self.audio_provider_config = AudioProviderConfigManager(settings=self.settings)
+        self.pronunciation_service = PronunciationService()
         register_default_audio_providers()
 
     def _resolve_voice_speed(self) -> Tuple[str, float]:
@@ -75,15 +87,142 @@ class AudioGenerationService:
         registry = AudioProvidersRegistry()
         if provider_mode.startswith("force:"):
             forced = provider_mode.split(":", 1)[1].strip()
-            return [forced] if registry.get(forced) else []
+            if not registry.get(forced):
+                return []
+            if not self._is_provider_enabled(forced):
+                return []
+            return [forced]
 
         chain = self.settings.get_json("audio/providers/chain", self.DEFAULT_CHAIN)
         if not isinstance(chain, list) or not chain:
             chain = list(self.DEFAULT_CHAIN)
-        resolved = [pid for pid in chain if registry.get(str(pid))]
+        resolved = [
+            pid
+            for pid in chain
+            if registry.get(str(pid)) and self._is_provider_enabled(str(pid))
+        ]
         if not resolved:
-            resolved = [pid for pid in self.DEFAULT_CHAIN if registry.get(pid)]
+            resolved = [
+                pid
+                for pid in self.DEFAULT_CHAIN
+                if registry.get(pid) and self._is_provider_enabled(pid)
+            ]
         return resolved
+
+    def _is_provider_enabled(self, provider_id: str) -> bool:
+        try:
+            return bool(self.audio_provider_config.load_config(provider_id).enabled)
+        except Exception:
+            return True
+
+    @staticmethod
+    def _provider_supports_ssml(provider_id: str) -> bool:
+        return provider_id in {"google_cloud_tts", "azure_speech_tts"}
+
+    @staticmethod
+    def _build_ssml_text(text_value: str) -> str:
+        escaped = html.escape(text_value or "", quote=False)
+        return f"<speak version='1.0'>{escaped}</speak>"
+
+    @staticmethod
+    def _build_ssml_ipa(surface_text: str, ipa_value: str) -> str:
+        escaped_surface = html.escape(surface_text or "", quote=False)
+        escaped_ipa = html.escape(ipa_value or "", quote=True)
+        return (
+            "<speak version='1.0'>"
+            f"<phoneme alphabet='ipa' ph='{escaped_ipa}'>{escaped_surface}</phoneme>"
+            "</speak>"
+        )
+
+    def _apply_token_pronunciation(
+        self,
+        session: Session,
+        *,
+        src_lang: str,
+        source_text: str,
+    ) -> str:
+        parts = re.findall(r"\w+|[^\w]+", source_text, flags=re.UNICODE)
+        if not parts:
+            return source_text
+        token_norms: Dict[str, str] = {}
+        for part in parts:
+            if not part or not part.strip() or not any(ch.isalnum() for ch in part):
+                continue
+            norm = normalize_for_tm(src_lang, part, "surface").norm
+            if norm:
+                token_norms[part] = norm
+        if not token_norms:
+            return source_text
+
+        entries = self.pronunciation_service.bulk_lookup(
+            session=session,
+            lang=src_lang,
+            src_norms=list(token_norms.values()),
+        )
+        if not entries:
+            return source_text
+
+        result_parts: List[str] = []
+        changed = False
+        for part in parts:
+            norm = token_norms.get(part)
+            if not norm:
+                result_parts.append(part)
+                continue
+            entry = entries.get(norm)
+            replacement = (entry.niqqud_text or "") if entry else ""
+            if replacement:
+                result_parts.append(replacement)
+                if replacement != part:
+                    changed = True
+            else:
+                result_parts.append(part)
+        return "".join(result_parts) if changed else source_text
+
+    def _prepare_pronunciation_payload(
+        self,
+        session: Session,
+        *,
+        src_lang: str,
+        source_text: str,
+        source_norm: str,
+    ) -> Dict[str, str]:
+        payload: Dict[str, str] = {
+            "text": source_text,
+            "token_text": source_text,
+            "ssml": "",
+        }
+        try:
+            entry = self.pronunciation_service.get_entry(
+                session=session,
+                lang=src_lang,
+                src_norm=source_norm,
+            )
+        except Exception:
+            entry = None
+
+        if entry:
+            if (entry.ipa or "").strip():
+                payload["ssml"] = self._build_ssml_ipa(source_text, entry.ipa or "")
+            elif (entry.niqqud_text or "").strip():
+                niqqud_text = entry.niqqud_text or source_text
+                payload["text"] = niqqud_text
+                payload["token_text"] = niqqud_text
+                payload["ssml"] = self._build_ssml_text(niqqud_text)
+
+        try:
+            token_text = self._apply_token_pronunciation(
+                session=session,
+                src_lang=src_lang,
+                source_text=source_text,
+            )
+        except Exception:
+            token_text = source_text
+        if token_text != source_text:
+            payload["token_text"] = token_text
+            if not payload["ssml"]:
+                payload["ssml"] = self._build_ssml_text(token_text)
+        return payload
 
     @staticmethod
     def _asset_rel_path(
@@ -165,19 +304,33 @@ class AudioGenerationService:
         req_trace = trace_id or str(uuid.uuid4())
         last_error = "All providers failed"
         app_dir = _get_app_dir()
+        pronunciation_payload = self._prepare_pronunciation_payload(
+            session=session,
+            src_lang=source_lang_clean,
+            source_text=source_text,
+            source_norm=source_norm_clean,
+        )
 
         for provider_id in provider_chain:
             provider = registry.get(provider_id)
             if not provider:
                 continue
 
+            prepared_text = pronunciation_payload.get("token_text") or source_text
+            options: Dict[str, object] = {}
+            if self._provider_supports_ssml(provider_id):
+                ssml_payload = (pronunciation_payload.get("ssml") or "").strip()
+                if ssml_payload:
+                    options["ssml"] = ssml_payload
+
             request = AudioGenerationRequest(
-                source_text=source_text,
+                source_text=prepared_text,
                 source_lang=source_lang_clean,
                 source_norm=source_norm_clean,
                 voice_id=voice_id,
                 speed=speed,
                 trace_id=req_trace,
+                options=options,
             )
             result = provider.generate(request)
             if not result.is_success:

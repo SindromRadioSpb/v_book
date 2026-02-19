@@ -1,17 +1,17 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for HDLE Premium
 #
-# АКТУАЛЬНАЯ ВЕРСИЯ: 2026-02-11 (включает Task 9 - Project Exchange, Task 11 - Entity Classification)
+# РђРљРўРЈРђР›Р¬РќРђРЇ Р’Р•Р РЎРРЇ: 2026-02-11 (РІРєР»СЋС‡Р°РµС‚ Task 9 - Project Exchange, Task 11 - Entity Classification)
 #
-# Этот spec файл создает standalone Windows executable с:
-# - Полными hiddenimports (PyQt6, SQLAlchemy, psutil, Google Cloud Translate)
-# - Встроенными SQL миграциями
-# - Модулем project_exchange (Task 9)
-# - БЕЗ UPX compression (избегает false positives антивирусов)
-# - Исключенными неиспользуемыми зависимостями (stanza_resources, tkinter, matplotlib)
+# Р­С‚РѕС‚ spec С„Р°Р№Р» СЃРѕР·РґР°РµС‚ standalone Windows executable СЃ:
+# - РџРѕР»РЅС‹РјРё hiddenimports (PyQt6, SQLAlchemy, psutil, Google Cloud Translate)
+# - Р’СЃС‚СЂРѕРµРЅРЅС‹РјРё SQL РјРёРіСЂР°С†РёСЏРјРё
+# - РњРѕРґСѓР»РµРј project_exchange (Task 9)
+# - Р‘Р•Р— UPX compression (РёР·Р±РµРіР°РµС‚ false positives Р°РЅС‚РёРІРёСЂСѓСЃРѕРІ)
+# - РСЃРєР»СЋС‡РµРЅРЅС‹РјРё РЅРµРёСЃРїРѕР»СЊР·СѓРµРјС‹РјРё Р·Р°РІРёСЃРёРјРѕСЃС‚СЏРјРё (stanza_resources, tkinter, matplotlib)
 #
-# РЕЖИМ: onedir (не onefile) - критично для torch_cpu.dll
-# ВЫХОД: dist/HDLE_Premium/ (папка с exe + зависимостями)
+# Р Р•Р–РРњ: onedir (РЅРµ onefile) - РєСЂРёС‚РёС‡РЅРѕ РґР»СЏ torch_cpu.dll
+# Р’Р«РҐРћР”: dist/HDLE_Premium/ (РїР°РїРєР° СЃ exe + Р·Р°РІРёСЃРёРјРѕСЃС‚СЏРјРё)
 
 import sys
 from pathlib import Path
@@ -26,9 +26,9 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        # SQL migrations (обязательно для инициализации БД)
+        # SQL migrations (РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ РґР»СЏ РёРЅРёС†РёР°Р»РёР·Р°С†РёРё Р‘Р”)
         (str(project_root / 'app' / 'infra' / 'migrations' / '*.sql'), 'app/infra/migrations/'),
-        # dialogs.py модуль (конфликт имен с dialogs/ папкой)
+        # dialogs.py РјРѕРґСѓР»СЊ (РєРѕРЅС„Р»РёРєС‚ РёРјРµРЅ СЃ dialogs/ РїР°РїРєРѕР№)
         (str(project_root / 'app' / 'ui' / 'dialogs.py'), 'app/ui/'),
     ],
     hiddenimports=[
@@ -69,7 +69,7 @@ a = Analysis(
         'grpc',
         'grpc._cython.cygrpc',
 
-        # Services (явно для гарантии bundling)
+        # Services (СЏРІРЅРѕ РґР»СЏ РіР°СЂР°РЅС‚РёРё bundling)
         'app.services.backup_service',
         'app.services.snapshot_service',
         'app.services.db_service',
@@ -85,8 +85,11 @@ a = Analysis(
         'app.services.coverage_service',
         'app.services.dictionary_import_service',
         'app.services.entity_classifier',  # Task 11: Entity Classification
+        'app.services.pronunciation_service',
+        'app.services.pronunciation_bootstrap_service',
+        'app.services.pronunciation_import_export_service',
 
-        # Project Exchange (Task 9) - НОВОЕ
+        # Project Exchange (Task 9) - РќРћР’РћР•
         'app.services.project_exchange',
         'app.services.project_exchange.export_engine',
         'app.services.project_exchange.import_engine',
@@ -95,12 +98,20 @@ a = Analysis(
         'app.services.project_exchange.constants',
         'app.services.project_exchange.dto',
 
-        # UI dialogs - КРИТИЧНО: и файл dialogs.py, и папка dialogs/
-        'app.ui.dialogs',  # Это импортирует app/ui/dialogs.py (файл с CreateProjectDialog и т.д.)
+        # UI dialogs - РљР РРўРР§РќРћ: Рё С„Р°Р№Р» dialogs.py, Рё РїР°РїРєР° dialogs/
+        'app.ui.dialogs',  # Р­С‚Рѕ РёРјРїРѕСЂС‚РёСЂСѓРµС‚ app/ui/dialogs.py (С„Р°Р№Р» СЃ CreateProjectDialog Рё С‚.Рґ.)
         'app.ui.dialogs.batch_translate_dialog',
+        'app.ui.dialogs.batch_audio_dialog',
+        'app.ui.dialogs.mms_license_gate_dialog',
         'app.ui.dialogs.batch_progress_dialog',
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',
+        'app.ui.audio_provider_settings_dialog',
+
+        # Audio providers
+        'app.infra.audio.providers.google_cloud_tts_provider',
+        'app.infra.audio.providers.azure_speech_tts_provider',
+        'app.infra.audio.providers.mms_tts_local_provider',
 
         # Encryption/credentials
         'keyring',
@@ -115,11 +126,11 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'stanza_resources',  # Stanza models (скачиваются при первом запуске)
-        'tkinter',           # Не используется
-        'matplotlib',        # Не используется
-        'PIL',               # Не используется (если нет OCR)
-        'numpy.distutils',   # Не нужно для runtime
+        'stanza_resources',  # Stanza models (СЃРєР°С‡РёРІР°СЋС‚СЃСЏ РїСЂРё РїРµСЂРІРѕРј Р·Р°РїСѓСЃРєРµ)
+        'tkinter',           # РќРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ
+        'matplotlib',        # РќРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ
+        'PIL',               # РќРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ (РµСЃР»Рё РЅРµС‚ OCR)
+        'numpy.distutils',   # РќРµ РЅСѓР¶РЅРѕ РґР»СЏ runtime
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -133,21 +144,21 @@ exe = EXE(
     pyz,
     a.scripts,
     [],
-    exclude_binaries=True,  # КРИТИЧНО: Режим onedir (не onefile) для избежания ошибки извлечения torch_cpu.dll
+    exclude_binaries=True,  # РљР РРўРР§РќРћ: Р РµР¶РёРј onedir (РЅРµ onefile) РґР»СЏ РёР·Р±РµР¶Р°РЅРёСЏ РѕС€РёР±РєРё РёР·РІР»РµС‡РµРЅРёСЏ torch_cpu.dll
     name='HDLE_Premium',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # ОТКЛЮЧЕНО: UPX может вызвать false positives антивирусов
+    upx=False,  # РћРўРљР›Р®Р§Р•РќРћ: UPX РјРѕР¶РµС‚ РІС‹Р·РІР°С‚СЊ false positives Р°РЅС‚РёРІРёСЂСѓСЃРѕРІ
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # GUI приложение (без консольного окна)
+    console=False,  # GUI РїСЂРёР»РѕР¶РµРЅРёРµ (Р±РµР· РєРѕРЅСЃРѕР»СЊРЅРѕРіРѕ РѕРєРЅР°)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # TODO: Добавить иконку если доступна
+    icon=None,  # TODO: Р”РѕР±Р°РІРёС‚СЊ РёРєРѕРЅРєСѓ РµСЃР»Рё РґРѕСЃС‚СѓРїРЅР°
 )
 
 coll = COLLECT(
@@ -160,3 +171,5 @@ coll = COLLECT(
     upx_exclude=[],
     name='HDLE_Premium',
 )
+
+

@@ -265,6 +265,22 @@ class UserDictionaryItemDTO:
 
 
 @dataclass
+class PronunciationEntryDTO:
+    """Pronunciation entry payload."""
+
+    entry_id: Optional[int]
+    lang: str
+    src_norm: str
+    niqqud_text: Optional[str]
+    ipa: Optional[str]
+    source: str
+    is_override: int
+    notes: Optional[str]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@dataclass
 class StudyProgressSummaryDTO:
     """Computed SRS summary for one canonical hash."""
 

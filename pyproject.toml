@@ -32,6 +32,10 @@ ocr = [
     "pytesseract>=0.3.10",
     "pdf2image>=1.16.0",
 ]
+audio_local = [
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-qt>=4.2.0",

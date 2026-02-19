@@ -19,6 +19,7 @@ from app.domain.dto import TermCardDTO
 from app.ui.models_qt import TermCardTableModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.dialogs import show_error, show_info
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
@@ -483,6 +484,21 @@ class TermCardView(QWidget):
             logger.error("Failed to play audio in Term Cards: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
+    def on_edit_pronunciation_selected(self):
+        """Open pronunciation editor for the first selected queue row."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+        first = items[0]
+        changed = show_edit_pronunciation_dialog(
+            parent=self,
+            src_lang=str(first.get("src_lang") or ""),
+            src_norm=str(first.get("src_norm") or ""),
+            src_text=str(first.get("src_text") or ""),
+        )
+        if changed:
+            self.load_review_queue()
+
     def on_queue_context_menu(self, pos):
         """Context menu for review queue rows."""
         selected_rows = self.queue_table.selectionModel().selectedRows()
@@ -501,6 +517,9 @@ class TermCardView(QWidget):
         add_action = QAction(f"Add Selected to User Dictionary ({count} rows)...", self)
         add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
         menu.addAction(add_action)
+        edit_pron_action = QAction("Edit Pronunciation...", self)
+        edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
+        menu.addAction(edit_pron_action)
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
 
     def on_add_selected_to_user_dictionary(self):

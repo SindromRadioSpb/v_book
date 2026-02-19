@@ -787,6 +787,29 @@ class AudioAsset(Base):
     )
 
 
+class PronunciationEntry(Base):
+    """Local pronunciation layer (auto + manual overrides)."""
+
+    __tablename__ = "pronunciation_entry"
+
+    entry_id = Column(Integer, primary_key=True)
+    lang = Column(String, nullable=False)
+    src_norm = Column(Text, nullable=False)
+    niqqud_text = Column(Text)
+    ipa = Column(Text)
+    source = Column(String, nullable=False, default="auto")
+    is_override = Column(Integer, nullable=False, default=0)
+    notes = Column(Text)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("lang", "src_norm", name="uq_pronunciation_entry_key"),
+        CheckConstraint("source IN ('auto', 'manual')", name="ck_pronunciation_source"),
+        CheckConstraint("is_override IN (0, 1)", name="ck_pronunciation_override"),
+    )
+
+
 class TMAlias(Base):
     """Translation Memory aliases for variant matching."""
 

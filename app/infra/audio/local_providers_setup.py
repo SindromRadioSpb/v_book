@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from app.infra.audio.providers import MockLocalAudioProvider, MockOnlineAudioProvider
+from app.infra.audio.providers import (
+    AzureSpeechTTSProvider,
+    GoogleCloudTTSProvider,
+    MMSTTSLocalProvider,
+    MockLocalAudioProvider,
+    MockOnlineAudioProvider,
+)
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 
 logger = logging.getLogger(__name__)
@@ -15,7 +21,13 @@ def register_default_audio_providers() -> int:
     registry = AudioProvidersRegistry()
     added = 0
 
-    for provider_cls in (MockLocalAudioProvider, MockOnlineAudioProvider):
+    for provider_cls in (
+        GoogleCloudTTSProvider,
+        AzureSpeechTTSProvider,
+        MMSTTSLocalProvider,
+        MockLocalAudioProvider,
+        MockOnlineAudioProvider,
+    ):
         provider = provider_cls()
         if registry.get(provider.provider_id):
             continue

@@ -23,6 +23,7 @@ EXCLUDED_TABLES = {
     "run_error",             # Operational: processing error logs
     "sentence_fts",          # Virtual: FTS5 table (rebuilt on import)
     "term_fts",              # Virtual: FTS5 table (rebuilt on import)
+    "pronunciation_entry",   # Global metadata layer (export/import via dedicated pronunciation exchange)
 }
 
 # Topological order for import (respects FK constraints)

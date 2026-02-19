@@ -123,6 +123,12 @@ class AppWindow(QMainWindow):
         provider_settings_action.triggered.connect(self.open_provider_settings)
         translation_menu.addAction(provider_settings_action)
 
+        # Audio Provider Settings
+        audio_provider_settings_action = QAction("&Audio Provider Settings...", self)
+        audio_provider_settings_action.setShortcut("Ctrl+Alt+A")
+        audio_provider_settings_action.triggered.connect(self.open_audio_provider_settings)
+        translation_menu.addAction(audio_provider_settings_action)
+
         # Premium menu
         premium_menu = menubar.addMenu("&Premium")
 
@@ -270,6 +276,13 @@ class AppWindow(QMainWindow):
         logger.info("Opening MT provider settings dialog")
         show_provider_settings(parent=self)
 
+    def open_audio_provider_settings(self):
+        """Open audio provider settings dialog."""
+        from app.ui.audio_provider_settings_dialog import show_audio_provider_settings
+
+        logger.info("Opening audio provider settings dialog")
+        show_audio_provider_settings(parent=self)
+
     def open_project(self, project_id: int):
         """Open a project view."""
         logger.info(f"Opening project {project_id}")
@@ -337,6 +350,15 @@ class AppWindow(QMainWindow):
             shortcut="Ctrl+Shift+U",
             callback=self.open_user_dictionaries,
             category="Premium"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="tools.audio_provider_settings",
+            title="Audio Provider Settings",
+            keywords=["audio", "tts", "provider", "mms", "speech"],
+            shortcut="Ctrl+Alt+A",
+            callback=self.open_audio_provider_settings,
+            category="Tools"
         ))
 
         registry.register(ActionSpec(
