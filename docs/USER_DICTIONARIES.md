@@ -25,12 +25,12 @@
 UI composition in `User Dictionaries`:
 - `Origin` marker column
 - `Study` chip column
+- `Last Review` column (`Added/Again/Hard/Good/Easy`) with cell-only semantic highlight
 - `Status` icon stack (translation/audio/noise) + full tooltip
 - Semantic colors applied to Study/Origin/Status/Audio/Noise for instant scanning
-- Study row highlighting by computed status (`new/learning/due/mastered/suspended`)
 - Top summary strip for opened dictionary:
   - `Words total`
-  - counts by `New/Learning/Due/Mastered/Suspended`
+  - review counters `Added/Again/Hard/Good/Easy`
 
 ## Scope
 
@@ -38,6 +38,7 @@ UI composition in `User Dictionaries`:
 - Default scope: `Current Project` when opened from project context, otherwise `All`.
 - Active scope is shown as `Filtered by: ...`, and `Show All` is available for quick reset.
 - Summary strip respects active scope and `Hide Noise` state.
+- Summary strip is stable and does not depend on the search text filter.
 
 ## Translate Selected
 
@@ -59,9 +60,11 @@ UI composition in `User Dictionaries`:
 - Rating buttons:
   - `Again` / `Hard` / `Good` / `Easy`
 - Ratings update `study_progress` (global by `canonical_hash`) using SM-2.
+- Every review persists `study_progress.last_grade` and `study_progress.last_graded_at`.
 - Optional inline translation edit in Review mode writes via canonical path and propagates to linked TM.
 - Manual due action is available in Browse mode: `Mark Due Now` / context action `Mark Selected as Due now (N rows)`.
   - This sets linked `study_progress.due_at` to current time.
+  - It does not reset review history (`review_count`, `ease_factor`, `lapse_count`, `last_grade`, `last_graded_at`).
   - Progress is global by canonical key, so duplicates linked to the same canonical hash become due together.
 
 ## Inline Edit + Context Menu

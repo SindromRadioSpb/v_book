@@ -20,8 +20,10 @@
 16. Cross-view UD marker switches from `*` to `*!` when row is due
 17. User Dictionaries context menu supports Suspend/Resume and due queue updates immediately
 18. User Dictionaries `Mark Due Now` action moves selected reviewed items into due queue after refresh
-19. User Dictionaries top summary strip updates totals by state for opened dictionary
-20. User Dictionaries rows have study-state background highlighting (not color-only; tooltip/text still present)
+19. User Dictionaries top summary strip updates `Words + Added/Again/Hard/Good/Easy` for opened dictionary
+20. `Last Review` column shows `Added/Again/Hard/Good/Easy` and applies highlight only to that cell (no row tint)
+21. Last Review tooltip includes `last_graded_at`, `review_count`, `due_at`
+22. Due-now action updates queue eligibility without resetting last-grade history
 
 ## Non-Functional Evidence
 
@@ -32,6 +34,7 @@
 - Existing long operations continue to use worker + `BatchProgressDialogV3`
 - Table content remains scrollable at small window sizes
 - Semantic color layer is additive only (icons/text/tooltip remain primary semantic carriers)
+- Last Review highlighting is isolated to one column to avoid conflicts with due/noise/suspended semantics
 
 ## Evidence Artifacts
 
