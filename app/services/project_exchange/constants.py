@@ -17,6 +17,7 @@ EXCLUDED_TABLES = {
     "security_audit_log",    # Operational: security logs
     "mt_cache",              # Ephemeral: translation cache
     "mt_usage",              # Operational: provider usage tracking
+    "audio_usage",           # Operational: audio provider usage tracking
     "schema_meta",           # System: migration version tracker
     "task_queue",            # Transient: job queue state
     "processor_run",         # Operational: processing run logs

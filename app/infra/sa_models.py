@@ -787,6 +787,26 @@ class AudioAsset(Base):
     )
 
 
+class AudioUsage(Base):
+    """Audio provider usage counters for budget guards."""
+
+    __tablename__ = "audio_usage"
+
+    usage_id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_id = Column(String, nullable=False)
+    period_type = Column(String, nullable=False)
+    period_key = Column(String, nullable=False)
+    char_count = Column(Integer, nullable=False, default=0)
+    request_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("provider_id", "period_type", "period_key", name="uq_audio_usage_period"),
+        CheckConstraint("period_type IN ('minute', 'day', 'month')", name="ck_audio_usage_period_type"),
+    )
+
+
 class PronunciationEntry(Base):
     """Local pronunciation layer (auto + manual overrides)."""
 

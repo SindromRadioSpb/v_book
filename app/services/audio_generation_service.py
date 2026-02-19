@@ -23,6 +23,7 @@ from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.sa_models import AudioAsset
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
+from app.services.audio_usage_tracker import AudioUsageTracker
 from app.services.pronunciation_service import PronunciationService
 from app.domain.normalization.normalizer import normalize_for_tm
 
@@ -85,6 +86,8 @@ class AudioGenerationService:
 
     def _resolve_provider_chain(self, provider_mode: str) -> List[str]:
         registry = AudioProvidersRegistry()
+        if not self.settings.get_bool("audio/providers/enabled", True):
+            return []
         if provider_mode.startswith("force:"):
             forced = provider_mode.split(":", 1)[1].strip()
             if not registry.get(forced):
@@ -301,9 +304,11 @@ class AudioGenerationService:
             return {"ok": False, "status": "failed", "provider_id": None, "error": "No audio provider available"}
 
         registry = AudioProvidersRegistry()
+        usage_tracker = AudioUsageTracker(session)
         req_trace = trace_id or str(uuid.uuid4())
         last_error = "All providers failed"
         app_dir = _get_app_dir()
+        source_char_count = len(source_text)
         pronunciation_payload = self._prepare_pronunciation_payload(
             session=session,
             src_lang=source_lang_clean,
@@ -315,6 +320,73 @@ class AudioGenerationService:
             provider = registry.get(provider_id)
             if not provider:
                 continue
+            provider_cfg = self.audio_provider_config.load_config(provider_id)
+
+            if source_char_count > int(provider_cfg.max_chars_per_request):
+                last_error = (
+                    f"Per-request limit exceeded for {provider_id}: "
+                    f"{source_char_count}/{provider_cfg.max_chars_per_request} chars"
+                )
+                self.audio_asset_service.upsert_status(
+                    session=session,
+                    lang=source_lang_clean,
+                    norm_text=source_norm_clean,
+                    voice_id=voice_id,
+                    speed=speed,
+                    provider=provider_id,
+                    status="failed",
+                    error_text=last_error[:1000],
+                )
+                continue
+
+            limits = provider_cfg.to_budget_limits()
+            if limits.fail_closed and limits.has_budget_guards():
+                try:
+                    allowed, error_msg = usage_tracker.can_spend(
+                        provider_id=provider_id,
+                        char_count=source_char_count,
+                        limits=limits,
+                    )
+                    if not allowed:
+                        last_error = f"Budget limit exceeded: {error_msg}"
+                        self.audio_asset_service.upsert_status(
+                            session=session,
+                            lang=source_lang_clean,
+                            norm_text=source_norm_clean,
+                            voice_id=voice_id,
+                            speed=speed,
+                            provider=provider_id,
+                            status="failed",
+                            error_text=last_error[:1000],
+                        )
+                        continue
+                except Exception as budget_err:
+                    err_text = str(budget_err).lower()
+                    if "no such table: audio_usage" in err_text:
+                        logger.warning(
+                            "Audio usage table is missing; skipping budget check for %s",
+                            provider_id,
+                        )
+                        allowed = True
+                        error_msg = None
+                    elif limits.fail_closed:
+                        last_error = f"Failed to check budget usage: {budget_err}"
+                        self.audio_asset_service.upsert_status(
+                            session=session,
+                            lang=source_lang_clean,
+                            norm_text=source_norm_clean,
+                            voice_id=voice_id,
+                            speed=speed,
+                            provider=provider_id,
+                            status="failed",
+                            error_text=str(last_error)[:1000],
+                        )
+                        continue
+                    logger.warning(
+                        "Audio budget check failed for %s (%s), continuing (fail_open)",
+                        provider_id,
+                        budget_err,
+                    )
 
             prepared_text = pronunciation_payload.get("token_text") or source_text
             options: Dict[str, object] = {}
@@ -373,6 +445,20 @@ class AudioGenerationService:
             row.duration_ms = result.duration_ms
             row.sha256 = payload_sha
             row.error_text = None
+            try:
+                usage_tracker.record_spend(
+                    provider_id=provider_id,
+                    char_count=source_char_count,
+                    request_count=1,
+                    commit=False,
+                )
+            except Exception as usage_err:
+                logger.warning(
+                    "Failed to record audio usage for %s (%s): %s",
+                    provider_id,
+                    req_trace,
+                    usage_err,
+                )
             return {
                 "ok": True,
                 "status": "ready",
