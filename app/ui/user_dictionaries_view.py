@@ -199,6 +199,10 @@ class UserDictionariesView(QWidget):
         header_layout.addWidget(self.back_btn)
         layout.addLayout(header_layout)
 
+        self.dictionary_summary_label = QLabel("Words: 0 | New: 0 | Learning: 0 | Due: 0 | Mastered: 0 | Suspended: 0")
+        self.dictionary_summary_label.setStyleSheet("color: #444; font-size: 11px;")
+        layout.addWidget(self.dictionary_summary_label)
+
         scope_layout = QHBoxLayout()
         scope_layout.addWidget(QLabel("Scope:"))
         self.scope_current_btn = QPushButton("Current Project")
@@ -698,6 +702,7 @@ class UserDictionariesView(QWidget):
                 self.items_model.update_items([], 0)
                 self.total_count = 0
                 self.update_pagination_controls()
+                self._update_study_summary()
                 return
 
             selected_row = 0
@@ -757,6 +762,7 @@ class UserDictionariesView(QWidget):
             self.items_model.update_items([], 0)
             self.total_count = 0
             self.update_pagination_controls()
+            self._update_study_summary()
             return
 
         try:
@@ -776,6 +782,7 @@ class UserDictionariesView(QWidget):
             self.items_model.update_items(items, total)
             self.total_count = total
             self.update_pagination_controls()
+            self._update_study_summary()
             self.on_items_selection_changed()
             self.status_label.setText(f"Loaded {len(items)} rows")
         except Exception as e:
@@ -812,6 +819,35 @@ class UserDictionariesView(QWidget):
         self.remove_selected_btn.setEnabled(count > 0)
         self.translate_selected_btn.setEnabled(count > 0)
         self.mark_due_btn.setEnabled(count > 0)
+
+    def _update_study_summary(self):
+        """Update top summary bar for the currently opened dictionary."""
+        if not self.current_dictionary_id:
+            self.dictionary_summary_label.setText(
+                "Words: 0 | New: 0 | Learning: 0 | Due: 0 | Mastered: 0 | Suspended: 0"
+            )
+            return
+
+        scope_origin_project_id = self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        try:
+            with self.db_service.get_session() as session:
+                counters = self.user_dict_service.get_study_summary_counts(
+                    session=session,
+                    dictionary_id=self.current_dictionary_id,
+                    scope_origin_project_id=scope_origin_project_id,
+                    hide_noise=self.hide_noise_checkbox.isChecked(),
+                )
+            self.dictionary_summary_label.setText(
+                f"Words: {counters['total']:,} | "
+                f"New: {counters['new']:,} | "
+                f"Learning: {counters['learning']:,} | "
+                f"Due: {counters['due']:,} | "
+                f"Mastered: {counters['mastered']:,} | "
+                f"Suspended: {counters['suspended']:,}"
+            )
+        except Exception as e:
+            logger.warning("Failed to load dictionary study summary: %s", e)
+            self.dictionary_summary_label.setText("Words: n/a | New: n/a | Learning: n/a | Due: n/a | Mastered: n/a | Suspended: n/a")
 
     def on_context_menu(self, pos):
         selected_rows = self.items_table.selectionModel().selectedRows()

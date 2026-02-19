@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -739,3 +740,84 @@ def test_set_items_due_now_bulk_updates_linked_progress(user_dict_engine):
             select(StudyProgress).where(StudyProgress.id == item.study_progress_id)
         ).scalar_one()
         assert progress_after.due_at >= due_before
+
+
+def test_get_study_summary_counts_by_computed_states(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Summary")
+        payloads = []
+        for idx in range(5):
+            payloads.append(
+                {
+                    "kind": "lemma",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": f"summary-{idx}",
+                    "src_norm": f"summary-{idx}",
+                    "origin_project_id": 100,
+                }
+            )
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=payloads,
+            include_noise=True,
+        )
+        session.flush()
+
+        items = session.execute(
+            select(UserDictionaryItem)
+            .where(UserDictionaryItem.dictionary_id == dictionary_id)
+            .order_by(UserDictionaryItem.item_id)
+        ).scalars().all()
+        assert len(items) == 5
+
+        now_dt = datetime.now(timezone.utc)
+        # new
+        p0 = session.get(StudyProgress, items[0].study_progress_id)
+        p0.review_count = 0
+        p0.interval_days = 0
+        p0.due_at = (now_dt + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        # learning
+        p1 = session.get(StudyProgress, items[1].study_progress_id)
+        p1.review_count = 1
+        p1.interval_days = 4
+        p1.due_at = (now_dt + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        # due
+        p2 = session.get(StudyProgress, items[2].study_progress_id)
+        p2.review_count = 2
+        p2.interval_days = 6
+        p2.due_at = (now_dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        # mastered
+        p3 = session.get(StudyProgress, items[3].study_progress_id)
+        p3.review_count = 3
+        p3.interval_days = 30
+        p3.due_at = (now_dt + timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        # suspended
+        items[4].is_suspended = 1
+        items[4].suspended_reason = "USER_SUSPENDED"
+        p4 = session.get(StudyProgress, items[4].study_progress_id)
+        p4.review_count = 1
+        p4.interval_days = 1
+        p4.due_at = (now_dt - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        session.commit()
+
+        counters = service.get_study_summary_counts(
+            session=session,
+            dictionary_id=dictionary_id,
+            scope_origin_project_id=100,
+            hide_noise=True,
+        )
+
+        assert counters["total"] == 5
+        assert counters["new"] == 1
+        assert counters["learning"] == 1
+        assert counters["due"] == 1
+        assert counters["mastered"] == 1
+        assert counters["suspended"] == 1

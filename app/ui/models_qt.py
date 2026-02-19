@@ -15,6 +15,7 @@ from app.ui.study_status_ui import (
     noise_brush,
     origin_brush,
     origin_marker,
+    study_row_background_brush,
     study_brush,
     study_chip,
     translation_tier_brush,
@@ -746,7 +747,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             "Translation",
             "Status",
             "Noise",
-            "Study",
+            "Study Status",
             "Origin",
             "Audio",
         ]
@@ -768,6 +769,9 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             if item.status_tooltip:
                 return item.status_tooltip
             return None
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return study_row_background_brush(item.computed_study_state)
 
         if role == Qt.ItemDataRole.ForegroundRole:
             if col == 3:

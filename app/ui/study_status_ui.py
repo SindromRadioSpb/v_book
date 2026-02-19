@@ -70,6 +70,14 @@ NOISE_COLORS = {
     1: "#C62828",
 }
 
+STUDY_ROW_BG_COLORS = {
+    "new": "#ECEFF1",
+    "learning": "#E3F2FD",
+    "due": "#FFF3E0",
+    "mastered": "#E8F5E9",
+    "suspended": "#F3E5F5",
+}
+
 
 def _brush(hex_color: str) -> QBrush:
     return QBrush(QColor(hex_color))
@@ -155,3 +163,12 @@ def origin_brush(origin_kind: Optional[str]) -> QBrush:
 
 def noise_brush(is_noise: int) -> QBrush:
     return _brush(NOISE_COLORS[1 if int(is_noise or 0) == 1 else 0])
+
+
+def study_row_background_brush(study_state: Optional[str]) -> QBrush:
+    return _brush(
+        STUDY_ROW_BG_COLORS.get(
+            (study_state or "new").lower(),
+            STUDY_ROW_BG_COLORS["new"],
+        )
+    )

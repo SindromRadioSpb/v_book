@@ -27,12 +27,17 @@ UI composition in `User Dictionaries`:
 - `Study` chip column
 - `Status` icon stack (translation/audio/noise) + full tooltip
 - Semantic colors applied to Study/Origin/Status/Audio/Noise for instant scanning
+- Study row highlighting by computed status (`new/learning/due/mastered/suspended`)
+- Top summary strip for opened dictionary:
+  - `Words total`
+  - counts by `New/Learning/Due/Mastered/Suspended`
 
 ## Scope
 
 - Scope chip: `Current Project` / `All`.
 - Default scope: `Current Project` when opened from project context, otherwise `All`.
 - Active scope is shown as `Filtered by: ...`, and `Show All` is available for quick reset.
+- Summary strip respects active scope and `Hide Noise` state.
 
 ## Translate Selected
 

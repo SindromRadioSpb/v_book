@@ -20,6 +20,8 @@
 16. Cross-view UD marker switches from `*` to `*!` when row is due
 17. User Dictionaries context menu supports Suspend/Resume and due queue updates immediately
 18. User Dictionaries `Mark Due Now` action moves selected reviewed items into due queue after refresh
+19. User Dictionaries top summary strip updates totals by state for opened dictionary
+20. User Dictionaries rows have study-state background highlighting (not color-only; tooltip/text still present)
 
 ## Non-Functional Evidence
 

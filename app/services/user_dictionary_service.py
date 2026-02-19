@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, desc, func, or_, select, text, tuple_, update
+from sqlalchemy import and_, asc, case, desc, func, or_, select, text, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDictionaryItemDTO
@@ -1187,6 +1187,58 @@ class UserDictionaryService:
         stmt = self._apply_item_filters(stmt, filters)
         stmt = self._apply_write_mode_filter(stmt, write_mode)
         return session.execute(stmt).scalar() or 0
+
+    def get_study_summary_counts(
+        self,
+        session: Session,
+        dictionary_id: int,
+        *,
+        scope_origin_project_id: Optional[int] = None,
+        hide_noise: bool = True,
+    ) -> Dict[str, int]:
+        """Return deterministic study-state counters for one opened dictionary."""
+        now_value = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        state_expr = case(
+            (UserDictionaryItem.is_suspended == 1, "suspended"),
+            (func.coalesce(StudyProgress.review_count, 0) <= 0, "new"),
+            (StudyProgress.due_at <= now_value, "due"),
+            (
+                and_(
+                    func.coalesce(StudyProgress.review_count, 0) >= StudyService.MASTERED_MIN_REVIEWS,
+                    func.coalesce(StudyProgress.interval_days, 0) >= StudyService.MASTERED_INTERVAL_DAYS,
+                ),
+                "mastered",
+            ),
+            else_="learning",
+        )
+
+        stmt = (
+            select(state_expr.label("study_state"), func.count(UserDictionaryItem.item_id))
+            .select_from(UserDictionaryItem)
+            .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
+            .where(UserDictionaryItem.dictionary_id == dictionary_id)
+        )
+        if scope_origin_project_id is not None:
+            stmt = stmt.where(UserDictionaryItem.origin_project_id == scope_origin_project_id)
+        if hide_noise:
+            stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
+        stmt = stmt.group_by(state_expr)
+
+        counters = {
+            "total": 0,
+            "new": 0,
+            "learning": 0,
+            "due": 0,
+            "mastered": 0,
+            "suspended": 0,
+        }
+        for study_state, count_value in session.execute(stmt).all():
+            state_key = (study_state or "").strip().lower()
+            count_int = int(count_value or 0)
+            if state_key in counters:
+                counters[state_key] = count_int
+            counters["total"] += count_int
+        return counters
 
     def fetch_item_ids_for_translation(
         self,
