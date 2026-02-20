@@ -76,7 +76,7 @@ def test_bootstrap_does_not_override_manual(monkeypatch):
             row = pron.get_entry(session, lang="he", src_norm="a")
             assert row is not None
             assert row.source == "manual"
-            assert row.niqqud_text == "manual_value"
+            assert row.niqqud_text == "manual value"
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
