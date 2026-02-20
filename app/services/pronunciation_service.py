@@ -312,13 +312,13 @@ class PronunciationService:
 
     @staticmethod
     def _build_ssml_text(text_value: str) -> str:
-        safe_text = PronunciationQualityService.sanitize_spoken_text(text_value)
+        safe_text = PronunciationQualityService.sanitize_tts_text(text_value)
         escaped = html.escape(safe_text, quote=False)
         return f"<speak version='1.0'>{escaped}</speak>"
 
     @staticmethod
     def _build_ssml_ipa(surface_text: str, ipa_value: str) -> str:
-        safe_surface = PronunciationQualityService.sanitize_spoken_text(surface_text)
+        safe_surface = PronunciationQualityService.sanitize_tts_text(surface_text)
         escaped_surface = html.escape(safe_surface, quote=False)
         escaped_ipa = html.escape(ipa_value or "", quote=True)
         return (
@@ -338,7 +338,7 @@ class PronunciationService:
         raw = (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip()
         if not raw:
             return None
-        sanitized = PronunciationQualityService.sanitize_spoken_text(raw)
+        sanitized = PronunciationQualityService.sanitize_tts_text(raw)
         return sanitized or None
 
     def _normalize_surface(self, src_lang: str, value: str) -> str:
@@ -470,7 +470,7 @@ class PronunciationService:
         """Apply phrase-first pronunciation rules (whole phrase -> phrase map -> token fallback)."""
         src_lang_clean = (src_lang or "").strip()
         source_text_clean = (source_text or "").strip()
-        source_spoken = PronunciationQualityService.sanitize_spoken_text(source_text_clean)
+        source_spoken = PronunciationQualityService.sanitize_tts_text(source_text_clean)
         source_qc_flag = "auto_fixed" if source_spoken != source_text_clean else None
         if not src_lang_clean or not source_spoken:
             return PronunciationApplied(
@@ -515,13 +515,13 @@ class PronunciationService:
             src_lang=src_lang_clean,
             source_text=source_spoken,
         )
-        phrase_text = PronunciationQualityService.sanitize_spoken_text(phrase_text)
+        phrase_text = PronunciationQualityService.sanitize_tts_text(phrase_text)
         token_text = self._apply_token_pronunciation_text(
             session,
             src_lang=src_lang_clean,
             source_text=phrase_text,
         )
-        token_text = PronunciationQualityService.sanitize_spoken_text(token_text)
+        token_text = PronunciationQualityService.sanitize_tts_text(token_text)
         if token_text != source_spoken:
             return PronunciationApplied(
                 text=source_spoken,
