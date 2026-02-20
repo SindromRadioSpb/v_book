@@ -69,7 +69,9 @@ Entry point:
 
 Capabilities:
 
-- Model path selection and persistence (`pronunciation/phonikud/model_path`).
+- Model selection and persistence (`pronunciation/phonikud/model_path`):
+  - direct `.onnx` file selection (preferred),
+  - or folder selection (auto-picks `*int8.onnx` first, then first `*.onnx`).
 - Health check via worker (no UI freeze), with mode/status/latency/samples.
 - Worker-safe bootstrap with `BatchProgressDialogV3`:
   - stages, counters, activity log, cancel/pause/resume.

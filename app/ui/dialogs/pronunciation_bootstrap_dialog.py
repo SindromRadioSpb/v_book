@@ -157,7 +157,23 @@ class PronunciationBootstrapDialog(QDialog):
     def _browse_model_path(self) -> None:
         from PyQt6.QtWidgets import QFileDialog
 
-        directory = QFileDialog.getExistingDirectory(self, "Select Phonikud model folder")
+        current = self.model_path_edit.text().strip()
+        start_dir = current or "J:/Models/phonikud"
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Phonikud ONNX Model",
+            start_dir,
+            "ONNX Model (*.onnx);;All Files (*)",
+        )
+        if file_path:
+            self.model_path_edit.setText(file_path)
+            return
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Phonikud model folder",
+            start_dir,
+        )
         if directory:
             self.model_path_edit.setText(directory)
 
