@@ -62,3 +62,28 @@ def test_shim_directory_prefers_int8_onnx(monkeypatch, tmp_path):
 
     assert seen["path"] is not None
     assert seen["path"].endswith("int8.onnx")
+
+
+def test_shim_path_without_onnx_extension_recovers_existing_file(monkeypatch, tmp_path):
+    onnx_file = tmp_path / "phonikud-1.0.int8.onnx"
+    onnx_file.write_text("int8", encoding="utf-8")
+    input_without_ext = tmp_path / "phonikud-1.0.int8"
+
+    seen = {"path": None}
+
+    class _FakePhonikud:
+        def __init__(self, model_path_value: str):
+            seen["path"] = model_path_value
+
+        def add_diacritics(self, text: str) -> str:
+            return text
+
+    fake_module = types.SimpleNamespace(Phonikud=_FakePhonikud)
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", fake_module)
+    monkeypatch.setenv("PHONIKUD_MODEL_PATH", str(input_without_ext))
+
+    shim = _reload_shim()
+    shim._load_model_bundle.cache_clear()
+    _ = shim.add_niqqud("\u05e9\u05dc\u05d5\u05dd")
+
+    assert seen["path"] == str(onnx_file)

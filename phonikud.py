@@ -13,9 +13,10 @@ It also exposes runtime diagnostics used by the premium UI gate:
 
 from __future__ import annotations
 
+from functools import lru_cache
 import os
 from pathlib import Path
-from functools import lru_cache
+import tempfile
 from typing import Optional, Tuple
 
 MODE_REAL = "real_inference"
@@ -32,20 +33,31 @@ def _normalize_input(text: str) -> str:
 
 def _ensure_hf_home() -> None:
     """Ensure Hugging Face cache points to a writable location."""
-    if (os.getenv("HF_HOME") or "").strip():
-        return
+    configured = (os.getenv("HF_HOME") or "").strip()
+    if configured:
+        configured_path = Path(configured)
+        try:
+            configured_path.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=str(configured_path), prefix="hf_write_test_", delete=True):
+                pass
+            return
+        except Exception:
+            pass
 
     candidates = []
+    candidates.append(Path.cwd() / "build" / "hf_cache")
+    candidates.append(Path(__file__).resolve().parent / "build" / "hf_cache")
     local_app_data = (os.getenv("LOCALAPPDATA") or "").strip()
     if local_app_data:
         candidates.append(Path(local_app_data) / "HDLE" / "hf_cache")
-    candidates.append(Path(__file__).resolve().parent / "build" / "hf_cache")
-    candidates.append(Path.cwd() / "build" / "hf_cache")
 
     for candidate in candidates:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=str(candidate), prefix="hf_write_test_", delete=True):
+                pass
             os.environ["HF_HOME"] = str(candidate)
+            os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
             return
         except Exception:
             continue
@@ -71,7 +83,23 @@ def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
             return "onnx", onnx_candidates[0]
         return "torch", path
 
-    # Non-existing path: infer intent by extension.
+    # Non-existing path: recover common UI/manual inputs.
+    if path.suffix.lower() != ".onnx":
+        direct_onnx = Path(str(path) + ".onnx")
+        if direct_onnx.is_file():
+            return "onnx", direct_onnx
+
+        parent = path.parent
+        if parent.exists() and parent.is_dir():
+            prefix = path.name
+            matches = sorted(
+                [p for p in parent.glob(f"{prefix}*.onnx") if p.is_file()],
+                key=lambda p: (0 if "int8" in p.name.lower() else 1, p.name.lower()),
+            )
+            if matches:
+                return "onnx", matches[0]
+
+    # Infer intent by extension.
     if path.suffix.lower() == ".onnx":
         return "onnx", path
     return "torch", path
