@@ -108,7 +108,7 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     assert FakeMenu.last.actions[0].text == "Translate Selected (3 rows)..."
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (3 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (3 rows)"
-    assert FakeMenu.last.actions[3].text == "Edit Pronunciation..."
+    assert FakeMenu.last.actions[3].text == "Mispronounced -> Add Pronunciation..."
     assert FakeMenu.last.actions[4].text == "Mark Selected as Noise (3 rows)"
     assert FakeMenu.last.actions[5].text == "Mark Selected as Valid (3 rows)"
     assert FakeMenu.last.actions[6].text == "Mark Selected as Due now (3 rows)"

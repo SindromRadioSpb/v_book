@@ -117,7 +117,7 @@ def test_terms_context_menu_translate_selected_single_row(monkeypatch):
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (1 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (1 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (1 rows)..."
-    assert FakeMenu.last.actions[4].text == "Edit Pronunciation..."
+    assert FakeMenu.last.actions[4].text == "Mispronounced -> Add Pronunciation..."
 
     FakeMenu.last.actions[0].triggered.emit()
     assert state["translate_called"] == 1
@@ -143,7 +143,7 @@ def test_terms_context_menu_translate_selected_multiple_rows(monkeypatch):
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (4 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (4 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (4 rows)..."
-    assert FakeMenu.last.actions[4].text == "Edit Pronunciation..."
+    assert FakeMenu.last.actions[4].text == "Mispronounced -> Add Pronunciation..."
 
     FakeMenu.last.actions[0].triggered.emit()
     assert state["translate_called"] == 1

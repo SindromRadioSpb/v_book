@@ -431,13 +431,13 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
     assert FakeMenu.last.actions[0].text == "Translate Selected (2 rows)..."
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (2 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (2 rows)"
-    assert "Edit Pronunciation..." in [a.text for a in FakeMenu.last.actions]
+    assert "Mispronounced -> Add Pronunciation..." in [a.text for a in FakeMenu.last.actions]
 
     # Ensure wired callback invokes TM batch translate handler.
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
     FakeMenu.last.actions[2].triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Edit Pronunciation...").triggered.emit()
+    next(a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation...").triggered.emit()
     assert state["translate_called"] == 1
     assert state["generate_called"] == 1
     assert state["play_called"] == 1

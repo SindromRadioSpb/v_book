@@ -117,7 +117,7 @@ def test_dictionary_context_menu_includes_audio_actions(monkeypatch):
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (2 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (2 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (2 rows)..."
-    assert FakeMenu.last.actions[4].text == "Edit Pronunciation..."
+    assert FakeMenu.last.actions[4].text == "Mispronounced -> Add Pronunciation..."
 
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
