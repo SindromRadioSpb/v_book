@@ -181,3 +181,39 @@ def test_ssml_payload_used_for_google_provider(monkeypatch):
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_source_payload_sanitizer_removes_taamim_and_bidi_chars(monkeypatch):
+    temp_dir = _workspace_temp_dir("audio_pron_sanitize_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'audio.db'}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_dir)
+        _setup_registry(monkeypatch, _CaptureProvider())
+
+        service = AudioGenerationService(settings=_SettingsStub())
+        raw_source = "\u05E8\u05B7\u05AB\u05DB\u05B6\u05D1\u200F_\u200D-\u05DE\u05D4\u05D9\u05E8\u05D5\u05EA"
+        with Session(engine) as session:
+            result = service.generate_one(
+                session,
+                src_text=raw_source,
+                src_lang="he",
+                source_norm=normalize_for_tm("he", raw_source, "surface").norm,
+                provider_mode="force:capture_provider",
+                trace_id="pron-sanitize",
+            )
+            session.commit()
+
+            assert result["ok"] is True
+            assert _CaptureProvider.last_request is not None
+            payload = _CaptureProvider.last_request.source_text
+            assert "\u05AB" not in payload
+            assert "\u200F" not in payload
+            assert "\u200D" not in payload
+            assert "_" not in payload
+            assert "-" not in payload
+            assert "\u05B7" in payload
+            assert "\u05B6" in payload
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)
