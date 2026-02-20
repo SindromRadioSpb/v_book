@@ -31,6 +31,15 @@ def _normalize_input(text: str) -> str:
     return (text or "").strip()
 
 
+def _sanitize_model_path(raw_value: str) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    # UI copy/paste frequently leaves quotes or trailing dot.
+    value = value.strip("\"'").rstrip(" .")
+    return value
+
+
 def _ensure_hf_home() -> None:
     """Ensure Hugging Face cache points to a writable location."""
     configured = (os.getenv("HF_HOME") or "").strip()
@@ -65,7 +74,7 @@ def _ensure_hf_home() -> None:
 
 def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
     """Resolve configured model target as ('onnx'|'torch', path) or (None, None)."""
-    raw = (os.getenv("PHONIKUD_MODEL_PATH") or "").strip()
+    raw = _sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
     if not raw:
         return None, None
 
@@ -190,3 +199,16 @@ def get_runtime_mode() -> str:
 
 def get_runtime_details() -> str:
     return _runtime_details
+
+
+def reset_runtime_cache() -> None:
+    """Reset cached runtime bundle to support model-path changes in-process."""
+    global _runtime_mode, _runtime_details
+    _load_model_bundle.cache_clear()
+    model_path = _sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
+    if model_path:
+        _runtime_mode = MODE_FALLBACK
+        _runtime_details = "Runtime cache cleared; awaiting model load"
+    else:
+        _runtime_mode = MODE_FALLBACK
+        _runtime_details = "PHONIKUD_MODEL_PATH is empty; fallback mode"

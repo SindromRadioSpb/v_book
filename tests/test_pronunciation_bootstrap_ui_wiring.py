@@ -41,3 +41,17 @@ def test_dialog_renders_health_status_and_samples(qtbot):
     assert "real_inference" in dialog.health_mode_label.text()
     assert "latency=12ms" in dialog.health_details_label.text()
     assert "שלום -> שָׁלוֹם" in dialog.health_samples_label.text()
+
+def test_dialog_sanitizes_model_path_before_persist(qtbot):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.sync()
+
+    dialog = PronunciationBootstrapDialog()
+    qtbot.addWidget(dialog)
+    dialog.model_path_edit.setText(' "J:/Models/phonikud/phonikud-1.0.int8." ')
+    dialog._save_settings()
+
+    assert dialog.model_path_edit.text() == "J:/Models/phonikud/phonikud-1.0.int8"
+    assert settings.get_string("pronunciation/phonikud/model_path", "") == "J:/Models/phonikud/phonikud-1.0.int8"

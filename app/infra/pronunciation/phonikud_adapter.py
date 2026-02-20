@@ -58,7 +58,7 @@ class PhonikudAdapter:
         module_name: str = "phonikud",
     ):
         self.enabled = bool(enabled)
-        self.model_path = (model_path or "").strip()
+        self.model_path = self._sanitize_model_path(model_path or "")
         self.module_name = module_name
 
         self._module = None
@@ -74,7 +74,7 @@ class PhonikudAdapter:
     def model_path_effective(self) -> str:
         if self.model_path:
             return self.model_path
-        return (os.getenv("PHONIKUD_MODEL_PATH") or "").strip()
+        return self._sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
 
     def model_path_safe(self) -> str:
         path_value = self.model_path_effective
@@ -86,9 +86,36 @@ class PhonikudAdapter:
         return path_obj.name or "<configured>"
 
     def _configure_env(self) -> None:
-        model_path = self.model_path_effective
+        model_path = self._sanitize_model_path(self.model_path_effective)
         if model_path:
             os.environ["PHONIKUD_MODEL_PATH"] = model_path
+        else:
+            os.environ.pop("PHONIKUD_MODEL_PATH", None)
+
+    @staticmethod
+    def _sanitize_model_path(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        return text.strip("\"'").rstrip(" .")
+
+    def _reset_module_cache(self) -> None:
+        if self._module is None:
+            return
+        reset_fn = getattr(self._module, "reset_runtime_cache", None)
+        if callable(reset_fn):
+            try:
+                reset_fn()
+                return
+            except Exception:
+                logger.debug("Phonikud module cache reset failed via reset_runtime_cache", exc_info=True)
+        cached_loader = getattr(self._module, "_load_model_bundle", None)
+        cache_clear = getattr(cached_loader, "cache_clear", None)
+        if callable(cache_clear):
+            try:
+                cache_clear()
+            except Exception:
+                logger.debug("Phonikud module cache_clear failed", exc_info=True)
 
     def _ensure_loaded(self) -> None:
         if self._module is not None:
@@ -107,6 +134,8 @@ class PhonikudAdapter:
             logger.debug("Phonikud import failed: %s", exc)
             return
 
+        self._reset_module_cache()
+
         for attr in self._CALLABLE_ATTRS:
             fn = getattr(self._module, attr, None)
             if callable(fn):
@@ -118,6 +147,17 @@ class PhonikudAdapter:
             self._load_error = f"{self.module_name} has no callable inference function"
         else:
             self._last_mode = self._read_module_mode(default=PhonikudMode.FALLBACK)
+
+    def _read_module_details(self) -> str:
+        if self._module is None:
+            return ""
+        fn = getattr(self._module, "get_runtime_details", None)
+        if not callable(fn):
+            return ""
+        try:
+            return str(fn() or "").strip()
+        except Exception:
+            return ""
 
     def _read_module_mode(self, *, default: PhonikudMode) -> PhonikudMode:
         if self._module is None:
@@ -188,13 +228,13 @@ class PhonikudAdapter:
         mode = self.last_mode
         if mode == PhonikudMode.REAL_INFERENCE.value:
             status = PhonikudHealthStatus.OK.value
-            details = "Real inference active"
+            details = self._read_module_details() or "Real inference active"
         elif mode == PhonikudMode.FALLBACK.value:
             status = PhonikudHealthStatus.FALLBACK.value
-            details = "Fallback mode active; baseline quality may be degraded"
+            details = self._read_module_details() or "Fallback mode active; baseline quality may be degraded"
         else:
             status = PhonikudHealthStatus.ERROR.value
-            details = self._load_error or "Phonikud runtime unavailable"
+            details = self._read_module_details() or self._load_error or "Phonikud runtime unavailable"
 
         samples_payload = [
             {"input": text, "output": outputs.get(text, text)}

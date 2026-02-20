@@ -87,3 +87,29 @@ def test_shim_path_without_onnx_extension_recovers_existing_file(monkeypatch, tm
     _ = shim.add_niqqud("\u05e9\u05dc\u05d5\u05dd")
 
     assert seen["path"] == str(onnx_file)
+
+
+def test_shim_path_with_trailing_dot_recovers_existing_onnx(monkeypatch, tmp_path):
+    onnx_file = tmp_path / "phonikud-1.0.int8.onnx"
+    onnx_file.write_text("int8", encoding="utf-8")
+    path_with_trailing_dot = str(tmp_path / "phonikud-1.0.int8.")  # common copy/paste typo
+
+    seen = {"path": None}
+
+    class _FakePhonikud:
+        def __init__(self, model_path_value: str):
+            seen["path"] = model_path_value
+
+        def add_diacritics(self, text: str) -> str:
+            return text
+
+    fake_module = types.SimpleNamespace(Phonikud=_FakePhonikud)
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", fake_module)
+    monkeypatch.setenv("PHONIKUD_MODEL_PATH", path_with_trailing_dot)
+
+    shim = _reload_shim()
+    shim.reset_runtime_cache()
+    _ = shim.add_niqqud("\u05e9\u05dc\u05d5\u05dd")
+
+    assert seen["path"] == str(onnx_file)
+    assert shim.get_runtime_mode() == "real_inference"

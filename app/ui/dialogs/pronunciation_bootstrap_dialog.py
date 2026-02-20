@@ -188,9 +188,18 @@ class PronunciationBootstrapDialog(QDialog):
             self._render_health({"mode": mode, "status": status or "error", "details": details, "samples": []})
 
     def _save_settings(self) -> None:
+        model_path = self._sanitize_model_path(self.model_path_edit.text())
+        self.model_path_edit.setText(model_path)
         self.settings.set_value("pronunciation/phonikud/enabled", bool(self.enabled_checkbox.isChecked()))
-        self.settings.set_value("pronunciation/phonikud/model_path", self.model_path_edit.text().strip())
+        self.settings.set_value("pronunciation/phonikud/model_path", model_path)
         self.settings.sync()
+
+    @staticmethod
+    def _sanitize_model_path(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        return text.strip("\"'").rstrip(" .")
 
     def _open_docs(self) -> None:
         docs_path = Path(__file__).resolve().parents[3] / "docs" / "PRONUNCIATION_BOOTSTRAP.md"
