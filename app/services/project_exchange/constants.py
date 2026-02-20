@@ -10,6 +10,7 @@ BUNDLE_EXTENSION = ".hdleproj"
 MANIFEST_FILENAME = "manifest.json"
 PAYLOAD_FILENAME = "payload.sqlite"
 CHECKSUMS_FILENAME = "checksums.json"
+PRONUNCIATION_METADATA_FILENAME = "pronunciation_metadata.tsv"
 
 # Tables to EXCLUDE from export (system/operational/security)
 EXCLUDED_TABLES = {

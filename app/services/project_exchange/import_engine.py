@@ -16,12 +16,14 @@ from app.services.project_exchange.constants import (
     TABLE_SCHEMA,
     NULLABLE_FK_COLUMNS,
     BUNDLE_FORMAT_VERSION,
+    PRONUNCIATION_METADATA_FILENAME,
 )
 from app.services.project_exchange.dto import (
     ImportOptions,
     ImportReport,
 )
 from app.infra.fts_manager import ensure_fts_tables
+from app.services.pronunciation_import_export_service import PronunciationImportExportService
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +106,10 @@ class ProjectImportEngine:
             host_conn.close()
             payload_conn.close()
 
+            pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
+            if pron_path.exists():
+                self._import_pronunciation_metadata(pron_path, warnings)
+
             elapsed = time.time() - start_time
             logger.info(f"Import completed in {elapsed:.1f}s, new project ID: {new_project_id}")
 
@@ -137,6 +143,28 @@ class ProjectImportEngine:
                     logger.debug(f"Cleaned up temp dir: {temp_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
+
+    def _import_pronunciation_metadata(self, pron_path: Path, warnings: list[str]) -> None:
+        """Import optional pronunciation metadata sidecar."""
+        service = PronunciationImportExportService()
+        try:
+            with self.db_service.get_session() as session:
+                result = service.import_file(
+                    session,
+                    in_path=pron_path,
+                    delimiter="\t",
+                    allow_auto_overwrite=False,
+                )
+                session.commit()
+            warnings.append(
+                "Pronunciation metadata imported: "
+                f"processed={result.get('processed', 0)}, "
+                f"updated={result.get('updated', 0)}, "
+                f"skipped={result.get('skipped', 0)}, "
+                f"failed={result.get('failed', 0)}"
+            )
+        except Exception as exc:
+            warnings.append(f"Pronunciation metadata import skipped: {exc}")
 
     def _preflight_checks(self, manifest) -> None:
         """Run preflight validation checks.

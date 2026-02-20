@@ -1,5 +1,6 @@
 """Export engine for project bundles."""
 
+import csv
 import logging
 import shutil
 import sqlite3
@@ -10,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable
 
+from sqlalchemy import select
+
 from app import __version__ as APP_VERSION
 from app.infra.security import validate_path_security
 from app.services.db_service import DBService
@@ -18,6 +21,7 @@ from app.services.project_exchange.constants import (
     TABLE_INSERT_ORDER,
     EXCLUDED_TABLES,
     BUNDLE_FORMAT_VERSION,
+    PRONUNCIATION_METADATA_FILENAME,
 )
 from app.services.project_exchange.dto import (
     ExportOptions,
@@ -25,6 +29,7 @@ from app.services.project_exchange.dto import (
     ManifestInfo,
 )
 from app.infra.fts_manager import ensure_fts_tables
+from app.infra.sa_models import Lemma, PronunciationEntry, TermCluster, TMEntry, UserDictionaryItem
 
 logger = logging.getLogger(__name__)
 
@@ -91,14 +96,26 @@ class ProjectExportEngine:
                 project_id, payload_path, options, progress_callback
             )
 
+            pronunciation_count = 0
+            extra_files: dict[str, Path] = {}
+            if options.include_pronunciation_metadata:
+                pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
+                pronunciation_count = self._export_pronunciation_metadata(project_id, pron_path)
+                if pronunciation_count > 0:
+                    extra_files[PRONUNCIATION_METADATA_FILENAME] = pron_path
+
             # Get project metadata for manifest
-            manifest = self._build_manifest(project_id, table_counts)
+            manifest = self._build_manifest(
+                project_id,
+                table_counts,
+                pronunciation_metadata_count=pronunciation_count,
+            )
 
             # Create bundle
             if progress_callback:
                 progress_callback("Creating bundle...", 95, 100)
 
-            bundle_format.create_bundle(payload_path, manifest, out_path)
+            bundle_format.create_bundle(payload_path, manifest, out_path, extra_files=extra_files)
 
             elapsed = time.time() - start_time
             logger.info(f"Export completed in {elapsed:.1f}s: {out_path}")
@@ -411,7 +428,13 @@ class ProjectExportEngine:
             logger.error(f"Query: {query[:200]}...")
             raise
 
-    def _build_manifest(self, project_id: int, table_counts: dict[str, int]) -> ManifestInfo:
+    def _build_manifest(
+        self,
+        project_id: int,
+        table_counts: dict[str, int],
+        *,
+        pronunciation_metadata_count: int = 0,
+    ) -> ManifestInfo:
         """Build manifest from project metadata and table counts.
 
         Args:
@@ -454,4 +477,76 @@ class ProjectExportEngine:
             project_tgt_lang=tgt_lang,
             exported_at=datetime.now(timezone.utc).isoformat(),
             table_counts=table_counts,
+            pronunciation_metadata_count=pronunciation_metadata_count,
         )
+
+    def _export_pronunciation_metadata(self, project_id: int, out_path: Path) -> int:
+        """Export project-intersection pronunciation metadata sidecar."""
+        from sqlalchemy import text
+
+        with self.db_service.get_session() as session:
+            row = session.execute(
+                text("SELECT src_lang FROM dict_project WHERE project_id = :project_id"),
+                {"project_id": project_id},
+            ).fetchone()
+            src_lang = (row[0] if row and row[0] else "").strip()
+            if not src_lang:
+                return 0
+
+            norms: set[str] = set()
+            lemma_norms = session.execute(
+                select(Lemma.norm_text).where(Lemma.project_id == project_id).where(Lemma.norm_text.is_not(None))
+            ).scalars().all()
+            term_norms = session.execute(
+                select(TermCluster.norm_text)
+                .where(TermCluster.project_id == project_id)
+                .where(TermCluster.norm_text.is_not(None))
+            ).scalars().all()
+            tm_norms = session.execute(
+                select(TMEntry.src_norm)
+                .where(TMEntry.project_id == project_id)
+                .where(TMEntry.src_norm.is_not(None))
+            ).scalars().all()
+            ud_norms = session.execute(
+                select(UserDictionaryItem.src_norm)
+                .where(UserDictionaryItem.origin_project_id == project_id)
+                .where(UserDictionaryItem.src_norm.is_not(None))
+            ).scalars().all()
+            for item in [*lemma_norms, *term_norms, *tm_norms, *ud_norms]:
+                norm = (item or "").strip()
+                if norm:
+                    norms.add(norm)
+            if not norms:
+                return 0
+
+            rows = session.execute(
+                select(PronunciationEntry)
+                .where(PronunciationEntry.lang == src_lang)
+                .where(PronunciationEntry.src_norm.in_(sorted(norms)))
+                .order_by(PronunciationEntry.src_norm.asc())
+            ).scalars().all()
+            if not rows:
+                return 0
+
+            out = Path(out_path).resolve()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with out.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(
+                    ["lang", "src_norm", "niqqud_text", "ipa", "reading_text", "source", "confidence", "is_override", "notes"]
+                )
+                for row in rows:
+                    writer.writerow(
+                        [
+                            row.lang,
+                            row.src_norm,
+                            row.niqqud_text or "",
+                            row.ipa or "",
+                            row.reading_text or "",
+                            row.source or "manual",
+                            "" if row.confidence is None else row.confidence,
+                            int(row.is_override or 0),
+                            row.notes or "",
+                        ]
+                    )
+            return len(rows)

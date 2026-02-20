@@ -13,6 +13,7 @@ from app.services.project_exchange.constants import (
     MANIFEST_FILENAME,
     PAYLOAD_FILENAME,
     CHECKSUMS_FILENAME,
+    PRONUNCIATION_METADATA_FILENAME,
 )
 from app.services.project_exchange.dto import ManifestInfo
 
@@ -25,7 +26,13 @@ class BundleFormatError(Exception):
     pass
 
 
-def create_bundle(payload_path: Path, manifest: ManifestInfo, out_path: Path) -> None:
+def create_bundle(
+    payload_path: Path,
+    manifest: ManifestInfo,
+    out_path: Path,
+    *,
+    extra_files: dict[str, Path] | None = None,
+) -> None:
     """Create a .hdleproj bundle (ZIP) from payload and manifest.
 
     Args:
@@ -41,7 +48,7 @@ def create_bundle(payload_path: Path, manifest: ManifestInfo, out_path: Path) ->
 
     # Compute checksums
     logger.info("Computing checksums...")
-    checksums = _compute_checksums(payload_path, manifest)
+    checksums = _compute_checksums(payload_path, manifest, extra_files=extra_files or {})
 
     # Create ZIP
     logger.info(f"Creating bundle: {out_path}")
@@ -57,6 +64,11 @@ def create_bundle(payload_path: Path, manifest: ManifestInfo, out_path: Path) ->
             # Add checksums.json
             checksums_json = json.dumps(checksums, indent=2)
             zf.writestr(CHECKSUMS_FILENAME, checksums_json)
+
+            # Add optional sidecar files (metadata-only sections)
+            for arcname, local_path in (extra_files or {}).items():
+                validate_path_security(local_path, operation="export_bundle")
+                zf.write(local_path, arcname)
 
         logger.info(f"Bundle created successfully: {out_path} ({out_path.stat().st_size / 1024 / 1024:.1f} MB)")
     except Exception as e:
@@ -108,7 +120,11 @@ def read_bundle(bundle_path: Path, extract_dir: Path) -> Tuple[ManifestInfo, Pat
         raise BundleFormatError(f"Invalid checksums.json: {e}") from e
 
     payload_path = extract_dir / PAYLOAD_FILENAME
-    actual_checksums = _compute_checksums(payload_path, manifest)
+    extra_files: dict[str, Path] = {}
+    pron_path = extract_dir / PRONUNCIATION_METADATA_FILENAME
+    if pron_path.exists():
+        extra_files[PRONUNCIATION_METADATA_FILENAME] = pron_path
+    actual_checksums = _compute_checksums(payload_path, manifest, extra_files=extra_files)
 
     if stored_checksums != actual_checksums:
         raise BundleFormatError(
@@ -153,7 +169,12 @@ def peek_manifest(bundle_path: Path) -> ManifestInfo:
         raise BundleFormatError(f"Failed to read manifest: {e}") from e
 
 
-def _compute_checksums(payload_path: Path, manifest: ManifestInfo) -> dict:
+def _compute_checksums(
+    payload_path: Path,
+    manifest: ManifestInfo,
+    *,
+    extra_files: dict[str, Path] | None = None,
+) -> dict:
     """Compute SHA256 checksums for payload and manifest.
 
     Args:
@@ -170,10 +191,13 @@ def _compute_checksums(payload_path: Path, manifest: ManifestInfo) -> dict:
     manifest_json = json.dumps(manifest.to_dict(), indent=2, sort_keys=True)
     manifest_sha256 = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
 
-    return {
+    checksums = {
         "manifest_sha256": manifest_sha256,
         "payload_sha256": payload_sha256,
     }
+    for name, file_path in (extra_files or {}).items():
+        checksums[f"extra_sha256::{name}"] = _compute_file_sha256(file_path)
+    return checksums
 
 
 def _compute_file_sha256(file_path: Path) -> str:
@@ -206,11 +230,15 @@ def _validate_zip_structure(bundle_path: Path) -> None:
             # Check for required entries
             entries = set(zf.namelist())
             required = {MANIFEST_FILENAME, PAYLOAD_FILENAME, CHECKSUMS_FILENAME}
+            allowed_optional = {PRONUNCIATION_METADATA_FILENAME}
 
-            if entries != required:
+            if not required.issubset(entries):
                 raise BundleFormatError(
-                    f"Invalid bundle structure. Expected exactly {required}, got {entries}"
+                    f"Invalid bundle structure. Missing required entries: {required - entries}"
                 )
+            unknown = entries - required - allowed_optional
+            if unknown:
+                raise BundleFormatError(f"Invalid bundle structure. Unknown entries: {unknown}")
 
             # Check uncompressed size (zip bomb protection)
             total_size = sum(info.file_size for info in zf.infolist())

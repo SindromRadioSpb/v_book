@@ -541,7 +541,7 @@ class AppWindow(QMainWindow):
             path = path.with_suffix(".hdleproj")
 
         # Create worker
-        options = ExportOptions(include_snapshots=True)
+        options = ExportOptions(include_snapshots=True, include_pronunciation_metadata=True)
         worker = ProjectExportWorker(project_id, path, options)
 
         # Create progress dialog

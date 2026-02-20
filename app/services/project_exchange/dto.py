@@ -10,6 +10,7 @@ class ExportOptions:
     """Options for project export."""
 
     include_snapshots: bool = True  # Include project_snapshot table
+    include_pronunciation_metadata: bool = False  # Include pronunciation metadata TSV sidecar
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ManifestInfo:
     project_tgt_lang: str
     exported_at: str  # ISO 8601 timestamp
     table_counts: dict[str, int]  # {table_name: row_count}
+    pronunciation_metadata_count: int = 0
 
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization."""
@@ -44,6 +46,7 @@ class ManifestInfo:
             "project_tgt_lang": self.project_tgt_lang,
             "exported_at": self.exported_at,
             "table_counts": self.table_counts,
+            "pronunciation_metadata_count": self.pronunciation_metadata_count,
         }
 
     @classmethod
@@ -58,6 +61,7 @@ class ManifestInfo:
             project_tgt_lang=data["project_tgt_lang"],
             exported_at=data["exported_at"],
             table_counts=data["table_counts"],
+            pronunciation_metadata_count=int(data.get("pronunciation_metadata_count") or 0),
         )
 
 
