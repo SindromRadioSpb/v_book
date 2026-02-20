@@ -9,6 +9,7 @@ P0 scope:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Dict, Iterable, List
 
@@ -139,6 +140,7 @@ class AudioAssetService:
             row.asset_status = status
             row.audio_rel_path = safe_rel_path
             row.error_text = error_text
+            row.updated_at = self._now_str()
             return row
 
         row = AudioAsset(
@@ -150,7 +152,11 @@ class AudioAssetService:
             asset_status=status,
             audio_rel_path=safe_rel_path,
             error_text=error_text,
+            updated_at=self._now_str(),
         )
         session.add(row)
         session.flush()
         return row
+    @staticmethod
+    def _now_str() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")

@@ -24,6 +24,7 @@ from app.infra.sa_models import AudioAsset
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
 from app.services.audio_usage_tracker import AudioUsageTracker
+from app.services.pronunciation_quality_service import PronunciationQualityService
 from app.services.pronunciation_service import PronunciationService
 from app.domain.normalization.normalizer import normalize_for_tm
 
@@ -124,12 +125,14 @@ class AudioGenerationService:
 
     @staticmethod
     def _build_ssml_text(text_value: str) -> str:
-        escaped = html.escape(text_value or "", quote=False)
+        safe_text = PronunciationQualityService.sanitize_spoken_text(text_value)
+        escaped = html.escape(safe_text, quote=False)
         return f"<speak version='1.0'>{escaped}</speak>"
 
     @staticmethod
     def _build_ssml_ipa(surface_text: str, ipa_value: str) -> str:
-        escaped_surface = html.escape(surface_text or "", quote=False)
+        safe_surface = PronunciationQualityService.sanitize_spoken_text(surface_text)
+        escaped_surface = html.escape(safe_surface, quote=False)
         escaped_ipa = html.escape(ipa_value or "", quote=True)
         return (
             "<speak version='1.0'>"
@@ -203,12 +206,16 @@ class AudioGenerationService:
                 "token_text": source_text,
                 "ssml": "",
                 "mode": "none",
+                "is_valid": True,
+                "qc_flag": None,
             }
         return {
             "text": applied.text or source_text,
             "token_text": applied.token_text or source_text,
             "ssml": applied.ssml or "",
             "mode": applied.mode or "none",
+            "is_valid": bool(getattr(applied, "is_valid", True)),
+            "qc_flag": getattr(applied, "qc_flag", None),
         }
 
     @staticmethod
@@ -268,7 +275,7 @@ class AudioGenerationService:
         trace_id: str = "",
     ) -> Dict[str, object]:
         """Generate audio for source text only (translation is intentionally ignored)."""
-        source_text = (src_text or "").strip()
+        source_text = PronunciationQualityService.sanitize_spoken_text((src_text or "").strip())
         source_norm_clean = (source_norm or "").strip()
         source_lang_clean = (src_lang or "").strip()
 
@@ -396,10 +403,16 @@ class AudioGenerationService:
                     )
 
             prepared_text = pronunciation_payload.get("token_text") or source_text
+            prepared_text = PronunciationQualityService.sanitize_spoken_text(str(prepared_text))
+            is_pron_valid = bool(pronunciation_payload.get("is_valid", True))
+            if not prepared_text:
+                prepared_text = source_text
+            if not is_pron_valid:
+                prepared_text = source_text
             options: Dict[str, object] = {}
             if self._provider_supports_ssml(provider_id):
                 ssml_payload = (pronunciation_payload.get("ssml") or "").strip()
-                if ssml_payload:
+                if ssml_payload and is_pron_valid:
                     options["ssml"] = ssml_payload
 
             request = AudioGenerationRequest(

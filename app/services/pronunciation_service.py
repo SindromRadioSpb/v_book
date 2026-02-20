@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import PronunciationEntryDTO
 from app.infra.sa_models import PronunciationEntry
+from app.services.pronunciation_quality_service import PronunciationQualityService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ class PronunciationApplied:
     token_text: str
     ssml: str
     mode: str
+    is_valid: bool = True
+    qc_flag: Optional[str] = None
 
 
 class PronunciationService:
@@ -104,14 +107,39 @@ class PronunciationService:
         if source_key not in self.VALID_SOURCES:
             raise ValueError(f"Unsupported pronunciation source: {source}")
 
-        niqqud_clean = self._clean_text(niqqud_text)
+        incoming_manual = source_key == "manual" or bool(is_override)
+        niqqud_result = PronunciationQualityService.normalize_field(
+            niqqud_text,
+            strict=incoming_manual,
+        )
+        reading_result = PronunciationQualityService.normalize_field(
+            reading_text,
+            strict=incoming_manual,
+        )
+        if incoming_manual and (not niqqud_result.is_valid or not reading_result.is_valid):
+            invalid_reason = niqqud_result.reason or reading_result.reason or "Invalid pronunciation payload."
+            raise ValueError(invalid_reason)
+
+        niqqud_clean = niqqud_result.value
         ipa_clean = self._clean_text(ipa)
-        reading_clean = self._clean_text(reading_text)
+        reading_clean = reading_result.value
         notes_clean = self._clean_text(notes)
+        qc_tags: List[str] = []
+        if niqqud_result.qc_flag:
+            qc_tags.append(f"niqqud_{niqqud_result.qc_flag}")
+        if reading_result.qc_flag:
+            qc_tags.append(f"reading_{reading_result.qc_flag}")
+        if qc_tags and source_key != "manual":
+            qc_note = "qc:" + ",".join(sorted(set(qc_tags)))
+            if notes_clean:
+                if qc_note not in notes_clean:
+                    notes_clean = f"{notes_clean}; {qc_note}"
+            else:
+                notes_clean = qc_note
+
         confidence_clean = float(confidence) if confidence is not None else None
         if confidence_clean is not None:
             confidence_clean = max(0.0, min(1.0, confidence_clean))
-        incoming_manual = source_key == "manual" or bool(is_override)
         now_str = self._now_str()
 
         row = session.execute(
@@ -284,12 +312,14 @@ class PronunciationService:
 
     @staticmethod
     def _build_ssml_text(text_value: str) -> str:
-        escaped = html.escape(text_value or "", quote=False)
+        safe_text = PronunciationQualityService.sanitize_spoken_text(text_value)
+        escaped = html.escape(safe_text, quote=False)
         return f"<speak version='1.0'>{escaped}</speak>"
 
     @staticmethod
     def _build_ssml_ipa(surface_text: str, ipa_value: str) -> str:
-        escaped_surface = html.escape(surface_text or "", quote=False)
+        safe_surface = PronunciationQualityService.sanitize_spoken_text(surface_text)
+        escaped_surface = html.escape(safe_surface, quote=False)
         escaped_ipa = html.escape(ipa_value or "", quote=True)
         return (
             "<speak version='1.0'>"
@@ -305,7 +335,11 @@ class PronunciationService:
     def _entry_text(entry: Optional[PronunciationEntryDTO]) -> Optional[str]:
         if not entry:
             return None
-        return (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip() or None
+        raw = (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip()
+        if not raw:
+            return None
+        sanitized = PronunciationQualityService.sanitize_spoken_text(raw)
+        return sanitized or None
 
     def _normalize_surface(self, src_lang: str, value: str) -> str:
         return normalize_for_tm(src_lang, value, "surface").norm
@@ -436,10 +470,19 @@ class PronunciationService:
         """Apply phrase-first pronunciation rules (whole phrase -> phrase map -> token fallback)."""
         src_lang_clean = (src_lang or "").strip()
         source_text_clean = (source_text or "").strip()
-        if not src_lang_clean or not source_text_clean:
-            return PronunciationApplied(text=source_text_clean, token_text=source_text_clean, ssml="", mode="none")
+        source_spoken = PronunciationQualityService.sanitize_spoken_text(source_text_clean)
+        source_qc_flag = "auto_fixed" if source_spoken != source_text_clean else None
+        if not src_lang_clean or not source_spoken:
+            return PronunciationApplied(
+                text=source_spoken,
+                token_text=source_spoken,
+                ssml="",
+                mode="none",
+                is_valid=bool(source_spoken),
+                qc_flag=source_qc_flag,
+            )
 
-        source_norm_clean = (source_norm or "").strip() or self._normalize_surface(src_lang_clean, source_text_clean)
+        source_norm_clean = (source_norm or "").strip() or self._normalize_surface(src_lang_clean, source_spoken)
         exact_entry = self.get_entry(
             session,
             lang=src_lang_clean,
@@ -448,10 +491,12 @@ class PronunciationService:
 
         if exact_entry and (exact_entry.ipa or "").strip():
             return PronunciationApplied(
-                text=source_text_clean,
-                token_text=source_text_clean,
-                ssml=self._build_ssml_ipa(source_text_clean, exact_entry.ipa or ""),
+                text=source_spoken,
+                token_text=source_spoken,
+                ssml=self._build_ssml_ipa(source_spoken, exact_entry.ipa or ""),
                 mode="exact_ipa",
+                is_valid=True,
+                qc_flag=source_qc_flag,
             )
 
         exact_text = self._entry_text(exact_entry)
@@ -461,26 +506,40 @@ class PronunciationService:
                 token_text=exact_text,
                 ssml=self._build_ssml_text(exact_text),
                 mode="exact_text",
+                is_valid=True,
+                qc_flag=source_qc_flag,
             )
 
         phrase_text = self._apply_phrase_pronunciation_text(
             session,
             src_lang=src_lang_clean,
-            source_text=source_text_clean,
+            source_text=source_spoken,
         )
+        phrase_text = PronunciationQualityService.sanitize_spoken_text(phrase_text)
         token_text = self._apply_token_pronunciation_text(
             session,
             src_lang=src_lang_clean,
             source_text=phrase_text,
         )
-        if token_text != source_text_clean:
+        token_text = PronunciationQualityService.sanitize_spoken_text(token_text)
+        if token_text != source_spoken:
             return PronunciationApplied(
-                text=source_text_clean,
+                text=source_spoken,
                 token_text=token_text,
                 ssml=self._build_ssml_text(token_text),
                 mode="phrase_or_token",
+                is_valid=True,
+                qc_flag=source_qc_flag,
             )
-        return PronunciationApplied(text=source_text_clean, token_text=source_text_clean, ssml="", mode="none")
+        mode = "source_sanitized" if source_qc_flag else "none"
+        return PronunciationApplied(
+            text=source_spoken,
+            token_text=source_spoken,
+            ssml="",
+            mode=mode,
+            is_valid=True,
+            qc_flag=source_qc_flag,
+        )
 
     @staticmethod
     def _to_dto(row: PronunciationEntry) -> PronunciationEntryDTO:
