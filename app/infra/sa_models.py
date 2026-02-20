@@ -817,7 +817,9 @@ class PronunciationEntry(Base):
     src_norm = Column(Text, nullable=False)
     niqqud_text = Column(Text)
     ipa = Column(Text)
-    source = Column(String, nullable=False, default="auto")
+    reading_text = Column(Text)
+    source = Column(String, nullable=False, default="manual")
+    confidence = Column(Float)
     is_override = Column(Integer, nullable=False, default=0)
     notes = Column(Text)
     created_at = Column(String, nullable=False, default=utc_now)
@@ -825,8 +827,15 @@ class PronunciationEntry(Base):
 
     __table_args__ = (
         UniqueConstraint("lang", "src_norm", name="uq_pronunciation_entry_key"),
-        CheckConstraint("source IN ('auto', 'manual')", name="ck_pronunciation_source"),
+        CheckConstraint(
+            "source IN ('manual', 'auto', 'auto_phonikud', 'import_csv', 'import_pls')",
+            name="ck_pronunciation_source",
+        ),
         CheckConstraint("is_override IN (0, 1)", name="ck_pronunciation_override"),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_pronunciation_confidence",
+        ),
     )
 
 

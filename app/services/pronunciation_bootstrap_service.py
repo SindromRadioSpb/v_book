@@ -61,7 +61,14 @@ class PhonikudPronunciationGenerator(PronunciationGenerator):
             try:
                 niqqud = self._callable(src_norm)
                 if niqqud and str(niqqud).strip():
-                    result[src_norm] = {"niqqud_text": str(niqqud).strip(), "ipa": None, "notes": "auto:phonikud"}
+                    result[src_norm] = {
+                        "niqqud_text": str(niqqud).strip(),
+                        "ipa": None,
+                        "reading_text": None,
+                        "source": "auto_phonikud",
+                        "confidence": 0.6,
+                        "notes": "auto:phonikud",
+                    }
             except Exception as exc:
                 logger.debug("Phonikud generation failed for '%s': %s", src_norm, exc)
         return result
@@ -146,6 +153,7 @@ class PronunciationBootstrapService:
         lang: str,
         chunk_size: int = 500,
         rebuild_auto: bool = False,
+        limit: Optional[int] = None,
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
@@ -160,6 +168,8 @@ class PronunciationBootstrapService:
             include_terms=include_terms,
             include_user_dictionary=include_user_dictionary,
         )
+        if limit is not None and int(limit) > 0:
+            src_norms = src_norms[: int(limit)]
         total = len(src_norms)
         if total == 0:
             return PronunciationBootstrapResult(
@@ -196,6 +206,8 @@ class PronunciationBootstrapService:
                         "src_norm": src_norm,
                         "niqqud_text": item.get("niqqud_text"),
                         "ipa": item.get("ipa"),
+                        "reading_text": item.get("reading_text"),
+                        "confidence": item.get("confidence"),
                         "notes": item.get("notes"),
                     }
                 )
@@ -206,6 +218,7 @@ class PronunciationBootstrapService:
                 entries=entries,
                 chunk_size=chunk_size,
                 rebuild_auto=rebuild_auto,
+                source="auto_phonikud",
             )
             updated += int(result.get("updated", 0))
             skipped += int(result.get("skipped", 0))

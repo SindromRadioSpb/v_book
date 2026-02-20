@@ -35,7 +35,15 @@ def main() -> int:
     parser.add_argument("--chunk-size", type=int, default=500, help="Chunk size for processing")
     parser.add_argument("--generator", choices=["phonikud", "noop"], default="phonikud")
     parser.add_argument("--strict-generator", action="store_true", help="Fail if selected generator is unavailable")
-    parser.add_argument("--rebuild-auto", action="store_true", help="Allow overwrite of existing auto rows")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--fill-only-missing-auto",
+        action="store_true",
+        help="Only fill missing auto values (default mode)",
+    )
+    mode.add_argument("--rebuild-auto", action="store_true", help="Allow overwrite of existing auto rows")
+    parser.add_argument("--limit", type=int, default=0, help="Optional limit of source norms to process")
+    parser.add_argument("--dry-run", action="store_true", help="Collect/generate but do not persist to DB")
     parser.add_argument("--skip-lemmas", action="store_true")
     parser.add_argument("--skip-terms", action="store_true")
     parser.add_argument("--skip-user-dictionary", action="store_true")
@@ -58,6 +66,7 @@ def main() -> int:
                 lang=args.lang,
                 chunk_size=max(1, int(args.chunk_size)),
                 rebuild_auto=bool(args.rebuild_auto),
+                limit=int(args.limit) if int(args.limit) > 0 else None,
                 include_lemmas=not args.skip_lemmas,
                 include_terms=not args.skip_terms,
                 include_user_dictionary=not args.skip_user_dictionary,
@@ -65,7 +74,11 @@ def main() -> int:
                     "bootstrap progress: %s/%s", processed, total
                 ),
             )
-            session.commit()
+            if args.dry_run:
+                session.rollback()
+                logger.info("Dry-run enabled: rolled back generated pronunciation changes")
+            else:
+                session.commit()
 
         logger.info("Pronunciation bootstrap completed")
         logger.info("  total candidates: %s", result.total_candidates)

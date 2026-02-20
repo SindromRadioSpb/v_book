@@ -273,7 +273,9 @@ class PronunciationEntryDTO:
     src_norm: str
     niqqud_text: Optional[str]
     ipa: Optional[str]
+    reading_text: Optional[str]
     source: str
+    confidence: Optional[float]
     is_override: int
     notes: Optional[str]
     created_at: Optional[str] = None

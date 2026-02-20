@@ -190,42 +190,26 @@ class AudioGenerationService:
         source_text: str,
         source_norm: str,
     ) -> Dict[str, str]:
-        payload: Dict[str, str] = {
-            "text": source_text,
-            "token_text": source_text,
-            "ssml": "",
-        }
         try:
-            entry = self.pronunciation_service.get_entry(
-                session=session,
-                lang=src_lang,
-                src_norm=source_norm,
-            )
-        except Exception:
-            entry = None
-
-        if entry:
-            if (entry.ipa or "").strip():
-                payload["ssml"] = self._build_ssml_ipa(source_text, entry.ipa or "")
-            elif (entry.niqqud_text or "").strip():
-                niqqud_text = entry.niqqud_text or source_text
-                payload["text"] = niqqud_text
-                payload["token_text"] = niqqud_text
-                payload["ssml"] = self._build_ssml_text(niqqud_text)
-
-        try:
-            token_text = self._apply_token_pronunciation(
+            applied = self.pronunciation_service.apply_to_text(
                 session=session,
                 src_lang=src_lang,
                 source_text=source_text,
+                source_norm=source_norm,
             )
         except Exception:
-            token_text = source_text
-        if token_text != source_text:
-            payload["token_text"] = token_text
-            if not payload["ssml"]:
-                payload["ssml"] = self._build_ssml_text(token_text)
-        return payload
+            return {
+                "text": source_text,
+                "token_text": source_text,
+                "ssml": "",
+                "mode": "none",
+            }
+        return {
+            "text": applied.text or source_text,
+            "token_text": applied.token_text or source_text,
+            "ssml": applied.ssml or "",
+            "mode": applied.mode or "none",
+        }
 
     @staticmethod
     def _asset_rel_path(
