@@ -105,7 +105,10 @@
       "Bash(cmd.exe:*)",
       "Bash(pgrep:*)",
       "Bash(lsof:*)",
-      "Bash(set:*)"
+      "Bash(set:*)",
+      "Bash(git status:*)",
+      "Bash(cmd /c \"sqlite3 %LOCALAPPDATA%\\\\HDLE\\\\hdle.db \"\"PRAGMA table_info\\(tm_entry\\)\"\" | findstr \"\"lemma_id cluster_id ngram_id\"\"\")",
+      "Bash(powershell -Command \"sqlite3 \"\"$env:LOCALAPPDATA\\\\HDLE\\\\hdle.db\"\" \"\"PRAGMA table_info\\(tm_entry\\)\"\" | Select-String ''lemma_id|cluster_id|ngram_id''\")"
     ]
   },
   "model": "opusplan"
