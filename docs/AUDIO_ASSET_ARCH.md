@@ -197,6 +197,18 @@ Advanced includes:
 - current usage summary (minute/day/month),
 - MMS license-gate + model path.
 
+Pronunciation bootstrap gate:
+
+- `Tools -> Translation -> Pronunciation Bootstrap...`
+- persisted keys:
+  - `pronunciation/phonikud/enabled`
+  - `pronunciation/phonikud/model_path`
+  - `pronunciation/phonikud/last_health_status`
+  - `pronunciation/phonikud/last_health_mode`
+  - `pronunciation/phonikud/last_health_report`
+- health-check reports strict runtime mode:
+  - `real_inference | fallback | error`
+
 Playback tab includes:
 
 - cadence controls (`pre_roll_ms`, `gap_ms`, `post_roll_ms`)

@@ -117,6 +117,10 @@ UI composition in `User Dictionaries`:
 - Same Generate/Play entrypoints are available in `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.
 - Optional local provider `mms_tts_local` is behind explicit license-gate and disabled by default.
 - Online provider credentials and budget limits are configured via `Tools -> Translation -> Audio Provider Settings...` (Rate Limits / Provider Chain / Advanced Settings).
+- Offline pronunciation baseline gate is available via `Tools -> Translation -> Pronunciation Bootstrap...`:
+  - model path management,
+  - health-check (`real_inference | fallback | error`),
+  - worker-safe bootstrap with `BatchProgressDialogV3`.
 
 Playback UX contract:
 

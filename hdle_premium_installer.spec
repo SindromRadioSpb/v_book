@@ -89,6 +89,7 @@ a = Analysis(
         'app.services.pronunciation_service',
         'app.services.pronunciation_bootstrap_service',
         'app.services.pronunciation_import_export_service',
+        'app.infra.pronunciation.phonikud_adapter',
         'app.services.audio_usage_tracker',
 
         # Project Exchange (Task 9) - РќРћР’РћР•
@@ -108,6 +109,7 @@ a = Analysis(
         'app.ui.dialogs.batch_progress_dialog',
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',
+        'app.ui.dialogs.pronunciation_bootstrap_dialog',
         'app.ui.audio_provider_settings_dialog',
         'app.ui.delegates.audio_play_delegate',
         'app.ui.widgets.audio_player_panel',

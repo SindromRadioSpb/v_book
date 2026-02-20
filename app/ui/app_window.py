@@ -162,6 +162,11 @@ class AppWindow(QMainWindow):
         audio_provider_settings_action.triggered.connect(self.open_audio_provider_settings)
         translation_menu.addAction(audio_provider_settings_action)
 
+        pronunciation_bootstrap_action = QAction("&Pronunciation Bootstrap...", self)
+        pronunciation_bootstrap_action.setShortcut("Ctrl+Alt+O")
+        pronunciation_bootstrap_action.triggered.connect(self.open_pronunciation_bootstrap)
+        translation_menu.addAction(pronunciation_bootstrap_action)
+
         # Premium menu
         premium_menu = menubar.addMenu("&Premium")
 
@@ -321,6 +326,13 @@ class AppWindow(QMainWindow):
         logger.info("Opening audio provider settings dialog")
         show_audio_provider_settings(parent=self)
 
+    def open_pronunciation_bootstrap(self):
+        """Open pronunciation bootstrap dialog."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        logger.info("Opening pronunciation bootstrap dialog")
+        show_pronunciation_bootstrap_dialog(parent=self)
+
     def open_project(self, project_id: int):
         """Open a project view."""
         logger.info(f"Opening project {project_id}")
@@ -396,6 +408,15 @@ class AppWindow(QMainWindow):
             keywords=["audio", "tts", "provider", "mms", "speech"],
             shortcut="Ctrl+Alt+A",
             callback=self.open_audio_provider_settings,
+            category="Tools"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="tools.pronunciation_bootstrap",
+            title="Pronunciation Bootstrap",
+            keywords=["pronunciation", "phonikud", "niqqud", "bootstrap", "offline"],
+            shortcut="Ctrl+Alt+O",
+            callback=self.open_pronunciation_bootstrap,
             category="Tools"
         ))
 

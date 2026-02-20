@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
+
+# Ensure repository root is on sys.path when script is executed as file.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from app.services.db_service import DBService
 from app.services.pronunciation_bootstrap_service import (
@@ -21,10 +27,14 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_generator(name: str, strict_generator: bool):
+def _build_generator(name: str, strict_generator: bool, *, model_path: str, enabled: bool):
     key = (name or "").strip().lower()
     if key == "phonikud":
-        return PhonikudPronunciationGenerator(strict=strict_generator)
+        return PhonikudPronunciationGenerator(
+            strict=strict_generator,
+            model_path=model_path or None,
+            enabled=enabled,
+        )
     return NoopPronunciationGenerator()
 
 
@@ -35,6 +45,12 @@ def main() -> int:
     parser.add_argument("--chunk-size", type=int, default=500, help="Chunk size for processing")
     parser.add_argument("--generator", choices=["phonikud", "noop"], default="phonikud")
     parser.add_argument("--strict-generator", action="store_true", help="Fail if selected generator is unavailable")
+    parser.add_argument("--model-path", default="", help="Optional Phonikud model/checkpoint path")
+    parser.add_argument(
+        "--disable-phonikud",
+        action="store_true",
+        help="Disable Phonikud runtime and force adapter error mode",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--fill-only-missing-auto",
@@ -56,10 +72,27 @@ def main() -> int:
 
     DBService._instance = None
     db_service = DBService.initialize(str(db_path))
-    generator = _build_generator(args.generator, args.strict_generator)
+    generator = _build_generator(
+        args.generator,
+        args.strict_generator,
+        model_path=str(args.model_path or ""),
+        enabled=not bool(args.disable_phonikud),
+    )
     bootstrap = PronunciationBootstrapService(generator=generator)
 
     try:
+        if hasattr(generator, "health_check"):
+            health = generator.health_check(["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"])
+            logger.info(
+                "Phonikud health: status=%s mode=%s latency_ms=%s model_path=%s",
+                health.status,
+                health.mode,
+                health.latency_ms,
+                health.model_path or "(env/default)",
+            )
+            for sample in health.samples:
+                logger.info("  sample: %s -> %s", sample.get("input"), sample.get("output"))
+
         with db_service.get_session() as session:
             result = bootstrap.bootstrap(
                 session,
@@ -87,6 +120,7 @@ def main() -> int:
         logger.info("  skipped: %s", result.skipped)
         logger.info("  failed: %s", result.failed)
         logger.info("  cancelled: %s", result.cancelled)
+        logger.info("  generator_mode: %s", result.generator_mode)
         return 0
     except Exception as exc:
         logger.exception("Pronunciation bootstrap failed: %s", exc)

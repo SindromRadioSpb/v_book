@@ -1,0 +1,210 @@
+"""Runtime adapter for optional Phonikud pronunciation inference."""
+
+from __future__ import annotations
+
+import importlib
+import logging
+import os
+import time
+from dataclasses import asdict, dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class PhonikudMode(str, Enum):
+    """Runtime mode returned by adapter."""
+
+    REAL_INFERENCE = "real_inference"
+    FALLBACK = "fallback"
+    ERROR = "error"
+
+
+class PhonikudHealthStatus(str, Enum):
+    """Health status persisted in settings."""
+
+    OK = "ok"
+    FALLBACK = "fallback"
+    ERROR = "error"
+
+
+@dataclass
+class PhonikudHealthReport:
+    """Health-check report for UI and diagnostics."""
+
+    mode: str
+    status: str
+    latency_ms: int
+    model_path: str
+    details: str
+    samples: List[Dict[str, str]]
+
+    def to_dict(self) -> Dict[str, object]:
+        return asdict(self)
+
+
+class PhonikudAdapter:
+    """Adapter for optional local pronunciation inference backend."""
+
+    _CALLABLE_ATTRS = ("add_niqqud", "phonikud", "nekud", "diacritize")
+
+    def __init__(
+        self,
+        *,
+        model_path: Optional[str] = None,
+        enabled: bool = True,
+        module_name: str = "phonikud",
+    ):
+        self.enabled = bool(enabled)
+        self.model_path = (model_path or "").strip()
+        self.module_name = module_name
+
+        self._module = None
+        self._callable = None
+        self._load_error = ""
+        self._last_mode: PhonikudMode = PhonikudMode.FALLBACK
+
+    @property
+    def last_mode(self) -> str:
+        return self._last_mode.value
+
+    @property
+    def model_path_effective(self) -> str:
+        if self.model_path:
+            return self.model_path
+        return (os.getenv("PHONIKUD_MODEL_PATH") or "").strip()
+
+    def model_path_safe(self) -> str:
+        path_value = self.model_path_effective
+        if not path_value:
+            return ""
+        path_obj = Path(path_value)
+        if len(path_obj.parts) >= 2:
+            return str(Path(*path_obj.parts[-2:]))
+        return path_obj.name or "<configured>"
+
+    def _configure_env(self) -> None:
+        model_path = self.model_path_effective
+        if model_path:
+            os.environ["PHONIKUD_MODEL_PATH"] = model_path
+
+    def _ensure_loaded(self) -> None:
+        if self._module is not None:
+            return
+        if not self.enabled:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = "Phonikud disabled in settings"
+            return
+
+        self._configure_env()
+        try:
+            self._module = importlib.import_module(self.module_name)
+        except Exception as exc:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = f"Failed to import {self.module_name}: {exc}"
+            logger.debug("Phonikud import failed: %s", exc)
+            return
+
+        for attr in self._CALLABLE_ATTRS:
+            fn = getattr(self._module, attr, None)
+            if callable(fn):
+                self._callable = fn
+                break
+
+        if self._callable is None:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = f"{self.module_name} has no callable inference function"
+        else:
+            self._last_mode = self._read_module_mode(default=PhonikudMode.FALLBACK)
+
+    def _read_module_mode(self, *, default: PhonikudMode) -> PhonikudMode:
+        if self._module is None:
+            return default
+
+        fn = getattr(self._module, "get_runtime_mode", None)
+        if not callable(fn):
+            return default
+
+        try:
+            raw = str(fn() or "").strip().lower()
+        except Exception:
+            return default
+
+        if raw in {"real", "real_inference", "ok"}:
+            return PhonikudMode.REAL_INFERENCE
+        if raw in {"fallback", "noop", "identity"}:
+            return PhonikudMode.FALLBACK
+        if raw in {"error", "failed"}:
+            return PhonikudMode.ERROR
+        return default
+
+    def is_available(self) -> bool:
+        self._ensure_loaded()
+        return self._callable is not None
+
+    def infer(self, texts: List[str]) -> Dict[str, str]:
+        self._ensure_loaded()
+        normalized = [str(text or "").strip() for text in (texts or [])]
+        normalized = [text for text in normalized if text]
+
+        if not normalized:
+            return {}
+        if self._callable is None:
+            self._last_mode = PhonikudMode.ERROR
+            return {text: text for text in normalized}
+
+        outputs: Dict[str, str] = {}
+        changed_any = False
+        for text in normalized:
+            try:
+                raw = self._callable(text)
+                rendered = str(raw or "").strip()
+                if not rendered:
+                    rendered = text
+                outputs[text] = rendered
+                if rendered != text:
+                    changed_any = True
+            except Exception as exc:
+                logger.debug("Phonikud inference failed for '%s': %s", text, exc)
+                outputs[text] = text
+
+        module_mode = self._read_module_mode(default=PhonikudMode.FALLBACK)
+        if module_mode == PhonikudMode.ERROR:
+            self._last_mode = PhonikudMode.ERROR
+        elif module_mode == PhonikudMode.REAL_INFERENCE:
+            self._last_mode = PhonikudMode.REAL_INFERENCE
+        else:
+            self._last_mode = PhonikudMode.REAL_INFERENCE if changed_any else PhonikudMode.FALLBACK
+        return outputs
+
+    def health_check(self, sample_texts: Optional[List[str]] = None) -> PhonikudHealthReport:
+        samples = sample_texts or ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
+        start = time.perf_counter()
+        outputs = self.infer(samples)
+        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        mode = self.last_mode
+        if mode == PhonikudMode.REAL_INFERENCE.value:
+            status = PhonikudHealthStatus.OK.value
+            details = "Real inference active"
+        elif mode == PhonikudMode.FALLBACK.value:
+            status = PhonikudHealthStatus.FALLBACK.value
+            details = "Fallback mode active; baseline quality may be degraded"
+        else:
+            status = PhonikudHealthStatus.ERROR.value
+            details = self._load_error or "Phonikud runtime unavailable"
+
+        samples_payload = [
+            {"input": text, "output": outputs.get(text, text)}
+            for text in samples
+        ]
+        return PhonikudHealthReport(
+            mode=mode,
+            status=status,
+            latency_ms=latency_ms,
+            model_path=self.model_path_safe(),
+            details=details,
+            samples=samples_payload,
+        )

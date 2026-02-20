@@ -17,6 +17,8 @@ Document purpose:
 - Base installer does not bundle MMS model weights by default.
 - Local provider uses external model path configured by user/admin.
 - If a bundled/offline pack is introduced later, it needs separate legal review and release note.
+- Phonikud pronunciation baseline model (if used) is also external-path based and optional.
+- Phonikud gate status is exposed in UI (`real_inference | fallback | error`) to avoid hidden quality assumptions.
 
 ## Runtime safety requirements
 

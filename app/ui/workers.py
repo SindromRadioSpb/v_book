@@ -2888,3 +2888,157 @@ class BatchGenerateAudioWorker(QThread):
         except Exception as exc:
             logger.error("BatchGenerateAudioWorker error: %s", exc, exc_info=True)
             self.error.emit(str(exc))
+
+
+class PhonikudHealthCheckWorker(QThread):
+    """Background health-check for Phonikud runtime mode."""
+
+    finished = pyqtSignal(dict)  # {mode,status,latency_ms,model_path,details,samples}
+    error = pyqtSignal(str)
+
+    def __init__(self, *, model_path: str, enabled: bool, sample_texts: Optional[List[str]] = None):
+        super().__init__()
+        self.model_path = model_path
+        self.enabled = enabled
+        self.sample_texts = sample_texts or ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
+
+    def run(self):
+        try:
+            from app.infra.pronunciation import PhonikudAdapter
+
+            adapter = PhonikudAdapter(model_path=self.model_path, enabled=self.enabled)
+            report = adapter.health_check(self.sample_texts)
+            self.finished.emit(report.to_dict())
+        except Exception as exc:
+            logger.error("PhonikudHealthCheckWorker error: %s", exc, exc_info=True)
+            self.error.emit(str(exc))
+
+
+class PronunciationBootstrapWorker(QThread):
+    """Run pronunciation bootstrap in background with pause/cancel safe points."""
+
+    progress = pyqtSignal(int, int)  # (completed, total)
+    stats_updated = pyqtSignal(int, int, int)  # (updated, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
+
+    def __init__(
+        self,
+        *,
+        lang: str,
+        model_path: str,
+        enabled: bool,
+        chunk_size: int = 500,
+        rebuild_auto: bool = False,
+        limit: Optional[int] = None,
+        dry_run: bool = False,
+        include_lemmas: bool = True,
+        include_terms: bool = True,
+        include_user_dictionary: bool = True,
+    ):
+        super().__init__()
+        self.lang = (lang or "he").strip() or "he"
+        self.model_path = (model_path or "").strip()
+        self.enabled = bool(enabled)
+        self.chunk_size = max(1, int(chunk_size))
+        self.rebuild_auto = bool(rebuild_auto)
+        self.limit = int(limit) if limit else None
+        self.dry_run = bool(dry_run)
+        self.include_lemmas = bool(include_lemmas)
+        self.include_terms = bool(include_terms)
+        self.include_user_dictionary = bool(include_user_dictionary)
+        self._cancel_requested = False
+        self._paused = False
+        self._trace = "pronunciation_bootstrap"
+
+    def cancel(self):
+        self._cancel_requested = True
+
+    def pause(self):
+        self._paused = True
+        self.paused.emit()
+
+    def resume(self):
+        self._paused = False
+        self.resumed.emit()
+
+    def _wait_if_paused(self) -> None:
+        while self._paused and not self._cancel_requested:
+            time.sleep(0.1)
+
+    def _on_progress(self, processed: int, total: int) -> None:
+        self._wait_if_paused()
+        self.progress.emit(int(processed), int(total))
+        self.stage_updated.emit(f"Generating pronunciations {int(processed):,}/{int(total):,}")
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.pronunciation_bootstrap_service import (
+                PhonikudPronunciationGenerator,
+                PronunciationBootstrapService,
+            )
+
+            self.stage_updated.emit("Initializing Phonikud bootstrap...")
+            db_service = DBService.get_instance()
+            generator = PhonikudPronunciationGenerator(
+                strict=False,
+                model_path=self.model_path or None,
+                enabled=self.enabled,
+            )
+            health = generator.health_check(["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"])
+            self.row_translated.emit("health", f"{health.mode} ({health.status})", health.status == "ok")
+            self.stage_updated.emit(f"Mode: {health.mode} ({health.status})")
+
+            bootstrap_service = PronunciationBootstrapService(generator=generator)
+            with db_service.get_session() as session:
+                self.stage_updated.emit("Collecting lexical source norms...")
+                result = bootstrap_service.bootstrap(
+                    session,
+                    lang=self.lang,
+                    chunk_size=self.chunk_size,
+                    rebuild_auto=self.rebuild_auto,
+                    limit=self.limit,
+                    include_lemmas=self.include_lemmas,
+                    include_terms=self.include_terms,
+                    include_user_dictionary=self.include_user_dictionary,
+                    progress_callback=self._on_progress,
+                    cancel_check=lambda: bool(self._cancel_requested),
+                )
+                if self.dry_run:
+                    session.rollback()
+                    self.stage_updated.emit("Dry-run finished (changes rolled back)")
+                else:
+                    session.commit()
+
+            self.stats_updated.emit(int(result.updated), int(result.skipped), int(result.failed))
+            self.row_translated.emit(
+                "summary",
+                f"updated={result.updated} skipped={result.skipped} failed={result.failed}",
+                int(result.failed) == 0,
+            )
+            self.stage_updated.emit(
+                f"Completed ({result.generator_mode}): {result.updated} updated, {result.skipped} skipped, {result.failed} failed"
+            )
+            self.finished.emit(
+                {
+                    "total_candidates": int(result.total_candidates),
+                    "generated_candidates": int(result.generated_candidates),
+                    "updated": int(result.updated),
+                    "skipped": int(result.skipped),
+                    "failed": int(result.failed),
+                    "cancelled": bool(result.cancelled or self._cancel_requested),
+                    "dry_run": bool(self.dry_run),
+                    "generator_mode": str(result.generator_mode),
+                    "health_mode": str(health.mode),
+                    "health_status": str(health.status),
+                    "health_latency_ms": int(health.latency_ms),
+                }
+            )
+        except Exception as exc:
+            logger.error("PronunciationBootstrapWorker error: %s", exc, exc_info=True)
+            self.error.emit(str(exc))

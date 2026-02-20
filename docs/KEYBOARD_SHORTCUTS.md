@@ -14,6 +14,7 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 ### Tools
 - **Ctrl+Shift+V**: Run P1 Verification
 - **Ctrl+Shift+I**: Import Dictionary (CSV)
+- **Ctrl+Alt+O**: Open Pronunciation Bootstrap
 
 ### Premium Features
 - **Ctrl+Shift+T**: Translation Management

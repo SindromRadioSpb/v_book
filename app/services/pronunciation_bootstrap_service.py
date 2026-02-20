@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional
@@ -10,6 +9,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
+from app.infra.pronunciation import PhonikudAdapter, PhonikudHealthReport, PhonikudMode
 from app.infra.sa_models import Lemma, TermCluster, UserDictionaryItem
 from app.services.pronunciation_service import PronunciationService
 
@@ -24,6 +24,7 @@ class PronunciationBootstrapResult:
     skipped: int
     failed: int
     cancelled: bool = False
+    generator_mode: str = "fallback"
 
 
 class PronunciationGenerator:
@@ -45,46 +46,44 @@ class NoopPronunciationGenerator(PronunciationGenerator):
 class PhonikudPronunciationGenerator(PronunciationGenerator):
     """Best-effort adapter for local Phonikud-like libraries."""
 
-    def __init__(self, *, strict: bool = False):
+    def __init__(self, *, strict: bool = False, model_path: Optional[str] = None, enabled: bool = True):
         self.strict = strict
-        self._callable = self._resolve_callable()
+        self._adapter = PhonikudAdapter(model_path=model_path, enabled=enabled)
+
+    @property
+    def mode(self) -> str:
+        return self._adapter.last_mode
+
+    def health_check(self, sample_texts: Optional[List[str]] = None) -> PhonikudHealthReport:
+        return self._adapter.health_check(sample_texts)
 
     def generate(self, lang: str, src_norms: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
         if lang.strip().lower() not in {"he", "he-il"}:
             return {}
-        if not self._callable:
+        if not self._adapter.is_available():
             if self.strict:
                 raise RuntimeError("Phonikud generator is not available")
             return {}
+        generated = self._adapter.infer(src_norms)
+        mode = self._adapter.last_mode
+        confidence = 0.8 if mode == PhonikudMode.REAL_INFERENCE.value else 0.2
+
         result: Dict[str, Dict[str, Optional[str]]] = {}
         for src_norm in src_norms:
             try:
-                niqqud = self._callable(src_norm)
+                niqqud = generated.get(src_norm)
                 if niqqud and str(niqqud).strip():
                     result[src_norm] = {
                         "niqqud_text": str(niqqud).strip(),
                         "ipa": None,
                         "reading_text": None,
                         "source": "auto_phonikud",
-                        "confidence": 0.6,
-                        "notes": "auto:phonikud",
+                        "confidence": confidence,
+                        "notes": f"auto:phonikud:{mode}",
                     }
             except Exception as exc:
                 logger.debug("Phonikud generation failed for '%s': %s", src_norm, exc)
         return result
-
-    def _resolve_callable(self):
-        try:
-            module = importlib.import_module("phonikud")
-        except Exception:
-            return None
-
-        for attr in ("add_niqqud", "phonikud", "nekud", "diacritize"):
-            fn = getattr(module, attr, None)
-            if callable(fn):
-                return fn
-        return None
-
 
 class PronunciationBootstrapService:
     """Build pronunciation entries from existing lexical corpus."""
@@ -235,4 +234,5 @@ class PronunciationBootstrapService:
             skipped=skipped,
             failed=failed,
             cancelled=cancelled,
+            generator_mode=(getattr(self.generator, "mode", None) or "fallback"),
         )

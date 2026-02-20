@@ -27,3 +27,4 @@ Rationale:
 - Export option `include_pronunciation_metadata` controls sidecar inclusion.
 - Sidecar contains project-intersection norms only.
 - Import merges sidecar after main payload import and appends a summary warning line with counts.
+- Very large bundles may still exceed global archive size policy; this is expected and should be surfaced as a user-facing warning.

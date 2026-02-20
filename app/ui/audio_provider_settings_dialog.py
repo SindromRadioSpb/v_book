@@ -233,6 +233,15 @@ class AudioProviderSettingsDialog(QDialog):
         self.advanced_stack.addWidget(self.mms_page)
         layout.addWidget(self.advanced_stack)
 
+        pronunciation_row = QHBoxLayout()
+        pronunciation_hint = QLabel("Need offline pronunciation baseline quality controls?")
+        pronunciation_row.addWidget(pronunciation_hint)
+        open_pron_btn = QPushButton("Open Pronunciation Bootstrap...")
+        open_pron_btn.clicked.connect(self._open_pronunciation_bootstrap)
+        pronunciation_row.addWidget(open_pron_btn)
+        pronunciation_row.addStretch()
+        layout.addLayout(pronunciation_row)
+
         return widget
 
     def _create_playback_tab(self) -> QWidget:
@@ -1092,6 +1101,11 @@ class AudioProviderSettingsDialog(QDialog):
         self._load_google_advanced_settings()
         self._load_azure_advanced_settings()
         self._load_mms_advanced_settings()
+
+    def _open_pronunciation_bootstrap(self):
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        show_pronunciation_bootstrap_dialog(parent=self)
 
     def accept(self):
         self._save_settings()

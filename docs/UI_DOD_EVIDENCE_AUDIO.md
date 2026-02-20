@@ -40,6 +40,11 @@
 35. Switch playback mode `interrupt` and verify new play request stops current queue and starts immediate playback.
 36. Switch playback mode `enqueue` and verify new play request appends to queue.
 37. Confirm no UI freeze while playback queue advances.
+38. Open `Tools -> Translation -> Pronunciation Bootstrap...` and verify model path controls are visible.
+39. Run `Health Check` with no model path and verify mode shows `fallback` or `error` (explicit, non-ambiguous).
+40. Configure model path, run `Health Check` again, verify mode and sample output are shown with latency.
+41. Run bootstrap in `Dry-run` mode and verify V3 progress + final rollback summary.
+42. Run bootstrap in write mode (`Fill missing auto`) and verify `source=auto_phonikud` rows increase without overriding manual entries.
 
 ## Non-functional evidence checklist
 
@@ -50,6 +55,7 @@
 - Provider failures are aggregated in activity log/final summary (no modal spam in loop).
 - Playback actions resolve paths in one batch-safe call path and never trust absolute/parent paths.
 - Delegate-based play controls are used (no `setIndexWidget` per row).
+- Pronunciation bootstrap health mode is explicit (`real_inference/fallback/error`) in UI and persisted in settings.
 
 ## Screenshot/log checklist
 
@@ -64,3 +70,4 @@
 - Audio column with delegate play icon in each main workspace.
 - Mini-player panel with active queue and now-playing item.
 - Playback settings controls (`pre/gap/post`, `interrupt/enqueue`).
+- Pronunciation Bootstrap dialog: model path + health status + V3 progress summary.
