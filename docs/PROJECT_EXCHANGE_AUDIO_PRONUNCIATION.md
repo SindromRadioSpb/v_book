@@ -8,19 +8,22 @@ This policy defines what is included in project bundles (`.hdleproj`) for audio-
 
 - `audio_asset` files are never embedded into project bundles.
 - `audio_asset` metadata is treated as operational cache and not exchanged between projects.
-- `pronunciation_entry` is a global metadata layer and is excluded from project bundles.
+- `pronunciation_entry` table itself remains excluded from payload DB copy.
+- Optional sidecar `pronunciation_metadata.tsv` may be included in bundle metadata section.
 
 Rationale:
 
-- Avoid cross-project pollution for global pronunciation data.
-- Keep project bundles deterministic and compact.
-- Avoid unique-key conflicts on import (`lang + src_norm`) in multi-project databases.
+- Keep payload schema deterministic while allowing controlled metadata exchange.
+- Preserve global-key safety (`lang + src_norm`) with merge-on-import rules.
+- Avoid embedding audio binaries and keep bundles compact.
 
 ## Recommended transfer path for pronunciation metadata
 
-- Use dedicated pronunciation exchange (CSV/TSV import/export service), not project bundle import.
-- Merge rule remains `manual override > auto`.
+- Dedicated pronunciation exchange (CSV/TSV/PLS) remains supported.
+- Bundle sidecar import uses the same merge rule: `manual override > auto/import`.
 
-## Future option (not enabled now)
+## Bundle sidecar behavior
 
-- Optional bundle flag `include_pronunciation_metadata` can be added later after explicit merge policy and conflict-resolution UX are finalized.
+- Export option `include_pronunciation_metadata` controls sidecar inclusion.
+- Sidecar contains project-intersection norms only.
+- Import merges sidecar after main payload import and appends a summary warning line with counts.

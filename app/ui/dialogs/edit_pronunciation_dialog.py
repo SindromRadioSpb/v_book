@@ -32,6 +32,7 @@ class EditPronunciationDialog(QDialog):
         src_text: str,
         niqqud_text: Optional[str],
         ipa: Optional[str],
+        reading_text: Optional[str],
         notes: Optional[str],
         is_override: bool,
         parent=None,
@@ -49,11 +50,13 @@ class EditPronunciationDialog(QDialog):
         form = QFormLayout()
         self.niqqud_edit = QLineEdit(niqqud_text or "")
         self.ipa_edit = QLineEdit(ipa or "")
+        self.reading_edit = QLineEdit(reading_text or "")
         self.notes_edit = QLineEdit(notes or "")
         self.override_checkbox = QCheckBox("Manual override (wins over auto bootstrap)")
         self.override_checkbox.setChecked(bool(is_override))
         form.addRow("Niqqud:", self.niqqud_edit)
         form.addRow("IPA:", self.ipa_edit)
+        form.addRow("Reading:", self.reading_edit)
         form.addRow("Notes:", self.notes_edit)
         form.addRow("", self.override_checkbox)
         root.addLayout(form)
@@ -81,6 +84,7 @@ class EditPronunciationDialog(QDialog):
         return {
             "niqqud_text": self.niqqud_edit.text().strip() or None,
             "ipa": self.ipa_edit.text().strip() or None,
+            "reading_text": self.reading_edit.text().strip() or None,
             "notes": self.notes_edit.text().strip() or None,
             "is_override": self.override_checkbox.isChecked(),
         }
@@ -125,6 +129,7 @@ def show_edit_pronunciation_dialog(
         src_text=src_text_clean or src_norm_clean,
         niqqud_text=existing.niqqud_text if existing else None,
         ipa=existing.ipa if existing else None,
+        reading_text=existing.reading_text if existing else None,
         notes=existing.notes if existing else None,
         is_override=bool(existing.is_override) if existing else True,
         parent=parent,
@@ -146,7 +151,9 @@ def show_edit_pronunciation_dialog(
             src_norm=src_norm_clean,
             niqqud_text=payload["niqqud_text"],
             ipa=payload["ipa"],
+            reading_text=payload["reading_text"],
             source=source,
+            confidence=1.0 if payload["is_override"] else None,
             is_override=bool(payload["is_override"]),
             notes=payload["notes"],
             allow_auto_overwrite=True,

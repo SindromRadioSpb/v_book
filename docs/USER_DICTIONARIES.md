@@ -75,7 +75,7 @@ UI composition in `User Dictionaries`:
   - `Translate Selected (N rows)...`
   - `Generate Audio Selected (N rows)...`
   - `Play Audio Selected (N rows)`
-  - `Edit Pronunciation...`
+  - `Mispronounced -> Add Pronunciation...`
   - `Mark Selected as Noise (N rows)`
   - `Mark Selected as Valid (N rows)`
   - `Mark Selected as Due now (N rows)`

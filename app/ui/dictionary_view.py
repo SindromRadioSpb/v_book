@@ -892,7 +892,7 @@ class DictionaryView(QWidget):
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
             menu.addAction(add_action)
 
-            edit_pron_action = QAction("Edit Pronunciation...", self)
+            edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
             menu.addAction(edit_pron_action)
             menu.addSeparator()

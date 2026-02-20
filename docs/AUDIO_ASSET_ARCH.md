@@ -78,11 +78,30 @@ Pipeline behavior:
 Pronunciation enrichment is applied before synthesis:
 
 - Provider with SSML phoneme support: build SSML/phoneme payload.
-- Other providers: token-level niqqud substitution fallback.
+- Other providers: phrase/token-level text preprocessing fallback.
 
 Precedence:
 
 - `manual override` entries always win over `auto` entries.
+
+`pronunciation_entry` v2 fields:
+
+- key: `lang + src_norm` (global, cross-project)
+- payload: `niqqud_text`, `ipa`, `reading_text`
+- source: `manual | auto | auto_phonikud | import_csv | import_pls`
+- confidence: optional `0..1` for auto/import quality hints
+
+Apply strategy (deterministic):
+
+1. exact canonical phrase (`src_norm`) if present,
+2. phrase-first longest multiword match,
+3. token fallback.
+
+Replacement priority:
+
+1. SSML `<phoneme>` when IPA exists and provider supports SSML,
+2. `niqqud_text`,
+3. `reading_text`.
 
 ## MMS local provider contract (license-gate)
 
@@ -143,7 +162,7 @@ Supported actions:
 - `Generate Audio...`
 - `Generate Audio Selected (N rows)...`
 - `Play Audio Selected (N rows)`
-- `Edit Pronunciation...` (manual override dialog for source norm)
+- `Mispronounced -> Add Pronunciation...` (manual override dialog for source norm)
 
 Playback UX surface (target):
 
@@ -183,3 +202,10 @@ Playback tab includes:
 - cadence controls (`pre_roll_ms`, `gap_ms`, `post_roll_ms`)
 - queue mode (`interrupt` / `enqueue`)
 - cadence presets (`Normal` / `Study` / `Fast`)
+
+## Project Exchange policy for pronunciation
+
+- Project bundle can optionally include `pronunciation_metadata.tsv` sidecar.
+- Sidecar is metadata-only (no audio assets are embedded).
+- Exported subset is intersection with project lexical norms.
+- Import merge is safe: manual overrides remain authoritative.

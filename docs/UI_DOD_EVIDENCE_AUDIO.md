@@ -27,8 +27,9 @@
 23. Click `Refresh Usage` and verify current minute/day/month counters are shown.
 24. In Batch Audio dialog choose `force:mms_tts_local` without accepted license and verify license-gate prompt appears.
 25. Accept license gate, re-run `force:mms_tts_local`, and verify provider is allowed (if local deps exist) or fails with explicit dependency message.
-26. In any lexical view, run `Edit Pronunciation...`, save manual niqqud/IPA override, then regenerate audio and verify status refresh.
+26. In any lexical view, run `Mispronounced -> Add Pronunciation...`, save manual niqqud/IPA/reading override, then regenerate audio and verify status refresh.
 27. Export pronunciation dictionary to TSV, import back, and verify `manual override > auto` remains unchanged.
+28. Export pronunciation to PLS (IPA profile), import back, and verify `source=import_pls` rows are merged safely.
 28. Verify `Play Audio Selected (N rows)` exists in context menu for UD/Dictionary/Terms/Term Cards/TM.
 29. Verify row-level play control is visible in Audio column and uses delegate rendering (no widget-per-row lag).
 30. Click row-level play on `ready` item and confirm internal playback starts in-app (no external player by default).
@@ -59,7 +60,7 @@
 - TM sorted by `Audio` column.
 - Audio Provider Settings dialog with MMS license-gate state.
 - Audio Provider Settings dialog with 3 tabs and Google credentials preview.
-- Edit Pronunciation dialog and regenerated audio result.
+- Mispronounced -> Add Pronunciation dialog and regenerated audio result.
 - Audio column with delegate play icon in each main workspace.
 - Mini-player panel with active queue and now-playing item.
 - Playback settings controls (`pre/gap/post`, `interrupt/enqueue`).
