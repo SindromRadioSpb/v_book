@@ -27,6 +27,11 @@ Payload fields:
 - `is_override`
 - `notes`
 
+Quality normalization:
+
+- exchanged `niqqud_text`/`reading_text` is sanitized on write (`_` -> space, `|` policy);
+- QC marker can be persisted in `notes` (for example `qc:auto_fixed`).
+
 ## Merge semantics
 
 - `is_override=1` (manual) always wins.

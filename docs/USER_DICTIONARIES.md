@@ -26,6 +26,7 @@ UI composition in `User Dictionaries`:
 - `Origin` marker column
 - `Study` chip column
 - `Last Review` column (`Added/Again/Hard/Good/Easy`) with cell-only semantic highlight
+- `Niqqud` column (effective spoken pronunciation)
 - `Status` icon stack (translation/audio/noise) + full tooltip
 - Semantic colors applied to Study/Origin/Status/Audio/Noise for instant scanning
 - Top summary strip for opened dictionary:
@@ -99,6 +100,11 @@ UI composition in `User Dictionaries`:
 - `Dictionary`, `Terms`, and `Term Card` rows display a saved-to-UD marker and study tooltip.
 - Marker contract: `*` for saved in UD, `*!` for saved and due.
 - `Dictionary`, `Terms`, `Term Card`, and `Translation Management` include a `Last Review` column.
+- `Dictionary`, `Terms`, `Term Card`, and `Translation Management` include a `Niqqud` column.
+- Niqqud tooltip contract:
+  - `source` (`manual|auto_phonikud|import_*`)
+  - `confidence`
+  - `qc` (`ok|auto_fixed|rejected`)
 - Cross-view rows get semantic fill by last review grade (`Added/Again/Hard/Good/Easy`) only when item is in UD.
 - Rows not present in UD are not filled.
 - `Translation Management` rows receive non-intrusive study tooltip enrichment.
@@ -107,6 +113,8 @@ UI composition in `User Dictionaries`:
 ## Audio Column (P0)
 
 - `Audio` column shows persisted statuses `missing|ready|failed` from `audio_asset`.
+- Niqqud rendering is source-oriented (`src_text`) and sanitized before provider calls.
+- Safety contract: `_` and `|` never appear in spoken payload.
 - `generating` is runtime-only and shown in progress/activity stream (not persisted in DB).
 - Generation is source-only (`src_text`/`src_norm`), not translation-based.
 - Batch generation entry points:

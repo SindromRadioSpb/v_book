@@ -56,10 +56,22 @@ Health banner in CLI now reports:
 - Writes are chunked and WAL-friendly.
 - Baseline rows are tagged as `source=auto_phonikud` with confidence hint.
 - UI and CLI expose generator mode explicitly (real/fallback/error).
+- Bootstrap stores by canonical key `(lang, src_norm)` but infers from preferred source surface text.
+- Preferred source selection is deterministic and favors:
+  - separator-free source forms,
+  - phrase forms with spaces,
+  - longer source text (keeps Hebrew prefixes/articles),
+  - stable source priority + id tie-breaker.
+- Generated niqqud goes through sanitizer before persist (`_` -> space, `|` autofix/reject policy).
 
 ## Idempotency
 
 Running bootstrap twice with fill-only mode should produce no additional updates on second run.
+
+## Quality notes
+
+- If model output contains malformed separators (`_`, `|`), the persisted value is sanitized and tagged in notes (`qc:*`).
+- If auto-generated pronunciation becomes invalid after sanitize, bootstrap skips that row and reports failure count.
 
 ## Premium UI gate (in-app)
 

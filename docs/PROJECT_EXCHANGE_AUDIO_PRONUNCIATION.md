@@ -10,6 +10,7 @@ This policy defines what is included in project bundles (`.hdleproj`) for audio-
 - `audio_asset` metadata is treated as operational cache and not exchanged between projects.
 - `pronunciation_entry` table itself remains excluded from payload DB copy.
 - Optional sidecar `pronunciation_metadata.tsv` may be included in bundle metadata section.
+- Sidecar carries pronunciation metadata only; spoken payload is re-materialized on target host during generation.
 
 Rationale:
 
@@ -21,6 +22,7 @@ Rationale:
 
 - Dedicated pronunciation exchange (CSV/TSV/PLS) remains supported.
 - Bundle sidecar import uses the same merge rule: `manual override > auto/import`.
+- Import path preserves QC notes and re-applies sanitizer before persistence.
 
 ## Bundle sidecar behavior
 

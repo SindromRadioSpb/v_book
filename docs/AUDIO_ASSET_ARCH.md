@@ -83,6 +83,7 @@ Pronunciation enrichment is applied before synthesis:
 Precedence:
 
 - `manual override` entries always win over `auto` entries.
+- pronunciation entry key stays canonical (`lang + src_norm`), while spoken payload is surface-oriented.
 
 `pronunciation_entry` v2 fields:
 
@@ -102,6 +103,20 @@ Replacement priority:
 1. SSML `<phoneme>` when IPA exists and provider supports SSML,
 2. `niqqud_text`,
 3. `reading_text`.
+
+Effective spoken payload safety contract:
+
+- build spoken payload from surface source text (`src_text`) + pronunciation overlay;
+- `effective_tts_text` is sanitized before provider call:
+  - `_` -> space
+  - `|` -> rejected in strict manual mode, auto-fixed to space in auto mode
+  - repeated whitespace collapsed
+- separators `_` and `|` must never reach provider request payload (plain text or SSML).
+
+Bootstrap quality contract:
+
+- bootstrap inference is run against deterministic preferred source text, not canonical `src_norm`.
+- canonical key remains `(lang, src_norm)` for storage and lookup.
 
 ## MMS local provider contract (license-gate)
 
@@ -135,6 +150,12 @@ Queue semantics:
 
 - `interrupt`: clear queue + stop current track + play new request.
 - `enqueue`: append request; if player is idle, start immediately.
+
+Deterministic regenerate/playback contract:
+
+- each `audio_asset` update refreshes `updated_at`;
+- playback resolver chooses latest ready by `updated_at DESC, asset_id DESC`;
+- provider switch sequence (`google -> mms -> google`) must play the final regenerate result.
 
 Playback state machine:
 

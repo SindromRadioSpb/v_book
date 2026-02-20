@@ -45,6 +45,11 @@
 40. Configure model path, run `Health Check` again, verify mode and sample output are shown with latency.
 41. Run bootstrap in `Dry-run` mode and verify V3 progress + final rollback summary.
 42. Run bootstrap in write mode (`Fill missing auto`) and verify `source=auto_phonikud` rows increase without overriding manual entries.
+43. Verify prefix retention case: source `התחנה הבאה` keeps full surface in generated niqqud (no dropped leading `ה`).
+44. Verify malformed niqqud safety: value containing `_` or `|` never reaches spoken payload (provider receives sanitized text).
+45. Regenerate provider switch sequence (`google -> mms -> google`) and verify playback resolves the latest generated asset.
+46. Verify Niqqud column is present in `User Dictionaries`, `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.
+47. Hover Niqqud cells and verify tooltip includes `source`, `confidence`, and `qc`.
 
 ## Non-functional evidence checklist
 
@@ -56,6 +61,8 @@
 - Playback actions resolve paths in one batch-safe call path and never trust absolute/parent paths.
 - Delegate-based play controls are used (no `setIndexWidget` per row).
 - Pronunciation bootstrap health mode is explicit (`real_inference/fallback/error`) in UI and persisted in settings.
+- Effective spoken payload sanitizer removes `_` and `|` in both text and SSML paths.
+- Playback latest-ready resolution is deterministic by refreshed `updated_at`.
 
 ## Screenshot/log checklist
 
