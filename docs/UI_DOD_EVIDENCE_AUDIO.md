@@ -50,6 +50,8 @@
 45. Regenerate provider switch sequence (`google -> mms -> google`) and verify playback resolves the latest generated asset.
 46. Verify Niqqud column is present in `User Dictionaries`, `Dictionary`, `Terms`, `Term Cards`, and `Translation Management`.
 47. Hover Niqqud cells and verify tooltip includes `source`, `confidence`, and `qc`.
+48. Run `python scripts/diag_tts_payload.py --db-path "<db>" --lang he --src-text "רכב"` and verify output has no `HEBREW ACCENT ...` codepoints.
+49. Run `python scripts/diag_tts_payload.py --db-path "<db>" --lang he --src-text "מהירות המותרת" --ssml` and verify output has no bidi/joiner `Cf` symbols (`U+200E/U+200F/U+200C/U+200D/U+2066..U+2069`).
 
 ## Non-functional evidence checklist
 
@@ -61,7 +63,7 @@
 - Playback actions resolve paths in one batch-safe call path and never trust absolute/parent paths.
 - Delegate-based play controls are used (no `setIndexWidget` per row).
 - Pronunciation bootstrap health mode is explicit (`real_inference/fallback/error`) in UI and persisted in settings.
-- Effective spoken payload sanitizer removes `_` and `|` in both text and SSML paths.
+- Effective spoken payload sanitizer removes taamim (`U+0591..U+05AF`) and bidi/joiner format chars while preserving niqqud marks.
 - Playback latest-ready resolution is deterministic by refreshed `updated_at`.
 
 ## Screenshot/log checklist

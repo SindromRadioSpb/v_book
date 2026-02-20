@@ -109,9 +109,22 @@ Effective spoken payload safety contract:
 - build spoken payload from surface source text (`src_text`) + pronunciation overlay;
 - `effective_tts_text` is sanitized before provider call:
   - `_` -> space
-  - `|` -> rejected in strict manual mode, auto-fixed to space in auto mode
+  - `|` -> rejected in strict manual mode, removed in provider payload sanitizer
+  - Hebrew cantillation marks (`U+0591..U+05AF`) are stripped from provider payload
+  - invisible formatting chars are stripped from provider payload:
+    - LRM/RLM (`U+200E/U+200F`)
+    - embeddings/overrides (`U+202A..U+202E`)
+    - isolates (`U+2066..U+2069`)
+    - joiners (`U+200C/U+200D`) and BOM/ZWNBSP (`U+FEFF`)
   - repeated whitespace collapsed
+  - Unicode is normalized to NFC before provider request
 - separators `_` and `|` must never reach provider request payload (plain text or SSML).
+- niqqud marks are preserved (`U+05B0..U+05BC`, `U+05C1`, `U+05C2`).
+
+Diagnostics:
+
+- `python scripts/diag_tts_payload.py --db-path "<db>" --lang he --src-text "<text>" [--ssml]`
+- The tool prints effective payload, sanitized payload, and Unicode codepoints/removals.
 
 Bootstrap quality contract:
 
