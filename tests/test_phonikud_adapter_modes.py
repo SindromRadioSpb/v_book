@@ -118,3 +118,31 @@ def test_phonikud_adapter_clears_runtime_cache_when_model_path_changes(monkeypat
     assert good_report.mode == "real_inference"
     assert good_report.status == "ok"
     assert good_report.samples[0]["output"].endswith("_nikud")
+
+
+def test_phonikud_adapter_prefers_batch_callable(monkeypatch):
+    calls = {"batch": 0, "single": 0}
+
+    class _FakeModule:
+        @staticmethod
+        def add_niqqud(text: str) -> str:
+            calls["single"] += 1
+            return f"{text}_single"
+
+        @staticmethod
+        def batch_add_niqqud(texts):
+            calls["batch"] += 1
+            return [f"{text}_batch" for text in texts]
+
+        @staticmethod
+        def get_runtime_mode() -> str:
+            return "real_inference"
+
+    monkeypatch.setattr(importlib, "import_module", lambda _name: _FakeModule)
+    adapter = PhonikudAdapter(model_path="J:/fake/model", enabled=True)
+    outputs = adapter.infer(["a", "b"])
+
+    assert outputs["a"] == "a_batch"
+    assert outputs["b"] == "b_batch"
+    assert calls["batch"] == 1
+    assert calls["single"] == 0

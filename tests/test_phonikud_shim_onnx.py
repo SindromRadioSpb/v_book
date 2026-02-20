@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import types
 
@@ -113,3 +114,32 @@ def test_shim_path_with_trailing_dot_recovers_existing_onnx(monkeypatch, tmp_pat
 
     assert seen["path"] == str(onnx_file)
     assert shim.get_runtime_mode() == "real_inference"
+
+
+def test_shim_falls_back_to_subprocess_when_inprocess_onnx_load_fails(monkeypatch, tmp_path):
+    onnx_file = tmp_path / "phonikud-1.0.int8.onnx"
+    onnx_file.write_text("int8", encoding="utf-8")
+
+    class _BrokenPhonikud:
+        def __init__(self, _model_path_value: str):
+            raise RuntimeError("DLL load failed while importing onnxruntime_pybind11_state")
+
+    fake_module = types.SimpleNamespace(Phonikud=_BrokenPhonikud)
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", fake_module)
+    monkeypatch.setenv("PHONIKUD_MODEL_PATH", str(onnx_file))
+
+    shim = _reload_shim()
+    shim.reset_runtime_cache()
+
+    def _fake_run(*_args, **kwargs):
+        payload = json.loads(kwargs.get("input") or "{}")
+        texts = payload.get("texts") or []
+        stdout = json.dumps({"outputs": [f"{text}_sub" for text in texts]}, ensure_ascii=False)
+        return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(shim.subprocess, "run", _fake_run)
+    out = shim.add_niqqud("\u05e9\u05dc\u05d5\u05dd")
+
+    assert out.endswith("_sub")
+    assert shim.get_runtime_mode() == "real_inference"
+    assert "subprocess backend active" in shim.get_runtime_details().lower()

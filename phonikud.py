@@ -14,8 +14,11 @@ It also exposes runtime diagnostics used by the premium UI gate:
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from typing import Optional, Tuple
 
@@ -25,6 +28,7 @@ MODE_ERROR = "error"
 
 _runtime_mode = MODE_FALLBACK
 _runtime_details = "No PHONIKUD_MODEL_PATH configured; fallback mode"
+_SUBPROCESS_TIMEOUT_SEC = 120
 
 
 def _normalize_input(text: str) -> str:
@@ -70,6 +74,55 @@ def _ensure_hf_home() -> None:
             return
         except Exception:
             continue
+
+
+def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
+    """Run ONNX inference in isolated process to avoid in-process DLL conflicts."""
+    payload = {
+        "model_path": str(model_path),
+        "texts": [str(text or "") for text in (texts or [])],
+    }
+    if not payload["texts"]:
+        return []
+
+    code = (
+        "import json,sys\n"
+        "from phonikud_onnx import Phonikud\n"
+        "raw=sys.stdin.read() or '{}'\n"
+        "data=json.loads(raw)\n"
+        "model=Phonikud(str(data.get('model_path') or ''))\n"
+        "inputs=data.get('texts') or []\n"
+        "outs=[]\n"
+        "for t in inputs:\n"
+        " t=str(t or '')\n"
+        " try:\n"
+        "  rendered=str(model.add_diacritics(t) or '').strip()\n"
+        " except Exception:\n"
+        "  rendered=''\n"
+        " outs.append(rendered or t)\n"
+        "sys.stdout.write(json.dumps({'outputs': outs}, ensure_ascii=False))\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=_SUBPROCESS_TIMEOUT_SEC,
+        env=env,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(stderr or f"Subprocess exited with code {proc.returncode}")
+    try:
+        parsed = json.loads(proc.stdout or "{}")
+    except Exception as exc:
+        raise RuntimeError(f"Subprocess returned invalid JSON: {exc}") from exc
+    outputs = parsed.get("outputs") or []
+    return [str(item or "") for item in outputs]
 
 
 def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
@@ -134,9 +187,18 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
             _runtime_details = f"ONNX model loaded: {target_path.name}"
             return "onnx", model, None
         except Exception as exc:
-            _runtime_mode = MODE_ERROR
-            _runtime_details = f"Failed to load ONNX model: {exc}"
-            return None
+            try:
+                # Probe isolated runtime to recover from in-process DLL init issues.
+                _ = _run_onnx_subprocess(target_path, ["\u05e9\u05dc\u05d5\u05dd"])
+                _runtime_mode = MODE_REAL
+                _runtime_details = f"ONNX subprocess backend active: {target_path.name}"
+                return "onnx_subprocess", str(target_path), None
+            except Exception as sub_exc:
+                _runtime_mode = MODE_ERROR
+                _runtime_details = (
+                    f"Failed to load ONNX model: {exc}; subprocess fallback failed: {sub_exc}"
+                )
+                return None
 
     try:
         from transformers import AutoTokenizer
@@ -159,26 +221,51 @@ def add_niqqud(text: str) -> str:
     if not source:
         return ""
 
+    rendered_list = batch_add_niqqud([source])
+    if not rendered_list:
+        return source
+    return rendered_list[0] or source
+
+
+def batch_add_niqqud(texts: list[str]) -> list[str]:
+    normalized = [_normalize_input(text) for text in (texts or [])]
+    if not normalized:
+        return []
+
     bundle = _load_model_bundle()
     if not bundle:
         # Deterministic fallback without crashing worker flows.
-        return source
+        return normalized
 
     kind, model, tokenizer = bundle
     try:
         if kind == "onnx":
-            rendered = str(model.add_diacritics(source) or "").strip()
-            return rendered or source
+            rendered = []
+            for source in normalized:
+                value = str(model.add_diacritics(source) or "").strip()
+                rendered.append(value or source)
+            return rendered
+
+        if kind == "onnx_subprocess":
+            rendered = _run_onnx_subprocess(Path(str(model)), normalized)
+            if len(rendered) != len(normalized):
+                return normalized
+            return [value.strip() or source for source, value in zip(normalized, rendered)]
 
         from src.model.phonikud_model import NIKUD_HASER
-        result = model.predict([source], tokenizer, mark_matres_lectionis=NIKUD_HASER)
-        rendered = str(result[0]).strip() if result else ""
-        return rendered or source
+        result = model.predict(normalized, tokenizer, mark_matres_lectionis=NIKUD_HASER)
+        if not result:
+            return normalized
+        rendered = []
+        for idx, source in enumerate(normalized):
+            value = str(result[idx]).strip() if idx < len(result) else ""
+            rendered.append(value or source)
+        return rendered
     except Exception as exc:
         global _runtime_mode, _runtime_details
         _runtime_mode = MODE_ERROR
         _runtime_details = f"Inference error: {exc}"
-        return source
+        return normalized
 
 
 def phonikud(text: str) -> str:
@@ -191,6 +278,10 @@ def nekud(text: str) -> str:
 
 def diacritize(text: str) -> str:
     return add_niqqud(text)
+
+
+def batch_phonikud(texts: list[str]) -> list[str]:
+    return batch_add_niqqud(texts)
 
 
 def get_runtime_mode() -> str:

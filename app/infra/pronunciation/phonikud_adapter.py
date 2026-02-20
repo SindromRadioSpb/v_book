@@ -49,6 +49,7 @@ class PhonikudAdapter:
     """Adapter for optional local pronunciation inference backend."""
 
     _CALLABLE_ATTRS = ("add_niqqud", "phonikud", "nekud", "diacritize")
+    _BATCH_CALLABLE_ATTRS = ("batch_add_niqqud", "batch_phonikud", "batch_nekud")
 
     def __init__(
         self,
@@ -63,6 +64,7 @@ class PhonikudAdapter:
 
         self._module = None
         self._callable = None
+        self._batch_callable = None
         self._load_error = ""
         self._last_mode: PhonikudMode = PhonikudMode.FALLBACK
 
@@ -141,6 +143,11 @@ class PhonikudAdapter:
             if callable(fn):
                 self._callable = fn
                 break
+        for attr in self._BATCH_CALLABLE_ATTRS:
+            fn = getattr(self._module, attr, None)
+            if callable(fn):
+                self._batch_callable = fn
+                break
 
         if self._callable is None:
             self._last_mode = PhonikudMode.ERROR
@@ -197,6 +204,33 @@ class PhonikudAdapter:
 
         outputs: Dict[str, str] = {}
         changed_any = False
+        if self._batch_callable is not None:
+            try:
+                raw_batch = self._batch_callable(normalized)
+                batch = [str(item or "").strip() for item in (raw_batch or [])]
+                if len(batch) == len(normalized):
+                    for source, rendered in zip(normalized, batch):
+                        value = rendered or source
+                        outputs[source] = value
+                        if value != source:
+                            changed_any = True
+                else:
+                    raise RuntimeError("batch output length mismatch")
+            except Exception as exc:
+                logger.debug("Phonikud batch inference failed, falling back to single-call mode: %s", exc)
+                outputs.clear()
+                changed_any = False
+
+        if outputs:
+            module_mode = self._read_module_mode(default=PhonikudMode.FALLBACK)
+            if module_mode == PhonikudMode.ERROR:
+                self._last_mode = PhonikudMode.ERROR
+            elif module_mode == PhonikudMode.REAL_INFERENCE:
+                self._last_mode = PhonikudMode.REAL_INFERENCE
+            else:
+                self._last_mode = PhonikudMode.REAL_INFERENCE if changed_any else PhonikudMode.FALLBACK
+            return outputs
+
         for text in normalized:
             try:
                 raw = self._callable(text)
