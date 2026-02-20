@@ -245,7 +245,8 @@ class DictionaryView(QWidget):
                 7: 110,  # Status
                 8: 90,   # Noise
                 9: 110,  # Last Review
-                10: 90,  # Audio
+                10: 180, # Niqqud
+                11: 90,  # Audio
             },
         )
         self.table_layout_controller.install()
@@ -253,7 +254,7 @@ class DictionaryView(QWidget):
             self.lemma_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.lemma_table.setItemDelegateForColumn(10, self.audio_play_delegate)
+        self.lemma_table.setItemDelegateForColumn(11, self.audio_play_delegate)
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
@@ -421,6 +422,10 @@ class DictionaryView(QWidget):
                 lemma.last_graded_at = None
                 lemma.translation_tier = None
                 lemma.audio_status = None
+                lemma.pronunciation_text = None
+                lemma.pronunciation_source = None
+                lemma.pronunciation_confidence = None
+                lemma.pronunciation_qc = None
                 continue
 
             lemma.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
@@ -431,6 +436,10 @@ class DictionaryView(QWidget):
             lemma.last_graded_at = overlay.get("last_graded_at")
             lemma.translation_tier = overlay.get("translation_tier")
             lemma.audio_status = overlay.get("audio_status")
+            lemma.pronunciation_text = overlay.get("pronunciation_text")
+            lemma.pronunciation_source = overlay.get("pronunciation_source")
+            lemma.pronunciation_confidence = overlay.get("pronunciation_confidence")
+            lemma.pronunciation_qc = overlay.get("pronunciation_qc")
 
     def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""

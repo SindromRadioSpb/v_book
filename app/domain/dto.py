@@ -40,6 +40,10 @@ class LemmaStats:
     translation_tier: Optional[str] = None
     audio_status: Optional[str] = None
     study_tooltip: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    pronunciation_source: Optional[str] = None
+    pronunciation_confidence: Optional[float] = None
+    pronunciation_qc: Optional[str] = None
 
 
 @dataclass
@@ -134,6 +138,10 @@ class ClusterStats:
     translation_tier: Optional[str] = None
     audio_status: Optional[str] = None
     study_tooltip: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    pronunciation_source: Optional[str] = None
+    pronunciation_confidence: Optional[float] = None
+    pronunciation_qc: Optional[str] = None
 
 
 @dataclass
@@ -198,6 +206,10 @@ class TMEntryDTO:
     last_graded_at: Optional[str] = None
     study_tooltip: Optional[str] = None
     audio_status: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    pronunciation_source: Optional[str] = None
+    pronunciation_confidence: Optional[float] = None
+    pronunciation_qc: Optional[str] = None
 
 
 @dataclass
@@ -262,6 +274,10 @@ class UserDictionaryItemDTO:
     last_graded_at: Optional[str] = None
     translation_tier: str = "missing"
     status_tooltip: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    pronunciation_source: Optional[str] = None
+    pronunciation_confidence: Optional[float] = None
+    pronunciation_qc: Optional[str] = None
 
 
 @dataclass
@@ -473,3 +489,7 @@ class TermCardDTO:
     last_graded_at: Optional[str] = None
     study_tooltip: Optional[str] = None
     audio_status: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    pronunciation_source: Optional[str] = None
+    pronunciation_confidence: Optional[float] = None
+    pronunciation_qc: Optional[str] = None

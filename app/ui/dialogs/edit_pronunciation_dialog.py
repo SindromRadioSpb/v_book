@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.services.db_service import DBService
+from app.services.pronunciation_quality_service import PronunciationQualityService
 from app.services.pronunciation_service import PronunciationService
 
 
@@ -39,6 +40,7 @@ class EditPronunciationDialog(QDialog):
     ):
         super().__init__(parent)
         self._clear_requested = False
+        self._source_text = src_text or src_norm
         self.setWindowTitle("Edit Pronunciation")
         self.setMinimumWidth(520)
 
@@ -61,6 +63,14 @@ class EditPronunciationDialog(QDialog):
         form.addRow("", self.override_checkbox)
         root.addLayout(form)
 
+        self.preview_label = QLabel("")
+        self.preview_label.setWordWrap(True)
+        root.addWidget(self.preview_label)
+        self.warning_label = QLabel("")
+        self.warning_label.setStyleSheet("color: #c62828;")
+        self.warning_label.setWordWrap(True)
+        root.addWidget(self.warning_label)
+
         controls = QHBoxLayout()
         self.clear_btn = QPushButton("Clear Entry")
         self.clear_btn.clicked.connect(self._on_clear)
@@ -75,6 +85,11 @@ class EditPronunciationDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+        self.niqqud_edit.textChanged.connect(self._refresh_preview)
+        self.reading_edit.textChanged.connect(self._refresh_preview)
+        self.override_checkbox.stateChanged.connect(self._refresh_preview)
+        self._refresh_preview()
 
     @property
     def clear_requested(self) -> bool:
@@ -100,6 +115,23 @@ class EditPronunciationDialog(QDialog):
             return
         self._clear_requested = True
         self.accept()
+
+    def _refresh_preview(self):
+        candidate = (self.niqqud_edit.text() or "").strip() or (self.reading_edit.text() or "").strip() or self._source_text
+        strict = self.override_checkbox.isChecked()
+        result = PronunciationQualityService.normalize_field(candidate, strict=strict)
+        if result.is_valid and result.value:
+            self.preview_label.setText(f"<b>What will be spoken:</b> {result.value}")
+            if result.qc_flag:
+                self.warning_label.setText(
+                    "Input was auto-fixed for playback safety "
+                    f"(qc={result.qc_flag})."
+                )
+            else:
+                self.warning_label.setText("")
+        else:
+            self.preview_label.setText("<b>What will be spoken:</b> -")
+            self.warning_label.setText(result.reason or "Invalid pronunciation payload.")
 
 
 def show_edit_pronunciation_dialog(
@@ -145,18 +177,23 @@ def show_edit_pronunciation_dialog(
 
         payload = dialog.payload()
         source = "manual" if payload["is_override"] else "auto"
-        service.upsert_entry(
-            session,
-            lang=src_lang_clean,
-            src_norm=src_norm_clean,
-            niqqud_text=payload["niqqud_text"],
-            ipa=payload["ipa"],
-            reading_text=payload["reading_text"],
-            source=source,
-            confidence=1.0 if payload["is_override"] else None,
-            is_override=bool(payload["is_override"]),
-            notes=payload["notes"],
-            allow_auto_overwrite=True,
-        )
+        try:
+            service.upsert_entry(
+                session,
+                lang=src_lang_clean,
+                src_norm=src_norm_clean,
+                niqqud_text=payload["niqqud_text"],
+                ipa=payload["ipa"],
+                reading_text=payload["reading_text"],
+                source=source,
+                confidence=1.0 if payload["is_override"] else None,
+                is_override=bool(payload["is_override"]),
+                notes=payload["notes"],
+                allow_auto_overwrite=True,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(parent, "Edit Pronunciation", str(exc))
+            session.rollback()
+            return False
         session.commit()
     return True

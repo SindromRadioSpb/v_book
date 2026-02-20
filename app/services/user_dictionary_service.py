@@ -31,6 +31,8 @@ from app.infra.sa_models import (
 )
 from app.infra.security.sanitizer import sanitize_for_log
 from app.services.audio_asset_service import AudioAssetService
+from app.services.pronunciation_quality_service import PronunciationQualityService
+from app.services.pronunciation_service import PronunciationService
 from app.services.study_service import StudyService
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ class UserDictionaryService:
         "last_grade": StudyProgress.last_grade,
         "last_graded_at": StudyProgress.last_graded_at,
         "is_noise": UserDictionaryItem.is_noise,
+        "pronunciation": UserDictionaryItem.src_norm,
         "created_at": UserDictionaryItem.created_at,
         "updated_at": UserDictionaryItem.updated_at,
         "translation": TMGlobal.translation,
@@ -1098,6 +1101,7 @@ class UserDictionaryService:
         summaries = study_service.get_progress_summaries(session, hashes)
 
         audio_status_by_item: Dict[int, str] = {}
+        pronunciation_by_item: Dict[int, Dict[str, Any]] = {}
         if source_items:
             audio_service = AudioAssetService()
             by_lang: Dict[str, List[Tuple[int, str]]] = {}
@@ -1116,6 +1120,16 @@ class UserDictionaryService:
                 for item_id, norm_text in tuples:
                     audio_status_by_item[item_id] = status_map.get(norm_text, "missing")
 
+            pronunciation_map = self._resolve_pronunciation_overlay(
+                session,
+                [(item.src_lang, item.src_norm) for item in source_items],
+            )
+            for item in source_items:
+                pronunciation_by_item[item.item_id] = pronunciation_map.get(
+                    (item.src_lang, item.src_norm),
+                    {},
+                )
+
         items = []
         now_dt = datetime.now(timezone.utc)
         for item, tm_global, _progress in rows:
@@ -1130,6 +1144,7 @@ class UserDictionaryService:
                 resolved_tm_global,
                 summary,
                 audio_status_by_item.get(item.item_id, "missing"),
+                pronunciation_by_item.get(item.item_id, {}),
             )
             items.append(dto)
         return items, total
@@ -1413,6 +1428,10 @@ class UserDictionaryService:
                 status_map = {}
             for norm_text, status in status_map.items():
                 audio_status[(lang, norm_text)] = status
+        pronunciation_map = self._resolve_pronunciation_overlay(
+            session,
+            [(row["src_lang"], row["src_norm"]) for row in by_hash.values()],
+        )
 
         result: Dict[str, Dict[str, Any]] = {}
         for canonical_hash, row in by_hash.items():
@@ -1441,6 +1460,7 @@ class UserDictionaryService:
                 origin=tm_row.origin if tm_row else None,
             )
             item_audio_status = audio_status.get((row["src_lang"], row["src_norm"]), "missing")
+            item_pronunciation = pronunciation_map.get((row["src_lang"], row["src_norm"]), {})
             count_value = int(membership_count.get(canonical_hash, 0))
             tooltip_value = None
             if count_value > 0:
@@ -1450,6 +1470,7 @@ class UserDictionaryService:
                     tm_global=tm_row,
                     translation_tier=translation_tier,
                     audio_status=item_audio_status,
+                    pronunciation_payload=item_pronunciation,
                 )
             result[canonical_hash] = {
                 "in_user_dictionary_count": count_value,
@@ -1459,6 +1480,10 @@ class UserDictionaryService:
                 "last_graded_at": summary.last_graded_at,
                 "translation_tier": translation_tier,
                 "audio_status": item_audio_status,
+                "pronunciation_text": item_pronunciation.get("pronunciation_text"),
+                "pronunciation_source": item_pronunciation.get("pronunciation_source"),
+                "pronunciation_confidence": item_pronunciation.get("pronunciation_confidence"),
+                "pronunciation_qc": item_pronunciation.get("pronunciation_qc"),
                 "study_tooltip": tooltip_value,
             }
         return result
@@ -1670,6 +1695,57 @@ class UserDictionaryService:
             logger.warning("normalize_for_tm failed for user dictionary item: %s", exc)
         return (fallback_norm or "").strip()
 
+    @staticmethod
+    def _extract_qc_flag(notes_value: Optional[str]) -> Optional[str]:
+        notes = (notes_value or "").strip()
+        marker = "qc:"
+        if marker not in notes:
+            return None
+        try:
+            tail = notes.split(marker, 1)[1].strip()
+            token = tail.split(";", 1)[0].strip()
+            return token or None
+        except Exception:
+            return None
+
+    def _resolve_pronunciation_overlay(
+        self,
+        session: Session,
+        pairs: List[Tuple[str, str]],
+    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        """Resolve effective pronunciation metadata in batch."""
+        if not pairs:
+            return {}
+        if not self._table_exists(session, "pronunciation_entry"):
+            return {}
+        by_lang: Dict[str, List[str]] = {}
+        for src_lang, src_norm in pairs:
+            lang_clean = (src_lang or "").strip()
+            norm_clean = (src_norm or "").strip()
+            if not lang_clean or not norm_clean:
+                continue
+            by_lang.setdefault(lang_clean, []).append(norm_clean)
+
+        service = PronunciationService()
+        resolved: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for lang, norms in by_lang.items():
+            try:
+                entries = service.bulk_lookup(session, lang=lang, src_norms=norms)
+            except Exception:
+                continue
+            for norm_text, entry in entries.items():
+                raw_text = (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip()
+                normalized = PronunciationQualityService.normalize_field(raw_text, strict=False)
+                effective_text = normalized.value
+                qc_flag = normalized.qc_flag or self._extract_qc_flag(entry.notes)
+                resolved[(lang, norm_text)] = {
+                    "pronunciation_text": effective_text,
+                    "pronunciation_source": entry.source,
+                    "pronunciation_confidence": entry.confidence,
+                    "pronunciation_qc": qc_flag,
+                }
+        return resolved
+
     def _resolve_tm_global_for_item(
         self,
         session: Session,
@@ -1699,6 +1775,7 @@ class UserDictionaryService:
         tm_global: Optional[TMGlobal],
         summary: Optional[StudyProgressSummaryDTO],
         audio_status: str,
+        pronunciation_payload: Optional[Dict[str, Any]],
     ) -> UserDictionaryItemDTO:
         """Convert ORM row to item DTO with resolved translation fields."""
         study_service = StudyService()
@@ -1733,6 +1810,7 @@ class UserDictionaryService:
             origin_source_ref=item.origin_source_ref,
             origin_entity_type=item.origin_entity_type,
         )
+        pronunciation_payload = pronunciation_payload or {}
 
         return UserDictionaryItemDTO(
             item_id=item.item_id,
@@ -1778,6 +1856,10 @@ class UserDictionaryService:
             last_grade=effective_summary.last_grade,
             last_graded_at=effective_summary.last_graded_at,
             translation_tier=translation_tier,
+            pronunciation_text=pronunciation_payload.get("pronunciation_text"),
+            pronunciation_source=pronunciation_payload.get("pronunciation_source"),
+            pronunciation_confidence=pronunciation_payload.get("pronunciation_confidence"),
+            pronunciation_qc=pronunciation_payload.get("pronunciation_qc"),
             status_tooltip=self._build_status_tooltip(
                 item=item,
                 summary=effective_summary,
@@ -1785,6 +1867,7 @@ class UserDictionaryService:
                 audio_status=audio_status,
                 translation_tier=translation_tier,
                 origin_kind=origin_kind,
+                pronunciation_payload=pronunciation_payload,
             ),
         )
 
@@ -1797,7 +1880,9 @@ class UserDictionaryService:
         audio_status: str,
         translation_tier: str,
         origin_kind: str,
+        pronunciation_payload: Optional[Dict[str, Any]],
     ) -> str:
+        pronunciation_payload = pronunciation_payload or {}
         translation_bits = [
             f"tier={translation_tier}",
             f"status={(tm_global.status if tm_global else 'none') or 'none'}",
@@ -1814,10 +1899,22 @@ class UserDictionaryService:
             f"EF={summary.ease_factor:.2f}",
             f"last_grade={summary.last_grade or 'added'}",
         ]
+        pron_text = pronunciation_payload.get("pronunciation_text") or "-"
+        pron_source = pronunciation_payload.get("pronunciation_source") or "none"
+        pron_conf = pronunciation_payload.get("pronunciation_confidence")
+        pron_qc = pronunciation_payload.get("pronunciation_qc") or "ok"
+        pron_meta = f"source={pron_source}"
+        if pron_conf is not None:
+            try:
+                pron_meta += f", confidence={float(pron_conf):.2f}"
+            except Exception:
+                pron_meta += f", confidence={pron_conf}"
+        pron_meta += f", qc={pron_qc}"
         return (
             f"Origin: {origin_kind}\n"
             f"Study: {', '.join(study_bits)}\n"
             f"Translation: {', '.join(translation_bits)}\n"
+            f"Niqqud: {pron_text} ({pron_meta})\n"
             f"Audio: {audio_status}\n"
             f"Noise: {'yes' if item.is_noise else 'no'}"
         )
@@ -1830,7 +1927,9 @@ class UserDictionaryService:
         tm_global: Optional[TMGlobal],
         translation_tier: str,
         audio_status: str,
+        pronunciation_payload: Optional[Dict[str, Any]],
     ) -> str:
+        pronunciation_payload = pronunciation_payload or {}
         translation_bits = [
             f"tier={translation_tier}",
             f"status={(tm_global.status if tm_global else 'none') or 'none'}",
@@ -1846,10 +1945,22 @@ class UserDictionaryService:
             f"interval={summary.interval_days}d",
             f"EF={summary.ease_factor:.2f}",
         ]
+        pron_text = pronunciation_payload.get("pronunciation_text") or "-"
+        pron_source = pronunciation_payload.get("pronunciation_source") or "none"
+        pron_conf = pronunciation_payload.get("pronunciation_confidence")
+        pron_qc = pronunciation_payload.get("pronunciation_qc") or "ok"
+        pron_meta = f"source={pron_source}"
+        if pron_conf is not None:
+            try:
+                pron_meta += f", confidence={float(pron_conf):.2f}"
+            except Exception:
+                pron_meta += f", confidence={pron_conf}"
+        pron_meta += f", qc={pron_qc}"
         return (
             f"In User Dictionaries: {in_user_dictionary_count}\n"
             f"Study: {', '.join(study_bits)}\n"
             f"Translation: {', '.join(translation_bits)}\n"
+            f"Niqqud: {pron_text} ({pron_meta})\n"
             f"Audio: {audio_status}"
         )
 

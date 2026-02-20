@@ -173,6 +173,7 @@ class UserDictionariesView(QWidget):
             4: "is_noise",
             5: "study_state",
             6: "last_grade",
+            8: "pronunciation",
         }
 
         self._init_ui()
@@ -343,7 +344,7 @@ class UserDictionariesView(QWidget):
             self.items_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.items_table.setItemDelegateForColumn(8, self.audio_play_delegate)
+        self.items_table.setItemDelegateForColumn(9, self.audio_play_delegate)
         self.items_table.horizontalHeader().sectionClicked.connect(self.on_items_header_clicked)
         self.items_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.items_table.customContextMenuRequested.connect(self.on_context_menu)
@@ -355,7 +356,7 @@ class UserDictionariesView(QWidget):
             settings=self.settings,
             table_id="user_dict_items",
             table=self.items_table,
-            default_widths={0: 120, 1: 220, 2: 220, 3: 110, 4: 90, 5: 110, 6: 120, 7: 120, 8: 90},
+            default_widths={0: 120, 1: 220, 2: 220, 3: 110, 4: 90, 5: 110, 6: 120, 7: 120, 8: 180, 9: 90},
         )
         self.table_layout_controller.install()
 

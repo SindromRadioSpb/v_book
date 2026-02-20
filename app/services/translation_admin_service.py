@@ -18,6 +18,7 @@ from sqlalchemy import select, func, or_, and_, update, case
 
 from app.infra.sa_models import (
     AudioAsset,
+    PronunciationEntry,
     TMEntry,
     TMEntryHistory,
     Lemma,
@@ -121,6 +122,37 @@ class TranslationAdminService:
             else_=0,
         )
 
+    def _pronunciation_sort_expression(self):
+        """Server-safe expression for pronunciation sorting (sanitized effective text)."""
+        pronunciation_subq = (
+            select(
+                func.coalesce(
+                    func.nullif(
+                        func.trim(
+                            func.replace(func.replace(func.coalesce(PronunciationEntry.niqqud_text, ""), "_", " "), "|", " ")
+                        ),
+                        "",
+                    ),
+                    func.nullif(
+                        func.trim(
+                            func.replace(func.replace(func.coalesce(PronunciationEntry.reading_text, ""), "_", " "), "|", " ")
+                        ),
+                        "",
+                    ),
+                    "",
+                )
+            )
+            .where(
+                and_(
+                    PronunciationEntry.lang == TMEntry.src_lang,
+                    PronunciationEntry.src_norm == TMEntry.src_norm,
+                )
+            )
+            .correlate(TMEntry)
+            .scalar_subquery()
+        )
+        return pronunciation_subq
+
     def _resolve_sort_column(self, sort_column: str):
         """Return safe sort expression for requested column."""
         if sort_column == "ud_marker":
@@ -129,6 +161,8 @@ class TranslationAdminService:
             return self._last_review_sort_expression()
         if sort_column == "audio_status":
             return self._audio_status_sort_expression()
+        if sort_column == "pronunciation":
+            return self._pronunciation_sort_expression()
         return self.SORT_COLUMNS.get(sort_column, TMEntry.updated_at)
 
     def search_tm_entries(
@@ -900,6 +934,10 @@ class TranslationAdminService:
             entry.last_graded_at = overlay.get("last_graded_at")
             entry.study_tooltip = overlay.get("study_tooltip")
             entry.audio_status = overlay.get("audio_status")
+            entry.pronunciation_text = overlay.get("pronunciation_text")
+            entry.pronunciation_source = overlay.get("pronunciation_source")
+            entry.pronunciation_confidence = overlay.get("pronunciation_confidence")
+            entry.pronunciation_qc = overlay.get("pronunciation_qc")
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:
         """Convert TMEntryHistory model to DTO."""

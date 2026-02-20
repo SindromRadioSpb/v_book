@@ -262,7 +262,8 @@ class TermCardView(QWidget):
                 7: 200,  # Aliases
                 8: 90,   # Stopword
                 9: 110,  # Last Review
-                10: 90,  # Audio
+                10: 180, # Niqqud
+                11: 90,  # Audio
             },
         )
         self.table_layout_controller.install()
@@ -270,7 +271,7 @@ class TermCardView(QWidget):
             self.queue_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.queue_table.setItemDelegateForColumn(10, self.audio_play_delegate)
+        self.queue_table.setItemDelegateForColumn(11, self.audio_play_delegate)
 
         queue_layout.addWidget(self.queue_table)
 
@@ -349,6 +350,10 @@ class TermCardView(QWidget):
             card.last_grade = overlay.get("last_grade")
             card.last_graded_at = overlay.get("last_graded_at")
             card.audio_status = overlay.get("audio_status")
+            card.pronunciation_text = overlay.get("pronunciation_text")
+            card.pronunciation_source = overlay.get("pronunciation_source")
+            card.pronunciation_confidence = overlay.get("pronunciation_confidence")
+            card.pronunciation_qc = overlay.get("pronunciation_qc")
 
     def on_queue_item_clicked(self, index):
         """Handle click on review queue item."""

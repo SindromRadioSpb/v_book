@@ -305,7 +305,8 @@ class TranslationManagementPanel(QWidget):
             8: "source_ref",
             9: "updated_at",
             11: "last_review",
-            12: "audio_status",
+            12: "pronunciation",
+            13: "audio_status",
         }
 
         self.init_ui()
@@ -472,7 +473,8 @@ class TranslationManagementPanel(QWidget):
                 9: 120,  # Updated
                 10: 90,  # Noise
                 11: 110, # Last Review
-                12: 90,  # Audio
+                12: 180, # Niqqud
+                13: 90,  # Audio
             },
         )
         self.table_layout_controller.install()
@@ -480,7 +482,7 @@ class TranslationManagementPanel(QWidget):
             self.table_view,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.table_view.setItemDelegateForColumn(12, self.audio_play_delegate)
+        self.table_view.setItemDelegateForColumn(13, self.audio_play_delegate)
 
         # Install event filter for Enter key editing
         self.table_view.installEventFilter(self)

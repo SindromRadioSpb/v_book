@@ -231,7 +231,8 @@ class TermsView(QWidget):
                 14: 110, # Status
                 15: 90,  # Noise
                 16: 110, # Last Review
-                17: 90,  # Audio
+                17: 180, # Niqqud
+                18: 90,  # Audio
             },
         )
         self.table_layout_controller.install()
@@ -239,7 +240,7 @@ class TermsView(QWidget):
             self.terms_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.terms_table.setItemDelegateForColumn(17, self.audio_play_delegate)
+        self.terms_table.setItemDelegateForColumn(18, self.audio_play_delegate)
 
         # M7 P1: Connect dataChanged to save handler
         self.terms_model.dataChanged.connect(self.on_translation_edited)
@@ -525,6 +526,10 @@ class TermsView(QWidget):
                 cluster.last_graded_at = None
                 cluster.translation_tier = None
                 cluster.audio_status = None
+                cluster.pronunciation_text = None
+                cluster.pronunciation_source = None
+                cluster.pronunciation_confidence = None
+                cluster.pronunciation_qc = None
                 continue
 
             cluster.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
@@ -535,6 +540,10 @@ class TermsView(QWidget):
             cluster.last_graded_at = overlay.get("last_graded_at")
             cluster.translation_tier = overlay.get("translation_tier")
             cluster.audio_status = overlay.get("audio_status")
+            cluster.pronunciation_text = overlay.get("pronunciation_text")
+            cluster.pronunciation_source = overlay.get("pronunciation_source")
+            cluster.pronunciation_confidence = overlay.get("pronunciation_confidence")
+            cluster.pronunciation_qc = overlay.get("pronunciation_qc")
 
     def on_search_error(self, error_msg: str):
         """Handle search error."""
