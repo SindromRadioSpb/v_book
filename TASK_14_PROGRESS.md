@@ -1,7 +1,17 @@
 # Task 14: Pagination Implementation Progress
 
-**Status:** ✅ COMPLETE (100%)
+**Status:** ✅ COMPLETE (100%) + HOTFIX
 **Date:** 2026-02-13
+
+## Completed ✅
+
+### HOTFIX: Tuple Unpacking Fix (2026-02-13)
+- ✅ Fixed startup crash in `dictionary_view.py`
+- ✅ Problem: `on_search_results()` tried to access tuples as dicts (`row["lemma_id"]`)
+- ✅ Solution: Changed to `for lemma, stat in rows:` with object attribute access
+- ✅ Verified `terms_view.py` doesn't have same issue (receives ClusterStats DTOs)
+- ✅ All tests pass: 8/8 pagination math, 7/7 Task 13 regression
+- ✅ Committed and pushed
 
 ## Completed ✅
 
