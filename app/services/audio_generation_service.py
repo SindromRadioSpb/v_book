@@ -125,13 +125,13 @@ class AudioGenerationService:
 
     @staticmethod
     def _build_ssml_text(text_value: str) -> str:
-        safe_text = PronunciationQualityService.sanitize_spoken_text(text_value)
+        safe_text = PronunciationQualityService.sanitize_tts_text(text_value)
         escaped = html.escape(safe_text, quote=False)
         return f"<speak version='1.0'>{escaped}</speak>"
 
     @staticmethod
     def _build_ssml_ipa(surface_text: str, ipa_value: str) -> str:
-        safe_surface = PronunciationQualityService.sanitize_spoken_text(surface_text)
+        safe_surface = PronunciationQualityService.sanitize_tts_text(surface_text)
         escaped_surface = html.escape(safe_surface, quote=False)
         escaped_ipa = html.escape(ipa_value or "", quote=True)
         return (
@@ -275,7 +275,7 @@ class AudioGenerationService:
         trace_id: str = "",
     ) -> Dict[str, object]:
         """Generate audio for source text only (translation is intentionally ignored)."""
-        source_text = PronunciationQualityService.sanitize_spoken_text((src_text or "").strip())
+        source_text = PronunciationQualityService.sanitize_tts_text((src_text or "").strip())
         source_norm_clean = (source_norm or "").strip()
         source_lang_clean = (src_lang or "").strip()
 
@@ -403,12 +403,24 @@ class AudioGenerationService:
                     )
 
             prepared_text = pronunciation_payload.get("token_text") or source_text
-            prepared_text = PronunciationQualityService.sanitize_spoken_text(str(prepared_text))
+            prepared_text = PronunciationQualityService.sanitize_tts_text(str(prepared_text))
             is_pron_valid = bool(pronunciation_payload.get("is_valid", True))
+            fallback_reason: Optional[str] = None
             if not prepared_text:
                 prepared_text = source_text
+                fallback_reason = "qc:tts_sanitized_fallback:empty_after_tts_sanitize"
             if not is_pron_valid:
                 prepared_text = source_text
+                fallback_reason = "qc:tts_sanitized_fallback:invalid_pronunciation_payload"
+            if fallback_reason:
+                logger.info(
+                    "Audio pronunciation fallback applied (%s): provider=%s lang=%s norm=%s trace=%s",
+                    fallback_reason,
+                    provider_id,
+                    source_lang_clean,
+                    source_norm_clean,
+                    req_trace,
+                )
             options: Dict[str, object] = {}
             if self._provider_supports_ssml(provider_id):
                 ssml_payload = (pronunciation_payload.get("ssml") or "").strip()

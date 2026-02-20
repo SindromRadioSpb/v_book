@@ -19,6 +19,7 @@ from app.infra.audio.base_provider import (
     AudioGenerationResult,
     BaseAudioProvider,
 )
+from app.services.pronunciation_quality_service import PronunciationQualityService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
 
     def generate(self, request: AudioGenerationRequest) -> AudioGenerationResult:
         trace_id = request.trace_id or f"gtts-{int(time.time() * 1000)}"
-        source_text = (request.source_text or "").strip()
+        source_text = PronunciationQualityService.sanitize_tts_text(request.source_text)
         if not source_text:
             return AudioGenerationResult(
                 provider_id=self.provider_id,
