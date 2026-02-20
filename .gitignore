@@ -116,3 +116,13 @@ tools/text/
 # Diagnostic output files
 diagnosis_output.txt
 diagnosis_result.json
+
+# Агенты и кодекс
+.agents/
+.codex/
+AGENTS.md
+
+# Local ad-hoc verification artifacts
+/lemma_check_result.txt
+/test1_verification.txt
+/nul
