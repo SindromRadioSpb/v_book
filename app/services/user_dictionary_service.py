@@ -1336,7 +1336,8 @@ class UserDictionaryService:
                 "tgt_lang": str,
                 "kind": str,
                 "src_text": str,
-                "src_norm": str,  # optional, fallback to normalize_for_tm(src_text)
+                "src_norm": str,      # optional, fallback to normalize_for_tm(src_text)
+                "raw_src_norm": str,  # optional legacy norm hint for pronunciation lookup
             }
         """
         prepared: List[Dict[str, str]] = []
@@ -1347,6 +1348,7 @@ class UserDictionaryService:
             src_text = (raw.get("src_text") or "").strip()
             if not src_lang or not tgt_lang or not kind:
                 continue
+            raw_src_norm = (raw.get("raw_src_norm") or raw.get("src_norm") or "").strip()
             src_norm = self._canonical_src_norm(
                 src_lang=src_lang,
                 src_text=src_text,
@@ -1362,6 +1364,7 @@ class UserDictionaryService:
                     "tgt_lang": tgt_lang,
                     "kind": kind,
                     "src_norm": src_norm,
+                    "raw_src_norm": raw_src_norm,
                     "canonical_hash": canonical_hash,
                 }
             )
@@ -1433,10 +1436,16 @@ class UserDictionaryService:
                 status_map = {}
             for norm_text, status in status_map.items():
                 audio_status[(lang, norm_text)] = status
-        pronunciation_map = self._resolve_pronunciation_overlay(
-            session,
-            [(row["src_lang"], row["src_norm"]) for row in by_hash.values()],
-        )
+        pronunciation_pairs: List[Tuple[str, str]] = []
+        for row in by_hash.values():
+            lang_clean = (row.get("src_lang") or "").strip()
+            canonical_norm = (row.get("src_norm") or "").strip()
+            raw_norm = (row.get("raw_src_norm") or "").strip()
+            if lang_clean and canonical_norm:
+                pronunciation_pairs.append((lang_clean, canonical_norm))
+            if lang_clean and raw_norm and raw_norm != canonical_norm:
+                pronunciation_pairs.append((lang_clean, raw_norm))
+        pronunciation_map = self._resolve_pronunciation_overlay(session, pronunciation_pairs)
 
         result: Dict[str, Dict[str, Any]] = {}
         for canonical_hash, row in by_hash.items():
@@ -1464,9 +1473,16 @@ class UserDictionaryService:
                 status=tm_row.status if tm_row else None,
                 origin=tm_row.origin if tm_row else None,
             )
-            row_key = ((row["src_lang"] or "").strip(), (row["src_norm"] or "").strip())
+            lang_clean = (row.get("src_lang") or "").strip()
+            canonical_norm = (row.get("src_norm") or "").strip()
+            raw_norm = (row.get("raw_src_norm") or "").strip()
+            row_key = (lang_clean, canonical_norm)
             item_audio_status = audio_status.get(row_key, "missing")
-            item_pronunciation = pronunciation_map.get(row_key, {})
+            item_pronunciation = pronunciation_map.get(row_key)
+            if not item_pronunciation and raw_norm and raw_norm != canonical_norm:
+                item_pronunciation = pronunciation_map.get((lang_clean, raw_norm))
+            if not item_pronunciation:
+                item_pronunciation = {}
             count_value = int(membership_count.get(canonical_hash, 0))
             tooltip_value = None
             if count_value > 0:
