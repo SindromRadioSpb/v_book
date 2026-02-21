@@ -53,6 +53,10 @@
 48. Run `python scripts/diag_tts_payload.py --db-path "<db>" --lang he --src-text "רכב"` and verify output has no `HEBREW ACCENT ...` codepoints.
 49. Run `python scripts/diag_tts_payload.py --db-path "<db>" --lang he --src-text "מהירות המותרת" --ssml` and verify output has no bidi/joiner `Cf` symbols (`U+200E/U+200F/U+200C/U+200D/U+2066..U+2069`).
 
+50. In each table workspace (`Dictionary`, `Terms`, `User Dictionaries`, `Term Cards`, `Translation Management`) select rows and verify button `Pronunciation Bootstrap...` is enabled.
+51. In each table workspace context menu verify action `Pronunciation Bootstrap Selected (N rows)...` opens bootstrap dialog with `Selection scope` hint.
+52. For a row with legacy `norm_text` mismatch verify Niqqud still renders in table (fallback via `raw_src_norm`).
+
 ## Non-functional evidence checklist
 
 - No per-row blocking calls in UI thread during generation.
@@ -65,6 +69,7 @@
 - Pronunciation bootstrap health mode is explicit (`real_inference/fallback/error`) in UI and persisted in settings.
 - Effective spoken payload sanitizer removes taamim (`U+0591..U+05AF`) and bidi/joiner format chars while preserving niqqud marks.
 - Playback latest-ready resolution is deterministic by refreshed `updated_at`.
+- Cross-view pronunciation overlay supports canonical lookup with legacy fallback (`raw_src_norm`) to avoid false missing Niqqud rows.
 
 ## Screenshot/log checklist
 

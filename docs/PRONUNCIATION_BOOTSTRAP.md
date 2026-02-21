@@ -78,6 +78,10 @@ Running bootstrap twice with fill-only mode should produce no additional updates
 Entry point:
 
 - `Tools -> Translation -> Pronunciation Bootstrap...`
+- Selection-scoped launch from table workspaces:
+  - `Dictionary`, `Terms`, `User Dictionaries`, `Term Cards`, `Translation Management`
+  - Button: `Pronunciation Bootstrap...` (enabled on row selection)
+  - Context menu: `Pronunciation Bootstrap Selected (N rows)...`
 
 Capabilities:
 
@@ -87,5 +91,8 @@ Capabilities:
 - Health check via worker (no UI freeze), with mode/status/latency/samples.
 - Worker-safe bootstrap with `BatchProgressDialogV3`:
   - stages, counters, activity log, cancel/pause/resume.
+- Selection scope preserves existing source checkboxes:
+  - `Lemmas`, `Terms`, `User Dictionaries`
+  - selected rows are filtered by checked source groups before generation.
 - Fallback warning before bootstrap run.
 - Dry-run support with rollback summary.
