@@ -135,6 +135,11 @@ class DictionaryView(QWidget):
         self.play_audio_btn.setEnabled(False)
         header_layout.addWidget(self.play_audio_btn)
 
+        self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
+        self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
+        self.pronunciation_bootstrap_btn.setEnabled(False)
+        header_layout.addWidget(self.pronunciation_bootstrap_btn)
+
         layout.addLayout(header_layout)
 
         # Pagination bar
@@ -399,6 +404,7 @@ class DictionaryView(QWidget):
                     "kind": "lemma",
                     "src_text": lemma.lemma_text,
                     "src_norm": src_norm,
+                    "raw_src_norm": (lemma.norm_text or "").strip(),
                 }
             )
 
@@ -733,6 +739,26 @@ class DictionaryView(QWidget):
             )
         return items
 
+    def _selected_pronunciation_items(self) -> List[dict]:
+        """Build pronunciation payloads from selected lemma rows."""
+        selected_rows = self.lemma_table.selectionModel().selectedRows()
+        items: List[dict] = []
+        for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
+            source_row = self.proxy_model.map_to_source_row(proxy_index.row())
+            lemma = self.lemma_model.lemmas[source_row]
+            src_norm = (lemma.norm_text or "").strip() or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "src_lang": "he",
+                    "src_text": lemma.lemma_text,
+                    "src_norm": src_norm,
+                    "source_group": "lemmas",
+                }
+            )
+        return items
+
     def on_generate_audio_selected(self):
         """Generate source-audio for selected rows."""
         items = self._selected_audio_items()
@@ -856,7 +882,7 @@ class DictionaryView(QWidget):
 
     def on_edit_pronunciation_selected(self):
         """Open pronunciation editor for the first selected row."""
-        items = self._selected_audio_items()
+        items = self._selected_pronunciation_items()
         if not items:
             return
         first = items[0]
@@ -868,6 +894,16 @@ class DictionaryView(QWidget):
         )
         if changed:
             self.perform_search()
+
+    def on_pronunciation_bootstrap_selected(self):
+        """Open pronunciation bootstrap dialog with selected rows scope."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._selected_pronunciation_items()
+        if not selected_items:
+            show_pronunciation_bootstrap_dialog(parent=self)
+            return
+        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
@@ -904,6 +940,9 @@ class DictionaryView(QWidget):
             edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
             menu.addAction(edit_pron_action)
+            bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self)
+            bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
+            menu.addAction(bootstrap_pron_action)
             menu.addSeparator()
 
         # "Why?" action - show explainability
@@ -1276,6 +1315,7 @@ class DictionaryView(QWidget):
         self.batch_translate_btn.setEnabled(has_selection)
         self.generate_audio_btn.setEnabled(has_selection)
         self.play_audio_btn.setEnabled(has_selection)
+        self.pronunciation_bootstrap_btn.setEnabled(has_selection)
 
     def on_batch_translate(self):
         """Task 15: Handle batch translate action with scope support."""

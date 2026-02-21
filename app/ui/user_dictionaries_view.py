@@ -418,6 +418,10 @@ class UserDictionariesView(QWidget):
         self.play_audio_btn.clicked.connect(self.on_play_audio_selected)
         self.play_audio_btn.setEnabled(False)
         actions_row.addWidget(self.play_audio_btn)
+        self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
+        self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
+        self.pronunciation_bootstrap_btn.setEnabled(False)
+        actions_row.addWidget(self.pronunciation_bootstrap_btn)
         self.mark_due_btn = QPushButton("Mark Due Now")
         self.mark_due_btn.clicked.connect(self.set_selected_due_now)
         self.mark_due_btn.setEnabled(False)
@@ -851,6 +855,7 @@ class UserDictionariesView(QWidget):
         self.translate_selected_btn.setEnabled(count > 0)
         self.generate_audio_btn.setEnabled(count > 0)
         self.play_audio_btn.setEnabled(count > 0)
+        self.pronunciation_bootstrap_btn.setEnabled(count > 0)
         self.mark_due_btn.setEnabled(count > 0)
 
     def _update_study_summary(self):
@@ -902,6 +907,9 @@ class UserDictionariesView(QWidget):
         edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
         edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
         menu.addAction(edit_pron_action)
+        bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({count} rows)...", self)
+        bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
+        menu.addAction(bootstrap_pron_action)
         menu.addSeparator()
 
         mark_noise_action = QAction(f"Mark Selected as Noise ({count} rows)", self)
@@ -946,6 +954,43 @@ class UserDictionariesView(QWidget):
         )
         if changed:
             self.load_items()
+
+    def _selected_pronunciation_items(self) -> List[Dict[str, str]]:
+        """Build pronunciation payloads from selected user-dictionary rows."""
+        selected_rows = self.items_table.selectionModel().selectedRows()
+        payloads: List[Dict[str, str]] = []
+        for index in sorted(selected_rows, key=lambda idx: idx.row()):
+            item = self.items_model.get_item(index.row())
+            if not item:
+                continue
+            src_norm = (item.src_norm or "").strip()
+            if not src_norm:
+                continue
+            if item.kind == "lemma":
+                source_group = "lemmas"
+            elif item.kind == "term_cluster":
+                source_group = "terms"
+            else:
+                source_group = "user_dictionary"
+            payloads.append(
+                {
+                    "src_lang": item.src_lang,
+                    "src_text": item.src_text,
+                    "src_norm": src_norm,
+                    "source_group": source_group,
+                }
+            )
+        return payloads
+
+    def on_pronunciation_bootstrap_selected(self):
+        """Open pronunciation bootstrap dialog with selected rows scope."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._selected_pronunciation_items()
+        if not selected_items:
+            show_pronunciation_bootstrap_dialog(parent=self)
+            return
+        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
 
     def on_translation_edited(self, top_left, bottom_right, roles):
         if top_left.column() != 2:

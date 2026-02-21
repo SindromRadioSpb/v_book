@@ -605,6 +605,11 @@ class TranslationManagementPanel(QWidget):
         self.play_audio_btn.setEnabled(False)
         actions_layout.addWidget(self.play_audio_btn)
 
+        self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
+        self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
+        self.pronunciation_bootstrap_btn.setEnabled(False)
+        actions_layout.addWidget(self.pronunciation_bootstrap_btn)
+
         # Task #14: Export Excel button
         self.export_btn = QPushButton("📊 Export Excel")
         self.export_btn.setStyleSheet("background: #2e7d32; color: white; padding: 6px 12px;")
@@ -1266,6 +1271,7 @@ class TranslationManagementPanel(QWidget):
         self.batch_translate_btn.setEnabled(has_selection)
         self.generate_audio_btn.setEnabled(has_selection)
         self.play_audio_btn.setEnabled(has_selection)
+        self.pronunciation_bootstrap_btn.setEnabled(has_selection)
 
     def _get_selected_tm_entries(self) -> List[TMEntryDTO]:
         """Return selected TM entries in deterministic order."""
@@ -1292,6 +1298,31 @@ class TranslationManagementPanel(QWidget):
                     "src_text": entry.src_text,
                     "src_lang": entry.src_lang,
                     "src_norm": src_norm,
+                }
+            )
+        return items
+
+    def _get_selected_pronunciation_items(self) -> list[dict]:
+        """Build pronunciation payloads from selected TM rows."""
+        items: list[dict] = []
+        for entry in self._get_selected_tm_entries():
+            src_norm = (entry.src_norm or "").strip() or normalize_for_tm(
+                entry.src_lang, entry.src_text, entry.kind
+            ).norm
+            if not src_norm:
+                continue
+            if entry.kind == "lemma":
+                source_group = "lemmas"
+            elif entry.kind == "term_cluster":
+                source_group = "terms"
+            else:
+                source_group = "user_dictionary"
+            items.append(
+                {
+                    "src_lang": entry.src_lang,
+                    "src_text": entry.src_text,
+                    "src_norm": src_norm,
+                    "source_group": source_group,
                 }
             )
         return items
@@ -1596,7 +1627,7 @@ class TranslationManagementPanel(QWidget):
 
     def on_edit_pronunciation_selected(self):
         """Open pronunciation editor for the first selected TM row."""
-        items = self._get_selected_audio_items()
+        items = self._get_selected_pronunciation_items()
         if not items:
             return
         first = items[0]
@@ -1608,6 +1639,16 @@ class TranslationManagementPanel(QWidget):
         )
         if changed:
             self.perform_search()
+
+    def on_pronunciation_bootstrap_selected(self):
+        """Open pronunciation bootstrap dialog with selected TM rows scope."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._get_selected_pronunciation_items()
+        if not selected_items:
+            show_pronunciation_bootstrap_dialog(parent=self)
+            return
+        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
 
     # ========================================================================
     # Noise Marking (Hide Noise + Bulk Mark as Valid/Noise)
@@ -1645,6 +1686,9 @@ class TranslationManagementPanel(QWidget):
         edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
         edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
         menu.addAction(edit_pron_action)
+        bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({count:,} rows)...", self)
+        bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
+        menu.addAction(bootstrap_pron_action)
         menu.addSeparator()
 
         # Mark as Noise action

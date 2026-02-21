@@ -202,6 +202,11 @@ class TermCardView(QWidget):
         self.play_audio_btn.setEnabled(False)
         other_actions_layout.addWidget(self.play_audio_btn)
 
+        self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
+        self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
+        self.pronunciation_bootstrap_btn.setEnabled(False)
+        other_actions_layout.addWidget(self.pronunciation_bootstrap_btn)
+
         other_actions_layout.addStretch()
         actions_layout.addLayout(other_actions_layout)
 
@@ -336,6 +341,7 @@ class TermCardView(QWidget):
                     "kind": "term_cluster",
                     "src_text": card.representative_he,
                     "src_norm": src_norm,
+                    "raw_src_norm": (card.canonical_key or "").strip(),
                 }
             )
         overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
@@ -367,6 +373,7 @@ class TermCardView(QWidget):
         has_selection = len(selected_rows) > 0
         self.generate_audio_btn.setEnabled(has_selection)
         self.play_audio_btn.setEnabled(has_selection)
+        self.pronunciation_bootstrap_btn.setEnabled(has_selection)
 
     def _selected_audio_items(self) -> list[dict]:
         """Build source-audio payloads from selected queue rows."""
@@ -385,6 +392,27 @@ class TermCardView(QWidget):
                     "src_text": card.representative_he,
                     "src_lang": "he",
                     "src_norm": src_norm,
+                }
+            )
+        return items
+
+    def _selected_pronunciation_items(self) -> list[dict]:
+        """Build pronunciation payloads from selected queue rows."""
+        selected_rows = self.queue_table.selectionModel().selectedRows()
+        items: list[dict] = []
+        for index in sorted(selected_rows, key=lambda idx: idx.row()):
+            card = self.queue_model.get_card(index.row())
+            if not card:
+                continue
+            src_norm = (card.canonical_key or "").strip() or normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "src_lang": "he",
+                    "src_text": card.representative_he,
+                    "src_norm": src_norm,
+                    "source_group": "terms",
                 }
             )
         return items
@@ -512,7 +540,7 @@ class TermCardView(QWidget):
 
     def on_edit_pronunciation_selected(self):
         """Open pronunciation editor for the first selected queue row."""
-        items = self._selected_audio_items()
+        items = self._selected_pronunciation_items()
         if not items:
             return
         first = items[0]
@@ -524,6 +552,16 @@ class TermCardView(QWidget):
         )
         if changed:
             self.load_review_queue()
+
+    def on_pronunciation_bootstrap_selected(self):
+        """Open pronunciation bootstrap dialog with selected queue rows."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._selected_pronunciation_items()
+        if not selected_items:
+            show_pronunciation_bootstrap_dialog(parent=self)
+            return
+        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
 
     def on_queue_context_menu(self, pos):
         """Context menu for review queue rows."""
@@ -546,6 +584,9 @@ class TermCardView(QWidget):
         edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
         edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
         menu.addAction(edit_pron_action)
+        bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({count} rows)...", self)
+        bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
+        menu.addAction(bootstrap_pron_action)
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
 
     def on_add_selected_to_user_dictionary(self):

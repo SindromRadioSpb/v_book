@@ -103,6 +103,11 @@ class TermsView(QWidget):
         self.play_audio_btn.setEnabled(False)
         header_layout.addWidget(self.play_audio_btn)
 
+        self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
+        self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
+        self.pronunciation_bootstrap_btn.setEnabled(False)
+        header_layout.addWidget(self.pronunciation_bootstrap_btn)
+
         self.extract_btn = QPushButton("Extract Terms")
         self.extract_btn.clicked.connect(self.on_extract)
         header_layout.addWidget(self.extract_btn)
@@ -503,6 +508,7 @@ class TermsView(QWidget):
                     "kind": "term_cluster",
                     "src_text": cluster.representative_he,
                     "src_norm": src_norm,
+                    "raw_src_norm": (cluster.norm_text or "").strip(),
                 }
             )
 
@@ -909,6 +915,26 @@ class TermsView(QWidget):
             )
         return items
 
+    def _selected_pronunciation_items(self) -> list[dict]:
+        """Build pronunciation payloads from selected term rows."""
+        selected_rows = self.terms_table.selectionModel().selectedRows()
+        items: list[dict] = []
+        for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
+            source_row = self.proxy_model.map_to_source_row(proxy_index.row())
+            cluster = self.terms_model.clusters[source_row]
+            src_norm = (cluster.norm_text or "").strip() or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "src_lang": "he",
+                    "src_text": cluster.representative_he,
+                    "src_norm": src_norm,
+                    "source_group": "terms",
+                }
+            )
+        return items
+
     def on_generate_audio_selected(self):
         """Generate source-audio for selected term rows."""
         items = self._selected_audio_items()
@@ -1033,7 +1059,7 @@ class TermsView(QWidget):
 
     def on_edit_pronunciation_selected(self):
         """Open pronunciation editor for the first selected row."""
-        items = self._selected_audio_items()
+        items = self._selected_pronunciation_items()
         if not items:
             return
         first = items[0]
@@ -1045,6 +1071,16 @@ class TermsView(QWidget):
         )
         if changed:
             self.perform_search()
+
+    def on_pronunciation_bootstrap_selected(self):
+        """Open pronunciation bootstrap dialog with selected rows scope."""
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._selected_pronunciation_items()
+        if not selected_items:
+            show_pronunciation_bootstrap_dialog(parent=self)
+            return
+        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
@@ -1081,6 +1117,9 @@ class TermsView(QWidget):
             edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
             menu.addAction(edit_pron_action)
+            bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self)
+            bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
+            menu.addAction(bootstrap_pron_action)
             menu.addSeparator()
 
         # "Why?" action - show explainability
@@ -1449,6 +1488,7 @@ class TermsView(QWidget):
         self.batch_translate_btn.setEnabled(has_selection)
         self.generate_audio_btn.setEnabled(has_selection)
         self.play_audio_btn.setEnabled(has_selection)
+        self.pronunciation_bootstrap_btn.setEnabled(has_selection)
 
     def on_batch_translate(self):
         """Task 15: Handle batch translate with scope support."""

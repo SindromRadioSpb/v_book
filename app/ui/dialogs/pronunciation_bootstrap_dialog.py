@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -31,16 +32,39 @@ from app.ui.workers import PhonikudHealthCheckWorker, PronunciationBootstrapWork
 class PronunciationBootstrapDialog(QDialog):
     """Premium UI gate for offline pronunciation bootstrap."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, selected_items: Optional[List[Dict[str, str]]] = None):
         super().__init__(parent)
         self.setWindowTitle("Pronunciation Bootstrap (Phonikud)")
         self.setMinimumWidth(760)
 
         self.settings = SettingsService.get_instance()
+        self.selected_items = self._normalize_selected_items(selected_items)
         self._health_worker = None
         self._bootstrap_worker = None
         self._init_ui()
         self._load_settings()
+
+    @staticmethod
+    def _normalize_selected_items(selected_items: Optional[List[Dict[str, str]]]) -> List[Dict[str, str]]:
+        normalized: List[Dict[str, str]] = []
+        for raw in selected_items or []:
+            src_norm = str(raw.get("src_norm") or "").strip()
+            src_text = str(raw.get("src_text") or "").strip()
+            src_lang = str(raw.get("src_lang") or "he").strip()
+            source_group = str(raw.get("source_group") or "user_dictionary").strip().lower()
+            if source_group not in {"lemmas", "terms", "user_dictionary"}:
+                source_group = "user_dictionary"
+            if not src_norm or not src_text:
+                continue
+            normalized.append(
+                {
+                    "src_norm": src_norm,
+                    "src_text": src_text,
+                    "src_lang": src_lang,
+                    "source_group": source_group,
+                }
+            )
+        return normalized
 
     def _init_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -53,6 +77,13 @@ class PronunciationBootstrapDialog(QDialog):
         )
         info.setWordWrap(True)
         root.addWidget(info)
+        if self.selected_items:
+            selected_total = len(self.selected_items)
+            selected_text = QLabel(
+                f"<b>Selection scope:</b> {selected_total:,} row(s) from current table."
+            )
+            selected_text.setWordWrap(True)
+            root.addWidget(selected_text)
 
         model_group = QGroupBox("Phonikud Runtime Gate")
         model_form = QFormLayout(model_group)
@@ -115,6 +146,11 @@ class PronunciationBootstrapDialog(QDialog):
         self.include_lemmas_cb.setChecked(True)
         self.include_terms_cb.setChecked(True)
         self.include_ud_cb.setChecked(True)
+        if self.selected_items:
+            selected_groups = {item.get("source_group") for item in self.selected_items}
+            self.include_lemmas_cb.setChecked("lemmas" in selected_groups)
+            self.include_terms_cb.setChecked("terms" in selected_groups)
+            self.include_ud_cb.setChecked("user_dictionary" in selected_groups)
         source_row.addWidget(self.include_lemmas_cb)
         source_row.addWidget(self.include_terms_cb)
         source_row.addWidget(self.include_ud_cb)
@@ -279,6 +315,14 @@ class PronunciationBootstrapDialog(QDialog):
         if self._bootstrap_worker is not None:
             return
 
+        if not (
+            self.include_lemmas_cb.isChecked()
+            or self.include_terms_cb.isChecked()
+            or self.include_ud_cb.isChecked()
+        ):
+            QMessageBox.warning(self, "Pronunciation Bootstrap", "Select at least one source group.")
+            return
+
         self._save_settings()
         health_status = (self.settings.get_string("pronunciation/phonikud/last_health_status", "") or "").strip()
         if health_status == "fallback":
@@ -321,6 +365,7 @@ class PronunciationBootstrapDialog(QDialog):
             include_lemmas=self.include_lemmas_cb.isChecked(),
             include_terms=self.include_terms_cb.isChecked(),
             include_user_dictionary=self.include_ud_cb.isChecked(),
+            selected_items=self.selected_items,
         )
         self._bootstrap_worker = worker
         worker.progress.connect(progress_dialog.update_progress)
@@ -374,6 +419,6 @@ class PronunciationBootstrapDialog(QDialog):
         QMessageBox.warning(self, "Bootstrap Failed", f"Pronunciation bootstrap failed:\n{error_msg}")
 
 
-def show_pronunciation_bootstrap_dialog(*, parent=None) -> None:
-    dialog = PronunciationBootstrapDialog(parent=parent)
+def show_pronunciation_bootstrap_dialog(*, parent=None, selected_items: Optional[List[Dict[str, str]]] = None) -> None:
+    dialog = PronunciationBootstrapDialog(parent=parent, selected_items=selected_items)
     dialog.exec()
