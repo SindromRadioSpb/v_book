@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import PronunciationEntry
 from app.services.pronunciation_bootstrap_service import PronunciationBootstrapService, PronunciationGenerator
 from app.services.pronunciation_service import PronunciationService
@@ -109,7 +110,45 @@ def test_bootstrap_selected_items_respects_source_group_filters():
 
             rows = session.query(PronunciationEntry).all()
             assert len(rows) == 1
-            assert rows[0].src_norm == "lemma_norm"
+            assert rows[0].src_norm == normalize_for_tm("he", "lemma text", "surface").norm
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_bootstrap_selected_items_uses_surface_norm_for_lemmas_and_terms():
+    temp_dir = _workspace_temp_dir("pron_bootstrap_selected_surface_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
+    try:
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        service = PronunciationBootstrapService(generator=_FakeGenerator())
+
+        with Session(engine) as session:
+            result = service.bootstrap(
+                session,
+                lang="he",
+                chunk_size=10,
+                include_lemmas=True,
+                include_terms=True,
+                include_user_dictionary=False,
+                selected_items=[
+                    {"src_lang": "he", "src_norm": "same_norm", "src_text": "alpha", "source_group": "lemmas"},
+                    {"src_lang": "he", "src_norm": "same_norm", "src_text": "beta", "source_group": "terms"},
+                ],
+            )
+            session.commit()
+
+            assert result.total_candidates == 2
+            assert result.updated == 2
+
+            rows = session.query(PronunciationEntry).all()
+            norms = sorted(row.src_norm for row in rows)
+            assert norms == sorted(
+                [
+                    normalize_for_tm("he", "alpha", "surface").norm,
+                    normalize_for_tm("he", "beta", "surface").norm,
+                ]
+            )
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)

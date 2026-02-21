@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import DictProject, Library, TMEntry
 from app.services.batch_mt_translate_service import (
     BatchMTTranslateService,
@@ -470,4 +471,4 @@ def test_selected_pronunciation_items_prefer_raw_src_norm():
     items = TranslationManagementPanel._get_selected_pronunciation_items(panel)
 
     assert len(items) == 1
-    assert items[0]["src_norm"] == "cluster_raw_norm"
+    assert items[0]["src_norm"] == normalize_for_tm("he", "legacy src", "surface").norm

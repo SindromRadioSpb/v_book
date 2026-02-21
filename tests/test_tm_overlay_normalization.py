@@ -123,9 +123,10 @@ def test_tm_overlay_uses_normalized_hash_and_cluster_raw_norm(monkeypatch):
             service = TranslationAdminService()
             service._apply_study_overlays(session, [entry])
 
+            expected_raw = normalize_for_tm("he", "legacy src", "surface").norm
             assert dummy.captured_payloads is not None
-            assert dummy.captured_payloads[0]["raw_src_norm"] == "cluster_raw_norm"
-            assert entry.raw_src_norm == "cluster_raw_norm"
+            assert dummy.captured_payloads[0]["raw_src_norm"] == expected_raw
+            assert entry.raw_src_norm == expected_raw
             assert entry.in_user_dictionary_count == 1
             assert entry.pronunciation_text == "נִסָּיוֹן"
     finally:

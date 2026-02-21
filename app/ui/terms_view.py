@@ -501,6 +501,8 @@ class TermsView(QWidget):
         payloads = []
         for cluster in clusters:
             src_norm = _cluster_norm(cluster)
+            raw_src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (cluster.norm_text or "").strip()
             payloads.append(
                 {
                     "src_lang": "he",
@@ -508,7 +510,7 @@ class TermsView(QWidget):
                     "kind": "term_cluster",
                     "src_text": cluster.representative_he,
                     "src_norm": src_norm,
-                    "raw_src_norm": (cluster.norm_text or "").strip(),
+                    "raw_src_norm": raw_src_norm,
                 }
             )
 
@@ -922,7 +924,10 @@ class TermsView(QWidget):
         for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             cluster = self.terms_model.clusters[source_row]
-            src_norm = (cluster.norm_text or "").strip() or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
+            src_norm = (src_norm or "").strip() or (cluster.norm_text or "").strip() or normalize_for_tm(
+                "he", cluster.representative_he, "term_cluster"
+            ).norm
             if not src_norm:
                 continue
             items.append(
@@ -930,6 +935,7 @@ class TermsView(QWidget):
                     "src_lang": "he",
                     "src_text": cluster.representative_he,
                     "src_norm": src_norm,
+                    "raw_src_norm": src_norm,
                     "source_group": "terms",
                 }
             )

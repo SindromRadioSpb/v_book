@@ -397,6 +397,8 @@ class DictionaryView(QWidget):
         payloads = []
         for lemma in lemmas:
             src_norm = _lemma_norm(lemma)
+            raw_src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (lemma.norm_text or "").strip()
             payloads.append(
                 {
                     "src_lang": "he",
@@ -404,7 +406,7 @@ class DictionaryView(QWidget):
                     "kind": "lemma",
                     "src_text": lemma.lemma_text,
                     "src_norm": src_norm,
-                    "raw_src_norm": (lemma.norm_text or "").strip(),
+                    "raw_src_norm": raw_src_norm,
                 }
             )
 
@@ -746,7 +748,10 @@ class DictionaryView(QWidget):
         for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             lemma = self.lemma_model.lemmas[source_row]
-            src_norm = (lemma.norm_text or "").strip() or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
+            src_norm = (src_norm or "").strip() or (lemma.norm_text or "").strip() or normalize_for_tm(
+                "he", lemma.lemma_text, "lemma"
+            ).norm
             if not src_norm:
                 continue
             items.append(
@@ -754,6 +759,7 @@ class DictionaryView(QWidget):
                     "src_lang": "he",
                     "src_text": lemma.lemma_text,
                     "src_norm": src_norm,
+                    "raw_src_norm": src_norm,
                     "source_group": "lemmas",
                 }
             )

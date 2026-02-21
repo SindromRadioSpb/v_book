@@ -1306,8 +1306,10 @@ class TranslationManagementPanel(QWidget):
         """Build pronunciation payloads from selected TM rows."""
         items: list[dict] = []
         for entry in self._get_selected_tm_entries():
+            surface_norm = normalize_for_tm(entry.src_lang, entry.src_text, "surface").norm
             src_norm = (
-                (getattr(entry, "raw_src_norm", "") or "").strip()
+                (surface_norm or "").strip()
+                or (getattr(entry, "raw_src_norm", "") or "").strip()
                 or (entry.src_norm or "").strip()
                 or normalize_for_tm(entry.src_lang, entry.src_text, entry.kind).norm
             )

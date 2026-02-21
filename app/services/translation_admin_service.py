@@ -28,6 +28,7 @@ from app.infra.sa_models import (
     UserDictionaryItem,
 )
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
 
@@ -929,13 +930,14 @@ class TranslationAdminService:
 
         resolved: Dict[int, str] = {}
         for entry in entries:
-            raw_norm = ""
+            raw_norm = normalize_for_tm(entry.src_lang, entry.src_text, "surface").norm
+            raw_norm = (raw_norm or "").strip()
             if entry.kind == "lemma" and entry.lemma_id:
-                raw_norm = lemma_norm_by_id.get(int(entry.lemma_id), "")
+                raw_norm = raw_norm or lemma_norm_by_id.get(int(entry.lemma_id), "")
             elif entry.kind == "term_cluster" and entry.cluster_id:
-                raw_norm = cluster_norm_by_id.get(int(entry.cluster_id), "")
+                raw_norm = raw_norm or cluster_norm_by_id.get(int(entry.cluster_id), "")
             elif entry.kind == "ngram" and entry.ngram_id:
-                raw_norm = ngram_norm_by_id.get(int(entry.ngram_id), "")
+                raw_norm = raw_norm or ngram_norm_by_id.get(int(entry.ngram_id), "")
 
             raw_norm = (raw_norm or "").strip()
             if not raw_norm:

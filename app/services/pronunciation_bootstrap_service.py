@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.pronunciation import PhonikudAdapter, PhonikudHealthReport, PhonikudMode
 from app.infra.sa_models import Lemma, TermCluster, UserDictionaryItem
 from app.services.pronunciation_quality_service import PronunciationQualityService
@@ -245,9 +246,39 @@ class PronunciationBootstrapService:
             "user_dictionary": bool(include_user_dictionary),
         }
 
-        def pick(norm_value: Optional[str], text_value: Optional[str], group: str, row_id: int) -> None:
-            norm = (norm_value or "").strip()
+        def _selected_pronunciation_norm(
+            *,
+            item_lang: str,
+            text_value: str,
+            group: str,
+            provided_norm: Optional[str],
+            provided_raw_norm: Optional[str],
+        ) -> str:
+            explicit = (provided_raw_norm or "").strip() or (provided_norm or "").strip()
+            if group in {"lemmas", "terms"} and text_value:
+                surface_norm = normalize_for_tm(item_lang, text_value, "surface").norm
+                surface_norm = (surface_norm or "").strip()
+                if surface_norm:
+                    return surface_norm
+            return explicit
+
+        def pick(
+            *,
+            item_lang: str,
+            norm_value: Optional[str],
+            raw_norm_value: Optional[str],
+            text_value: Optional[str],
+            group: str,
+            row_id: int,
+        ) -> None:
             text = (text_value or "").strip()
+            norm = _selected_pronunciation_norm(
+                item_lang=item_lang,
+                text_value=text,
+                group=group,
+                provided_norm=norm_value,
+                provided_raw_norm=raw_norm_value,
+            )
             if not norm or not text:
                 return
             rank = self._candidate_rank(text, source_priority.get(group, 2), row_id)
@@ -270,10 +301,12 @@ class PronunciationBootstrapService:
             if not include_by_group[group]:
                 continue
             pick(
-                raw.get("src_norm"),
-                raw.get("src_text"),
-                group,
-                idx,
+                item_lang=item_lang or target_lang or "he",
+                norm_value=raw.get("src_norm"),
+                raw_norm_value=raw.get("raw_src_norm"),
+                text_value=raw.get("src_text"),
+                group=group,
+                row_id=idx,
             )
 
         return {src_norm: text for src_norm, (_rank, text) in selected.items()}

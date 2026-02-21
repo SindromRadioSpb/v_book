@@ -334,6 +334,8 @@ class TermCardView(QWidget):
         payloads = []
         for card in cards:
             src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            raw_src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (card.canonical_key or "").strip()
             payloads.append(
                 {
                     "src_lang": "he",
@@ -341,7 +343,7 @@ class TermCardView(QWidget):
                     "kind": "term_cluster",
                     "src_text": card.representative_he,
                     "src_norm": src_norm,
-                    "raw_src_norm": (card.canonical_key or "").strip(),
+                    "raw_src_norm": raw_src_norm,
                 }
             )
         overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
@@ -404,7 +406,10 @@ class TermCardView(QWidget):
             card = self.queue_model.get_card(index.row())
             if not card:
                 continue
-            src_norm = (card.canonical_key or "").strip() or normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
+            src_norm = (src_norm or "").strip() or (card.canonical_key or "").strip() or normalize_for_tm(
+                "he", card.representative_he, "term_cluster"
+            ).norm
             if not src_norm:
                 continue
             items.append(
@@ -412,6 +417,7 @@ class TermCardView(QWidget):
                     "src_lang": "he",
                     "src_text": card.representative_he,
                     "src_norm": src_norm,
+                    "raw_src_norm": src_norm,
                     "source_group": "terms",
                 }
             )
