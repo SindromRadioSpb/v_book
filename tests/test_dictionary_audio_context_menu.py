@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.dictionary_view import DictionaryView
 
 
@@ -129,3 +130,21 @@ def test_dictionary_context_menu_includes_audio_actions(monkeypatch):
     FakeMenu.last.actions[5].triggered.emit()
 
     assert state == {"translate": 1, "generate": 1, "play": 1, "add": 1, "edit_pron": 1, "bootstrap": 1}
+
+
+def test_dictionary_selected_pronunciation_items_use_surface_norm():
+    view = DictionaryView.__new__(DictionaryView)
+    view.lemma_table = FakeTable(selected_count=2)
+    view.proxy_model = FakeProxyModel()
+    view.lemma_model = SimpleNamespace(
+        lemmas=[
+            SimpleNamespace(lemma_id=1, lemma_text="בפלדה", norm_text="פלדה"),
+            SimpleNamespace(lemma_id=2, lemma_text="לפלדה", norm_text="פלדה"),
+        ]
+    )
+
+    items = DictionaryView._selected_pronunciation_items(view)
+
+    assert len(items) == 2
+    assert items[0]["src_norm"] == normalize_for_tm("he", "בפלדה", "surface").norm
+    assert items[1]["src_norm"] == normalize_for_tm("he", "לפלדה", "surface").norm

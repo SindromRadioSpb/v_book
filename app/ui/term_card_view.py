@@ -332,6 +332,7 @@ class TermCardView(QWidget):
         if not cards:
             return
         payloads = []
+        raw_norm_pairs = []
         for card in cards:
             src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
             raw_src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
@@ -346,9 +347,14 @@ class TermCardView(QWidget):
                     "raw_src_norm": raw_src_norm,
                 }
             )
+            if raw_src_norm:
+                raw_norm_pairs.append(("he", raw_src_norm))
         overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+        pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
         for card in cards:
             src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            raw_src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (card.canonical_key or "").strip()
             canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
             overlay = overlay_map.get(canonical_hash) or {}
             card.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
@@ -362,6 +368,13 @@ class TermCardView(QWidget):
             card.pronunciation_source = overlay.get("pronunciation_source")
             card.pronunciation_confidence = overlay.get("pronunciation_confidence")
             card.pronunciation_qc = overlay.get("pronunciation_qc")
+
+            row_pron = pronunciation_map.get(("he", raw_src_norm))
+            if row_pron:
+                card.pronunciation_text = row_pron.get("pronunciation_text")
+                card.pronunciation_source = row_pron.get("pronunciation_source")
+                card.pronunciation_confidence = row_pron.get("pronunciation_confidence")
+                card.pronunciation_qc = row_pron.get("pronunciation_qc")
 
     def on_queue_item_clicked(self, index):
         """Handle click on review queue item."""

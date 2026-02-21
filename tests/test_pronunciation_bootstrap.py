@@ -152,3 +152,38 @@ def test_bootstrap_selected_items_uses_surface_norm_for_lemmas_and_terms():
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_bootstrap_selected_lemma_prefix_forms_do_not_collapse_to_one_candidate():
+    temp_dir = _workspace_temp_dir("pron_bootstrap_selected_prefixes_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
+    try:
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        service = PronunciationBootstrapService(generator=_FakeGenerator())
+        selected = [
+            {"src_lang": "he", "src_norm": "פלדה", "src_text": "בפלדה", "source_group": "lemmas"},
+            {"src_lang": "he", "src_norm": "פלדה", "src_text": "לפלדה", "source_group": "lemmas"},
+            {"src_lang": "he", "src_norm": "פלדה", "src_text": "מפלדה", "source_group": "lemmas"},
+            {"src_lang": "he", "src_norm": "פלדה", "src_text": "הפלדה", "source_group": "lemmas"},
+            {"src_lang": "he", "src_norm": "פלדה", "src_text": "פלדה", "source_group": "lemmas"},
+        ]
+
+        with Session(engine) as session:
+            result = service.bootstrap(
+                session,
+                lang="he",
+                chunk_size=10,
+                include_lemmas=True,
+                include_terms=False,
+                include_user_dictionary=False,
+                selected_items=selected,
+            )
+            session.commit()
+
+            assert result.total_candidates == 5
+            assert result.updated == 5
+            rows = session.query(PronunciationEntry).all()
+            assert len(rows) == 5
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)

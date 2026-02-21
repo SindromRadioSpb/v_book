@@ -988,6 +988,16 @@ class TranslationAdminService:
             logger.warning("Failed to resolve TM study overlays: %s", e)
             return
 
+        pronunciation_pairs = []
+        for entry in entries:
+            raw_src_norm = (entry.raw_src_norm or "").strip()
+            if raw_src_norm:
+                pronunciation_pairs.append((entry.src_lang, raw_src_norm))
+            canonical_norm = (entry.src_norm or "").strip()
+            if canonical_norm:
+                pronunciation_pairs.append((entry.src_lang, canonical_norm))
+        pronunciation_map = user_dict_service._resolve_pronunciation_overlay(session, pronunciation_pairs)
+
         for entry in entries:
             canonical_hash = overlay_hash_by_tm_id.get(int(entry.tm_id))
             if not canonical_hash:
@@ -997,20 +1007,28 @@ class TranslationAdminService:
                     entry.kind,
                     entry.src_norm,
                 )
-            overlay = overlay_map.get(canonical_hash)
-            if not overlay:
-                continue
-            entry.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
-            entry.study_state = overlay.get("study_state")
-            entry.study_due_human = overlay.get("study_due_human")
-            entry.last_grade = overlay.get("last_grade")
-            entry.last_graded_at = overlay.get("last_graded_at")
-            entry.study_tooltip = overlay.get("study_tooltip")
-            entry.audio_status = overlay.get("audio_status")
-            entry.pronunciation_text = overlay.get("pronunciation_text")
-            entry.pronunciation_source = overlay.get("pronunciation_source")
-            entry.pronunciation_confidence = overlay.get("pronunciation_confidence")
-            entry.pronunciation_qc = overlay.get("pronunciation_qc")
+            overlay = overlay_map.get(canonical_hash) or {}
+            if overlay:
+                entry.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
+                entry.study_state = overlay.get("study_state")
+                entry.study_due_human = overlay.get("study_due_human")
+                entry.last_grade = overlay.get("last_grade")
+                entry.last_graded_at = overlay.get("last_graded_at")
+                entry.study_tooltip = overlay.get("study_tooltip")
+                entry.audio_status = overlay.get("audio_status")
+                entry.pronunciation_text = overlay.get("pronunciation_text")
+                entry.pronunciation_source = overlay.get("pronunciation_source")
+                entry.pronunciation_confidence = overlay.get("pronunciation_confidence")
+                entry.pronunciation_qc = overlay.get("pronunciation_qc")
+
+            row_pron = pronunciation_map.get((entry.src_lang, (entry.raw_src_norm or "").strip()))
+            if not row_pron:
+                row_pron = pronunciation_map.get((entry.src_lang, (entry.src_norm or "").strip()))
+            if row_pron:
+                entry.pronunciation_text = row_pron.get("pronunciation_text")
+                entry.pronunciation_source = row_pron.get("pronunciation_source")
+                entry.pronunciation_confidence = row_pron.get("pronunciation_confidence")
+                entry.pronunciation_qc = row_pron.get("pronunciation_qc")
 
     def _history_to_dto(self, history: TMEntryHistory) -> TMHistoryDTO:
         """Convert TMEntryHistory model to DTO."""

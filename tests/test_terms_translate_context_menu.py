@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.terms_view import TermsView
 
 
@@ -169,3 +170,21 @@ def test_terms_context_menu_translate_selected_multiple_rows(monkeypatch):
     assert state["edit_pron_called"] == 1
     FakeMenu.last.actions[5].triggered.emit()
     assert state["bootstrap_called"] == 1
+
+
+def test_terms_selected_pronunciation_items_use_surface_norm():
+    view = TermsView.__new__(TermsView)
+    view.terms_table = FakeTable(selected_count=2)
+    view.proxy_model = FakeProxyModel()
+    view.terms_model = SimpleNamespace(
+        clusters=[
+            SimpleNamespace(cluster_id=1, representative_he="בפלדה", norm_text="פלדה"),
+            SimpleNamespace(cluster_id=2, representative_he="לפלדה", norm_text="פלדה"),
+        ]
+    )
+
+    items = TermsView._selected_pronunciation_items(view)
+
+    assert len(items) == 2
+    assert items[0]["src_norm"] == normalize_for_tm("he", "בפלדה", "surface").norm
+    assert items[1]["src_norm"] == normalize_for_tm("he", "לפלדה", "surface").norm

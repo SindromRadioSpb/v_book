@@ -499,6 +499,7 @@ class TermsView(QWidget):
             return normalized or (cluster_obj.norm_text or "")
 
         payloads = []
+        raw_norm_pairs = []
         for cluster in clusters:
             src_norm = _cluster_norm(cluster)
             raw_src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
@@ -513,16 +514,21 @@ class TermsView(QWidget):
                     "raw_src_norm": raw_src_norm,
                 }
             )
+            if raw_src_norm:
+                raw_norm_pairs.append(("he", raw_src_norm))
 
         try:
             with self.db_service.get_session() as session:
                 overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
         except Exception as e:
             logger.warning("Failed to resolve terms study overlays: %s", e)
             return
 
         for cluster in clusters:
             src_norm = _cluster_norm(cluster)
+            raw_src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (cluster.norm_text or "").strip()
             canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
             overlay = overlay_map.get(canonical_hash)
             if not overlay:
@@ -552,6 +558,13 @@ class TermsView(QWidget):
             cluster.pronunciation_source = overlay.get("pronunciation_source")
             cluster.pronunciation_confidence = overlay.get("pronunciation_confidence")
             cluster.pronunciation_qc = overlay.get("pronunciation_qc")
+
+            row_pron = pronunciation_map.get(("he", raw_src_norm))
+            if row_pron:
+                cluster.pronunciation_text = row_pron.get("pronunciation_text")
+                cluster.pronunciation_source = row_pron.get("pronunciation_source")
+                cluster.pronunciation_confidence = row_pron.get("pronunciation_confidence")
+                cluster.pronunciation_qc = row_pron.get("pronunciation_qc")
 
     def on_search_error(self, error_msg: str):
         """Handle search error."""

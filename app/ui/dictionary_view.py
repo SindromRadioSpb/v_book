@@ -395,6 +395,7 @@ class DictionaryView(QWidget):
             return normalized or (lemma_obj.norm_text or "")
 
         payloads = []
+        raw_norm_pairs = []
         for lemma in lemmas:
             src_norm = _lemma_norm(lemma)
             raw_src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
@@ -409,16 +410,21 @@ class DictionaryView(QWidget):
                     "raw_src_norm": raw_src_norm,
                 }
             )
+            if raw_src_norm:
+                raw_norm_pairs.append(("he", raw_src_norm))
 
         try:
             with self.db_service.get_session() as session:
                 overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
+                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
         except Exception as e:
             logger.warning("Failed to resolve dictionary study overlays: %s", e)
             return
 
         for lemma in lemmas:
             src_norm = _lemma_norm(lemma)
+            raw_src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
+            raw_src_norm = (raw_src_norm or "").strip() or (lemma.norm_text or "").strip()
             canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "lemma", src_norm)
             overlay = overlay_map.get(canonical_hash)
             if not overlay:
@@ -448,6 +454,13 @@ class DictionaryView(QWidget):
             lemma.pronunciation_source = overlay.get("pronunciation_source")
             lemma.pronunciation_confidence = overlay.get("pronunciation_confidence")
             lemma.pronunciation_qc = overlay.get("pronunciation_qc")
+
+            row_pron = pronunciation_map.get(("he", raw_src_norm))
+            if row_pron:
+                lemma.pronunciation_text = row_pron.get("pronunciation_text")
+                lemma.pronunciation_source = row_pron.get("pronunciation_source")
+                lemma.pronunciation_confidence = row_pron.get("pronunciation_confidence")
+                lemma.pronunciation_qc = row_pron.get("pronunciation_qc")
 
     def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""

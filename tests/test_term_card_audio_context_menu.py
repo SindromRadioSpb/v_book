@@ -1,5 +1,6 @@
 """Tests for Term Card queue context menu audio actions."""
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.term_card_view import TermCardView
 
 
@@ -107,3 +108,25 @@ def test_term_card_context_menu_includes_audio_actions(monkeypatch):
     FakeMenu.last.actions[4].triggered.emit()
 
     assert state == {"generate": 1, "play": 1, "add": 1, "edit_pron": 1, "bootstrap": 1}
+
+
+def test_term_card_selected_pronunciation_items_use_surface_norm():
+    class _QueueModel:
+        def __init__(self):
+            self._cards = [
+                type("Card", (), {"cluster_id": 1, "representative_he": "בפלדה", "canonical_key": "פלדה"})(),
+                type("Card", (), {"cluster_id": 2, "representative_he": "לפלדה", "canonical_key": "פלדה"})(),
+            ]
+
+        def get_card(self, row):
+            return self._cards[row]
+
+    view = TermCardView.__new__(TermCardView)
+    view.queue_table = FakeTable(selected_count=2)
+    view.queue_model = _QueueModel()
+
+    items = TermCardView._selected_pronunciation_items(view)
+
+    assert len(items) == 2
+    assert items[0]["src_norm"] == normalize_for_tm("he", "בפלדה", "surface").norm
+    assert items[1]["src_norm"] == normalize_for_tm("he", "לפלדה", "surface").norm

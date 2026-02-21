@@ -1,9 +1,9 @@
-"""Tests for TermsView study overlay canonical normalization."""
+"""Tests for DictionaryView pronunciation overlay normalization behavior."""
 
 from types import SimpleNamespace
 
 from app.domain.normalization.normalizer import normalize_for_tm
-from app.ui.terms_view import TermsView
+from app.ui.dictionary_view import DictionaryView
 
 
 class _SessionCtx:
@@ -17,7 +17,7 @@ class _SessionCtx:
 class _DummyUserDictService:
     def __init__(self):
         self.captured_payloads = None
-        self.pron_map = {}
+        self._pron_map = {}
 
     @staticmethod
     def build_canonical_hash(src_lang: str, dst_lang: str, kind: str, src_norm: str) -> str:
@@ -25,8 +25,7 @@ class _DummyUserDictService:
 
     def resolve_cross_view_status(self, _session, payloads):
         self.captured_payloads = payloads
-        src_norm = payloads[0]["src_norm"]
-        canonical = self.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+        canonical = self.build_canonical_hash("he", "ru", "lemma", payloads[0]["src_norm"])
         return {
             canonical: {
                 "in_user_dictionary_count": 1,
@@ -35,52 +34,32 @@ class _DummyUserDictService:
                 "study_due_human": "n/a",
                 "translation_tier": "missing",
                 "audio_status": "missing",
+                "pronunciation_text": "פלדה",
+                "pronunciation_source": "auto_phonikud",
+                "pronunciation_confidence": 0.8,
+                "pronunciation_qc": "ok",
             }
         }
 
     def _resolve_pronunciation_overlay(self, _session, pairs):
-        return {pair: self.pron_map.get(pair, {}) for pair in pairs}
+        return {pair: self._pron_map.get(pair, {}) for pair in pairs}
 
 
-def test_terms_overlay_uses_normalized_text_instead_of_legacy_norm():
-    view = TermsView.__new__(TermsView)
-    view.db_service = SimpleNamespace(get_session=lambda: _SessionCtx())
-    view.user_dict_service = _DummyUserDictService()
-
-    cluster = SimpleNamespace(
-        representative_he="legacy src",
-        norm_text="legacy_wrong_norm",
-        in_user_dictionary_count=0,
-        study_tooltip=None,
-        study_state=None,
-        study_due_human=None,
-        translation_tier=None,
-        audio_status=None,
-    )
-
-    TermsView._apply_study_overlays(view, [cluster])
-
-    expected_norm = normalize_for_tm("he", "legacy src", "term_cluster").norm
-    assert view.user_dict_service.captured_payloads[0]["src_norm"] == expected_norm
-    assert cluster.in_user_dictionary_count == 1
-    assert cluster.study_tooltip == "tooltip"
-
-
-def test_terms_overlay_uses_row_specific_pronunciation_by_surface_norm():
-    view = TermsView.__new__(TermsView)
+def test_dictionary_overlay_uses_row_specific_pronunciation_by_surface_norm():
+    view = DictionaryView.__new__(DictionaryView)
     view.db_service = SimpleNamespace(get_session=lambda: _SessionCtx())
     view.user_dict_service = _DummyUserDictService()
 
     first_surface = normalize_for_tm("he", "בפלדה", "surface").norm
     second_surface = normalize_for_tm("he", "לפלדה", "surface").norm
-    view.user_dict_service.pron_map = {
+    view.user_dict_service._pron_map = {
         ("he", first_surface): {"pronunciation_text": "בַּפְלָדָה", "pronunciation_source": "manual"},
         ("he", second_surface): {"pronunciation_text": "לַפְלָדָה", "pronunciation_source": "manual"},
     }
 
-    clusters = [
+    lemmas = [
         SimpleNamespace(
-            representative_he="בפלדה",
+            lemma_text="בפלדה",
             norm_text="פלדה",
             in_user_dictionary_count=0,
             study_tooltip=None,
@@ -96,7 +75,7 @@ def test_terms_overlay_uses_row_specific_pronunciation_by_surface_norm():
             pronunciation_qc=None,
         ),
         SimpleNamespace(
-            representative_he="לפלדה",
+            lemma_text="לפלדה",
             norm_text="פלדה",
             in_user_dictionary_count=0,
             study_tooltip=None,
@@ -113,7 +92,7 @@ def test_terms_overlay_uses_row_specific_pronunciation_by_surface_norm():
         ),
     ]
 
-    TermsView._apply_study_overlays(view, clusters)
+    DictionaryView._apply_study_overlays(view, lemmas)
 
-    assert clusters[0].pronunciation_text == "בַּפְלָדָה"
-    assert clusters[1].pronunciation_text == "לַפְלָדָה"
+    assert lemmas[0].pronunciation_text == "בַּפְלָדָה"
+    assert lemmas[1].pronunciation_text == "לַפְלָדָה"

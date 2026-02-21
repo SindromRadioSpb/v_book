@@ -17,6 +17,7 @@ from app.services.translation_admin_service import TranslationAdminService
 class _DummyUserDictService:
     def __init__(self):
         self.captured_payloads = None
+        self.pron_map = {}
 
     @staticmethod
     def _canonical_src_norm(src_lang: str, src_text: str, kind: str, fallback_norm: str = "") -> str:
@@ -58,6 +59,9 @@ class _DummyUserDictService:
                 "pronunciation_qc": "ok",
             }
         }
+
+    def _resolve_pronunciation_overlay(self, _session, pairs):
+        return {pair: self.pron_map.get(pair, {}) for pair in pairs}
 
 
 def test_tm_overlay_uses_normalized_hash_and_cluster_raw_norm(monkeypatch):
@@ -129,6 +133,116 @@ def test_tm_overlay_uses_normalized_hash_and_cluster_raw_norm(monkeypatch):
             assert entry.raw_src_norm == expected_raw
             assert entry.in_user_dictionary_count == 1
             assert entry.pronunciation_text == "נִסָּיוֹן"
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)
+
+
+def test_tm_overlay_applies_row_specific_pronunciation_for_duplicate_canonical_hash(monkeypatch):
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as fh:
+        db_path = fh.name
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    try:
+        Library.__table__.create(engine, checkfirst=True)
+        DictProject.__table__.create(engine, checkfirst=True)
+        TermCluster.__table__.create(engine, checkfirst=True)
+
+        with Session(engine) as session:
+            library = Library(name="Overlay Lib 2")
+            session.add(library)
+            session.flush()
+            project = DictProject(library_id=library.library_id, name="Overlay P2")
+            session.add(project)
+            session.flush()
+
+            cluster_a = TermCluster(
+                project_id=project.project_id,
+                canonical_key="cluster_a",
+                representative_he="prefix_a",
+                norm_text="shared_norm",
+            )
+            cluster_b = TermCluster(
+                project_id=project.project_id,
+                canonical_key="cluster_b",
+                representative_he="prefix_b",
+                norm_text="shared_norm",
+            )
+            session.add_all([cluster_a, cluster_b])
+            session.flush()
+
+            entry_a = SimpleNamespace(
+                tm_id=21,
+                project_id=project.project_id,
+                kind="term_cluster",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="prefix_a",
+                src_norm="shared_norm",
+                translation="",
+                translation_norm=None,
+                pos=None,
+                domain=None,
+                notes=None,
+                status="draft",
+                confidence=None,
+                origin="import",
+                source_ref=None,
+                created_at="",
+                updated_at="",
+                approved_at=None,
+                approved_by=None,
+                is_noise=0,
+                noise_reason=None,
+                norm_text=None,
+                lemma_id=None,
+                cluster_id=cluster_a.cluster_id,
+                ngram_id=None,
+                tm_global_id=None,
+            )
+            entry_b = SimpleNamespace(
+                tm_id=22,
+                project_id=project.project_id,
+                kind="term_cluster",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="prefix_b",
+                src_norm="shared_norm",
+                translation="",
+                translation_norm=None,
+                pos=None,
+                domain=None,
+                notes=None,
+                status="draft",
+                confidence=None,
+                origin="import",
+                source_ref=None,
+                created_at="",
+                updated_at="",
+                approved_at=None,
+                approved_by=None,
+                is_noise=0,
+                noise_reason=None,
+                norm_text=None,
+                lemma_id=None,
+                cluster_id=cluster_b.cluster_id,
+                ngram_id=None,
+                tm_global_id=None,
+            )
+
+            dummy = _DummyUserDictService()
+            raw_a = normalize_for_tm("he", "prefix_a", "surface").norm
+            raw_b = normalize_for_tm("he", "prefix_b", "surface").norm
+            dummy.pron_map = {
+                ("he", raw_a): {"pronunciation_text": "pron_a"},
+                ("he", raw_b): {"pronunciation_text": "pron_b"},
+            }
+            monkeypatch.setattr("app.services.translation_admin_service.UserDictionaryService", lambda: dummy)
+
+            TranslationAdminService()._apply_study_overlays(session, [entry_a, entry_b])
+
+            assert entry_a.pronunciation_text == "pron_a"
+            assert entry_b.pronunciation_text == "pron_b"
     finally:
         engine.dispose()
         Path(db_path).unlink(missing_ok=True)
