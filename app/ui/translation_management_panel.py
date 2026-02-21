@@ -1306,9 +1306,11 @@ class TranslationManagementPanel(QWidget):
         """Build pronunciation payloads from selected TM rows."""
         items: list[dict] = []
         for entry in self._get_selected_tm_entries():
-            src_norm = (entry.src_norm or "").strip() or normalize_for_tm(
-                entry.src_lang, entry.src_text, entry.kind
-            ).norm
+            src_norm = (
+                (getattr(entry, "raw_src_norm", "") or "").strip()
+                or (entry.src_norm or "").strip()
+                or normalize_for_tm(entry.src_lang, entry.src_text, entry.kind).norm
+            )
             if not src_norm:
                 continue
             if entry.kind == "lemma":

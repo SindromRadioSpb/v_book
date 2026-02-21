@@ -23,6 +23,7 @@ from app.infra.sa_models import (
     TMEntryHistory,
     Lemma,
     TermCluster,
+    Ngram,
     StudyProgress,
     UserDictionaryItem,
 )
@@ -891,7 +892,58 @@ class TranslationAdminService:
             cluster_id=entry.cluster_id,
             ngram_id=entry.ngram_id,
             tm_global_id=entry.tm_global_id,  # PATCH-19-03
+            raw_src_norm=None,
         )
+
+    @staticmethod
+    def _resolve_tm_raw_norms(session: Session, entries: List[TMEntryDTO]) -> Dict[int, str]:
+        """Resolve legacy/raw source norms from linked lexical entities."""
+        if not entries:
+            return {}
+
+        lemma_ids = sorted({int(entry.lemma_id) for entry in entries if entry.lemma_id})
+        cluster_ids = sorted({int(entry.cluster_id) for entry in entries if entry.cluster_id})
+        ngram_ids = sorted({int(entry.ngram_id) for entry in entries if entry.ngram_id})
+
+        lemma_norm_by_id: Dict[int, str] = {}
+        cluster_norm_by_id: Dict[int, str] = {}
+        ngram_norm_by_id: Dict[int, str] = {}
+
+        if lemma_ids:
+            for lemma_id, norm_text in session.execute(
+                select(Lemma.lemma_id, Lemma.norm_text).where(Lemma.lemma_id.in_(lemma_ids))
+            ).all():
+                lemma_norm_by_id[int(lemma_id)] = (norm_text or "").strip()
+
+        if cluster_ids:
+            for cluster_id, norm_text in session.execute(
+                select(TermCluster.cluster_id, TermCluster.norm_text).where(TermCluster.cluster_id.in_(cluster_ids))
+            ).all():
+                cluster_norm_by_id[int(cluster_id)] = (norm_text or "").strip()
+
+        if ngram_ids:
+            for ngram_id, he_canonical in session.execute(
+                select(Ngram.ngram_id, Ngram.he_canonical).where(Ngram.ngram_id.in_(ngram_ids))
+            ).all():
+                ngram_norm_by_id[int(ngram_id)] = (he_canonical or "").strip()
+
+        resolved: Dict[int, str] = {}
+        for entry in entries:
+            raw_norm = ""
+            if entry.kind == "lemma" and entry.lemma_id:
+                raw_norm = lemma_norm_by_id.get(int(entry.lemma_id), "")
+            elif entry.kind == "term_cluster" and entry.cluster_id:
+                raw_norm = cluster_norm_by_id.get(int(entry.cluster_id), "")
+            elif entry.kind == "ngram" and entry.ngram_id:
+                raw_norm = ngram_norm_by_id.get(int(entry.ngram_id), "")
+
+            raw_norm = (raw_norm or "").strip()
+            if not raw_norm:
+                raw_norm = (entry.norm_text or "").strip()
+            if not raw_norm:
+                raw_norm = (entry.src_norm or "").strip()
+            resolved[int(entry.tm_id)] = raw_norm
+        return resolved
 
     def _apply_study_overlays(self, session: Session, entries: List[TMEntryDTO]) -> None:
         """Attach non-intrusive study tooltip metadata for TM panel rows."""
@@ -899,8 +951,24 @@ class TranslationAdminService:
             return
 
         user_dict_service = UserDictionaryService()
+        raw_norms_by_tm_id = self._resolve_tm_raw_norms(session, entries)
         payloads = []
+        overlay_hash_by_tm_id: Dict[int, str] = {}
         for entry in entries:
+            raw_src_norm = (raw_norms_by_tm_id.get(int(entry.tm_id)) or "").strip()
+            canonical_norm = user_dict_service._canonical_src_norm(
+                src_lang=entry.src_lang,
+                src_text=entry.src_text,
+                kind=entry.kind,
+                fallback_norm=(entry.src_norm or "").strip(),
+            )
+            overlay_hash_by_tm_id[int(entry.tm_id)] = user_dict_service.build_canonical_hash(
+                entry.src_lang,
+                entry.tgt_lang,
+                entry.kind,
+                canonical_norm,
+            )
+            entry.raw_src_norm = raw_src_norm
             payloads.append(
                 {
                     "src_lang": entry.src_lang,
@@ -908,6 +976,7 @@ class TranslationAdminService:
                     "kind": entry.kind,
                     "src_text": entry.src_text,
                     "src_norm": entry.src_norm,
+                    "raw_src_norm": raw_src_norm,
                 }
             )
 
@@ -918,12 +987,14 @@ class TranslationAdminService:
             return
 
         for entry in entries:
-            canonical_hash = user_dict_service.build_canonical_hash(
-                entry.src_lang,
-                entry.tgt_lang,
-                entry.kind,
-                entry.src_norm,
-            )
+            canonical_hash = overlay_hash_by_tm_id.get(int(entry.tm_id))
+            if not canonical_hash:
+                canonical_hash = user_dict_service.build_canonical_hash(
+                    entry.src_lang,
+                    entry.tgt_lang,
+                    entry.kind,
+                    entry.src_norm,
+                )
             overlay = overlay_map.get(canonical_hash)
             if not overlay:
                 continue

@@ -210,6 +210,7 @@ class TMEntryDTO:
     pronunciation_source: Optional[str] = None
     pronunciation_confidence: Optional[float] = None
     pronunciation_qc: Optional[str] = None
+    raw_src_norm: Optional[str] = None
 
 
 @dataclass

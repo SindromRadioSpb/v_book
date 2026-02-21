@@ -452,3 +452,22 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
     assert state["play_called"] == 1
     assert state["edit_pron_called"] == 1
     assert state["bootstrap_called"] == 1
+
+
+def test_selected_pronunciation_items_prefer_raw_src_norm():
+    panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
+    panel._get_selected_tm_entries = lambda: [
+        SimpleNamespace(
+            tm_id=7,
+            src_lang="he",
+            src_text="legacy src",
+            src_norm="legacy_wrong_norm",
+            raw_src_norm="cluster_raw_norm",
+            kind="term_cluster",
+        )
+    ]
+
+    items = TranslationManagementPanel._get_selected_pronunciation_items(panel)
+
+    assert len(items) == 1
+    assert items[0]["src_norm"] == "cluster_raw_norm"
