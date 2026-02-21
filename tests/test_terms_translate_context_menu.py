@@ -96,12 +96,20 @@ def _build_terms_view(selected_count: int):
     view.set_clusters_noise_status_bulk = lambda _is_noise: None
     view.set_cluster_noise_status = lambda _row, _is_noise: None
 
-    state = {"translate_called": 0, "generate_called": 0, "play_called": 0, "add_called": 0, "edit_pron_called": 0}
+    state = {
+        "translate_called": 0,
+        "generate_called": 0,
+        "play_called": 0,
+        "add_called": 0,
+        "edit_pron_called": 0,
+        "bootstrap_called": 0,
+    }
     view.on_batch_translate = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
     view.on_generate_audio_selected = lambda: state.__setitem__("generate_called", state["generate_called"] + 1)
     view.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
     view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add_called", state["add_called"] + 1)
     view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
     return view, state
 
 
@@ -118,6 +126,7 @@ def test_terms_context_menu_translate_selected_single_row(monkeypatch):
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (1 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (1 rows)..."
     assert FakeMenu.last.actions[4].text == "Mispronounced -> Add Pronunciation..."
+    assert FakeMenu.last.actions[5].text == "Pronunciation Bootstrap Selected (1 rows)..."
 
     FakeMenu.last.actions[0].triggered.emit()
     assert state["translate_called"] == 1
@@ -129,6 +138,8 @@ def test_terms_context_menu_translate_selected_single_row(monkeypatch):
     assert state["add_called"] == 1
     FakeMenu.last.actions[4].triggered.emit()
     assert state["edit_pron_called"] == 1
+    FakeMenu.last.actions[5].triggered.emit()
+    assert state["bootstrap_called"] == 1
 
 
 def test_terms_context_menu_translate_selected_multiple_rows(monkeypatch):
@@ -144,6 +155,7 @@ def test_terms_context_menu_translate_selected_multiple_rows(monkeypatch):
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (4 rows)"
     assert FakeMenu.last.actions[3].text == "Add Selected to User Dictionary (4 rows)..."
     assert FakeMenu.last.actions[4].text == "Mispronounced -> Add Pronunciation..."
+    assert FakeMenu.last.actions[5].text == "Pronunciation Bootstrap Selected (4 rows)..."
 
     FakeMenu.last.actions[0].triggered.emit()
     assert state["translate_called"] == 1
@@ -155,3 +167,5 @@ def test_terms_context_menu_translate_selected_multiple_rows(monkeypatch):
     assert state["add_called"] == 1
     FakeMenu.last.actions[4].triggered.emit()
     assert state["edit_pron_called"] == 1
+    FakeMenu.last.actions[5].triggered.emit()
+    assert state["bootstrap_called"] == 1

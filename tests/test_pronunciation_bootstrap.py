@@ -80,3 +80,36 @@ def test_bootstrap_does_not_override_manual(monkeypatch):
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_bootstrap_selected_items_respects_source_group_filters():
+    temp_dir = _workspace_temp_dir("pron_bootstrap_selected_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
+    try:
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        service = PronunciationBootstrapService(generator=_FakeGenerator())
+
+        with Session(engine) as session:
+            result = service.bootstrap(
+                session,
+                lang="he",
+                chunk_size=10,
+                include_lemmas=True,
+                include_terms=False,
+                include_user_dictionary=False,
+                selected_items=[
+                    {"src_lang": "he", "src_norm": "lemma_norm", "src_text": "lemma text", "source_group": "lemmas"},
+                    {"src_lang": "he", "src_norm": "term_norm", "src_text": "term text", "source_group": "terms"},
+                ],
+            )
+            session.commit()
+
+            assert result.total_candidates == 1
+            assert result.updated == 1
+
+            rows = session.query(PronunciationEntry).all()
+            assert len(rows) == 1
+            assert rows[0].src_norm == "lemma_norm"
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)

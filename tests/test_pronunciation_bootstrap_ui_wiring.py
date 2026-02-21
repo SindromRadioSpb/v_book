@@ -55,3 +55,29 @@ def test_dialog_sanitizes_model_path_before_persist(qtbot):
 
     assert dialog.model_path_edit.text() == "J:/Models/phonikud/phonikud-1.0.int8"
     assert settings.get_string("pronunciation/phonikud/model_path", "") == "J:/Models/phonikud/phonikud-1.0.int8"
+
+
+def test_dialog_accepts_selected_items_scope(qtbot):
+    dialog = PronunciationBootstrapDialog(
+        selected_items=[
+            {
+                "src_lang": "he",
+                "src_text": "שלום",
+                "src_norm": "שלום",
+                "source_group": "lemmas",
+            },
+            {
+                "src_lang": "he",
+                "src_text": "מישור משופע",
+                "src_norm": "מישור_משופע",
+                "source_group": "terms",
+            },
+        ]
+    )
+    qtbot.addWidget(dialog)
+    assert len(dialog.selected_items) == 2
+    assert dialog.selected_items[0]["source_group"] == "lemmas"
+    assert dialog.selected_items[1]["source_group"] == "terms"
+    assert dialog.include_lemmas_cb.isChecked() is True
+    assert dialog.include_terms_cb.isChecked() is True
+    assert dialog.include_ud_cb.isChecked() is False

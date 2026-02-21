@@ -739,6 +739,44 @@ def test_resolve_cross_view_status_includes_failed_audio_for_non_ud_rows(user_di
         assert overlay[canonical_hash]["study_tooltip"] is None
 
 
+def test_resolve_cross_view_status_pronunciation_falls_back_to_raw_norm(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        src_text = "legacy pronunciation term"
+        canonical_norm = normalize_for_tm("he", src_text, "term_cluster").norm
+        legacy_norm = "legacy_pron_norm"
+        canonical_hash = service.build_canonical_hash("he", "ru", "term_cluster", canonical_norm)
+
+        session.add(
+            PronunciationEntry(
+                lang="he",
+                src_norm=legacy_norm,
+                niqqud_text="term nikud",
+                source="auto_phonikud",
+                is_override=0,
+                notes="auto:phonikud:real_inference",
+            )
+        )
+        session.commit()
+
+        overlay = service.resolve_cross_view_status(
+            session,
+            rows=[
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": src_text,
+                    "src_norm": canonical_norm,
+                    "raw_src_norm": legacy_norm,
+                }
+            ],
+        )
+
+        assert overlay[canonical_hash]["pronunciation_text"] == "term nikud"
+        assert overlay[canonical_hash]["pronunciation_source"] == "auto_phonikud"
+
+
 def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
     service = UserDictionaryService()
     with Session(user_dict_engine) as session:

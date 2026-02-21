@@ -82,6 +82,7 @@ def _build_view(selected_count: int):
         "audio_called": 0,
         "play_called": 0,
         "edit_pron_called": 0,
+        "bootstrap_called": 0,
         "noise_flags": [],
         "suspended_flags": [],
         "due_called": 0,
@@ -90,6 +91,7 @@ def _build_view(selected_count: int):
     view.on_generate_audio_selected = lambda: state.__setitem__("audio_called", state["audio_called"] + 1)
     view.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
     view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
     view.set_selected_noise_status = lambda flag: state["noise_flags"].append(flag)
     view.set_selected_suspension = lambda flag: state["suspended_flags"].append(flag)
     view.set_selected_due_now = lambda: state.__setitem__("due_called", state["due_called"] + 1)
@@ -104,16 +106,17 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     UserDictionariesView.on_context_menu(view, pos=(0, 0))
 
     assert FakeMenu.last is not None
-    assert len(FakeMenu.last.actions) == 9
+    assert len(FakeMenu.last.actions) == 10
     assert FakeMenu.last.actions[0].text == "Translate Selected (3 rows)..."
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (3 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (3 rows)"
     assert FakeMenu.last.actions[3].text == "Mispronounced -> Add Pronunciation..."
-    assert FakeMenu.last.actions[4].text == "Mark Selected as Noise (3 rows)"
-    assert FakeMenu.last.actions[5].text == "Mark Selected as Valid (3 rows)"
-    assert FakeMenu.last.actions[6].text == "Mark Selected as Due now (3 rows)"
-    assert FakeMenu.last.actions[7].text == "Suspend Selected (3 rows)"
-    assert FakeMenu.last.actions[8].text == "Resume Selected (3 rows)"
+    assert FakeMenu.last.actions[4].text == "Pronunciation Bootstrap Selected (3 rows)..."
+    assert FakeMenu.last.actions[5].text == "Mark Selected as Noise (3 rows)"
+    assert FakeMenu.last.actions[6].text == "Mark Selected as Valid (3 rows)"
+    assert FakeMenu.last.actions[7].text == "Mark Selected as Due now (3 rows)"
+    assert FakeMenu.last.actions[8].text == "Suspend Selected (3 rows)"
+    assert FakeMenu.last.actions[9].text == "Resume Selected (3 rows)"
 
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
@@ -124,11 +127,13 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     FakeMenu.last.actions[6].triggered.emit()
     FakeMenu.last.actions[7].triggered.emit()
     FakeMenu.last.actions[8].triggered.emit()
+    FakeMenu.last.actions[9].triggered.emit()
 
     assert state["translate_called"] == 1
     assert state["audio_called"] == 1
     assert state["play_called"] == 1
     assert state["edit_pron_called"] == 1
+    assert state["bootstrap_called"] == 1
     assert state["noise_flags"] == [True, False]
     assert state["due_called"] == 1
     assert state["suspended_flags"] == [True, False]
