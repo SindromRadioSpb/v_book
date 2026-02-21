@@ -777,6 +777,109 @@ def test_resolve_cross_view_status_pronunciation_falls_back_to_raw_norm(user_dic
         assert overlay[canonical_hash]["pronunciation_source"] == "auto_phonikud"
 
 
+def test_resolve_cross_view_status_derives_raw_norm_from_source_text(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        src_text = "\u05d4\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df"
+        canonical_norm = normalize_for_tm("he", src_text, "term_cluster").norm
+        surface_norm = normalize_for_tm("he", src_text, "surface").norm
+        assert canonical_norm != surface_norm
+
+        canonical_hash = service.build_canonical_hash("he", "ru", "term_cluster", canonical_norm)
+        session.add(
+            PronunciationEntry(
+                lang="he",
+                src_norm=surface_norm,
+                niqqud_text="surface nikud",
+                source="manual",
+                is_override=1,
+                notes="manual",
+            )
+        )
+        session.commit()
+
+        overlay = service.resolve_cross_view_status(
+            session,
+            rows=[
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": src_text,
+                    "src_norm": canonical_norm,
+                }
+            ],
+        )
+
+        assert overlay[canonical_hash]["pronunciation_text"] == "surface nikud"
+        assert overlay[canonical_hash]["pronunciation_source"] == "manual"
+
+
+def test_query_items_pronunciation_prefers_surface_norm(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Pron Surface")
+        src_text = "\u05d4\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df"
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "term_cluster",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": src_text,
+                    "src_norm": "legacy_term_norm",
+                }
+            ],
+            include_noise=True,
+        )
+        session.flush()
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+        ).scalar_one()
+        canonical_norm = (item.src_norm or "").strip()
+        surface_norm = normalize_for_tm("he", src_text, "surface").norm
+        assert canonical_norm != surface_norm
+
+        session.add_all(
+            [
+                PronunciationEntry(
+                    lang="he",
+                    src_norm=canonical_norm,
+                    niqqud_text="canonical nikud",
+                    source="auto_phonikud",
+                    is_override=0,
+                    notes="auto:phonikud",
+                ),
+                PronunciationEntry(
+                    lang="he",
+                    src_norm=surface_norm,
+                    niqqud_text="surface nikud",
+                    source="manual",
+                    is_override=1,
+                    notes="manual",
+                ),
+            ]
+        )
+        session.commit()
+
+        rows, total = service.query_items(
+            session,
+            dictionary_id=dictionary_id,
+            filters={},
+            limit=20,
+            offset=0,
+            sort_column="updated_at",
+            sort_direction="desc",
+        )
+
+        assert total == 1
+        assert len(rows) == 1
+        assert rows[0].pronunciation_text == "surface nikud"
+        assert rows[0].pronunciation_source == "manual"
+
+
 def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
     service = UserDictionaryService()
     with Session(user_dict_engine) as session:

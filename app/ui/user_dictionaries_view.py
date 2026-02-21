@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
 from app.services.db_service import DBService
@@ -946,10 +947,14 @@ class UserDictionariesView(QWidget):
             item = self.items_model.get_item(selected_rows[0].row())
         if not item:
             return
+        src_norm = normalize_for_tm(item.src_lang, item.src_text, "surface").norm
+        src_norm = (src_norm or "").strip() or (item.src_norm or "").strip()
+        if not src_norm:
+            return
         changed = show_edit_pronunciation_dialog(
             parent=self,
             src_lang=item.src_lang,
-            src_norm=item.src_norm,
+            src_norm=src_norm,
             src_text=item.src_text,
         )
         if changed:
@@ -963,7 +968,8 @@ class UserDictionariesView(QWidget):
             item = self.items_model.get_item(index.row())
             if not item:
                 continue
-            src_norm = (item.src_norm or "").strip()
+            src_norm = normalize_for_tm(item.src_lang, item.src_text, "surface").norm
+            src_norm = (src_norm or "").strip() or (item.src_norm or "").strip()
             if not src_norm:
                 continue
             if item.kind == "lemma":
@@ -977,6 +983,7 @@ class UserDictionariesView(QWidget):
                     "src_lang": item.src_lang,
                     "src_text": item.src_text,
                     "src_norm": src_norm,
+                    "raw_src_norm": src_norm,
                     "source_group": source_group,
                 }
             )

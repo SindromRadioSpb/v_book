@@ -124,9 +124,17 @@ class PronunciationBootstrapService:
         """Collect deterministic `(src_norm -> preferred source_text)` map."""
         selected: Dict[str, Tuple[Tuple[int, int, int, int, str], str]] = {}
 
-        def pick(norm_value: Optional[str], text_value: Optional[str], source_priority: int, row_id: int) -> None:
-            norm = (norm_value or "").strip()
+        def pick(
+            norm_value: Optional[str],
+            text_value: Optional[str],
+            source_priority: int,
+            row_id: int,
+            *,
+            item_lang: str,
+        ) -> None:
             text = (text_value or "").strip()
+            norm = normalize_for_tm(item_lang, text, "surface").norm
+            norm = (norm or "").strip() or (norm_value or "").strip()
             if not norm or not text:
                 return
             rank = self._candidate_rank(text, source_priority, row_id)
@@ -143,7 +151,7 @@ class PronunciationBootstrapService:
                     .order_by(asc(Lemma.norm_text), asc(Lemma.lemma_id))
                 ).all()
                 for lemma_id, norm_text, lemma_text in lemma_rows:
-                    pick(norm_text, lemma_text, 0, int(lemma_id or 0))
+                    pick(norm_text, lemma_text, 0, int(lemma_id or 0), item_lang=lang)
             except Exception as exc:
                 logger.debug("collect_source_candidates lemmas skipped: %s", exc)
 
@@ -156,7 +164,7 @@ class PronunciationBootstrapService:
                     .order_by(asc(TermCluster.norm_text), asc(TermCluster.cluster_id))
                 ).all()
                 for cluster_id, norm_text, representative_he in term_rows:
-                    pick(norm_text, representative_he, 1, int(cluster_id or 0))
+                    pick(norm_text, representative_he, 1, int(cluster_id or 0), item_lang=lang)
             except Exception as exc:
                 logger.debug("collect_source_candidates terms skipped: %s", exc)
 
@@ -170,7 +178,7 @@ class PronunciationBootstrapService:
                     .order_by(asc(UserDictionaryItem.src_norm), asc(UserDictionaryItem.item_id))
                 ).all()
                 for item_id, src_norm, src_text in ud_rows:
-                    pick(src_norm, src_text, 2, int(item_id or 0))
+                    pick(src_norm, src_text, 2, int(item_id or 0), item_lang=lang)
             except Exception as exc:
                 logger.debug("collect_source_candidates user_dictionary skipped: %s", exc)
 

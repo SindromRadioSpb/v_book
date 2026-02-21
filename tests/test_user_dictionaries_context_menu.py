@@ -1,5 +1,8 @@
 """Tests for User Dictionaries context menu actions."""
 
+from types import SimpleNamespace
+
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.ui.user_dictionaries_view import UserDictionariesView
 
 
@@ -137,3 +140,42 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     assert state["noise_flags"] == [True, False]
     assert state["due_called"] == 1
     assert state["suspended_flags"] == [True, False]
+
+
+def test_user_dict_selected_pronunciation_items_use_surface_norm():
+    view = UserDictionariesView.__new__(UserDictionariesView)
+    view.items_table = FakeTable(2)
+    rows = [
+        SimpleNamespace(src_lang="he", src_text="בפלדה", src_norm="פלדה", kind="lemma"),
+        SimpleNamespace(src_lang="he", src_text="לפלדה", src_norm="פלדה", kind="lemma"),
+    ]
+    view.items_model = SimpleNamespace(get_item=lambda idx: rows[idx])
+
+    items = UserDictionariesView._selected_pronunciation_items(view)
+
+    assert len(items) == 2
+    assert items[0]["src_norm"] == normalize_for_tm("he", "בפלדה", "surface").norm
+    assert items[1]["src_norm"] == normalize_for_tm("he", "לפלדה", "surface").norm
+
+
+def test_user_dict_edit_pronunciation_uses_surface_norm(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "app.ui.user_dictionaries_view.show_edit_pronunciation_dialog",
+        lambda **kwargs: captured.update(kwargs) or False,
+    )
+
+    view = UserDictionariesView.__new__(UserDictionariesView)
+    view._selected_item_ids = lambda: [1]
+    view.items_table = FakeTable(1)
+    row = SimpleNamespace(
+        src_lang="he",
+        src_text="הפרק הזמן",
+        src_norm=normalize_for_tm("he", "הפרק הזמן", "term_cluster").norm,
+        kind="term_cluster",
+    )
+    view.items_model = SimpleNamespace(get_item=lambda _idx: row)
+
+    UserDictionariesView.on_edit_pronunciation_selected(view)
+
+    assert captured["src_norm"] == normalize_for_tm("he", "הפרק הזמן", "surface").norm

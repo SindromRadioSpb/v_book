@@ -1122,16 +1122,39 @@ class UserDictionaryService:
                 for item_id, norm_text in tuples:
                     audio_status_by_item[item_id] = status_map.get(norm_text, "missing")
 
+            pronunciation_pairs: List[Tuple[str, str]] = []
+            pronunciation_keys_by_item: Dict[int, Tuple[str, str, str]] = {}
+            for item in source_items:
+                lang_key = (item.src_lang or "").strip()
+                canonical_norm = (item.src_norm or "").strip()
+                raw_norm = ""
+                if lang_key and (item.src_text or "").strip():
+                    try:
+                        raw_norm = normalize_for_tm(lang_key, item.src_text, "surface").norm or ""
+                    except Exception as exc:
+                        logger.debug("Failed to derive raw pronunciation norm for item_id=%s: %s", item.item_id, exc)
+                raw_norm = (raw_norm or "").strip() or canonical_norm
+                pronunciation_keys_by_item[item.item_id] = (lang_key, canonical_norm, raw_norm)
+                if lang_key and canonical_norm:
+                    pronunciation_pairs.append((lang_key, canonical_norm))
+                if lang_key and raw_norm and raw_norm != canonical_norm:
+                    pronunciation_pairs.append((lang_key, raw_norm))
+
             pronunciation_map = self._resolve_pronunciation_overlay(
                 session,
-                [(item.src_lang, item.src_norm) for item in source_items],
+                pronunciation_pairs,
             )
             for item in source_items:
-                pron_key = ((item.src_lang or "").strip(), (item.src_norm or "").strip())
-                pronunciation_by_item[item.item_id] = pronunciation_map.get(
-                    pron_key,
-                    {},
+                lang_key, canonical_norm, raw_norm = pronunciation_keys_by_item.get(
+                    item.item_id,
+                    ("", "", ""),
                 )
+                item_pron = {}
+                if raw_norm:
+                    item_pron = pronunciation_map.get((lang_key, raw_norm), {}) or {}
+                if not item_pron and canonical_norm:
+                    item_pron = pronunciation_map.get((lang_key, canonical_norm), {}) or {}
+                pronunciation_by_item[item.item_id] = item_pron
 
         items = []
         now_dt = datetime.now(timezone.utc)
@@ -1348,7 +1371,13 @@ class UserDictionaryService:
             src_text = (raw.get("src_text") or "").strip()
             if not src_lang or not tgt_lang or not kind:
                 continue
-            raw_src_norm = (raw.get("raw_src_norm") or raw.get("src_norm") or "").strip()
+            raw_src_norm = (raw.get("raw_src_norm") or "").strip()
+            if not raw_src_norm and src_text:
+                try:
+                    raw_src_norm = normalize_for_tm(src_lang, src_text, "surface").norm or ""
+                except Exception as exc:
+                    logger.debug("Failed to derive raw_src_norm for cross-view row: %s", exc)
+            raw_src_norm = (raw_src_norm or raw.get("src_norm") or "").strip()
             src_norm = self._canonical_src_norm(
                 src_lang=src_lang,
                 src_text=src_text,
