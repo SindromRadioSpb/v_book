@@ -144,3 +144,37 @@ def test_review_again_increments_lapse_and_resets(monkeypatch, qtbot):
         engine.dispose()
         path.unlink(missing_ok=True)
 
+
+def test_review_play_audio_uses_current_card(monkeypatch, qtbot):
+    engine, path = _setup_engine()
+    try:
+        monkeypatch.setattr(UserDictionariesView, "load_dictionaries", lambda self: None)
+        monkeypatch.setattr(UserDictionariesView, "load_items", lambda self: None)
+        monkeypatch.setattr("app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine))
+
+        view = UserDictionariesView(project_id=None)
+        qtbot.addWidget(view)
+        view._review_cards = [_make_card(progress_id=1)]
+        view._review_index = 0
+        view._render_review_card()
+
+        captured = {}
+
+        def _capture_play(items, *, play_mode):
+            captured["items"] = items
+            captured["play_mode"] = play_mode
+
+        monkeypatch.setattr(view, "_play_audio_items", _capture_play)
+        view.review_play_audio_btn.click()
+
+        assert captured["play_mode"] == "interrupt"
+        assert captured["items"] == [
+            {
+                "src_lang": "he",
+                "src_norm": "alpha",
+                "src_text": "alpha",
+            }
+        ]
+    finally:
+        engine.dispose()
+        path.unlink(missing_ok=True)

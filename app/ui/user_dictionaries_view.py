@@ -459,6 +459,9 @@ class UserDictionariesView(QWidget):
         self.review_save_translation_btn = QPushButton("Save Translation")
         self.review_save_translation_btn.clicked.connect(self.on_review_save_translation)
         review_edit_row.addWidget(self.review_save_translation_btn)
+        self.review_play_audio_btn = QPushButton("Play Audio")
+        self.review_play_audio_btn.clicked.connect(self.on_review_play_audio)
+        review_edit_row.addWidget(self.review_play_audio_btn)
         review_layout.addLayout(review_edit_row)
 
         self.review_meta_label = QLabel("")
@@ -556,6 +559,7 @@ class UserDictionariesView(QWidget):
 
     def _set_review_controls_enabled(self, enabled: bool):
         self.review_save_translation_btn.setEnabled(enabled)
+        self.review_play_audio_btn.setEnabled(enabled)
         self.review_again_btn.setEnabled(enabled)
         self.review_hard_btn.setEnabled(enabled)
         self.review_good_btn.setEnabled(enabled)
@@ -676,6 +680,22 @@ class UserDictionariesView(QWidget):
         except Exception as e:
             logger.error("Failed to apply review rating: %s", e, exc_info=True)
             QMessageBox.warning(self, "Review Error", f"Failed to apply rating:\n{e}")
+
+    def on_review_play_audio(self):
+        """Play audio for current review card (if ready asset exists)."""
+        card = self._current_review_card()
+        if not card:
+            return
+        self._play_audio_items(
+            [
+                {
+                    "src_lang": (card.src_lang or "").strip(),
+                    "src_norm": (card.src_norm or "").strip(),
+                    "src_text": (card.src_text or "").strip(),
+                }
+            ],
+            play_mode="interrupt",
+        )
 
     def build_filters(self) -> Dict[str, object]:
         filters: Dict[str, object] = {"hide_noise": self.hide_noise_checkbox.isChecked()}
