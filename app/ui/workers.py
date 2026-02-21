@@ -2939,6 +2939,7 @@ class PronunciationBootstrapWorker(QThread):
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
+        selected_items: Optional[List[Dict[str, str]]] = None,
     ):
         super().__init__()
         self.lang = (lang or "he").strip() or "he"
@@ -2951,6 +2952,7 @@ class PronunciationBootstrapWorker(QThread):
         self.include_lemmas = bool(include_lemmas)
         self.include_terms = bool(include_terms)
         self.include_user_dictionary = bool(include_user_dictionary)
+        self.selected_items = list(selected_items or [])
         self._cancel_requested = False
         self._paused = False
         self._trace = "pronunciation_bootstrap"
@@ -3006,6 +3008,7 @@ class PronunciationBootstrapWorker(QThread):
                     include_lemmas=self.include_lemmas,
                     include_terms=self.include_terms,
                     include_user_dictionary=self.include_user_dictionary,
+                    selected_items=self.selected_items,
                     progress_callback=self._on_progress,
                     cancel_check=lambda: bool(self._cancel_requested),
                 )

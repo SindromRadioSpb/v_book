@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
@@ -223,6 +223,61 @@ class PronunciationBootstrapService:
 
         return sorted(values)
 
+    def collect_selected_source_candidates(
+        self,
+        *,
+        lang: str,
+        selected_items: List[Dict[str, Any]],
+        include_lemmas: bool = True,
+        include_terms: bool = True,
+        include_user_dictionary: bool = True,
+    ) -> Dict[str, str]:
+        """Collect deterministic `(src_norm -> source_text)` map from selected rows."""
+        selected: Dict[str, Tuple[Tuple[int, int, int, int, str], str]] = {}
+        source_priority = {
+            "lemmas": 0,
+            "terms": 1,
+            "user_dictionary": 2,
+        }
+        include_by_group = {
+            "lemmas": bool(include_lemmas),
+            "terms": bool(include_terms),
+            "user_dictionary": bool(include_user_dictionary),
+        }
+
+        def pick(norm_value: Optional[str], text_value: Optional[str], group: str, row_id: int) -> None:
+            norm = (norm_value or "").strip()
+            text = (text_value or "").strip()
+            if not norm or not text:
+                return
+            rank = self._candidate_rank(text, source_priority.get(group, 2), row_id)
+            current = selected.get(norm)
+            if current is None or rank < current[0]:
+                selected[norm] = (rank, text)
+
+        target_lang = (lang or "").strip().lower()
+        for idx, raw in enumerate(selected_items or []):
+            item_lang = (raw.get("src_lang") or lang).strip().lower()
+            if item_lang and target_lang:
+                same_family = item_lang.startswith("he") and target_lang.startswith("he")
+                if item_lang != target_lang and not same_family:
+                    continue
+            elif item_lang and not target_lang:
+                continue
+            group = (raw.get("source_group") or "user_dictionary").strip().lower()
+            if group not in include_by_group:
+                group = "user_dictionary"
+            if not include_by_group[group]:
+                continue
+            pick(
+                raw.get("src_norm"),
+                raw.get("src_text"),
+                group,
+                idx,
+            )
+
+        return {src_norm: text for src_norm, (_rank, text) in selected.items()}
+
     def bootstrap(
         self,
         session: Session,
@@ -234,27 +289,48 @@ class PronunciationBootstrapService:
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
+        selected_items: Optional[List[Dict[str, Any]]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> PronunciationBootstrapResult:
         """Bootstrap pronunciation entries from available lexical norms."""
-        source_candidates = self.collect_source_candidates(
-            session,
-            lang=lang,
-            include_lemmas=include_lemmas,
-            include_terms=include_terms,
-            include_user_dictionary=include_user_dictionary,
-        )
-        if not source_candidates:
-            # Backward-compat fallback for slim fixture DBs and legacy tests.
-            fallback_norms = self.collect_unique_src_norms(
+        source_candidates: Dict[str, str]
+        if selected_items:
+            source_candidates = self.collect_selected_source_candidates(
+                lang=lang,
+                selected_items=selected_items,
+                include_lemmas=include_lemmas,
+                include_terms=include_terms,
+                include_user_dictionary=include_user_dictionary,
+            )
+        else:
+            source_candidates = self.collect_source_candidates(
                 session,
                 lang=lang,
                 include_lemmas=include_lemmas,
                 include_terms=include_terms,
                 include_user_dictionary=include_user_dictionary,
             )
-            source_candidates = {norm: norm for norm in fallback_norms}
+        if not source_candidates:
+            # Backward-compat fallback for slim fixture DBs and legacy tests.
+            if selected_items:
+                fallback_norms = sorted(
+                    {
+                        (raw.get("src_norm") or "").strip()
+                        for raw in selected_items
+                        if (raw.get("src_norm") or "").strip()
+                    }
+                )
+                source_candidates = {norm: norm for norm in fallback_norms}
+            else:
+                fallback_norms = self.collect_unique_src_norms(
+                    session,
+                    lang=lang,
+                    include_lemmas=include_lemmas,
+                    include_terms=include_terms,
+                    include_user_dictionary=include_user_dictionary,
+                )
+                source_candidates = {norm: norm for norm in fallback_norms}
 
         ordered_norms = sorted(source_candidates.keys())
         if limit is not None and int(limit) > 0:
