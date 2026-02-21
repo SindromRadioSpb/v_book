@@ -26,3 +26,8 @@ def test_autofix_mode_keeps_valid_output_for_pipe():
 def test_detects_source_structure_mismatch():
     assert PronunciationQualityService.has_source_structure_mismatch("\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df", "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df") is True
     assert PronunciationQualityService.has_source_structure_mismatch("\u05e4\u05e8\u05e7 \u05d6\u05de\u05df", "\u05e4\u05b6\u05bc\u05e8\u05b6\u05e7 \u05d6\u05b0\u05de\u05b7\u05df") is False
+
+
+def test_has_hebrew_nikud_detects_marks():
+    assert PronunciationQualityService.has_hebrew_nikud("\u05e4\u05b6\u05bc\u05e8\u05b6\u05e7") is True
+    assert PronunciationQualityService.has_hebrew_nikud("\u05e4\u05e8\u05e7") is False

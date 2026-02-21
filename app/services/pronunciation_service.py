@@ -192,7 +192,15 @@ class PronunciationService:
             row.confidence = confidence_clean
             row.notes = notes_clean if notes_clean is not None else row.notes
         else:
-            if not (row.niqqud_text or "").strip() and niqqud_clean:
+            existing_niqqud = (row.niqqud_text or "").strip()
+            can_refresh_auto_niqqud = (
+                not existing_niqqud
+                or (
+                    not existing_manual
+                    and not PronunciationQualityService.has_hebrew_nikud(existing_niqqud)
+                )
+            )
+            if can_refresh_auto_niqqud and niqqud_clean:
                 row.niqqud_text = niqqud_clean
             if not (row.ipa or "").strip() and ipa_clean:
                 row.ipa = ipa_clean

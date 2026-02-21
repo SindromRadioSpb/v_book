@@ -40,6 +40,23 @@ class _MismatchGenerator(PronunciationGenerator):
         }
 
 
+class _DiacriticGenerator(PronunciationGenerator):
+    def generate(self, lang: str, source_texts: list[str]):
+        _ = lang
+        return {
+            text: {
+                "niqqud_text": (
+                    "\u05e4\u05b6\u05bc\u05e8\u05b6\u05e7"
+                    if text == "\u05e4\u05e8\u05e7"
+                    else "\u05d6\u05b8\u05e8\u05b7\u05e7" if text == "\u05d6\u05e8\u05e7" else text
+                ),
+                "ipa": None,
+                "notes": "fake_diacritic",
+            }
+            for text in source_texts
+        }
+
+
 def test_bootstrap_is_idempotent_on_second_run(monkeypatch):
     temp_dir = _workspace_temp_dir("pron_bootstrap_")
     engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
@@ -234,6 +251,55 @@ def test_bootstrap_falls_back_to_source_when_generated_structure_mismatch():
             assert by_norm[first_norm].niqqud_text == "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df"
             assert "qc:source_structure_fallback" in (by_norm[first_norm].notes or "")
             assert by_norm[second_norm].niqqud_text == "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df"
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_fill_missing_updates_auto_rows_without_nikud_marks():
+    temp_dir = _workspace_temp_dir("pron_bootstrap_fill_missing_no_marks_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
+    try:
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        service = PronunciationBootstrapService(generator=_DiacriticGenerator())
+        pron = PronunciationService()
+
+        with Session(engine) as session:
+            pron.upsert_entry(
+                session,
+                lang="he",
+                src_norm="\u05e4\u05e8\u05e7",
+                niqqud_text="\u05e4\u05e8\u05e7",
+                ipa=None,
+                source="auto_phonikud",
+                is_override=False,
+                notes="auto:phonikud",
+            )
+            session.commit()
+
+            result = service.bootstrap(
+                session,
+                lang="he",
+                chunk_size=10,
+                include_lemmas=False,
+                include_terms=False,
+                include_user_dictionary=False,
+                selected_items=[
+                    {
+                        "src_lang": "he",
+                        "src_norm": "\u05e4\u05e8\u05e7",
+                        "src_text": "\u05e4\u05e8\u05e7",
+                        "source_group": "terms",
+                    }
+                ],
+                rebuild_auto=False,
+            )
+            session.commit()
+
+            assert result.updated == 1
+            row = pron.get_entry(session, lang="he", src_norm="\u05e4\u05e8\u05e7")
+            assert row is not None
+            assert row.niqqud_text == "\u05e4\u05b6\u05bc\u05e8\u05b6\u05e7"
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)

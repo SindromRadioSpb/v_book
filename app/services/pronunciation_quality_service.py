@@ -66,6 +66,14 @@ class PronunciationQualityService:
         "\u05BE",  # hebrew maqaf
         "\u00A0",  # nbsp
     }
+    _NIKUD_RANGES = (
+        (0x05B0, 0x05BC),
+        (0x05BD, 0x05BD),
+        (0x05BF, 0x05BF),
+        (0x05C1, 0x05C2),
+        (0x05C4, 0x05C5),
+        (0x05C7, 0x05C7),
+    )
 
     @classmethod
     def _is_taamim(cls, char: str) -> bool:
@@ -167,6 +175,19 @@ class PronunciationQualityService:
             )
 
         return PronunciationQualityResult(value=sanitized, is_valid=True, qc_flag=None)
+
+    @classmethod
+    def has_hebrew_nikud(cls, value: Optional[str]) -> bool:
+        """Return True when value contains Hebrew vowel/diacritic marks."""
+        text = (value or "").strip()
+        if not text:
+            return False
+        for char in text:
+            code = ord(char)
+            for start, end in cls._NIKUD_RANGES:
+                if start <= code <= end:
+                    return True
+        return False
 
     @classmethod
     def spoken_letters_signature(cls, value: Optional[str]) -> str:
