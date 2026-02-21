@@ -16,6 +16,7 @@ from app.infra.sa_models import (
     DictProject,
     Lemma,
     Library,
+    PronunciationEntry,
     SourceDocument,
     StudyProgress,
     TMEntry,
@@ -43,6 +44,7 @@ def user_dict_engine():
         StudyProgress.__table__.create(engine, checkfirst=True)
         UserDictionaryItem.__table__.create(engine, checkfirst=True)
         AudioAsset.__table__.create(engine, checkfirst=True)
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
         yield engine
     finally:
         engine.dispose()
@@ -418,6 +420,50 @@ def test_query_items_fallback_resolves_legacy_src_norm_mismatch(user_dict_engine
 
         assert total == 1
         assert rows[0].translation == "RU LEGACY"
+
+
+def test_query_items_pronunciation_overlay_handles_whitespace_norm_key(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        dictionary_id = _create_dictionary(session, service, "Deck Pron Overlay")
+
+        legacy_norm = "term_with_space   "
+        session.add(
+            UserDictionaryItem(
+                dictionary_id=dictionary_id,
+                kind="term_cluster",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="term with space",
+                src_norm=legacy_norm,
+                canonical_hash=service.build_canonical_hash("he", "ru", "term_cluster", legacy_norm),
+                tags_json="[]",
+                is_noise=0,
+                study_state="new",
+                seen_count=0,
+            )
+        )
+        session.add(
+            PronunciationEntry(
+                lang="he",
+                src_norm="term_with_space",
+                niqqud_text="תֶּרְם",
+                source="manual",
+                is_override=1,
+            )
+        )
+        session.commit()
+
+        rows, total = service.query_items(
+            session,
+            dictionary_id=dictionary_id,
+            filters={"hide_noise": True},
+            limit=100,
+            offset=0,
+        )
+
+        assert total == 1
+        assert rows[0].pronunciation_text == "תֶּרְם"
 
 
 def test_update_item_translation_updates_tm_global_and_tm_entry(user_dict_engine):

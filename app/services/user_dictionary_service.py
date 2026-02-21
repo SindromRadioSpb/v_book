@@ -1106,7 +1106,9 @@ class UserDictionaryService:
             audio_service = AudioAssetService()
             by_lang: Dict[str, List[Tuple[int, str]]] = {}
             for item in source_items:
-                by_lang.setdefault(item.src_lang, []).append((item.item_id, item.src_norm))
+                lang_key = (item.src_lang or "").strip()
+                norm_key = (item.src_norm or "").strip()
+                by_lang.setdefault(lang_key, []).append((item.item_id, norm_key))
             for lang, tuples in by_lang.items():
                 try:
                     status_map = audio_service.bulk_get_status_any(
@@ -1125,8 +1127,9 @@ class UserDictionaryService:
                 [(item.src_lang, item.src_norm) for item in source_items],
             )
             for item in source_items:
+                pron_key = ((item.src_lang or "").strip(), (item.src_norm or "").strip())
                 pronunciation_by_item[item.item_id] = pronunciation_map.get(
-                    (item.src_lang, item.src_norm),
+                    pron_key,
                     {},
                 )
 
@@ -1416,7 +1419,9 @@ class UserDictionaryService:
         audio_status: Dict[Tuple[str, str], str] = {}
         by_lang_norms: Dict[str, List[str]] = {}
         for row in by_hash.values():
-            by_lang_norms.setdefault(row["src_lang"], []).append(row["src_norm"])
+            lang_key = (row["src_lang"] or "").strip()
+            norm_key = (row["src_norm"] or "").strip()
+            by_lang_norms.setdefault(lang_key, []).append(norm_key)
         for lang, norms in by_lang_norms.items():
             try:
                 status_map = audio_service.bulk_get_status_any(
@@ -1459,8 +1464,9 @@ class UserDictionaryService:
                 status=tm_row.status if tm_row else None,
                 origin=tm_row.origin if tm_row else None,
             )
-            item_audio_status = audio_status.get((row["src_lang"], row["src_norm"]), "missing")
-            item_pronunciation = pronunciation_map.get((row["src_lang"], row["src_norm"]), {})
+            row_key = ((row["src_lang"] or "").strip(), (row["src_norm"] or "").strip())
+            item_audio_status = audio_status.get(row_key, "missing")
+            item_pronunciation = pronunciation_map.get(row_key, {})
             count_value = int(membership_count.get(canonical_hash, 0))
             tooltip_value = None
             if count_value > 0:
@@ -1734,11 +1740,14 @@ class UserDictionaryService:
             except Exception:
                 continue
             for norm_text, entry in entries.items():
+                norm_key = (norm_text or "").strip()
+                if not norm_key:
+                    continue
                 raw_text = (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip()
                 normalized = PronunciationQualityService.normalize_field(raw_text, strict=False)
                 effective_text = normalized.value
                 qc_flag = normalized.qc_flag or self._extract_qc_flag(entry.notes)
-                resolved[(lang, norm_text)] = {
+                resolved[(lang, norm_key)] = {
                     "pronunciation_text": effective_text,
                     "pronunciation_source": entry.source,
                     "pronunciation_confidence": entry.confidence,
