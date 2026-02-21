@@ -5,12 +5,64 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableWidget
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt6.QtGui import QHelpEvent
+from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableWidget, QToolTip
 
 from app.infra.settings import SettingsService
 
 logger = logging.getLogger(__name__)
+
+
+class _OverflowTooltipFilter(QObject):
+    """Show cell text tooltip only when DisplayRole content is visually truncated."""
+
+    def __init__(self, table: QAbstractItemView):
+        viewport = table.viewport()
+        super().__init__(viewport)
+        self.table = table
+        self.viewport = viewport
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        try:
+            if obj is not self.viewport or event.type() != QEvent.Type.ToolTip:
+                return False
+            if not isinstance(event, QHelpEvent):
+                return False
+
+            index = self.table.indexAt(event.pos())
+            if not index.isValid():
+                return False
+
+            explicit_tooltip = index.data(Qt.ItemDataRole.ToolTipRole)
+            if explicit_tooltip not in (None, ""):
+                return False
+
+            display_value = index.data(Qt.ItemDataRole.DisplayRole)
+            text = str(display_value or "").strip()
+            if not text:
+                return False
+
+            if not self._is_truncated(index, text):
+                return False
+
+            rect = self.table.visualRect(index)
+            QToolTip.showText(event.globalPos(), text, self.viewport, rect)
+            return True
+        except RuntimeError:
+            # Guard late Qt events during widget destruction.
+            return False
+
+    def _is_truncated(self, index, text: str) -> bool:
+        rect = self.table.visualRect(index)
+        if rect.width() <= 0:
+            return False
+        available = max(1, rect.width() - 8)
+        fm = self.table.fontMetrics()
+        for line in text.splitlines() or [text]:
+            if fm.horizontalAdvance(line) > available:
+                return True
+        return False
 
 
 class TableLayoutController:
@@ -24,6 +76,7 @@ class TableLayoutController:
         default_widths: Optional[dict[int, int]] = None,
         minimum_section_width: int = 60,
         save_debounce_ms: int = 400,
+        enable_overflow_tooltips: bool = True,
     ):
         self.settings = settings
         self.table_id = table_id
@@ -33,6 +86,8 @@ class TableLayoutController:
         self.minimum_section_width = minimum_section_width
         self._signature_key = f"table/{self.table_id}/header_signature"
         self._is_applying = False
+        self._overflow_tooltip_filter: Optional[_OverflowTooltipFilter] = None
+        self._enable_overflow_tooltips = enable_overflow_tooltips
 
         self._save_timer = QTimer(self.header)
         self._save_timer.setSingleShot(True)
@@ -50,6 +105,12 @@ class TableLayoutController:
         restored = self.restore()
         if not restored:
             self.reset_to_defaults(save=False)
+
+        if self._enable_overflow_tooltips and self.table.viewport() is not None:
+            self.table.setMouseTracking(True)
+            self.table.viewport().setMouseTracking(True)
+            self._overflow_tooltip_filter = _OverflowTooltipFilter(self.table)
+            self.table.viewport().installEventFilter(self._overflow_tooltip_filter)
 
         self.header.sectionMoved.connect(self._on_header_changed)
         self.header.sectionResized.connect(self._on_header_changed)

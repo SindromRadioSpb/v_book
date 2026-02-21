@@ -2,7 +2,8 @@
 
 import pytest
 
-from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtGui import QHelpEvent
+from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
 
 from app.infra.settings import SettingsService
 from app.ui.table_layout_controller import TableLayoutController
@@ -118,3 +119,74 @@ def test_reset_to_defaults(qtbot, settings):
     assert table.columnWidth(0) == 130
     assert table.columnWidth(1) == 170
     assert table.columnWidth(2) == 210
+
+
+def test_overflow_tooltip_shows_display_text_for_truncated_cell(qtbot, settings, monkeypatch):
+    table = _create_table(qtbot, ["A"])
+    table.setRowCount(1)
+    table.setItem(0, 0, QTableWidgetItem("This is a very long value that must be truncated"))
+    table.setColumnWidth(0, 80)
+
+    controller = TableLayoutController(
+        settings=settings,
+        table_id="test/table/overflow-tooltip",
+        table=table,
+        default_widths={0: 80},
+        save_debounce_ms=50,
+    )
+    controller.install()
+
+    captured = {}
+
+    def _fake_show_text(pos, text, *_args):
+        captured["pos"] = pos
+        captured["text"] = text
+
+    monkeypatch.setattr("app.ui.table_layout_controller.QToolTip.showText", _fake_show_text)
+
+    index = table.model().index(0, 0)
+    rect = table.visualRect(index)
+    help_event = QHelpEvent(
+        QHelpEvent.Type.ToolTip,
+        rect.center(),
+        table.viewport().mapToGlobal(rect.center()),
+    )
+
+    handled = controller._overflow_tooltip_filter.eventFilter(table.viewport(), help_event)
+    assert handled is True
+    assert captured["text"] == "This is a very long value that must be truncated"
+
+
+def test_overflow_tooltip_does_not_override_explicit_tooltip(qtbot, settings, monkeypatch):
+    table = _create_table(qtbot, ["A"])
+    table.setRowCount(1)
+    table.setItem(0, 0, QTableWidgetItem("Another very long value"))
+    table.item(0, 0).setToolTip("Custom tooltip")
+    table.setColumnWidth(0, 80)
+
+    controller = TableLayoutController(
+        settings=settings,
+        table_id="test/table/overflow-tooltip-explicit",
+        table=table,
+        default_widths={0: 80},
+        save_debounce_ms=50,
+    )
+    controller.install()
+
+    calls = {"count": 0}
+    monkeypatch.setattr(
+        "app.ui.table_layout_controller.QToolTip.showText",
+        lambda *_args, **_kwargs: calls.__setitem__("count", calls["count"] + 1),
+    )
+
+    index = table.model().index(0, 0)
+    rect = table.visualRect(index)
+    help_event = QHelpEvent(
+        QHelpEvent.Type.ToolTip,
+        rect.center(),
+        table.viewport().mapToGlobal(rect.center()),
+    )
+
+    handled = controller._overflow_tooltip_filter.eventFilter(table.viewport(), help_event)
+    assert handled is False
+    assert calls["count"] == 0

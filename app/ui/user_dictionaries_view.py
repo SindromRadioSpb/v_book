@@ -263,8 +263,15 @@ class UserDictionariesView(QWidget):
         self.dictionary_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.dictionary_table.setAlternatingRowColors(True)
         self.dictionary_table.verticalHeader().setVisible(False)
-        self.dictionary_table.setColumnWidth(0, 220)
-        self.dictionary_table.setColumnWidth(1, 80)
+
+        self.dictionary_table_layout_controller = TableLayoutController(
+            settings=self.settings,
+            table_id="user_dict_dictionary_list",
+            table=self.dictionary_table,
+            default_widths={0: 220, 1: 80},
+        )
+        self.dictionary_table_layout_controller.install()
+
         left_layout.addWidget(self.dictionary_table, 1)
         self.dictionary_table.selectionModel().selectionChanged.connect(self.on_dictionary_selected)
 
@@ -1690,5 +1697,6 @@ class UserDictionariesView(QWidget):
                     worker.wait(2000)
             except Exception:
                 pass
+        self.dictionary_table_layout_controller.save_now()
         self.table_layout_controller.save_now()
         super().closeEvent(event)
