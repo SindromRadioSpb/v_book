@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.infra.sa_models import AudioAsset
 from app.services.audio_generation_service import AudioGenerationService
+from app.services.audio_playback_service import AudioPlaybackService
 
 
 class _DummySettings:
@@ -151,6 +152,77 @@ def test_generate_one_records_failed_status_when_provider_chain_unavailable(monk
             row = session.execute(select(AudioAsset).where(AudioAsset.norm_text == "shalom")).scalar_one()
             assert row.asset_status == "failed"
             assert "No audio provider available" in str(row.error_text)
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_audio_dir, ignore_errors=True)
+
+
+def test_force_regenerate_same_provider_rewrites_asset_path(monkeypatch):
+    temp_audio_dir = _workspace_temp_dir("audio_regen_same_provider_")
+    db_path = temp_audio_dir / "audio_regen_same_provider.db"
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir)
+
+        service = AudioGenerationService(settings=_DummySettings())
+        with Session(engine) as session:
+            first = service.generate_one(
+                session,
+                src_text="shalom",
+                src_lang="he",
+                source_norm="shalom",
+                provider_mode="force:mock_local_audio",
+                force_regenerate=False,
+                trace_id="t-audio-regen-1",
+            )
+            session.commit()
+            assert first["ok"] is True
+            first_row = session.execute(
+                select(AudioAsset).where(
+                    AudioAsset.lang == "he",
+                    AudioAsset.norm_text == "shalom",
+                    AudioAsset.provider == "mock_local_audio",
+                )
+            ).scalar_one()
+            first_rel = str(first_row.audio_rel_path or "")
+            assert first_rel
+            first_abs = temp_audio_dir / first_rel
+            assert first_abs.exists()
+
+            second = service.generate_one(
+                session,
+                src_text="shalom",
+                src_lang="he",
+                source_norm="shalom",
+                provider_mode="force:mock_local_audio",
+                force_regenerate=True,
+                trace_id="t-audio-regen-2",
+            )
+            session.commit()
+            assert second["ok"] is True
+            second_row = session.execute(
+                select(AudioAsset).where(
+                    AudioAsset.lang == "he",
+                    AudioAsset.norm_text == "shalom",
+                    AudioAsset.provider == "mock_local_audio",
+                )
+            ).scalar_one()
+            second_rel = str(second_row.audio_rel_path or "")
+            assert second_rel
+            assert second_rel != first_rel
+            second_abs = temp_audio_dir / second_rel
+            assert second_abs.exists()
+            assert not first_abs.exists()
+
+            resolved = AudioPlaybackService.resolve_ready_path(
+                session,
+                lang="he",
+                norm_text="shalom",
+            )
+            assert resolved == second_abs
     finally:
         engine.dispose()
         shutil.rmtree(temp_audio_dir, ignore_errors=True)

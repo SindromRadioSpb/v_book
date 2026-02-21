@@ -169,6 +169,7 @@ Deterministic regenerate/playback contract:
 - each `audio_asset` update refreshes `updated_at`;
 - playback resolver chooses latest ready by `updated_at DESC, asset_id DESC`;
 - provider switch sequence (`google -> mms -> google`) must play the final regenerate result.
+- `force regenerate` on the same provider writes a fresh asset path and updates row pointer to avoid stale file locks/cache.
 
 Playback state machine:
 

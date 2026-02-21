@@ -226,10 +226,15 @@ class AudioGenerationService:
         source_norm: str,
         voice_id: str,
         speed: float,
+        generation_tag: Optional[str] = None,
     ) -> str:
         digest = hashlib.sha256(f"{src_lang}|{source_norm}|{voice_id}|{speed:.2f}".encode("utf-8")).hexdigest()[:20]
         safe_provider = provider_id.replace("/", "_").replace("\\", "_")
         safe_lang = src_lang.replace("/", "_").replace("\\", "_")
+        if generation_tag:
+            safe_tag = "".join(ch for ch in generation_tag if ch.isalnum())[:16]
+            if safe_tag:
+                return f"audio/{safe_provider}/{safe_lang}/{digest}_{safe_tag}.wav"
         return f"audio/{safe_provider}/{safe_lang}/{digest}.wav"
 
     @staticmethod
@@ -452,12 +457,24 @@ class AudioGenerationService:
                 failed_recorded = True
                 continue
 
+            previous_row = session.execute(
+                select(AudioAsset.audio_rel_path).where(
+                    AudioAsset.lang == source_lang_clean,
+                    AudioAsset.norm_text == source_norm_clean,
+                    AudioAsset.voice_id == provider_voice_id,
+                    AudioAsset.speed == provider_speed,
+                    AudioAsset.provider == provider_id,
+                )
+            ).scalar_one_or_none()
+
+            generation_tag = uuid.uuid4().hex[:12] if force_regenerate else None
             rel_path = self._asset_rel_path(
                 provider_id=provider_id,
                 src_lang=source_lang_clean,
                 source_norm=source_norm_clean,
                 voice_id=provider_voice_id,
                 speed=provider_speed,
+                generation_tag=generation_tag,
             )
             safe_rel = self.audio_asset_service.sanitize_relative_path(rel_path)
             abs_path = app_dir / safe_rel
@@ -478,6 +495,15 @@ class AudioGenerationService:
             row.duration_ms = result.duration_ms
             row.sha256 = payload_sha
             row.error_text = None
+
+            if previous_row and previous_row != safe_rel:
+                try:
+                    prev_rel = self.audio_asset_service.sanitize_relative_path(str(previous_row))
+                    prev_abs = app_dir / prev_rel
+                    if prev_abs.exists():
+                        prev_abs.unlink()
+                except Exception as cleanup_err:
+                    logger.debug("Old audio cleanup skipped: %s", cleanup_err)
             try:
                 usage_tracker.record_spend(
                     provider_id=provider_id,
