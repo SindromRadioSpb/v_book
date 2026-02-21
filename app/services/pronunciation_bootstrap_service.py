@@ -409,13 +409,23 @@ class PronunciationBootstrapService:
                     failed += 1
                     continue
                 notes_value = (item.get("notes") or "").strip()
+                niqqud_value = niqqud_result.value
+                if PronunciationQualityService.has_source_structure_mismatch(source_text, niqqud_value):
+                    fallback_source = PronunciationQualityService.sanitize_spoken_text(source_text)
+                    if fallback_source:
+                        niqqud_value = fallback_source
+                        mismatch_note = "qc:source_structure_fallback"
+                        notes_value = f"{notes_value}; {mismatch_note}".strip("; ").strip()
+                    else:
+                        failed += 1
+                        continue
                 if niqqud_result.qc_flag:
                     qc_note = f"qc:{niqqud_result.qc_flag}"
                     notes_value = f"{notes_value}; {qc_note}".strip("; ").strip()
                 entries.append(
                     {
                         "src_norm": src_norm,
-                        "niqqud_text": niqqud_result.value,
+                        "niqqud_text": niqqud_value,
                         "ipa": item.get("ipa"),
                         "reading_text": PronunciationQualityService.normalize_field(
                             item.get("reading_text"),

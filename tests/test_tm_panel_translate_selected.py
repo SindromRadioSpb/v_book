@@ -472,3 +472,20 @@ def test_selected_pronunciation_items_prefer_raw_src_norm():
 
     assert len(items) == 1
     assert items[0]["src_norm"] == normalize_for_tm("he", "legacy src", "surface").norm
+
+
+def test_tm_bootstrap_refreshes_search_on_success(monkeypatch):
+    panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
+    panel._get_selected_pronunciation_items = lambda: [
+        {"src_lang": "he", "src_text": "prefix_a", "src_norm": normalize_for_tm("he", "prefix_a", "surface").norm}
+    ]
+    state = {"search": 0}
+    panel.perform_search = lambda: state.__setitem__("search", state["search"] + 1)
+
+    monkeypatch.setattr(
+        "app.ui.dialogs.pronunciation_bootstrap_dialog.show_pronunciation_bootstrap_dialog",
+        lambda **kwargs: True,
+    )
+
+    TranslationManagementPanel.on_pronunciation_bootstrap_selected(panel)
+    assert state["search"] == 1

@@ -148,3 +148,20 @@ def test_dictionary_selected_pronunciation_items_use_surface_norm():
     assert len(items) == 2
     assert items[0]["src_norm"] == normalize_for_tm("he", "בפלדה", "surface").norm
     assert items[1]["src_norm"] == normalize_for_tm("he", "לפלדה", "surface").norm
+
+
+def test_dictionary_bootstrap_refreshes_view_on_success(monkeypatch):
+    view = DictionaryView.__new__(DictionaryView)
+    view._selected_pronunciation_items = lambda: [
+        {"src_lang": "he", "src_text": "בפלדה", "src_norm": normalize_for_tm("he", "בפלדה", "surface").norm}
+    ]
+    state = {"search": 0}
+    view.perform_search = lambda: state.__setitem__("search", state["search"] + 1)
+
+    monkeypatch.setattr(
+        "app.ui.dialogs.pronunciation_bootstrap_dialog.show_pronunciation_bootstrap_dialog",
+        lambda **kwargs: True,
+    )
+
+    DictionaryView.on_pronunciation_bootstrap_selected(view)
+    assert state["search"] == 1

@@ -41,6 +41,7 @@ class PronunciationBootstrapDialog(QDialog):
         self.selected_items = self._normalize_selected_items(selected_items)
         self._health_worker = None
         self._bootstrap_worker = None
+        self._should_refresh_parent = False
         self._init_ui()
         self._load_settings()
 
@@ -408,6 +409,8 @@ class PronunciationBootstrapDialog(QDialog):
         )
         if dry_run:
             msg += "\n\nDry-run mode: all DB changes were rolled back."
+        else:
+            self._should_refresh_parent = True
 
         if int(result.get("failed", 0)) > 0:
             QMessageBox.warning(self, title, msg)
@@ -419,6 +422,11 @@ class PronunciationBootstrapDialog(QDialog):
         QMessageBox.warning(self, "Bootstrap Failed", f"Pronunciation bootstrap failed:\n{error_msg}")
 
 
-def show_pronunciation_bootstrap_dialog(*, parent=None, selected_items: Optional[List[Dict[str, str]]] = None) -> None:
+def show_pronunciation_bootstrap_dialog(
+    *,
+    parent=None,
+    selected_items: Optional[List[Dict[str, str]]] = None,
+) -> bool:
     dialog = PronunciationBootstrapDialog(parent=parent, selected_items=selected_items)
     dialog.exec()
+    return bool(dialog._should_refresh_parent)

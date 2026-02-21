@@ -104,7 +104,8 @@ class PronunciationQualityService:
                 removed.append(cls._removed_record(index=index, char=char, reason="format_char"))
                 continue
             if char == "|":
-                removed.append(cls._removed_record(index=index, char=char, reason="pipe_removed"))
+                removed.append(cls._removed_record(index=index, char=char, reason="pipe_to_space"))
+                out_chars.append(" ")
                 continue
             if char in cls._SEPARATORS_TO_SPACE:
                 out_chars.append(" ")
@@ -166,3 +167,30 @@ class PronunciationQualityService:
             )
 
         return PronunciationQualityResult(value=sanitized, is_valid=True, qc_flag=None)
+
+    @classmethod
+    def spoken_letters_signature(cls, value: Optional[str]) -> str:
+        """Return comparable signature without diacritics/formatting noise."""
+        sanitized = cls.sanitize_tts_text(value)
+        if not sanitized:
+            return ""
+        chars: List[str] = []
+        for char in sanitized:
+            category = unicodedata.category(char)
+            if category.startswith("M"):
+                continue
+            if char.isspace():
+                chars.append(" ")
+                continue
+            if category.startswith("L") or category.startswith("N"):
+                chars.append(char)
+        return cls._MULTISPACE_RE.sub(" ", "".join(chars)).strip()
+
+    @classmethod
+    def has_source_structure_mismatch(cls, source_text: Optional[str], candidate_text: Optional[str]) -> bool:
+        """Detect when generated pronunciation drops/adds source letters/tokens."""
+        source_sig = cls.spoken_letters_signature(source_text)
+        candidate_sig = cls.spoken_letters_signature(candidate_text)
+        if not source_sig or not candidate_sig:
+            return False
+        return source_sig != candidate_sig

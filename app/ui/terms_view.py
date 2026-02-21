@@ -1096,10 +1096,13 @@ class TermsView(QWidget):
         from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
 
         selected_items = self._selected_pronunciation_items()
+        changed = False
         if not selected_items:
-            show_pronunciation_bootstrap_dialog(parent=self)
-            return
-        show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            changed = show_pronunciation_bootstrap_dialog(parent=self)
+        else:
+            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+        if changed:
+            self.perform_search()
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
