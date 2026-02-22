@@ -3152,6 +3152,14 @@ class SentenceNiqqudBootstrapWorker(QThread):
                     self.progress.emit(done, total)
                     _last_emit[0] = now
 
+            def _row_cb(sid: int, niqqud, action: str) -> None:
+                success = action in ("inserted", "updated", "dry_would_insert")
+                if success and niqqud:
+                    msg = (niqqud[:50] + "…") if len(niqqud) > 50 else niqqud
+                else:
+                    msg = action
+                self.row_translated.emit(str(sid), msg, success)
+
             import time
 
             with db.get_session() as session:
@@ -3163,6 +3171,7 @@ class SentenceNiqqudBootstrapWorker(QThread):
                     phonikud_generator=generator,
                     guard_params=guard,
                     progress_callback=_progress_cb,
+                    row_callback=_row_cb,
                     cancel_check=lambda: self._cancel_requested,
                     pause_check=lambda: self._pause_requested,
                     phonikud_version=health.mode,

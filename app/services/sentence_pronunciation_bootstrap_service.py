@@ -134,6 +134,7 @@ class SentencePronunciationBootstrapService:
         phonikud_generator,         # PronunciationGenerator-like with .generate() and .mode
         guard_params: Optional[GuardParams] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        row_callback: Optional[Callable] = None,  # (sid: int, niqqud: str|None, action: str)
         cancel_check: Optional[Callable[[], bool]] = None,
         pause_check: Optional[Callable[[], bool]] = None,
         phonikud_version: Optional[str] = None,
@@ -148,6 +149,7 @@ class SentencePronunciationBootstrapService:
             phonikud_generator: Generator with .generate(lang, texts) → dict.
             guard_params: Optional override for min/max length and Hebrew ratio thresholds.
             progress_callback: Called as (processed_so_far, total, stage_label).
+            row_callback: Optional per-row notification: (sentence_id, niqqud_or_None, action_str).
             cancel_check: Returns True to abort at next safe chunk boundary.
             pause_check: Returns True when paused; blocks until False.
             phonikud_version: Overrides auto-detected version from generator.mode.
@@ -207,6 +209,8 @@ class SentencePronunciationBootstrapService:
                 if not ok:
                     result.processed += 1
                     self._increment_skip_reason(result, skip_reason)
+                    if row_callback:
+                        row_callback(sid, None, skip_reason)
                     continue
 
                 src_hash = self._svc.compute_src_hash(lang, preprocessed, _pv)
@@ -219,14 +223,20 @@ class SentencePronunciationBootstrapService:
                         if existing.is_override:
                             result.processed += 1
                             result.skipped_has_override += 1
+                            if row_callback:
+                                row_callback(sid, None, "skipped_has_override")
                             continue
                         if mode == "fill_only" and existing.src_hash == src_hash and existing.niqqud_text:
                             result.processed += 1
                             result.skipped_same_hash += 1
+                            if row_callback:
+                                row_callback(sid, None, "skipped_same_hash")
                             continue
                         if mode == "rebuild" and existing.src_hash == src_hash and existing.niqqud_text:
                             result.processed += 1
                             result.skipped_same_hash += 1
+                            if row_callback:
+                                row_callback(sid, None, "skipped_same_hash")
                             continue
                 else:
                     # dry_run: still count what would happen
@@ -286,6 +296,9 @@ class SentencePronunciationBootstrapService:
                         with_retry_on_locked(session.commit, max_retries=3)
                     result.failed += len(sub_chunk)
                     result.processed += len(sub_chunk)
+                    if row_callback:
+                        for _sid, _, _ in sub_chunk:
+                            row_callback(_sid, None, "failed")
                     continue
 
                 # ── Write each row ─────────────────────────────────────────────
@@ -321,8 +334,12 @@ class SentencePronunciationBootstrapService:
                         # Count what would happen; no DB write
                         if qc_status == "rejected":
                             result.skipped_invalid_after_qc += 1
+                            if row_callback:
+                                row_callback(sid, None, "dry_qc_rejected")
                         else:
                             result.inserted += 1  # approximate
+                            if row_callback:
+                                row_callback(sid, sanitized_niqqud, "dry_would_insert")
                         continue
 
                     # Store niqqud_text only for ok/partial/auto_fixed; None for rejected
@@ -346,6 +363,8 @@ class SentencePronunciationBootstrapService:
                     except Exception as exc:
                         logger.error("Failed to upsert sentence %d: %s", sid, exc)
                         result.failed += 1
+                        if row_callback:
+                            row_callback(sid, None, "failed")
                         continue
 
                     if action == "inserted":
@@ -361,6 +380,10 @@ class SentencePronunciationBootstrapService:
                         result.rejected_qc += 1
                     elif qc_status == "partial":
                         result.partial_qc += 1
+
+                    if row_callback:
+                        _rc_niqqud = store_niqqud if action in ("inserted", "updated") else None
+                        row_callback(sid, _rc_niqqud, action)
 
             # ── Commit chunk ───────────────────────────────────────────────────
             if mode != "dry_run" and not result.cancelled:
