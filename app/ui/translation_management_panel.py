@@ -242,6 +242,72 @@ class HistoryDialog(QDialog):
                 self.accept()
 
 
+class KindFilterDialog(QDialog):
+    """Multi-select checklist dialog for TM Kind filter."""
+
+    ALL_KINDS = ["lemma", "term_cluster", "ngram", "surface"]
+
+    def __init__(self, selected_kinds: Optional[List[str]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Kinds")
+        self.setMinimumSize(280, 260)
+        self._selected = list(selected_kinds) if selected_kinds else []
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout()
+        info = QLabel("Select one or more kinds to include:")
+        info.setStyleSheet("font-weight: bold;")
+        layout.addWidget(info)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        for kind in self.ALL_KINDS:
+            item = QListWidgetItem(kind)
+            item.setCheckState(
+                Qt.CheckState.Checked if kind in self._selected else Qt.CheckState.Unchecked
+            )
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        btn_row = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(self._on_select_all)
+        btn_row.addWidget(select_all)
+        clear_all = QPushButton("Clear All")
+        clear_all.clicked.connect(self._on_clear_all)
+        btn_row.addWidget(clear_all)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        self.setLayout(layout)
+
+    def _on_select_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _on_clear_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def get_selected_kinds(self) -> Optional[List[str]]:
+        """Return list of selected kinds, or None if all selected (= no filter)."""
+        selected = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(item.text())
+        if len(selected) == len(self.ALL_KINDS) or len(selected) == 0:
+            return None  # None = All (no filter)
+        return selected
+
+
 class TranslationManagementPanel(QWidget):
     """P2 Translation Management Panel."""
 
@@ -269,6 +335,12 @@ class TranslationManagementPanel(QWidget):
         self.settings = SettingsService.get_instance()
         self._scope_setting_key = (
             "tm_panel/scope_mode_project" if self.project_id is not None else "tm_panel/scope_mode_global"
+        )
+
+        # State: selected kinds (None = All; [] treated as None)
+        _saved_kinds = self.settings.get_json("tm_panel/kind_filter", None)
+        self.selected_kinds: Optional[List[str]] = (
+            _saved_kinds if isinstance(_saved_kinds, list) and len(_saved_kinds) > 0 else None
         )
 
         # State: selected project IDs (None = all projects)
@@ -379,10 +451,11 @@ class TranslationManagementPanel(QWidget):
         row1.addWidget(self.search_edit)
 
         row1.addWidget(QLabel("Kind:"))
-        self.kind_combo = QComboBox()
-        self.kind_combo.addItems(["All", "lemma", "term_cluster", "ngram", "surface"])
-        self.kind_combo.currentTextChanged.connect(self.on_filter_changed)
-        row1.addWidget(self.kind_combo)
+        self.kind_filter_btn = QPushButton(self._kind_btn_label())
+        self.kind_filter_btn.setMinimumWidth(140)
+        self.kind_filter_btn.setToolTip("Click to select kinds to filter")
+        self.kind_filter_btn.clicked.connect(self.on_select_kinds)
+        row1.addWidget(self.kind_filter_btn)
 
         filters_layout.addLayout(row1)
 
@@ -692,10 +765,32 @@ class TranslationManagementPanel(QWidget):
         """Clear all filters."""
         self.search_edit.clear()
         self.source_ref_edit.clear()
-        self.kind_combo.setCurrentIndex(0)
+        self.selected_kinds = None
+        self.kind_filter_btn.setText(self._kind_btn_label())
+        self.settings.set_value("tm_panel/kind_filter", None)
         self.status_combo.setCurrentIndex(0)
         self.origin_combo.setCurrentIndex(0)
         self._apply_scope_mode(reset_page=False)
+        self.perform_search()
+
+    def _kind_btn_label(self) -> str:
+        """Return button label reflecting current kind selection."""
+        if not self.selected_kinds:
+            return "All ▾"
+        if len(self.selected_kinds) == 1:
+            return f"{self.selected_kinds[0]} ▾"
+        return f"{len(self.selected_kinds)} kinds ▾"
+
+    def on_select_kinds(self):
+        """Open KindFilterDialog and apply selection."""
+        dlg = KindFilterDialog(self.selected_kinds, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.selected_kinds = dlg.get_selected_kinds()
+        # Persist to settings
+        self.settings.set_value("tm_panel/kind_filter", self.selected_kinds)
+        self.kind_filter_btn.setText(self._kind_btn_label())
+        self.current_page = 1
         self.perform_search()
 
     def on_refresh(self):
@@ -884,10 +979,9 @@ class TranslationManagementPanel(QWidget):
         if search_text:
             filters["search_text"] = search_text
 
-        # Kind
-        kind = self.kind_combo.currentText()
-        if kind != "All":
-            filters["kind"] = kind
+        # Kind multi-select (None = All; list = restrict to selected)
+        if self.selected_kinds:
+            filters["kinds"] = self.selected_kinds
 
         # Status
         status = self.status_combo.currentText()

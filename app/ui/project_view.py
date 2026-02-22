@@ -17,6 +17,7 @@ from app.ui.concordance_view import ConcordanceView
 from app.ui.term_card_view import TermCardView
 from app.ui.user_dictionaries_view import UserDictionariesView
 from app.ui.export_view import ExportView
+from app.ui.sentences_view import SentencesView
 from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,12 @@ class ProjectView(QWidget):
             self.on_open_translation_management
         )
         self.tabs.addTab(self.user_dictionaries_view, "User Dictionaries")
+
+        # Sentences workspace tab (Task 22)
+        self.sentences_view = SentencesView(self.project_id)
+        self.tabs.addTab(self.sentences_view, "Sentences")
+        # Refresh sentences after NLP processing completes
+        self.documents_view.processing_completed.connect(self.sentences_view._reload)
 
         # Export tab
         self.export_view = ExportView(self.project_id)

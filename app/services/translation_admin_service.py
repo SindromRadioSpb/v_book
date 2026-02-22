@@ -205,7 +205,12 @@ class TranslationAdminService:
         stmt = select(TMEntry)
 
         # Apply filters
-        if "kind" in filters and filters["kind"]:
+        # Support both legacy single-kind ("kind") and multi-select ("kinds" list)
+        if "kinds" in filters and filters["kinds"]:
+            kinds_list = [k for k in filters["kinds"] if k]
+            if kinds_list:
+                stmt = stmt.where(TMEntry.kind.in_(kinds_list))
+        elif "kind" in filters and filters["kind"]:
             stmt = stmt.where(TMEntry.kind == filters["kind"])
 
         if "status" in filters and filters["status"]:

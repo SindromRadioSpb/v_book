@@ -1,4 +1,4 @@
-"""Documents view - file import and management."""
+"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -14,13 +14,19 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QCheckBox,
     QProgressBar,
+    QLineEdit,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QTimer
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
 from app.services.db_service import DBService
 from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
+from app.services.document_service import DocumentService, validate_link_url, VALID_LEVELS
 from app.infra.settings import SettingsService
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import IngestWorker, ProcessWorker
@@ -29,11 +35,81 @@ from app.ui.dialogs import show_error, show_info, show_warning
 logger = logging.getLogger(__name__)
 
 
+class EditMetadataDialog(QDialog):
+    """Dialog for editing document metadata (tag, link_url, level, topic)."""
+
+    LEVELS = ["", "aleph", "bet", "gimel", "he"]
+
+    def __init__(self, doc_name: str, tag: str, link_url: str, level: str, topic: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Edit Metadata — {doc_name}")
+        self.setMinimumWidth(480)
+        layout = QVBoxLayout()
+
+        form = QFormLayout()
+
+        self.tag_edit = QLineEdit(tag or "")
+        self.tag_edit.setPlaceholderText("e.g. grammar, vocab, reading")
+        self.tag_edit.setMaxLength(200)
+        form.addRow("Tag:", self.tag_edit)
+
+        self.link_edit = QLineEdit(link_url or "")
+        self.link_edit.setPlaceholderText("https://example.com/text")
+        form.addRow("Link URL:", self.link_edit)
+
+        self.level_combo = QComboBox()
+        self.level_combo.addItems(["(none)", "aleph", "bet", "gimel", "he"])
+        if level in ("aleph", "bet", "gimel", "he"):
+            self.level_combo.setCurrentText(level)
+        else:
+            self.level_combo.setCurrentIndex(0)
+        form.addRow("Level:", self.level_combo)
+
+        self.topic_edit = QLineEdit(topic or "")
+        self.topic_edit.setPlaceholderText("e.g. daily life, travel, news")
+        self.topic_edit.setMaxLength(500)
+        form.addRow("Topic:", self.topic_edit)
+
+        layout.addLayout(form)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        self.setLayout(layout)
+
+    def get_values(self):
+        """Return (tag, link_url, level, topic) — level is None if (none)."""
+        level_text = self.level_combo.currentText()
+        return (
+            self.tag_edit.text().strip() or None,
+            self.link_edit.text().strip() or None,
+            level_text if level_text != "(none)" else None,
+            self.topic_edit.text().strip() or None,
+        )
+
+
 class DocumentsView(QWidget):
-    """Documents view with drag-drop import."""
+    """Documents view with drag-drop import and metadata columns (Tag/Link/Level/Topic)."""
 
     document_added = pyqtSignal(int)  # Emits doc_id when document is added
     processing_completed = pyqtSignal()  # Emits when NLP processing is done
+
+    # Column indices (12 columns total)
+    COL_ID = 0
+    COL_NAME = 1
+    COL_SIZE = 2
+    COL_STATUS = 3
+    COL_SENTENCES = 4
+    COL_TOKENS = 5
+    COL_IMPORTED = 6
+    COL_PATH = 7
+    COL_TAG = 8
+    COL_LINK = 9
+    COL_LEVEL = 10
+    COL_TOPIC = 11
 
     def __init__(self, project_id: int):
         super().__init__()
@@ -44,12 +120,19 @@ class DocumentsView(QWidget):
         self.db_service = DBService.get_instance()
         self.project_service = ProjectService()
         self.ingest_service = IngestService()
+        self.document_service = DocumentService()
         self.settings = SettingsService.get_instance()
 
         self.current_worker = None
         self.process_worker = None
 
         self._loading = False  # Flag to suppress cellChanged during load
+
+        # Debounce timer for search/filter
+        self._filter_timer = QTimer()
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(400)
+        self._filter_timer.timeout.connect(self.load_documents)
 
         self.init_ui()
         self.load_corpus()
@@ -85,6 +168,37 @@ class DocumentsView(QWidget):
         header_layout.addWidget(refresh_btn)
 
         layout.addLayout(header_layout)
+
+        # --- Search / Filter row ---
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Search title:"))
+        self.title_search_edit = QLineEdit()
+        self.title_search_edit.setPlaceholderText("Filter by file name...")
+        self.title_search_edit.setMaximumWidth(220)
+        self.title_search_edit.textChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.title_search_edit)
+
+        filter_layout.addWidget(QLabel("Level:"))
+        self.level_filter_combo = QComboBox()
+        self.level_filter_combo.addItems(["All", "aleph", "bet", "gimel", "he"])
+        self.level_filter_combo.setMaximumWidth(90)
+        self.level_filter_combo.currentTextChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.level_filter_combo)
+
+        filter_layout.addWidget(QLabel("Tag:"))
+        self.tag_filter_edit = QLineEdit()
+        self.tag_filter_edit.setPlaceholderText("Filter by tag...")
+        self.tag_filter_edit.setMaximumWidth(150)
+        self.tag_filter_edit.textChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.tag_filter_edit)
+
+        clear_filters_btn = QPushButton("Clear")
+        clear_filters_btn.setMaximumWidth(60)
+        clear_filters_btn.clicked.connect(self._on_clear_filters)
+        filter_layout.addWidget(clear_filters_btn)
+
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
 
         # OCR option
         ocr_layout = QHBoxLayout()
@@ -135,11 +249,12 @@ class DocumentsView(QWidget):
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint_label)
 
-        # Documents table
+        # Documents table (12 columns including metadata)
         self.docs_table = QTableWidget()
-        self.docs_table.setColumnCount(8)  # Added Sentences and Tokens columns
+        self.docs_table.setColumnCount(12)
         self.docs_table.setHorizontalHeaderLabels([
-            "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens", "Imported", "Path"
+            "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens",
+            "Imported", "Path", "Tag", "Link", "Level", "Topic"
         ])
         self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
@@ -162,14 +277,18 @@ class DocumentsView(QWidget):
             table_id="documents_view",
             table=self.docs_table,
             default_widths={
-                0: 70,   # ID
-                1: 260,  # File Name
-                2: 100,  # Size
-                3: 120,  # Status
-                4: 100,  # Sentences
-                5: 100,  # Tokens
-                6: 140,  # Imported
-                7: 320,  # Path
+                0: 60,   # ID
+                1: 220,  # File Name
+                2: 90,   # Size
+                3: 110,  # Status
+                4: 90,   # Sentences
+                5: 90,   # Tokens
+                6: 130,  # Imported
+                7: 260,  # Path
+                8: 120,  # Tag
+                9: 180,  # Link
+                10: 80,  # Level
+                11: 160, # Topic
             },
         )
         self.table_layout_controller.install()
@@ -177,6 +296,9 @@ class DocumentsView(QWidget):
         # Context menu
         self.docs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.docs_table.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Link click handler
+        self.docs_table.cellClicked.connect(self.on_cell_clicked)
 
         layout.addWidget(self.docs_table)
 
@@ -261,90 +383,142 @@ class DocumentsView(QWidget):
             show_error(self, "Error", f"Failed to load corpus: {e}")
 
     def load_documents(self):
-        """Load documents from database."""
+        """Load documents from database using DocumentService (with search/filter)."""
         if not self.corpus_id:
             return
 
         try:
-            # Set loading flag to suppress cellChanged handler
             self._loading = True
 
+            # Read filter state
+            title_search = self.title_search_edit.text().strip() or None
+            tag_filter = self.tag_filter_edit.text().strip() or None
+            level_text = self.level_filter_combo.currentText()
+            level_filter = level_text if level_text != "All" else None
+
             with self.db_service.get_session() as session:
-                from sqlalchemy import select
-                from app.infra.sa_models import SourceDocument
+                dtos = self.document_service.list_documents(
+                    session,
+                    self.corpus_id,
+                    title_search=title_search,
+                    tag_filter=tag_filter,
+                    level_filter=level_filter,
+                    sort_by="imported_at",
+                    sort_dir="desc",
+                )
 
-                stmt = select(SourceDocument).where(
-                    SourceDocument.corpus_id == self.corpus_id
-                ).order_by(SourceDocument.imported_at.desc())
-
-                docs = session.execute(stmt).scalars().all()
-
-                # Temporarily disable sorting while populating (performance optimization)
+                # Temporarily disable sorting while populating
                 self.docs_table.setSortingEnabled(False)
-                self.docs_table.setRowCount(len(docs))
+                self.docs_table.setRowCount(len(dtos))
 
-                for row, doc in enumerate(docs):
-                    # Column 0: ID (numeric sorting) - NOT EDITABLE
-                    id_item = QTableWidgetItem()
-                    id_item.setData(Qt.ItemDataRole.DisplayRole, doc.doc_id)
-                    id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 0, id_item)
+                def _ro_item(text="", data=None):
+                    """Create a read-only QTableWidgetItem."""
+                    item = QTableWidgetItem(text)
+                    if data is not None:
+                        item.setData(Qt.ItemDataRole.DisplayRole, data)
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    return item
 
-                    # Column 1: File Name (text sorting) - EDITABLE
-                    file_name_item = QTableWidgetItem(doc.file_name)
-                    # Store doc_id in UserRole for reliable lookup after sorting
-                    file_name_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
-                    # Keep ItemIsEditable flag (default)
-                    self.docs_table.setItem(row, 1, file_name_item)
+                for row, doc in enumerate(dtos):
+                    # Col 0: ID
+                    id_item = _ro_item(data=doc.doc_id)
+                    id_item.setText(str(doc.doc_id))
+                    self.docs_table.setItem(row, self.COL_ID, id_item)
 
-                    # Column 2: Size (numeric sorting) - NOT EDITABLE
+                    # Col 1: File Name — EDITABLE, stores doc_id in UserRole
+                    fn_item = QTableWidgetItem(doc.file_name)
+                    fn_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
+                    self.docs_table.setItem(row, self.COL_NAME, fn_item)
+
+                    # Col 2: Size KB
                     size_kb = doc.file_size_bytes / 1024
-                    size_item = QTableWidgetItem()
-                    size_item.setData(Qt.ItemDataRole.DisplayRole, size_kb)
-                    size_item.setText(f"{size_kb:.1f}")
-                    size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 2, size_item)
+                    sz_item = _ro_item(f"{size_kb:.1f}", data=size_kb)
+                    self.docs_table.setItem(row, self.COL_SIZE, sz_item)
 
-                    # Column 3: Status (text sorting) - NOT EDITABLE
-                    status_item = QTableWidgetItem(doc.status)
-                    status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 3, status_item)
+                    # Col 3: Status
+                    self.docs_table.setItem(row, self.COL_STATUS, _ro_item(doc.status))
 
-                    # Column 4: Sentences (numeric sorting) - NOT EDITABLE
-                    sentences_item = QTableWidgetItem()
-                    sentences_item.setData(Qt.ItemDataRole.DisplayRole, doc.sentence_count or 0)
-                    sentences_item.setText(str(doc.sentence_count) if doc.sentence_count else "")
-                    sentences_item.setFlags(sentences_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 4, sentences_item)
+                    # Col 4: Sentences
+                    sc = doc.sentence_count or 0
+                    s_item = _ro_item(str(sc) if sc else "", data=sc)
+                    self.docs_table.setItem(row, self.COL_SENTENCES, s_item)
 
-                    # Column 5: Tokens (numeric sorting) - NOT EDITABLE
-                    tokens_item = QTableWidgetItem()
-                    tokens_item.setData(Qt.ItemDataRole.DisplayRole, doc.token_count or 0)
-                    tokens_item.setText(str(doc.token_count) if doc.token_count else "")
-                    tokens_item.setFlags(tokens_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 5, tokens_item)
+                    # Col 5: Tokens
+                    tc = doc.token_count or 0
+                    t_item = _ro_item(str(tc) if tc else "", data=tc)
+                    self.docs_table.setItem(row, self.COL_TOKENS, t_item)
 
-                    # Column 6: Imported (text sorting - already formatted) - NOT EDITABLE
-                    imported_item = QTableWidgetItem(doc.imported_at[:19])
-                    imported_item.setFlags(imported_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 6, imported_item)
+                    # Col 6: Imported
+                    self.docs_table.setItem(row, self.COL_IMPORTED, _ro_item(doc.imported_at[:19]))
 
-                    # Column 7: Path (text sorting) - NOT EDITABLE
-                    path_item = QTableWidgetItem(doc.file_path)
-                    path_item.setFlags(path_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.docs_table.setItem(row, 7, path_item)
+                    # Col 7: Path
+                    self.docs_table.setItem(row, self.COL_PATH, _ro_item(doc.file_path))
 
-                # Re-enable sorting after population
+                    # Col 8: Tag
+                    self.docs_table.setItem(row, self.COL_TAG, _ro_item(doc.tag or ""))
+
+                    # Col 9: Link — store URL in UserRole for click handler
+                    link_text = doc.link_url or ""
+                    lk_item = _ro_item(link_text)
+                    lk_item.setData(Qt.ItemDataRole.UserRole + 1, doc.link_url)
+                    if doc.link_url:
+                        lk_item.setForeground(Qt.GlobalColor.blue)
+                        lk_item.setToolTip(f"Click to open: {doc.link_url}")
+                    self.docs_table.setItem(row, self.COL_LINK, lk_item)
+
+                    # Col 10: Level
+                    self.docs_table.setItem(row, self.COL_LEVEL, _ro_item(doc.level or ""))
+
+                    # Col 11: Topic
+                    self.docs_table.setItem(row, self.COL_TOPIC, _ro_item(doc.topic or ""))
+
                 self.docs_table.setSortingEnabled(True)
-
-                self.status_label.setText(f"Total documents: {len(docs)}")
+                self.status_label.setText(f"Total documents: {len(dtos)}")
 
         except Exception as e:
             logger.exception("Failed to load documents")
             show_error(self, "Error", f"Failed to load documents: {e}")
         finally:
-            # Clear loading flag
             self._loading = False
+
+    def _on_filter_changed(self):
+        """Debounced filter change handler."""
+        self._filter_timer.start()
+
+    def _on_clear_filters(self):
+        """Clear all search/filter fields."""
+        self.title_search_edit.blockSignals(True)
+        self.tag_filter_edit.blockSignals(True)
+        self.title_search_edit.clear()
+        self.tag_filter_edit.clear()
+        self.level_filter_combo.setCurrentIndex(0)
+        self.title_search_edit.blockSignals(False)
+        self.tag_filter_edit.blockSignals(False)
+        self.load_documents()
+
+    def on_cell_clicked(self, row: int, column: int):
+        """Handle click on Link column — open URL safely."""
+        if column != self.COL_LINK:
+            return
+        item = self.docs_table.item(row, column)
+        if not item:
+            return
+        url = item.data(Qt.ItemDataRole.UserRole + 1)
+        if not url:
+            return
+        # Safety: re-validate scheme before opening
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                show_error(self, "Unsafe Link", f"Link scheme '{parsed.scheme}' is not allowed.")
+                return
+        except Exception:
+            show_error(self, "Invalid Link", "Could not parse link URL.")
+            return
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl(url))
 
     def _configure_reference_corpus_ui(self):
         """Configure UI for reference corpus (read-only documents)."""
@@ -887,40 +1061,83 @@ class DocumentsView(QWidget):
             self.load_documents()
 
     def show_context_menu(self, position):
-        """Show context menu with Rename, View Text, and Delete options."""
-        # Get selected row
+        """Show context menu with Rename, Edit Metadata, View Text, and Delete options."""
         selected_rows = set(item.row() for item in self.docs_table.selectedItems())
         if not selected_rows:
             return
 
         row = min(selected_rows)
 
-        # Create menu
         from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
 
-        # Rename action (only for single selection)
+        # Single-selection actions
         if len(selected_rows) == 1:
             rename_action = menu.addAction("Rename (F2)")
             rename_action.triggered.connect(lambda: self.start_rename(row))
+
+            edit_meta_action = menu.addAction("Edit Metadata...")
+            edit_meta_action.triggered.connect(lambda: self.on_edit_metadata(row))
+
             menu.addSeparator()
 
-        # View Text action (single selection)
-        if len(selected_rows) == 1:
             view_action = menu.addAction("View Text")
             view_action.triggered.connect(self.on_view_text)
+
+            menu.addSeparator()
 
         # Delete action (single or multiple)
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self.on_delete)
 
-        # Disable delete for reference corpus
         if self.is_reference_corpus:
             delete_action.setEnabled(False)
             delete_action.setToolTip("Cannot delete documents from reference corpus")
 
-        # Show menu
         menu.exec(self.docs_table.viewport().mapToGlobal(position))
+
+    def on_edit_metadata(self, row: int):
+        """Open Edit Metadata dialog for the document at given row."""
+        fn_item = self.docs_table.item(row, self.COL_NAME)
+        if not fn_item:
+            return
+        doc_id = fn_item.data(Qt.ItemDataRole.UserRole)
+        if not doc_id:
+            return
+
+        # Read current metadata from table
+        tag = (self.docs_table.item(row, self.COL_TAG) or QTableWidgetItem()).text()
+        link_url = self.docs_table.item(row, self.COL_LINK)
+        link_url = link_url.data(Qt.ItemDataRole.UserRole + 1) if link_url else None
+        level = (self.docs_table.item(row, self.COL_LEVEL) or QTableWidgetItem()).text()
+        topic = (self.docs_table.item(row, self.COL_TOPIC) or QTableWidgetItem()).text()
+        doc_name = fn_item.text()
+
+        dlg = EditMetadataDialog(doc_name, tag, link_url or "", level, topic, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_tag, new_link, new_level, new_topic = dlg.get_values()
+
+        try:
+            from app.services.document_service import validate_link_url
+            # Validate link_url before saving
+            validate_link_url(new_link)
+            with self.db_service.get_session() as session:
+                self.document_service.update_metadata(
+                    session,
+                    doc_id,
+                    tag=new_tag,
+                    link_url=new_link,
+                    level=new_level,
+                    topic=new_topic,
+                )
+            self.load_documents()
+        except ValueError as e:
+            show_error(self, "Validation Error", str(e))
+        except Exception as e:
+            logger.exception("Failed to update metadata")
+            show_error(self, "Error", f"Failed to save metadata: {e}")
 
     def start_rename(self, row):
         """Start editing the File Name column for a specific row."""
