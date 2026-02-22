@@ -240,6 +240,7 @@ class PronunciationBootstrapService:
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
+        include_sentences: bool = False,
     ) -> Dict[str, str]:
         """Collect deterministic `(src_norm -> source_text)` map from selected rows."""
         selected: Dict[str, Tuple[Tuple[int, int, int, int, str], str]] = {}
@@ -247,11 +248,13 @@ class PronunciationBootstrapService:
             "lemmas": 0,
             "terms": 1,
             "user_dictionary": 2,
+            "sentences": 3,
         }
         include_by_group = {
             "lemmas": bool(include_lemmas),
             "terms": bool(include_terms),
             "user_dictionary": bool(include_user_dictionary),
+            "sentences": bool(include_sentences),
         }
 
         def _selected_pronunciation_norm(
@@ -330,6 +333,7 @@ class PronunciationBootstrapService:
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
+        include_sentences: bool = False,
         selected_items: Optional[List[Dict[str, Any]]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
@@ -343,6 +347,7 @@ class PronunciationBootstrapService:
                 include_lemmas=include_lemmas,
                 include_terms=include_terms,
                 include_user_dictionary=include_user_dictionary,
+                include_sentences=include_sentences,
             )
         else:
             source_candidates = self.collect_source_candidates(
@@ -427,6 +432,12 @@ class PronunciationBootstrapService:
                     else:
                         failed += 1
                         continue
+                if not PronunciationQualityService.has_hebrew_nikud(niqqud_value):
+                    # Generator returned text unchanged (model unavailable or fallback mode).
+                    # Writing source text as niqqud_text would pollute the column with
+                    # unvowelled text, so skip this entry entirely.
+                    skipped += 1
+                    continue
                 if niqqud_result.qc_flag:
                     qc_note = f"qc:{niqqud_result.qc_flag}"
                     notes_value = f"{notes_value}; {qc_note}".strip("; ").strip()

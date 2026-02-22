@@ -453,6 +453,8 @@ class BatchMTTranslateService:
             self._write_term_cluster(session, item, translation, force_global_update=force_global_update)
         elif item.entity_type == "tm_entry":
             self._write_tm_entry(session, item, translation, force_global_update=force_global_update)
+        elif item.entity_type == "surface":
+            self._write_surface(session, item, translation, force_global_update=force_global_update)
         else:
             raise ValueError(f"Unknown entity_type: {item.entity_type}")
 
@@ -619,3 +621,52 @@ class BatchMTTranslateService:
 
         # Note: We don't create history here (TranslationAdminService does that)
         # For batch operations, we prioritize performance over history granularity
+
+    def _write_surface(
+        self,
+        session: Session,
+        item: "BatchTranslateItem",
+        translation: str,
+        force_global_update: bool = False,
+    ) -> None:
+        """Write surface-level translation (Sentences workspace pattern).
+
+        Upserts a kind='surface' TM entry keyed by src_norm.
+        This is the same layer that SentencesWorkspaceService._batch_get_translations reads.
+        """
+        normalized = normalize_for_tm(item.src_lang, item.source_text, "surface")
+        src_norm = normalized.norm
+
+        stmt = select(TMEntry).where(
+            TMEntry.project_id == item.project_id,
+            TMEntry.kind == "surface",
+            TMEntry.src_norm == src_norm,
+        )
+        existing = session.execute(stmt).scalar()
+
+        if existing:
+            existing.translation = translation
+            existing.status = "approved"
+            existing.origin = "mt_auto"
+            existing.updated_at = datetime.now()
+            session.flush()
+            TMGlobalService().upsert_and_link(
+                session, existing, force_global_update=force_global_update
+            )
+        else:
+            tm_entry = TMEntry(
+                project_id=item.project_id,
+                kind="surface",
+                src_lang=item.src_lang,
+                tgt_lang=item.tgt_lang,
+                src_text=item.source_text,
+                src_norm=src_norm,
+                translation=translation,
+                status="approved",
+                origin="mt_auto",
+            )
+            session.add(tm_entry)
+            session.flush()
+            TMGlobalService().upsert_and_link(
+                session, tm_entry, force_global_update=force_global_update
+            )

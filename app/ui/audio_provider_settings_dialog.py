@@ -332,6 +332,7 @@ class AudioProviderSettingsDialog(QDialog):
         voice_form = QFormLayout(voice_group)
         self.google_voice_combo = QComboBox()
         self.google_voice_combo.setEditable(True)
+        self.google_voice_combo.setMaxVisibleItems(50)
         voice_form.addRow("Voice ID:", self.google_voice_combo)
         self.google_refresh_voices_btn = QPushButton("Refresh voices")
         self.google_refresh_voices_btn.clicked.connect(self._refresh_google_voices)

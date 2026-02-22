@@ -53,7 +53,7 @@ class PronunciationBootstrapDialog(QDialog):
             src_text = str(raw.get("src_text") or "").strip()
             src_lang = str(raw.get("src_lang") or "he").strip()
             source_group = str(raw.get("source_group") or "user_dictionary").strip().lower()
-            if source_group not in {"lemmas", "terms", "user_dictionary"}:
+            if source_group not in {"lemmas", "terms", "user_dictionary", "sentences"}:
                 source_group = "user_dictionary"
             if not src_norm or not src_text:
                 continue
@@ -144,17 +144,21 @@ class PronunciationBootstrapDialog(QDialog):
         self.include_lemmas_cb = QCheckBox("Lemmas")
         self.include_terms_cb = QCheckBox("Terms")
         self.include_ud_cb = QCheckBox("User Dictionaries")
+        self.include_sentences_cb = QCheckBox("Sentences")
         self.include_lemmas_cb.setChecked(True)
         self.include_terms_cb.setChecked(True)
         self.include_ud_cb.setChecked(True)
+        self.include_sentences_cb.setChecked(False)
         if self.selected_items:
             selected_groups = {item.get("source_group") for item in self.selected_items}
             self.include_lemmas_cb.setChecked("lemmas" in selected_groups)
             self.include_terms_cb.setChecked("terms" in selected_groups)
             self.include_ud_cb.setChecked("user_dictionary" in selected_groups)
+            self.include_sentences_cb.setChecked("sentences" in selected_groups)
         source_row.addWidget(self.include_lemmas_cb)
         source_row.addWidget(self.include_terms_cb)
         source_row.addWidget(self.include_ud_cb)
+        source_row.addWidget(self.include_sentences_cb)
         source_row.addStretch()
         opts_form.addRow("Sources:", source_row)
 
@@ -320,6 +324,7 @@ class PronunciationBootstrapDialog(QDialog):
             self.include_lemmas_cb.isChecked()
             or self.include_terms_cb.isChecked()
             or self.include_ud_cb.isChecked()
+            or self.include_sentences_cb.isChecked()
         ):
             QMessageBox.warning(self, "Pronunciation Bootstrap", "Select at least one source group.")
             return
@@ -366,6 +371,7 @@ class PronunciationBootstrapDialog(QDialog):
             include_lemmas=self.include_lemmas_cb.isChecked(),
             include_terms=self.include_terms_cb.isChecked(),
             include_user_dictionary=self.include_ud_cb.isChecked(),
+            include_sentences=self.include_sentences_cb.isChecked(),
             selected_items=self.selected_items,
         )
         self._bootstrap_worker = worker
