@@ -264,17 +264,16 @@ class SentenceNiqqudBootstrapDialog(QDialog):
     def _on_finished(self, result: dict, progress_dialog: BatchProgressDialogV3) -> None:
         self._should_refresh = True
         progress_dialog.set_completed()
+        progress_dialog.accept()  # dismiss blocking exec() so the app is not stuck
 
         lines = result.get("summary_lines") or []
         if lines:
             self._log.setVisible(True)
             self._log.setPlainText("\n".join(lines))
 
-        summary = "\n".join(lines) if lines else "Done."
-        progress_dialog.set_stage("Done")
-
     def _on_error(self, msg: str, progress_dialog: BatchProgressDialogV3) -> None:
         progress_dialog.set_stage(f"Error: {msg[:80]}")
+        progress_dialog.accept()  # dismiss blocking exec() before showing the error box
         QMessageBox.critical(self, "Bootstrap Error", msg)
 
     def should_refresh(self) -> bool:
