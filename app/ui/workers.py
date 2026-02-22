@@ -3048,3 +3048,155 @@ class PronunciationBootstrapWorker(QThread):
         except Exception as exc:
             logger.error("PronunciationBootstrapWorker error: %s", exc, exc_info=True)
             self.error.emit(str(exc))
+
+
+class SentenceNiqqudBootstrapWorker(QThread):
+    """Run sentence niqqud bootstrap in background with V3 progress + pause/cancel.
+
+    Signal contract (compatible with BatchProgressDialogV3):
+      progress(completed, total)
+      stats_updated(inserted, updated, skipped_total, failed)
+      row_translated(sentence_id_str, status_msg, success)
+      stage_updated(stage_label)
+      finished(result_dict)
+      error(message)
+      paused / resumed
+    """
+
+    progress = pyqtSignal(int, int)                    # (completed, total)
+    stats_updated = pyqtSignal(int, int, int, int)     # (inserted, updated, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)        # (id_str, message, success)
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
+
+    def __init__(
+        self,
+        *,
+        sentence_ids: List[int],
+        lang: str,
+        mode: str = "fill_only",          # "dry_run" | "fill_only" | "rebuild"
+        model_path: str = "",
+        enabled: bool = True,
+        chunk_size: int = 200,
+        sub_chunk_size: int = 50,
+        min_len: int = 5,
+        max_len: int = 2000,
+        min_he_ratio: float = 0.10,
+    ):
+        super().__init__()
+        self.sentence_ids = list(sentence_ids)
+        self.lang = (lang or "he").strip() or "he"
+        self.mode = mode
+        self.model_path = (model_path or "").strip()
+        self.enabled = bool(enabled)
+        self.chunk_size = max(1, int(chunk_size))
+        self.sub_chunk_size = max(1, int(sub_chunk_size))
+        self.min_len = int(min_len)
+        self.max_len = int(max_len)
+        self.min_he_ratio = float(min_he_ratio)
+
+        self._cancel_requested = False
+        self._pause_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def pause(self) -> None:
+        self._pause_requested = True
+        self.paused.emit()
+
+    def resume(self) -> None:
+        self._pause_requested = False
+        self.resumed.emit()
+
+    def run(self) -> None:
+        try:
+            from app.services.db_service import DBService
+            from app.services.pronunciation_bootstrap_service import PhonikudPronunciationGenerator
+            from app.services.sentence_pronunciation_bootstrap_service import (
+                SentencePronunciationBootstrapService,
+                GuardParams,
+            )
+
+            db = DBService.get_instance()
+            generator = PhonikudPronunciationGenerator(
+                model_path=self.model_path,
+                enabled=self.enabled,
+            )
+
+            # Health check (non-blocking; warn but continue)
+            health = generator.health_check()
+            self.stage_updated.emit(f"Phonikud mode: {health.mode}")
+
+            guard = GuardParams(
+                min_len=self.min_len,
+                max_len=self.max_len,
+                min_he_ratio=self.min_he_ratio,
+            )
+            svc = SentencePronunciationBootstrapService(
+                chunk_size=self.chunk_size,
+                sub_chunk_size=self.sub_chunk_size,
+            )
+
+            # Throttle progress signals (max ~10/sec)
+            _last_emit = [0.0]
+            _EMIT_INTERVAL = 0.1
+
+            def _progress_cb(done: int, total: int, stage: str) -> None:
+                self.stage_updated.emit(stage)
+                now = time.time()
+                if now - _last_emit[0] >= _EMIT_INTERVAL:
+                    self.progress.emit(done, total)
+                    _last_emit[0] = now
+
+            import time
+
+            with db.get_session() as session:
+                result = svc.run(
+                    session,
+                    self.sentence_ids,
+                    lang=self.lang,
+                    mode=self.mode,
+                    phonikud_generator=generator,
+                    guard_params=guard,
+                    progress_callback=_progress_cb,
+                    cancel_check=lambda: self._cancel_requested,
+                    pause_check=lambda: self._pause_requested,
+                    phonikud_version=health.mode,
+                )
+
+            # Final progress + stats
+            self.progress.emit(len(self.sentence_ids), len(self.sentence_ids))
+            self.stats_updated.emit(
+                result.inserted,
+                result.updated,
+                result.skipped_total,
+                result.failed,
+            )
+            self.stage_updated.emit("Done" if not result.cancelled else "Cancelled")
+
+            self.finished.emit({
+                "total_candidates": result.total_candidates,
+                "inserted": result.inserted,
+                "updated": result.updated,
+                "skipped_same_hash": result.skipped_same_hash,
+                "skipped_has_override": result.skipped_has_override,
+                "skipped_too_short": result.skipped_too_short,
+                "skipped_too_long": result.skipped_too_long,
+                "skipped_non_hebrew_ratio": result.skipped_non_hebrew_ratio,
+                "skipped_invalid_after_qc": result.skipped_invalid_after_qc,
+                "failed": result.failed,
+                "rejected_qc": result.rejected_qc,
+                "partial_qc": result.partial_qc,
+                "dry_run": result.dry_run,
+                "cancelled": result.cancelled,
+                "generator_mode": result.generator_mode,
+                "elapsed_seconds": result.elapsed_seconds,
+                "summary_lines": result.summary_lines(),
+            })
+        except Exception as exc:
+            logger.error("SentenceNiqqudBootstrapWorker error: %s", exc, exc_info=True)
+            self.error.emit(str(exc))
