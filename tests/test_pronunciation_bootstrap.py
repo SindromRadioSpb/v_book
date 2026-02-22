@@ -24,7 +24,8 @@ def _workspace_temp_dir(prefix: str) -> Path:
 class _FakeGenerator(PronunciationGenerator):
     def generate(self, lang: str, src_norms: list[str]):
         _ = lang
-        return {norm: {"niqqud_text": f"{norm}_nikud", "ipa": None, "notes": "fake"} for norm in src_norms}
+        # Append a Hebrew PATAH (U+05B7) so has_hebrew_nikud() accepts the value.
+        return {norm: {"niqqud_text": norm + "\u05B7", "ipa": None, "notes": "fake"} for norm in src_norms}
 
 
 class _MismatchGenerator(PronunciationGenerator):
@@ -219,7 +220,11 @@ def test_bootstrap_selected_lemma_prefix_forms_do_not_collapse_to_one_candidate(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def test_bootstrap_falls_back_to_source_when_generated_structure_mismatch():
+def test_bootstrap_skips_when_generated_has_no_nikud_marks():
+    """When the generator returns text without Hebrew nikud marks (mismatch or identity),
+    the bootstrap must skip the entry rather than writing unvowelled text to the Niqqud column.
+    This covers the structure-mismatch fallback path: mismatch → source_text fallback →
+    source_text has no nikud → skip."""
     temp_dir = _workspace_temp_dir("pron_bootstrap_structure_fallback_")
     engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
     try:
@@ -243,14 +248,13 @@ def test_bootstrap_falls_back_to_source_when_generated_structure_mismatch():
             )
             session.commit()
 
+            # Both candidates are skipped: first triggers mismatch → source_text fallback
+            # (no nikud), second is identity (no nikud). Neither should pollute the DB.
             assert result.total_candidates == 2
+            assert result.updated == 0
+            assert result.skipped == 2
             rows = session.query(PronunciationEntry).all()
-            by_norm = {row.src_norm: row for row in rows}
-            first_norm = normalize_for_tm("he", "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df", "surface").norm
-            second_norm = normalize_for_tm("he", "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df", "surface").norm
-            assert by_norm[first_norm].niqqud_text == "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df"
-            assert "qc:source_structure_fallback" in (by_norm[first_norm].notes or "")
-            assert by_norm[second_norm].niqqud_text == "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df"
+            assert len(rows) == 0, "No entries should be written when no Hebrew nikud marks exist"
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
