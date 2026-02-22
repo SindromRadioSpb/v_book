@@ -95,6 +95,21 @@ class DocumentDTO:
 
 
 @dataclass
+class SentenceNiqqudOverlay:
+    """Sentence-level niqqud overlay from sentence_pronunciation table (Migration 024)."""
+
+    sentence_id: int
+    niqqud_text: Optional[str]
+    qc_status: str          # ok | auto_fixed | partial | rejected | failed | pending
+    qc_reason: Optional[str]
+    source: str             # auto_phonikud | manual | import_csv
+    confidence: Optional[float]
+    niqqud_coverage: Optional[float]
+    is_override: bool
+    review_status: str      # auto | pending_review | approved | rejected_by_user
+
+
+@dataclass
 class SentenceDTO:
     """A single sentence from document_sentence with overlay data."""
 
@@ -103,11 +118,19 @@ class SentenceDTO:
     doc_name: str
     sent_index: int
     text: str
-    # Overlays from TM/pronunciation/audio (populated by SentencesWorkspaceService)
+    # TM overlay
     translation: Optional[str] = None
     translation_status: Optional[str] = None
     translation_source: Optional[str] = None
-    pronunciation_text: Optional[str] = None
+    # Sentence niqqud overlay (sentence_pronunciation table, Migration 024)
+    pronunciation_text: Optional[str] = None   # effective niqqud_text
+    niqqud_qc: Optional[str] = None            # qc_status badge
+    niqqud_source: Optional[str] = None
+    niqqud_confidence: Optional[float] = None
+    niqqud_coverage: Optional[float] = None
+    niqqud_is_override: bool = False
+    niqqud_review: Optional[str] = None
+    # Audio overlay
     audio_status: Optional[str] = None
 
 

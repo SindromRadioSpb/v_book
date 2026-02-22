@@ -184,6 +184,56 @@ class DocumentSentence(Base):
     )
 
     document = relationship("SourceDocument", back_populates="sentences")
+    pronunciation = relationship(
+        "SentencePronunciation", back_populates="sentence",
+        uselist=False, cascade="all, delete-orphan",
+    )
+
+
+class SentencePronunciation(Base):
+    """Sentence-level niqqud layer (Migration 024).
+
+    Keyed by sentence_id (PK, FK document_sentence).
+    src_hash provides idempotency: sha256(lang|preprocessed_text|phonikud_version|sanitizer_version).
+    Manual override (is_override=1) is never auto-overwritten.
+    """
+
+    __tablename__ = "sentence_pronunciation"
+
+    sentence_id       = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="CASCADE"), primary_key=True)
+    lang              = Column(Text, nullable=False, default="he")
+    src_hash          = Column(Text, nullable=False)
+    src_preprocessed  = Column(Text)
+    niqqud_text       = Column(Text)
+    source            = Column(Text, nullable=False, default="auto_phonikud")
+    is_override       = Column(Integer, nullable=False, default=0)
+    confidence        = Column(Float)
+    qc_status         = Column(Text, nullable=False, default="pending")
+    qc_reason         = Column(Text)
+    niqqud_coverage   = Column(Float)
+    phonikud_version  = Column(Text)
+    sanitizer_version = Column(Text, nullable=False, default="1")
+    error_kind        = Column(Text)
+    error_details     = Column(Text)
+    review_status     = Column(Text, nullable=False, default="auto")
+    created_at        = Column(Text, nullable=False, default=utc_now)
+    updated_at        = Column(Text, nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('auto_phonikud','manual','import_csv')", name="ck_sp_source"),
+        CheckConstraint("is_override IN (0,1)", name="ck_sp_is_override"),
+        CheckConstraint("qc_status IN ('ok','auto_fixed','partial','rejected','failed','pending')", name="ck_sp_qc_status"),
+        CheckConstraint("review_status IN ('auto','pending_review','approved','rejected_by_user')", name="ck_sp_review_status"),
+        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_sp_confidence"),
+        CheckConstraint("niqqud_coverage IS NULL OR (niqqud_coverage >= 0 AND niqqud_coverage <= 1)", name="ck_sp_coverage"),
+        Index("idx_sp_lang_hash", "lang", "src_hash"),
+        Index("idx_sp_is_override", "is_override"),
+        Index("idx_sp_qc_status", "qc_status"),
+        Index("idx_sp_review_status", "review_status"),
+        Index("idx_sp_source", "source"),
+    )
+
+    sentence = relationship("DocumentSentence", back_populates="pronunciation")
 
 
 # -----------------------
