@@ -74,6 +74,44 @@ class KWICResult:
 
 
 @dataclass
+class DocumentDTO:
+    """Document metadata DTO (Migration 023 fields included)."""
+
+    doc_id: int
+    corpus_id: int
+    file_name: str
+    file_path: str
+    file_size_bytes: int
+    status: str
+    sentence_count: int
+    token_count: int
+    imported_at: str
+    processed_at: Optional[str] = None
+    # Metadata fields (Migration 023)
+    tag: Optional[str] = None
+    link_url: Optional[str] = None
+    level: Optional[str] = None    # aleph | bet | gimel | he
+    topic: Optional[str] = None
+
+
+@dataclass
+class SentenceDTO:
+    """A single sentence from document_sentence with overlay data."""
+
+    sentence_id: int
+    doc_id: int
+    doc_name: str
+    sent_index: int
+    text: str
+    # Overlays from TM/pronunciation/audio (populated by SentencesWorkspaceService)
+    translation: Optional[str] = None
+    translation_status: Optional[str] = None
+    translation_source: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    audio_status: Optional[str] = None
+
+
+@dataclass
 class DeleteReport:
     """Report of project deletion results."""
 

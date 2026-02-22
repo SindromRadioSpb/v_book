@@ -131,13 +131,25 @@ class SourceDocument(Base):
     sentence_count = Column(Integer, nullable=False, default=0)
     token_count = Column(Integer, nullable=False, default=0)
 
+    # Document metadata (Migration 023)
+    tag = Column(String)        # Free-text label (max 200 chars, service-validated)
+    link_url = Column(String)   # Clickable URL, http/https only (service-validated)
+    level = Column(String)      # Learning level: aleph/bet/gimel/he (nullable)
+    topic = Column(String)      # Topic/category (max 500 chars, service-validated)
+
     __table_args__ = (
         UniqueConstraint("corpus_id", "sha256", name="uq_document_corpus_sha256"),
         CheckConstraint(
             "status IN ('imported','queued','processing','processed','failed')",
             name="ck_document_status",
         ),
+        CheckConstraint(
+            "level IS NULL OR level IN ('aleph','bet','gimel','he')",
+            name="ck_document_level",
+        ),
         Index("idx_doc_corpus_status", "corpus_id", "status"),
+        Index("idx_doc_level", "level"),
+        Index("idx_doc_tag", "tag"),
     )
 
     corpus = relationship("SourceCorpus", back_populates="documents")
