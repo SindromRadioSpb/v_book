@@ -19,9 +19,9 @@ from app.infra.sa_models import (
     SourceDocument,
     SourceCorpus,
     TMEntry,
-    PronunciationEntry,
+    SentencePronunciation,
 )
-from app.domain.dto import SentenceDTO
+from app.domain.dto import SentenceDTO, SentenceNiqqudOverlay
 from app.domain.normalization.normalizer import normalize_for_tm
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,8 @@ class SentencesWorkspaceService:
         translation_map = self._batch_get_translations(
             session, project_id, src_lang, sentence_texts
         )
-        pronunciation_map = self._batch_get_pronunciations(session, src_lang, sentence_texts)
+        # Use sentence-level niqqud (sentence_pronunciation table)
+        niqqud_map = self._batch_get_sentence_niqqud(session, sentence_ids)
         audio_map = self._batch_get_audio(session, src_lang, sentence_texts)
 
         result = []
@@ -107,6 +108,7 @@ class SentencesWorkspaceService:
             text = sent.text
             norm = self._norm(src_lang, text)
             translation_entry = translation_map.get(norm)
+            overlay: Optional[SentenceNiqqudOverlay] = niqqud_map.get(sent.sentence_id)
             result.append(
                 SentenceDTO(
                     sentence_id=sent.sentence_id,
@@ -117,7 +119,13 @@ class SentencesWorkspaceService:
                     translation=translation_entry[0] if translation_entry else None,
                     translation_status=translation_entry[1] if translation_entry else None,
                     translation_source=translation_entry[2] if translation_entry else None,
-                    pronunciation_text=pronunciation_map.get(norm),
+                    pronunciation_text=overlay.niqqud_text if overlay else None,
+                    niqqud_qc=overlay.qc_status if overlay else None,
+                    niqqud_source=overlay.source if overlay else None,
+                    niqqud_confidence=overlay.confidence if overlay else None,
+                    niqqud_coverage=overlay.niqqud_coverage if overlay else None,
+                    niqqud_is_override=overlay.is_override if overlay else False,
+                    niqqud_review=overlay.review_status if overlay else None,
                     audio_status=audio_map.get(norm),
                 )
             )
@@ -252,35 +260,26 @@ class SentencesWorkspaceService:
                 result[src_norm] = (translation, status, origin)
         return result
 
-    def _batch_get_pronunciations(
+    def _batch_get_sentence_niqqud(
         self,
         session: Session,
-        src_lang: str,
-        texts: List[str],
-    ) -> Dict[str, str]:
-        """Return {norm: niqqud_text} for sentence texts using PronunciationEntry.
+        sentence_ids: List[int],
+    ) -> Dict[int, "SentenceNiqqudOverlay"]:
+        """Return {sentence_id: SentenceNiqqudOverlay} from sentence_pronunciation table.
 
-        Normalizes raw texts before querying PronunciationEntry.src_norm.
-        Returns dict keyed by normalized form so callers can use the same norm
-        they compute per-row in list_sentences().
+        Uses the dedicated sentence-level niqqud store (Migration 024).
+        Only returns rows; the SentencePronunciationService._to_overlay() filters
+        entries without actual nikud marks.
         """
-        if not texts:
+        if not sentence_ids:
             return {}
-        norms = [self._norm(src_lang, t) for t in texts]
-        norm_set = list(set(norms))
-        stmt = select(
-            PronunciationEntry.src_norm,
-            PronunciationEntry.niqqud_text,
-        ).where(
-            PronunciationEntry.lang == src_lang,
-            PronunciationEntry.src_norm.in_(norm_set),
-        )
-        from app.services.pronunciation_quality_service import PronunciationQualityService
-        return {
-            src: pron
-            for src, pron in session.execute(stmt).all()
-            if pron and PronunciationQualityService.has_hebrew_nikud(pron)
-        }
+        try:
+            from app.services.sentence_pronunciation_service import SentencePronunciationService
+            svc = SentencePronunciationService()
+            return svc.bulk_get_niqqud(session, sentence_ids)
+        except Exception:
+            logger.debug("sentence_pronunciation lookup failed (table may not exist yet)", exc_info=True)
+            return {}
 
     def _batch_get_audio(
         self,

@@ -38,14 +38,15 @@ from app.ui.dialogs import show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
 
-# Column indices
+# Column indices (8 columns — QC column added in Task 24)
 COL_ID = 0
 COL_DOC = 1
 COL_IDX = 2
 COL_TEXT = 3
 COL_TRANSLATION = 4
 COL_NIQQUD = 5
-COL_AUDIO = 6
+COL_QC = 6
+COL_AUDIO = 7
 
 
 class _SentencesLoadWorker(QThread):
@@ -183,6 +184,17 @@ class SentencesView(QWidget):
         self.bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap)
         action_row.addWidget(self.bootstrap_btn)
 
+        self.niqqud_btn = QPushButton("Niqqud Bootstrap…")
+        self.niqqud_btn.setToolTip("Run sentence niqqud bootstrap (all filtered)")
+        self.niqqud_btn.clicked.connect(self.on_niqqud_bootstrap_all)
+        action_row.addWidget(self.niqqud_btn)
+
+        self.niqqud_sel_btn = QPushButton("Niqqud Selected…")
+        self.niqqud_sel_btn.setEnabled(False)
+        self.niqqud_sel_btn.setToolTip("Run sentence niqqud bootstrap for selected rows")
+        self.niqqud_sel_btn.clicked.connect(self.on_niqqud_bootstrap_selected)
+        action_row.addWidget(self.niqqud_sel_btn)
+
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.setEnabled(False)
         self.play_btn.clicked.connect(self.on_play_audio)
@@ -193,10 +205,10 @@ class SentencesView(QWidget):
 
         # --- Table ---
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
             "ID", "Document", "#", "Sentence Text",
-            "Translation", "Niqqud", "Audio"
+            "Translation", "Niqqud", "QC", "Audio"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -214,7 +226,8 @@ class SentencesView(QWidget):
         self.table.setColumnWidth(COL_IDX, 50)
         self.table.setColumnWidth(COL_TEXT, 400)
         self.table.setColumnWidth(COL_TRANSLATION, 280)
-        self.table.setColumnWidth(COL_NIQQUD, 180)
+        self.table.setColumnWidth(COL_NIQQUD, 200)
+        self.table.setColumnWidth(COL_QC, 55)
         self.table.setColumnWidth(COL_AUDIO, 90)
 
         # In-cell play button for Audio column (same pattern as Dictionary/TM/Terms)
@@ -335,6 +348,22 @@ class SentencesView(QWidget):
         self.status_label.setText(f"Error: {msg}")
         logger.error(f"Sentences load error: {msg}")
 
+    @staticmethod
+    def _qc_badge_static(qc_status: Optional[str]):
+        """Return (badge_text, QColor_or_None) for a QC status."""
+        from PyQt6.QtGui import QColor
+        _MAP = {
+            "ok": ("✓", QColor("darkGreen")),
+            "auto_fixed": ("~", QColor("olive")),
+            "partial": ("~", QColor("darkorange")),
+            "rejected": ("✗", QColor("red")),
+            "failed": ("!", QColor("red")),
+            "pending": ("…", QColor("gray")),
+        }
+        if not qc_status:
+            return "—", None
+        return _MAP.get(qc_status, (qc_status[:2], None))
+
     def _populate_table(self, dtos: List[SentenceDTO]):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(dtos))
@@ -350,7 +379,32 @@ class SentencesView(QWidget):
             self.table.setItem(row, COL_IDX, _ro(dto.sent_index))
             self.table.setItem(row, COL_TEXT, _ro(dto.text))
             self.table.setItem(row, COL_TRANSLATION, _ro(dto.translation or ""))
-            self.table.setItem(row, COL_NIQQUD, _ro(dto.pronunciation_text or ""))
+
+            # Niqqud column with tooltip
+            niqqud_item = _ro(dto.pronunciation_text or "")
+            if dto.pronunciation_text:
+                cov_pct = f"{dto.niqqud_coverage * 100:.0f}%" if dto.niqqud_coverage is not None else "—"
+                conf_str = f"{dto.niqqud_confidence:.2f}" if dto.niqqud_confidence is not None else "—"
+                override_str = "manual override" if dto.niqqud_is_override else "auto"
+                tooltip_lines = [
+                    f"Source: {dto.niqqud_source or '—'}  ({override_str})",
+                    f"Confidence: {conf_str}",
+                    f"Coverage: {cov_pct}",
+                    f"QC: {dto.niqqud_qc or '—'}",
+                ]
+                if dto.niqqud_qc in ("partial", "rejected") and dto.niqqud_coverage is not None:
+                    pass  # qc_reason would be in overlay but not in DTO — tooltip shows coverage
+                niqqud_item.setToolTip("\n".join(tooltip_lines))
+            self.table.setItem(row, COL_NIQQUD, niqqud_item)
+
+            # QC badge column
+            qc_badge, qc_color = self._qc_badge_static(dto.niqqud_qc)
+            qc_item = _ro(qc_badge)
+            if qc_color:
+                qc_item.setForeground(qc_color)
+            if dto.niqqud_qc:
+                qc_item.setToolTip(f"QC status: {dto.niqqud_qc}")
+            self.table.setItem(row, COL_QC, qc_item)
 
             audio_text = dto.audio_status or "—"
             audio_item = _ro(audio_text)
@@ -432,6 +486,7 @@ class SentencesView(QWidget):
         self.translate_btn.setEnabled(has_sel)
         self.audio_btn.setEnabled(has_sel)
         self.play_btn.setEnabled(has_sel)
+        self.niqqud_sel_btn.setEnabled(has_sel)
 
     def _get_selected_dtos(self) -> List[SentenceDTO]:
         rows = {item.row() for item in self.table.selectedItems()}
@@ -461,6 +516,17 @@ class SentencesView(QWidget):
 
         bootstrap_action = menu.addAction(f"Pronunciation Bootstrap Selected ({n})...")
         bootstrap_action.triggered.connect(self.on_pronunciation_bootstrap)
+
+        menu.addSeparator()
+
+        niqqud_action = menu.addAction(f"Niqqud Selected ({n})…")
+        niqqud_action.triggered.connect(self.on_niqqud_bootstrap_selected)
+
+        edit_niqqud_action = menu.addAction("Edit Niqqud…")
+        edit_niqqud_action.triggered.connect(self.on_edit_niqqud_selected)
+
+        clear_niqqud_action = menu.addAction(f"Clear Niqqud ({n})…")
+        clear_niqqud_action.triggered.connect(self.on_clear_niqqud_selected)
 
         menu.addSeparator()
 
@@ -625,7 +691,7 @@ class SentencesView(QWidget):
             self._reload()
 
     def on_edit_pronunciation_selected(self):
-        """Open Edit Pronunciation dialog for the first selected sentence row."""
+        """Open Edit Pronunciation dialog for the first selected sentence row (lexical bootstrap)."""
         from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
         selected = self._get_selected_dtos()
         if not selected:
@@ -638,6 +704,122 @@ class SentencesView(QWidget):
         )
         if changed:
             self._reload()
+
+    # ------------------------------------------------------------------
+    # Sentence niqqud actions (sentence_pronunciation table)
+    # ------------------------------------------------------------------
+
+    def _get_phonikud_mode(self) -> str:
+        """Return current phonikud gate mode string for display in dialog."""
+        try:
+            from app.infra.settings import SettingsService
+            settings = SettingsService.get_instance()
+            # Quick health-check via adapter (fallback if unavailable)
+            from app.infra.pronunciation import PhonikudAdapter
+            model_path = settings.get_str("phonikud/model_path", "")
+            enabled = settings.get_bool("phonikud/enabled", True)
+            adapter = PhonikudAdapter(model_path=model_path, enabled=enabled)
+            return adapter.last_mode if adapter.is_available() else "fallback"
+        except Exception:
+            return "unknown"
+
+    def on_niqqud_bootstrap_all(self):
+        """Run sentence niqqud bootstrap for all filtered sentences."""
+        src_lang = self._get_src_lang()
+        try:
+            all_ids = []
+            with self.db_service.get_session() as session:
+                all_ids = self.sentences_service.get_all_filtered_sentence_ids(
+                    session, self.project_id,
+                    doc_id_filter=self._doc_filter,
+                    text_search=self._text_search,
+                )
+        except Exception as e:
+            from app.ui.dialogs import show_error
+            show_error(self, "Error", f"Failed to fetch sentence IDs: {e}")
+            return
+
+        page_ids = [dto.sentence_id for dto in self._current_dtos]
+        selected_ids = [dto.sentence_id for dto in self._get_selected_dtos()]
+
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+        changed = show_sentence_niqqud_bootstrap_dialog(
+            self,
+            selected_ids=selected_ids,
+            page_ids=page_ids,
+            all_ids=all_ids,
+            lang=src_lang,
+            phonikud_mode=self._get_phonikud_mode(),
+        )
+        if changed:
+            self._reload()
+
+    def on_niqqud_bootstrap_selected(self):
+        """Run sentence niqqud bootstrap for selected rows only."""
+        selected = self._get_selected_dtos()
+        if not selected:
+            return
+        selected_ids = [dto.sentence_id for dto in selected]
+        src_lang = self._get_src_lang()
+
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+        changed = show_sentence_niqqud_bootstrap_dialog(
+            self,
+            selected_ids=selected_ids,
+            page_ids=[dto.sentence_id for dto in self._current_dtos],
+            all_ids=selected_ids,  # constrain to selection in this path
+            lang=src_lang,
+            phonikud_mode=self._get_phonikud_mode(),
+        )
+        if changed:
+            self._reload()
+
+    def on_edit_niqqud_selected(self):
+        """Open manual niqqud edit dialog for the first selected sentence."""
+        selected = self._get_selected_dtos()
+        if not selected:
+            return
+        dto = selected[0]
+        from app.ui.dialogs.edit_sentence_niqqud_dialog import show_edit_sentence_niqqud_dialog
+        changed = show_edit_sentence_niqqud_dialog(
+            self,
+            sentence_id=dto.sentence_id,
+            sentence_text=dto.text,
+            current_niqqud=dto.pronunciation_text,
+        )
+        if changed:
+            self._reload()
+
+    def on_clear_niqqud_selected(self):
+        """Clear sentence niqqud for selected rows (sets to pending)."""
+        selected = self._get_selected_dtos()
+        if not selected:
+            return
+        from PyQt6.QtWidgets import QMessageBox
+        resp = QMessageBox.question(
+            self,
+            "Clear Niqqud",
+            f"Clear niqqud for {len(selected)} selected sentence(s)?\n"
+            "This resets to 'pending' and removes any stored niqqud text.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from app.services.sentence_pronunciation_service import SentencePronunciationService
+            svc = SentencePronunciationService()
+            cleared = 0
+            with self.db_service.get_session() as session:
+                for dto in selected:
+                    if svc.clear(session, sentence_id=dto.sentence_id):
+                        cleared += 1
+                session.commit()
+            self._reload()
+            from app.ui.dialogs import show_info
+            show_info(self, "Clear Niqqud", f"Cleared niqqud for {cleared} sentence(s).")
+        except Exception as e:
+            from app.ui.dialogs import show_error
+            show_error(self, "Error", f"Failed to clear niqqud: {e}")
 
     def on_play_audio(self):
         """Play audio for all selected sentences (enqueue mode)."""
