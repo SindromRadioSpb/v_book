@@ -117,9 +117,37 @@ class DatabaseManager:
                     raw_conn = self.engine.raw_connection()
                     try:
                         cursor = raw_conn.cursor()
-                        cursor.executescript(sql_content)
-                        raw_conn.commit()
-                        logger.info(f"Migration {sql_file.name} applied successfully")
+                        try:
+                            cursor.executescript(sql_content)
+                            raw_conn.commit()
+                            logger.info(f"Migration {sql_file.name} applied successfully")
+                        except Exception as script_err:
+                            # Guard: if columns were already added in a previous partial run
+                            # (schema_version not updated), treat as already applied rather
+                            # than crashing the app.
+                            if "duplicate column name" in str(script_err).lower():
+                                logger.warning(
+                                    f"Migration {sql_file.name} already partially applied "
+                                    f"({script_err}) — forcing schema_version to "
+                                    f"{migration_version}"
+                                )
+                                try:
+                                    raw_conn.rollback()
+                                except Exception:
+                                    pass
+                                cursor2 = raw_conn.cursor()
+                                cursor2.execute(
+                                    "UPDATE schema_meta SET value = ? "
+                                    "WHERE key = 'schema_version'",
+                                    (str(migration_version),),
+                                )
+                                raw_conn.commit()
+                            else:
+                                try:
+                                    raw_conn.rollback()
+                                except Exception:
+                                    pass
+                                raise
                     finally:
                         raw_conn.close()
 
