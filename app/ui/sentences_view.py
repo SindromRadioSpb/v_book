@@ -709,20 +709,6 @@ class SentencesView(QWidget):
     # Sentence niqqud actions (sentence_pronunciation table)
     # ------------------------------------------------------------------
 
-    def _get_phonikud_mode(self) -> str:
-        """Return current phonikud gate mode string for display in dialog."""
-        try:
-            from app.infra.settings import SettingsService
-            settings = SettingsService.get_instance()
-            # Quick health-check via adapter (fallback if unavailable)
-            from app.infra.pronunciation import PhonikudAdapter
-            model_path = settings.get_str("phonikud/model_path", "")
-            enabled = settings.get_bool("phonikud/enabled", True)
-            adapter = PhonikudAdapter(model_path=model_path, enabled=enabled)
-            return adapter.last_mode if adapter.is_available() else "fallback"
-        except Exception:
-            return "unknown"
-
     def on_niqqud_bootstrap_all(self):
         """Run sentence niqqud bootstrap for all filtered sentences."""
         src_lang = self._get_src_lang()
@@ -749,7 +735,6 @@ class SentencesView(QWidget):
             page_ids=page_ids,
             all_ids=all_ids,
             lang=src_lang,
-            phonikud_mode=self._get_phonikud_mode(),
         )
         if changed:
             self._reload()
@@ -769,7 +754,6 @@ class SentencesView(QWidget):
             page_ids=[dto.sentence_id for dto in self._current_dtos],
             all_ids=selected_ids,  # constrain to selection in this path
             lang=src_lang,
-            phonikud_mode=self._get_phonikud_mode(),
         )
         if changed:
             self._reload()
