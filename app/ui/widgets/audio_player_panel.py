@@ -3,7 +3,7 @@
 Layout:
   ┌── Now Playing bar (label + transport controls + Go to Source) ──┐
   ├── Playback controls (speed · repeat · auto-pause · gap · preset) ┤
-  ├── [Queue] [Playlists] [History]              [⚙ Columns]        ┤
+  ├── [Queue] [Playlists] [History]       [Add All…] [⚙ Columns]   ┤
   └── Table/list for the active tab                                   ┘
 
 Hotkeys (WidgetWithChildrenShortcut — active when panel has focus):
@@ -27,7 +27,10 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -35,6 +38,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -153,6 +157,98 @@ class AudioQueueTableModel(QAbstractTableModel):
             return row
 
         return None
+
+
+# ── Source picker dialog ───────────────────────────────────────────────────────
+
+
+class AddAllToQueueDialog(QDialog):
+    """Simple dialog to select source kind + project + add mode before bulk-loading."""
+
+    def __init__(self, *, db=None, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add All to Queue")
+        self.setMinimumWidth(380)
+        self._db = db
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        layout.addLayout(form)
+
+        # Kind
+        self.kind_combo = QComboBox()
+        self.kind_combo.addItems(["Sentences", "Lemmas (Dictionary)"])
+        form.addRow("Source kind:", self.kind_combo)
+
+        # Project
+        self.project_combo = QComboBox()
+        self._project_ids: List[int] = []
+        self._load_projects()
+        form.addRow("Project:", self.project_combo)
+
+        # Add mode
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Append", "After current", "Prepend"])
+        form.addRow("Add mode:", self.mode_combo)
+
+        # Count estimate label
+        self.count_label = QLabel("(select project to estimate)")
+        self.count_label.setWordWrap(True)
+        layout.addWidget(self.count_label)
+
+        self.project_combo.currentIndexChanged.connect(self._update_estimate)
+
+        # Buttons
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self._update_estimate()
+
+    def _load_projects(self) -> None:
+        if not self._db:
+            self.project_combo.addItem("(no DB session)", -1)
+            return
+        try:
+            from app.services.project_service import ProjectService
+            with self._db.get_session() as session:
+                projects = ProjectService().list_projects(session)
+            self._project_ids = [p.project_id for p in projects]
+            for p in projects:
+                name = getattr(p, "name", None) or f"Project {p.project_id}"
+                self.project_combo.addItem(name, p.project_id)
+        except Exception as exc:
+            logger.warning("AddAllToQueueDialog: could not load projects: %s", exc)
+            self.project_combo.addItem("(error loading projects)", -1)
+
+    def _update_estimate(self) -> None:
+        pid = self.selected_project_id()
+        if pid < 0 or not self._db:
+            self.count_label.setText("(select a project to estimate)")
+            return
+        try:
+            from app.services.sentences_workspace_service import SentencesWorkspaceService
+            with self._db.get_session() as session:
+                ids = SentencesWorkspaceService().get_all_filtered_sentence_ids(session, pid)
+            self.count_label.setText(f"~{len(ids):,} sentences in this project")
+        except Exception:
+            self.count_label.setText("(estimate unavailable)")
+
+    def selected_kind(self) -> str:
+        return "sentence" if self.kind_combo.currentIndex() == 0 else "lemma"
+
+    def selected_project_id(self) -> int:
+        idx = self.project_combo.currentIndex()
+        if idx < 0 or idx >= len(self._project_ids):
+            return -1
+        return self._project_ids[idx]
+
+    def selected_add_mode(self) -> str:
+        idx = self.mode_combo.currentIndex()
+        return ["append", "after_current", "prepend"][idx]
 
 
 # ── Panel ─────────────────────────────────────────────────────────────────────
@@ -317,6 +413,12 @@ class AudioPlayerPanel(QWidget):
         tab_header = QHBoxLayout()
         self.tab_widget = QTabWidget()
         tab_header.addWidget(self.tab_widget, 1)
+
+        self.add_all_btn = QPushButton("Add All…")
+        self.add_all_btn.setToolTip("Add all items from a project source to the queue")
+        self.add_all_btn.setFixedWidth(78)
+        self.add_all_btn.clicked.connect(self._on_add_all_clicked)
+        tab_header.addWidget(self.add_all_btn)
 
         self.columns_btn = QToolButton()
         self.columns_btn.setText("⚙")
@@ -631,6 +733,69 @@ class AudioPlayerPanel(QWidget):
             self.history_list.takeItem(200)
 
     # ── Context menu ──────────────────────────────────────────────────────────
+
+    def _on_add_all_clicked(self) -> None:
+        """Open source picker dialog then launch AudioQueuePopulateWorker."""
+        dlg = AddAllToQueueDialog(db=self._db, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        project_id = dlg.selected_project_id()
+        if project_id < 0:
+            QMessageBox.warning(self, "Add All", "No project selected.")
+            return
+        kind = dlg.selected_kind()
+        add_mode = dlg.selected_add_mode()
+        current_pos = self.player.current_index
+
+        try:
+            from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+            from app.ui.workers import AudioQueuePopulateWorker
+        except ImportError as exc:
+            QMessageBox.critical(self, "Add All", f"Import error:\n{exc}")
+            return
+
+        # Use 1 as placeholder total; real total set by first progress signal
+        progress_dialog = BatchProgressDialogV3(parent=self, total=1)
+        progress_dialog.show()
+
+        worker = AudioQueuePopulateWorker(
+            kind=kind,
+            project_id=project_id,
+            add_mode=add_mode,
+            current_position=current_pos,
+        )
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+        worker.finished.connect(lambda r: self._on_add_all_finished(r, progress_dialog))
+        worker.error.connect(lambda e: self._on_add_all_error(e, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+
+        self.add_all_btn.setEnabled(False)
+        worker.finished.connect(lambda _: self.add_all_btn.setEnabled(True))
+        worker.error.connect(lambda _: self.add_all_btn.setEnabled(True))
+        worker.start()
+        self._populate_worker = worker  # keep reference
+
+    def _on_add_all_finished(self, result: dict, progress_dialog) -> None:
+        progress_dialog.set_completed()
+        progress_dialog.accept()
+        added = result.get("added", 0)
+        failed = result.get("failed", 0)
+        cancelled = result.get("cancelled", False)
+        msg = f"Added {added:,} items to queue."
+        if cancelled:
+            msg += " (cancelled)"
+        if failed:
+            msg += f"\n{failed} items failed."
+        QMessageBox.information(self, "Add All — Done", msg)
+        self._refresh_queue()
+
+    def _on_add_all_error(self, msg: str, progress_dialog) -> None:
+        progress_dialog.set_stage(f"Error: {msg[:80]}")
+        progress_dialog.accept()
+        QMessageBox.critical(self, "Add All — Error", msg)
 
     def _on_queue_context_menu(self, pos) -> None:
         rows = sorted({idx.row() for idx in self.queue_table.selectedIndexes()})

@@ -3209,3 +3209,234 @@ class SentenceNiqqudBootstrapWorker(QThread):
         except Exception as exc:
             logger.error("SentenceNiqqudBootstrapWorker error: %s", exc, exc_info=True)
             self.error.emit(str(exc))
+
+
+# ── Audio Player v2: queue populate worker ─────────────────────────────────────
+
+
+class AudioQueuePopulateWorker(QThread):
+    """Fetch all filtered sentence / lemma IDs and bulk-insert into the audio queue.
+
+    Signal contract (V3 compatible with BatchProgressDialogV3):
+      progress(completed, total)
+      stats_updated(added, skipped, 0, failed)     — unused slots kept for V3 compat
+      row_translated(id_str, label, success)
+      stage_updated(stage_label)
+      finished(result_dict)
+      error(message)
+    """
+
+    progress = pyqtSignal(int, int)
+    stats_updated = pyqtSignal(int, int, int, int)
+    row_translated = pyqtSignal(str, str, bool)
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    CHUNK_SIZE = 200
+
+    def __init__(
+        self,
+        *,
+        kind: str = "sentence",          # "sentence" | "lemma"
+        project_id: int,
+        doc_id_filter: Optional[int] = None,
+        text_search: Optional[str] = None,
+        add_mode: str = "append",        # "append" | "prepend" | "after_current"
+        current_position: int = 0,
+    ) -> None:
+        super().__init__()
+        self.kind = kind
+        self.project_id = project_id
+        self.doc_id_filter = doc_id_filter
+        self.text_search = text_search
+        self.add_mode = add_mode
+        self.current_position = current_position
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    # ------------------------------------------------------------------
+    # Main thread entry
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        try:
+            self._run_inner()
+        except Exception as exc:
+            logger.error("AudioQueuePopulateWorker error: %s", exc, exc_info=True)
+            self.error.emit(str(exc))
+
+    def _run_inner(self) -> None:
+        from app.services.db_service import DBService
+        from app.services.audio_queue_service import AudioQueueService, AudioItemSpec
+
+        db = DBService.get_instance()
+        aq_svc = AudioQueueService()
+
+        # ── Step 1: fetch IDs ──────────────────────────────────────────
+        self.stage_updated.emit("Fetching IDs…")
+        with db.get_session() as session:
+            ids = self._fetch_ids(session)
+
+        total = len(ids)
+        if total == 0:
+            self.stage_updated.emit("No matching items found.")
+            self.finished.emit({"added": 0, "skipped": 0, "failed": 0, "total": 0, "cancelled": False})
+            return
+
+        self.stage_updated.emit(f"Adding {total} items to queue…")
+        self.progress.emit(0, total)
+
+        # ── Step 2: process in chunks ──────────────────────────────────
+        added = 0
+        failed = 0
+        for chunk_start in range(0, total, self.CHUNK_SIZE):
+            if self._cancel_requested:
+                break
+            chunk_ids = ids[chunk_start: chunk_start + self.CHUNK_SIZE]
+            try:
+                with db.get_session() as session:
+                    specs = self._build_specs(session, chunk_ids)
+                    aq_svc.add_to_queue(
+                        session,
+                        specs,
+                        mode=self.add_mode,
+                        current_position=self.current_position,
+                    )
+                    session.commit()
+                # Emit row signals for recent-activity display (first 5 in chunk)
+                for spec in specs[:5]:
+                    label = spec.snapshot_hebrew or spec.snapshot_source_label or str(spec.source_id or "")
+                    self.row_translated.emit(str(spec.source_id or ""), label, True)
+                added += len(specs)
+            except Exception as exc:
+                logger.error("AudioQueuePopulateWorker chunk error: %s", exc, exc_info=True)
+                failed += len(chunk_ids)
+
+            done = min(chunk_start + self.CHUNK_SIZE, total)
+            self.progress.emit(done, total)
+            self.stats_updated.emit(added, 0, 0, failed)
+
+        self.progress.emit(total, total)
+        cancelled = self._cancel_requested
+        self.stage_updated.emit("Cancelled" if cancelled else "Done")
+        self.stats_updated.emit(added, 0, 0, failed)
+        self.finished.emit({
+            "added": added,
+            "skipped": 0,
+            "failed": failed,
+            "total": total,
+            "cancelled": cancelled,
+        })
+
+    # ------------------------------------------------------------------
+    # Kind-specific helpers (run inside session)
+    # ------------------------------------------------------------------
+
+    def _fetch_ids(self, session) -> List[int]:
+        """Return ordered list of IDs to process (no snapshots yet)."""
+        if self.kind == "sentence":
+            from app.services.sentences_workspace_service import SentencesWorkspaceService
+            svc = SentencesWorkspaceService()
+            return svc.get_all_filtered_sentence_ids(
+                session,
+                self.project_id,
+                doc_id_filter=self.doc_id_filter,
+                text_search=self.text_search or None,
+            )
+        else:  # lemma
+            from sqlalchemy import select
+            from app.infra.sa_models import Lemma
+            stmt = (
+                select(Lemma.lemma_id)
+                .where(Lemma.project_id == self.project_id)
+                .where(Lemma.is_noise == 0)
+                .order_by(Lemma.lemma_id.asc())
+            )
+            if self.text_search:
+                stmt = stmt.where(Lemma.lemma_text.ilike(f"%{self.text_search}%"))
+            return [row[0] for row in session.execute(stmt).all()]
+
+    def _build_specs(self, session, ids: List[int]) -> List:
+        """Resolve snapshots for a chunk of IDs → AudioItemSpec list."""
+        if self.kind == "sentence":
+            return self._build_sentence_specs(session, ids)
+        else:
+            return self._build_lemma_specs(session, ids)
+
+    def _build_sentence_specs(self, session, sentence_ids: List[int]) -> List:
+        from sqlalchemy import select
+        from app.infra.sa_models import DocumentSentence
+        from app.services.audio_queue_service import AudioItemSpec
+
+        # Fetch text
+        stmt = select(DocumentSentence.sentence_id, DocumentSentence.text).where(
+            DocumentSentence.sentence_id.in_(sentence_ids)
+        )
+        texts: Dict[int, str] = {sid: txt for sid, txt in session.execute(stmt).all()}
+
+        # Fetch niqqud overlay (best-effort)
+        niqqud_map: Dict[int, str] = {}
+        try:
+            from app.services.sentence_pronunciation_service import SentencePronunciationService
+            overlays = SentencePronunciationService().bulk_get_niqqud(session, sentence_ids)
+            for sid, overlay in overlays.items():
+                if overlay and overlay.niqqud_text:
+                    niqqud_map[sid] = overlay.niqqud_text
+        except Exception:
+            pass
+
+        # Fetch translation overlay (best-effort)
+        transl_map: Dict[str, str] = {}
+        try:
+            from app.services.sentences_workspace_service import SentencesWorkspaceService
+            svc = SentencesWorkspaceService()
+            text_list = list(texts.values())
+            raw = svc._batch_get_translations(session, self.project_id, "he", text_list)
+            transl_map = {
+                txt: raw[svc._norm("he", txt)][0]
+                for txt in text_list
+                if svc._norm("he", txt) in raw
+            }
+        except Exception:
+            pass
+
+        specs = []
+        for sid in sentence_ids:
+            text = texts.get(sid, "")
+            specs.append(AudioItemSpec(
+                kind="sentence",
+                source_id=sid,
+                project_id=self.project_id,
+                snapshot_hebrew=text,
+                snapshot_niqqud=niqqud_map.get(sid) or None,
+                snapshot_translation=transl_map.get(text) or None,
+                snapshot_source_label=f"sentence:{sid}",
+                audio_status="unknown",
+            ))
+        return specs
+
+    def _build_lemma_specs(self, session, lemma_ids: List[int]) -> List:
+        from sqlalchemy import select
+        from app.infra.sa_models import Lemma
+        from app.services.audio_queue_service import AudioItemSpec
+
+        stmt = select(Lemma.lemma_id, Lemma.lemma_text).where(
+            Lemma.lemma_id.in_(lemma_ids)
+        )
+        rows: Dict[int, str] = {lid: txt for lid, txt in session.execute(stmt).all()}
+
+        specs = []
+        for lid in lemma_ids:
+            lemma_text = rows.get(lid, "")
+            specs.append(AudioItemSpec(
+                kind="lemma",
+                source_id=lid,
+                project_id=self.project_id,
+                snapshot_hebrew=lemma_text,
+                snapshot_source_label=f"lemma:{lid}",
+                audio_status="unknown",
+            ))
+        return specs

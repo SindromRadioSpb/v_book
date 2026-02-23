@@ -2,7 +2,7 @@
 
 **Task:** 25 — Audio Player v2 (Premium)
 **Date:** 2026-02-23
-**Status:** PATCH-01–03 implemented; PATCH-04–06 pending
+**Status:** PATCH-01–04 implemented; PATCH-05 pending
 
 ---
 
@@ -26,8 +26,8 @@
 - [x] **DB migration 025** — audio_queue_item, audio_playlist, audio_playlist_entry, audio_history
 - [x] **ORM models** — AudioQueueItem, AudioPlaylist, AudioPlaylistEntry, AudioHistory
 - [x] **AudioQueueService** — Queue/Playlist/History CRUD
-- [ ] **Add All Filtered worker** — SQL chunked, V3 progress (PATCH-04)
-- [ ] **Source picker** — project/document/kind filter (PATCH-04)
+- [x] **Add All Filtered worker** — SQL chunked, V3 progress (PATCH-04)
+- [x] **Source picker** — project/kind/mode picker dialog (PATCH-04)
 - [ ] **Context actions** — Translate/Niqqudize/Regen/Edit Pronunciation/Edit Niqqud (PATCH-05)
 - [ ] **Stale invalidation** — mark stale after pronunciation/niqqud edit (PATCH-05)
 - [ ] **Playlist persistence** — DB-backed with full CRUD (PATCH-04)
