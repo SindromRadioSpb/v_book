@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
@@ -133,7 +134,8 @@ class AudioQueueTableModel(QAbstractTableModel):
                 is_stale = ctx.get("is_stale", False)
                 if is_stale:
                     return "stale"
-                return "ready" if path and os.path.exists(str(path)) else "missing"
+                # Path("") serialises to "." which exists() — treat it as missing
+                return "ready" if path and path != "." and os.path.exists(str(path)) else "missing"
             if col == _COL_PLAYS:
                 return str(ctx.get("play_count", "—"))
             return None
@@ -1146,28 +1148,46 @@ class AudioPlayerPanel(QWidget):
                         if norm in norm_to_path and item_id not in resolved_paths:
                             resolved_paths[item_id] = norm_to_path[norm]
         except Exception as path_exc:
-            logger.debug("_load_db_queue_to_player: path resolution skipped (%s)", path_exc)
+            logger.warning("_load_db_queue_to_player: path resolution failed (%s)", path_exc, exc_info=True)
 
-        # ── Step 3: Dedup + enqueue (always runs if candidates exist) ─────────
-        # Dedup by (kind, source_id) — prevents same source content appearing twice
-        # when "Add All" is clicked multiple times.
-        existing_source_keys: set = {
-            (t.context.get("kind"), t.context.get("source_id"))
-            for t in self.player._tracks  # noqa: SLF001
-            if isinstance(t.context, dict)
-            and t.context.get("kind") is not None
-            and t.context.get("source_id") is not None
-        }
-        new_items = [
-            item for item in candidate_items
-            if (item.kind, item.source_id) not in existing_source_keys
-        ]
+        logger.debug(
+            "_load_db_queue_to_player: %d/%d candidates resolved to audio path",
+            len(resolved_paths), len(candidate_items),
+        )
+
+        # ── Step 3: Dedup + in-place path upgrade ─────────────────────────────
+        # Build a (kind, source_id) → existing AudioTrack map so that when the
+        # same source re-appears in a new Add All run we can UPGRADE an old
+        # unresolved track (path == ".") rather than silently skipping it.
+        existing_track_map: Dict[tuple, Any] = {}
+        for t in self.player._tracks:  # noqa: SLF001
+            if isinstance(t.context, dict):
+                k = (t.context.get("kind"), t.context.get("source_id"))
+                if k[0] is not None and k[1] is not None:
+                    existing_track_map[k] = t
+
+        upgraded = 0
+        new_items = []
+        for item in candidate_items:
+            key = (item.kind, item.source_id)
+            existing = existing_track_map.get(key)
+            if existing is None:
+                new_items.append(item)
+            elif str(existing.path) in ("", ".") and item.item_id in resolved_paths:
+                # Old broken track — upgrade its path in-place so it becomes playable
+                existing.path = resolved_paths[item.item_id]
+                existing.context["audio_status"] = "ready"
+                upgraded += 1
+            # else: existing track already has a valid path → leave it
+
         if new_items:
             self.player.enqueue_from_db(new_items, mode=add_mode, resolved_paths=resolved_paths)
-            logger.debug(
-                "_load_db_queue_to_player: loaded %d/%d items (%d with audio path)",
-                len(new_items), len(candidate_items), len(resolved_paths),
-            )
+        if upgraded:
+            self.player._emit_queue_changed()  # noqa: SLF001 — refresh Status column
+        logger.debug(
+            "_load_db_queue_to_player: added %d new items, upgraded %d existing unresolved tracks",
+            len(new_items), upgraded,
+        )
 
     def _on_add_all_error(self, msg: str, progress_dialog) -> None:
         progress_dialog.set_stage(f"Error: {msg[:80]}")
@@ -1464,12 +1484,74 @@ class AudioPlayerPanel(QWidget):
         return updated
 
     def _refresh_term_display(self, session, tracks: List) -> int:
-        """Batch-refresh Source for term tracks (translation already stored from pinned_translation)."""
+        """Batch-refresh Source / Niqqud / Translation for term tracks."""
         if not tracks:
             return 0
+        from sqlalchemy import select as _sel
+
+        cid_to_norm: Dict[int, str] = {}
+        try:
+            from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+            for t in tracks:
+                cid = t.context.get("source_id")
+                text = t.context.get("snapshot_hebrew") or ""
+                if cid and text:
+                    try:
+                        cid_to_norm[cid] = _ntm("he", text, "term_cluster").norm or text
+                    except Exception:
+                        cid_to_norm[cid] = text
+        except Exception:
+            pass
+
+        all_norms = list(set(cid_to_norm.values()))
+
+        norm_to_niqqud: Dict[str, str] = {}
+        try:
+            from app.services.pronunciation_service import PronunciationService
+            if all_norms:
+                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
+                norm_to_niqqud = {n: dto.niqqud_text for n, dto in bulk.items() if dto.niqqud_text}
+        except Exception:
+            pass
+
+        norm_to_transl: Dict[str, str] = {}
+        try:
+            from app.infra.sa_models import TMEntry as _TM
+            project_id = next(
+                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
+            )
+            if all_norms and project_id:
+                tm_rows = session.execute(
+                    _sel(_TM.src_norm, _TM.translation)
+                    .where(_TM.kind == "term_cluster")
+                    .where(_TM.src_lang == "he")
+                    .where(_TM.src_norm.in_(all_norms))
+                    .where(_TM.project_id == project_id)
+                    .where(_TM.status.in_(["draft", "approved"]))
+                    .order_by(_TM.status.desc())
+                ).all()
+                for norm, transl in tm_rows:
+                    if norm not in norm_to_transl and transl:
+                        norm_to_transl[norm] = transl
+        except Exception:
+            pass
+
         updated = 0
         for t in tracks:
+            cid = t.context.get("source_id")
+            norm = cid_to_norm.get(cid, "")
+            changed = False
             if t.context.get("snapshot_source_label") != "Terms":
                 t.context["snapshot_source_label"] = "Terms"
+                changed = True
+            niqqud = norm_to_niqqud.get(norm)
+            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+                t.context["snapshot_niqqud"] = niqqud
+                changed = True
+            transl = norm_to_transl.get(norm)
+            if transl and t.context.get("snapshot_translation") != transl:
+                t.context["snapshot_translation"] = transl
+                changed = True
+            if changed:
                 updated += 1
         return updated

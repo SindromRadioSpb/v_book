@@ -3613,9 +3613,10 @@ class AudioQueuePopulateWorker(QThread):
                         spec.audio_status = "ready"
 
             resolved = sum(1 for s in specs if s.audio_asset_id is not None)
-            logger.debug(
+            log_fn = logger.warning if resolved == 0 and specs else logger.debug
+            log_fn(
                 "_resolve_audio_assets: %d/%d specs resolved to ready AudioAsset",
                 resolved, len(specs),
             )
         except Exception as exc:
-            logger.debug("_resolve_audio_assets: non-fatal: %s", exc)
+            logger.warning("_resolve_audio_assets: non-fatal exception: %s", exc, exc_info=True)

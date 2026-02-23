@@ -407,6 +407,12 @@ class TermCardView(QWidget):
                     "src_text": card.representative_he,
                     "src_lang": "he",
                     "src_norm": src_norm,
+                    "kind": "term",
+                    "source_id": int(card.cluster_id),
+                    "project_id": getattr(self, "project_id", None),
+                    "source_label": "Term Cards",
+                    "translation": card.pinned_translation or "",
+                    "pronunciation_text": getattr(card, "pronunciation_text", "") or "",
                 }
             )
         return items
@@ -532,6 +538,12 @@ class TermCardView(QWidget):
                     "src_lang": "he",
                     "src_norm": src_norm,
                     "src_text": card.representative_he,
+                    "kind": "term",
+                    "source_id": int(card.cluster_id),
+                    "project_id": getattr(self, "project_id", None),
+                    "source_label": "Term Cards",
+                    "translation": card.pinned_translation or "",
+                    "pronunciation_text": getattr(card, "pronunciation_text", "") or "",
                 }
             ],
             play_mode="enqueue",
@@ -552,7 +564,39 @@ class TermCardView(QWidget):
 
             paths = [row[0] for row in ready_items]
             labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
-            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
+            contexts = []
+            for _, item in ready_items:
+                payload = item or {}
+                contexts.append(
+                    {
+                        "snapshot_hebrew": str(payload.get("src_text") or ""),
+                        "snapshot_niqqud": str(
+                            payload.get("pronunciation_text")
+                            or payload.get("snapshot_niqqud")
+                            or payload.get("niqqud")
+                            or ""
+                        ),
+                        "snapshot_translation": str(
+                            payload.get("translation")
+                            or payload.get("snapshot_translation")
+                            or ""
+                        ),
+                        "snapshot_source_label": str(
+                            payload.get("source_label")
+                            or payload.get("snapshot_source_label")
+                            or "Term Cards"
+                        ),
+                        "kind": payload.get("kind"),
+                        "source_id": payload.get("source_id"),
+                        "project_id": payload.get("project_id"),
+                    }
+                )
+            self.audio_playback_service.launch_audio_files(
+                paths,
+                labels=labels,
+                play_mode=play_mode,
+                contexts=contexts,
+            )
         except Exception as e:
             logger.error("Failed to play audio in Term Cards: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")

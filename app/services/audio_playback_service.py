@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Dict, Iterable, Optional, Sequence
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
@@ -64,6 +64,7 @@ class AudioPlaybackService:
         *,
         labels: Optional[Sequence[str]] = None,
         play_mode: str = "enqueue",
+        contexts: Optional[Sequence[Dict[str, object]]] = None,
     ) -> int:
         """Play/enqueue many audio files using internal player (fallback: first external)."""
         valid_paths = [Path(p) for p in paths if p and Path(p).exists()]
@@ -75,7 +76,12 @@ class AudioPlaybackService:
 
             player = AudioPlayerService.get_instance()
             if player.is_available:
-                return player.play_paths(valid_paths, labels=labels, play_mode=play_mode)
+                return player.play_paths(
+                    valid_paths,
+                    labels=labels,
+                    play_mode=play_mode,
+                    contexts=contexts,
+                )
         except Exception:
             pass
 

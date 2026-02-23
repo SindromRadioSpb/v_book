@@ -1251,6 +1251,12 @@ class UserDictionariesView(QWidget):
                     "src_lang": src_lang,
                     "src_norm": src_norm,
                     "src_text": src_text,
+                    "kind": "term" if item.kind == "term_cluster" else item.kind,
+                    "source_id": item.origin_entity_id,
+                    "project_id": item.origin_project_id,
+                    "source_label": "User Dictionaries",
+                    "translation": item.translation or "",
+                    "pronunciation_text": getattr(item, "pronunciation_text", "") or "",
                 }
             )
         return items
@@ -1453,6 +1459,12 @@ class UserDictionariesView(QWidget):
                     "src_lang": (item.src_lang or "").strip(),
                     "src_norm": (item.src_norm or "").strip(),
                     "src_text": (item.src_text or "").strip(),
+                    "kind": "term" if item.kind == "term_cluster" else item.kind,
+                    "source_id": item.origin_entity_id,
+                    "project_id": item.origin_project_id,
+                    "source_label": "User Dictionaries",
+                    "translation": item.translation or "",
+                    "pronunciation_text": getattr(item, "pronunciation_text", "") or "",
                 }
             ],
             play_mode="enqueue",
@@ -1473,7 +1485,39 @@ class UserDictionariesView(QWidget):
 
             paths = [row[0] for row in ready_items]
             labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
-            self.audio_playback_service.launch_audio_files(paths, labels=labels, play_mode=play_mode)
+            contexts = []
+            for _, item in ready_items:
+                payload = item or {}
+                contexts.append(
+                    {
+                        "snapshot_hebrew": str(payload.get("src_text") or ""),
+                        "snapshot_niqqud": str(
+                            payload.get("pronunciation_text")
+                            or payload.get("snapshot_niqqud")
+                            or payload.get("niqqud")
+                            or ""
+                        ),
+                        "snapshot_translation": str(
+                            payload.get("translation")
+                            or payload.get("snapshot_translation")
+                            or ""
+                        ),
+                        "snapshot_source_label": str(
+                            payload.get("source_label")
+                            or payload.get("snapshot_source_label")
+                            or "User Dictionaries"
+                        ),
+                        "kind": payload.get("kind"),
+                        "source_id": payload.get("source_id"),
+                        "project_id": payload.get("project_id"),
+                    }
+                )
+            self.audio_playback_service.launch_audio_files(
+                paths,
+                labels=labels,
+                play_mode=play_mode,
+                contexts=contexts,
+            )
         except Exception as e:
             logger.error("Failed to play audio in User Dictionaries: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")

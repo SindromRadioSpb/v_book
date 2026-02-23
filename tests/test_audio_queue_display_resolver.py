@@ -82,6 +82,36 @@ def test_refresh_term_display_no_change_if_already_terms(qapp):
     assert count == 0
 
 
+def test_refresh_term_display_populates_niqqud_and_translation(qapp):
+    """_refresh_term_display enriches term rows with niqqud + TM translation."""
+    from app.ui.widgets.audio_player_panel import AudioPlayerPanel
+
+    panel = _make_panel(qapp)
+    t = _make_track("term", 5, "שלום עולם", source_label="term:5", project_id=7)
+    panel.player._tracks = [t]
+    mock_session = MagicMock()
+    mock_session.execute.return_value.all.return_value = [("shalom_olam", "peace world")]
+
+    def fake_ntm(lang, text, kind):
+        r = MagicMock()
+        r.norm = "shalom_olam"
+        return r
+
+    mock_niqqud_dto = MagicMock()
+    mock_niqqud_dto.niqqud_text = "שָׁלוֹם עוֹלָם"
+    mock_pron_svc = MagicMock()
+    mock_pron_svc.return_value.bulk_lookup.return_value = {"shalom_olam": mock_niqqud_dto}
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
+         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+        count = panel._refresh_term_display(mock_session, [t])
+
+    assert count >= 1
+    assert t.context["snapshot_source_label"] == "Terms"
+    assert t.context["snapshot_niqqud"] == "שָׁלוֹם עוֹלָם"
+    assert t.context["snapshot_translation"] == "peace world"
+
+
 def test_refresh_term_display_empty_list(qapp):
     """_refresh_term_display with empty list returns 0 without error."""
     from app.ui.widgets.audio_player_panel import AudioPlayerPanel

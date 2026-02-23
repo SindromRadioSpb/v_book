@@ -115,6 +115,10 @@ class QtMultimediaBackend(AudioBackendBase):
         self._player.playbackStateChanged.connect(self._on_state_changed)
 
     def play(self, path: Path) -> bool:
+        # Path("") serialises to "." — reject empty/current-dir sentinel values
+        if not str(path) or str(path) == ".":
+            self.error.emit("No audio file path provided (unresolved track)")
+            return False
         if not path.exists():
             self.error.emit(f"Audio file does not exist: {path}")
             return False

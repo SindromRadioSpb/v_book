@@ -103,3 +103,45 @@ def test_resolve_ready_path_returns_none_when_file_missing(monkeypatch):
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_launch_audio_files_passes_contexts_to_internal_player(monkeypatch, tmp_path):
+    """Internal player path keeps per-track contexts so Audio Player queue can show metadata."""
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"RIFF")
+
+    captured = {}
+
+    class _FakePlayer:
+        is_available = True
+
+        def play_paths(self, paths, *, labels=None, play_mode=None, contexts=None):
+            captured["paths"] = list(paths)
+            captured["labels"] = list(labels or [])
+            captured["play_mode"] = play_mode
+            captured["contexts"] = list(contexts or [])
+            return len(paths)
+
+    monkeypatch.setattr(
+        "app.services.audio_player_service.AudioPlayerService.get_instance",
+        staticmethod(lambda: _FakePlayer()),
+    )
+
+    result = AudioPlaybackService.launch_audio_files(
+        [audio_file],
+        labels=["שלום"],
+        play_mode="enqueue",
+        contexts=[
+            {
+                "snapshot_hebrew": "שלום",
+                "snapshot_source_label": "Dictionary",
+                "snapshot_translation": "peace",
+            }
+        ],
+    )
+
+    assert result == 1
+    assert captured["paths"] == [audio_file]
+    assert captured["labels"] == ["שלום"]
+    assert captured["play_mode"] == "enqueue"
+    assert captured["contexts"][0]["snapshot_source_label"] == "Dictionary"
