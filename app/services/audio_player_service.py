@@ -375,6 +375,60 @@ class AudioPlayerService(QObject):
         self._current = None
         self._emit_queue_changed()
 
+    def enqueue_from_db(
+        self,
+        items: list,       # List[AudioQueueItemDTO] — avoids circular import
+        *,
+        mode: str = "append",   # "append" | "prepend" | "after_current"
+    ) -> int:
+        """Add AudioQueueItemDTO objects to the in-memory queue without requiring
+        an audio file on disk.  Items with no ready audio appear as 'missing'
+        in the Status column; playback skips them until audio is generated.
+
+        ``mode`` mirrors play_paths() semantics:
+          append        — add after the last existing track
+          prepend       — insert before position 0 (shifts current_index)
+          after_current — insert after current cursor position
+        """
+        tracks: List[AudioTrack] = []
+        for item in items:
+            label = (
+                item.snapshot_hebrew
+                or item.snapshot_source_label
+                or f"{item.kind}:{item.source_id}"
+            )
+            ctx: Dict[str, Any] = {
+                "snapshot_hebrew": item.snapshot_hebrew,
+                "snapshot_niqqud": item.snapshot_niqqud,
+                "snapshot_translation": item.snapshot_translation,
+                "snapshot_source_label": item.snapshot_source_label,
+                "source_id": item.source_id,
+                "kind": item.kind,
+                "project_id": item.project_id,
+                "item_id": item.item_id,
+                "audio_status": item.audio_status,
+                "play_count": item.play_count,
+            }
+            tracks.append(AudioTrack(path=Path(""), label=label, context=ctx))
+
+        if not tracks:
+            return 0
+
+        if mode == "prepend":
+            self._tracks = tracks + self._tracks
+            if self._current_index >= 0:
+                self._current_index += len(tracks)
+        elif mode == "after_current":
+            insert_at = max(0, self._current_index + 1)
+            self._tracks = (
+                self._tracks[:insert_at] + tracks + self._tracks[insert_at:]
+            )
+        else:  # append
+            self._tracks.extend(tracks)
+
+        self._emit_queue_changed()
+        return len(tracks)
+
     # ── Playback control ──────────────────────────────────────────────────────
 
     def play_path(

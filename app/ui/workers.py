@@ -3329,6 +3329,7 @@ class AudioQueuePopulateWorker(QThread):
             "failed": failed,
             "total": total,
             "cancelled": cancelled,
+            "add_mode": self.add_mode,
         })
 
     # ------------------------------------------------------------------

@@ -1010,6 +1010,9 @@ class AudioPlayerPanel(QWidget):
         added = result.get("added", 0)
         failed = result.get("failed", 0)
         cancelled = result.get("cancelled", False)
+        add_mode = result.get("add_mode", "append")
+        if added > 0:
+            self._load_db_queue_to_player(add_mode)
         msg = f"Added {added:,} items to queue."
         if cancelled:
             msg += " (cancelled)"
@@ -1017,6 +1020,30 @@ class AudioPlayerPanel(QWidget):
             msg += f"\n{failed} items failed."
         QMessageBox.information(self, "Add All — Done", msg)
         self._refresh_queue()
+
+    def _load_db_queue_to_player(self, add_mode: str = "append") -> None:
+        """Sync newly-added DB queue items into the in-memory AudioPlayerService queue.
+
+        Only items not already present in _tracks (matched by item_id in context)
+        are appended, so manually-added play_paths() tracks are preserved.
+        """
+        try:
+            from app.services.db_service import DBService
+            from app.services.audio_queue_service import AudioQueueService
+            db = DBService.get_instance()
+            with db.get_session() as session:
+                all_db_items = AudioQueueService().get_queue(session)
+            # Determine which item_ids are already in the in-memory queue
+            existing_ids = {
+                t.context.get("item_id")
+                for t in self.player._tracks  # noqa: SLF001
+                if isinstance(t.context, dict) and t.context.get("item_id") is not None
+            }
+            new_items = [item for item in all_db_items if item.item_id not in existing_ids]
+            if new_items:
+                self.player.enqueue_from_db(new_items, mode=add_mode)
+        except Exception as exc:
+            logger.warning("_load_db_queue_to_player failed: %s", exc)
 
     def _on_add_all_error(self, msg: str, progress_dialog) -> None:
         progress_dialog.set_stage(f"Error: {msg[:80]}")

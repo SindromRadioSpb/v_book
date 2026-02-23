@@ -136,3 +136,88 @@ def test_enqueue_mode_appends(service, tmp_audio):
     n = service.play_paths(tmp_audio[2:4], play_mode="enqueue")
     assert n == 2
     assert len(service._tracks) == 4
+
+
+# -- enqueue_from_db: items appear in queue without audio file --
+
+
+class _FakeDTO:
+    """Minimal stub mimicking AudioQueueItemDTO for enqueue_from_db tests."""
+    def __init__(self, item_id, hebrew, niqqud="", translation="", kind="sentence"):
+        self.item_id = item_id
+        self.snapshot_hebrew = hebrew
+        self.snapshot_niqqud = niqqud
+        self.snapshot_translation = translation
+        self.snapshot_source_label = f"{kind}:{item_id}"
+        self.source_id = item_id
+        self.kind = kind
+        self.project_id = 1
+        self.audio_status = "unknown"
+        self.play_count = 0
+
+
+def test_enqueue_from_db_appends_items(service):
+    """enqueue_from_db adds items to _tracks even with no audio file."""
+    dtos = [_FakeDTO(1, "שלום"), _FakeDTO(2, "עולם"), _FakeDTO(3, "בית")]
+    n = service.enqueue_from_db(dtos, mode="append")
+    assert n == 3
+    assert len(service._tracks) == 3
+    assert service._tracks[0].label == "שלום"
+    assert service._tracks[2].label == "בית"
+    # path is empty (no audio yet)
+    from pathlib import Path
+    assert service._tracks[0].path == Path("")
+
+
+def test_enqueue_from_db_stores_context(service):
+    """Context dict includes item_id, kind, source_id, project_id."""
+    dtos = [_FakeDTO(42, "מים", niqqud="מַיִם", translation="water", kind="lemma")]
+    service.enqueue_from_db(dtos, mode="append")
+    ctx = service._tracks[0].context
+    assert ctx["item_id"] == 42
+    assert ctx["kind"] == "lemma"
+    assert ctx["snapshot_hebrew"] == "מים"
+    assert ctx["snapshot_niqqud"] == "מַיִם"
+    assert ctx["snapshot_translation"] == "water"
+
+
+def test_enqueue_from_db_prepend_shifts_index(service, tmp_audio):
+    """prepend mode inserts before existing tracks and adjusts current_index."""
+    _inject_tracks(service, tmp_audio[:2])
+    service._current_index = 1   # pretend track[1] is current
+    dtos = [_FakeDTO(10, "אחד"), _FakeDTO(11, "שניים")]
+    n = service.enqueue_from_db(dtos, mode="prepend")
+    assert n == 2
+    assert len(service._tracks) == 4
+    # New items at positions 0,1; old items shifted to 2,3
+    assert service._tracks[0].label == "אחד"
+    assert service._tracks[2].path == tmp_audio[0]  # original track[0]
+    # current_index shifted by 2
+    assert service._current_index == 3
+
+
+def test_enqueue_from_db_after_current_inserts_correctly(service, tmp_audio):
+    """after_current mode inserts after the cursor position."""
+    _inject_tracks(service, tmp_audio[:3])
+    service._current_index = 0
+    dtos = [_FakeDTO(20, "חדש")]
+    service.enqueue_from_db(dtos, mode="after_current")
+    assert len(service._tracks) == 4
+    # Should be inserted at position 1
+    assert service._tracks[1].label == "חדש"
+    assert service._tracks[2].path == tmp_audio[1]  # original track[1]
+
+
+def test_enqueue_from_db_empty_list(service):
+    """Empty input returns 0 and leaves queue unchanged."""
+    n = service.enqueue_from_db([], mode="append")
+    assert n == 0
+    assert len(service._tracks) == 0
+
+
+def test_enqueue_from_db_does_not_start_playback(service):
+    """enqueue_from_db never triggers _start_next_track automatically."""
+    dtos = [_FakeDTO(1, "שלום")]
+    service.enqueue_from_db(dtos, mode="append")
+    # _current should remain None (no auto-start on db load)
+    assert service._current is None
