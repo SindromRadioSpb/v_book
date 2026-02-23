@@ -3215,7 +3215,7 @@ class SentenceNiqqudBootstrapWorker(QThread):
 
 
 class AudioQueuePopulateWorker(QThread):
-    """Fetch all filtered sentence / lemma IDs and bulk-insert into the audio queue.
+    """Fetch all filtered sentence / lemma / term IDs and bulk-insert into the audio queue.
 
     Signal contract (V3 compatible with BatchProgressDialogV3):
       progress(completed, total)
@@ -3238,9 +3238,9 @@ class AudioQueuePopulateWorker(QThread):
     def __init__(
         self,
         *,
-        kind: str = "sentence",          # "sentence" | "lemma"
+        kind: str = "sentence",          # "sentence" | "lemma" | "term"
         project_id: int,
-        doc_id_filter: Optional[int] = None,
+        doc_ids: Optional[List[int]] = None,   # None or [] = all docs (sentences only)
         text_search: Optional[str] = None,
         add_mode: str = "append",        # "append" | "prepend" | "after_current"
         current_position: int = 0,
@@ -3248,7 +3248,7 @@ class AudioQueuePopulateWorker(QThread):
         super().__init__()
         self.kind = kind
         self.project_id = project_id
-        self.doc_id_filter = doc_id_filter
+        self.doc_ids = list(doc_ids) if doc_ids else []
         self.text_search = text_search
         self.add_mode = add_mode
         self.current_position = current_position
@@ -3337,17 +3337,24 @@ class AudioQueuePopulateWorker(QThread):
 
     def _fetch_ids(self, session) -> List[int]:
         """Return ordered list of IDs to process (no snapshots yet)."""
+        from sqlalchemy import select
+
         if self.kind == "sentence":
-            from app.services.sentences_workspace_service import SentencesWorkspaceService
-            svc = SentencesWorkspaceService()
-            return svc.get_all_filtered_sentence_ids(
-                session,
-                self.project_id,
-                doc_id_filter=self.doc_id_filter,
-                text_search=self.text_search or None,
+            from app.infra.sa_models import DocumentSentence, SourceCorpus, SourceDocument
+            stmt = (
+                select(DocumentSentence.sentence_id)
+                .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(SourceCorpus.project_id == self.project_id)
+                .order_by(DocumentSentence.sentence_id.asc())
             )
-        else:  # lemma
-            from sqlalchemy import select
+            if self.doc_ids:
+                stmt = stmt.where(DocumentSentence.doc_id.in_(self.doc_ids))
+            if self.text_search:
+                stmt = stmt.where(DocumentSentence.text.ilike(f"%{self.text_search}%"))
+            return [row[0] for row in session.execute(stmt).all()]
+
+        elif self.kind == "lemma":
             from app.infra.sa_models import Lemma
             stmt = (
                 select(Lemma.lemma_id)
@@ -3359,12 +3366,27 @@ class AudioQueuePopulateWorker(QThread):
                 stmt = stmt.where(Lemma.lemma_text.ilike(f"%{self.text_search}%"))
             return [row[0] for row in session.execute(stmt).all()]
 
+        else:  # term
+            from app.infra.sa_models import TermCluster
+            stmt = (
+                select(TermCluster.cluster_id)
+                .where(TermCluster.project_id == self.project_id)
+                .where(TermCluster.is_noise == 0)
+                .where(TermCluster.curation_status != "rejected")
+                .order_by(TermCluster.cluster_id.asc())
+            )
+            if self.text_search:
+                stmt = stmt.where(TermCluster.representative_he.ilike(f"%{self.text_search}%"))
+            return [row[0] for row in session.execute(stmt).all()]
+
     def _build_specs(self, session, ids: List[int]) -> List:
         """Resolve snapshots for a chunk of IDs → AudioItemSpec list."""
         if self.kind == "sentence":
             return self._build_sentence_specs(session, ids)
-        else:
+        elif self.kind == "lemma":
             return self._build_lemma_specs(session, ids)
+        else:
+            return self._build_term_specs(session, ids)
 
     def _build_sentence_specs(self, session, sentence_ids: List[int]) -> List:
         from sqlalchemy import select
@@ -3437,6 +3459,35 @@ class AudioQueuePopulateWorker(QThread):
                 project_id=self.project_id,
                 snapshot_hebrew=lemma_text,
                 snapshot_source_label=f"lemma:{lid}",
+                audio_status="unknown",
+            ))
+        return specs
+
+    def _build_term_specs(self, session, cluster_ids: List[int]) -> List:
+        from sqlalchemy import select
+        from app.infra.sa_models import TermCluster
+        from app.services.audio_queue_service import AudioItemSpec
+
+        stmt = select(
+            TermCluster.cluster_id,
+            TermCluster.representative_he,
+            TermCluster.pinned_translation,
+        ).where(TermCluster.cluster_id.in_(cluster_ids))
+        rows: Dict[int, tuple] = {
+            cid: (rep_he, transl)
+            for cid, rep_he, transl in session.execute(stmt).all()
+        }
+
+        specs = []
+        for cid in cluster_ids:
+            rep_he, transl = rows.get(cid, ("", None))
+            specs.append(AudioItemSpec(
+                kind="term",
+                source_id=cid,
+                project_id=self.project_id,
+                snapshot_hebrew=rep_he or "",
+                snapshot_translation=transl or None,
+                snapshot_source_label=f"term:{cid}",
                 audio_status="unknown",
             ))
         return specs

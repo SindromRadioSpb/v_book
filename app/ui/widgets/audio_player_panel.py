@@ -159,96 +159,320 @@ class AudioQueueTableModel(QAbstractTableModel):
         return None
 
 
-# ── Source picker dialog ───────────────────────────────────────────────────────
+# ── Source picker dialog (premium) ────────────────────────────────────────────
 
 
 class AddAllToQueueDialog(QDialog):
-    """Simple dialog to select source kind + project + add mode before bulk-loading."""
+    """Premium dialog — select source kind / project / documents / add mode.
 
-    def __init__(self, *, db=None, parent=None) -> None:
+    Self-sufficient: uses DBService.get_instance() directly so it works
+    even when AudioPlayerPanel was created without a ``db=`` argument.
+
+    Kinds supported:
+      - Sentences  → filterable by document (multi-select with live search)
+      - Lemmas (Dictionary) → project-wide, no document filter
+      - Terms      → project-wide, no document filter
+    """
+
+    # Maps combo index → (worker kind string, show doc filter)
+    _KIND_META = [
+        ("sentence", True),
+        ("lemma", False),
+        ("term", False),
+    ]
+
+    def __init__(self, *, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add All to Queue")
-        self.setMinimumWidth(380)
-        self._db = db
+        self.setMinimumWidth(460)
+        self.setMinimumHeight(420)
 
-        layout = QVBoxLayout(self)
+        self._project_ids: List[int] = []
+        self._db = None
+        try:
+            from app.services.db_service import DBService
+            self._db = DBService.get_instance()
+        except Exception as exc:
+            logger.warning("AddAllToQueueDialog: no DBService: %s", exc)
+
+        self._build_ui()
+        self._load_projects()
+
+    # ── UI construction ───────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setSpacing(8)
+
+        # ── Top form ──────────────────────────────────────────────────
         form = QFormLayout()
-        layout.addLayout(form)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        # Kind
         self.kind_combo = QComboBox()
-        self.kind_combo.addItems(["Sentences", "Lemmas (Dictionary)"])
+        self.kind_combo.addItems(["Sentences", "Lemmas (Dictionary)", "Terms"])
         form.addRow("Source kind:", self.kind_combo)
 
-        # Project
         self.project_combo = QComboBox()
-        self._project_ids: List[int] = []
-        self._load_projects()
+        self.project_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         form.addRow("Project:", self.project_combo)
 
-        # Add mode
+        root.addLayout(form)
+
+        # ── Document filter group (Sentences only) ────────────────────
+        self.doc_group = QGroupBox("Document filter  (leave empty = all documents)")
+        doc_vl = QVBoxLayout(self.doc_group)
+        doc_vl.setSpacing(4)
+
+        # Search bar
+        search_row = QHBoxLayout()
+        search_row.setSpacing(4)
+        search_lbl = QLabel("🔍")
+        search_lbl.setFixedWidth(18)
+        self.doc_search = QLineEdit()
+        self.doc_search.setPlaceholderText("Type to filter documents…")
+        self.doc_search.setClearButtonEnabled(True)
+        search_row.addWidget(search_lbl)
+        search_row.addWidget(self.doc_search)
+        doc_vl.addLayout(search_row)
+
+        # Document list
+        self.doc_list = QListWidget()
+        self.doc_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.doc_list.setAlternatingRowColors(True)
+        self.doc_list.setMinimumHeight(160)
+        self.doc_list.setToolTip(
+            "Select specific documents (Ctrl+Click for multi-select).\n"
+            "Leave nothing selected to use all documents."
+        )
+        doc_vl.addWidget(self.doc_list, 1)
+
+        # Buttons + count
+        btn_row = QHBoxLayout()
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.setFixedWidth(80)
+        self.clear_sel_btn = QPushButton("Clear")
+        self.clear_sel_btn.setFixedWidth(60)
+        self.doc_sel_label = QLabel("Selected: 0 / 0")
+        self.doc_sel_label.setStyleSheet("color: gray; font-size: 11px;")
+        btn_row.addWidget(self.select_all_btn)
+        btn_row.addWidget(self.clear_sel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.doc_sel_label)
+        doc_vl.addLayout(btn_row)
+        root.addWidget(self.doc_group)
+
+        # ── Add mode ──────────────────────────────────────────────────
+        mode_form = QFormLayout()
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Append", "After current", "Prepend"])
-        form.addRow("Add mode:", self.mode_combo)
+        mode_form.addRow("Add mode:", self.mode_combo)
+        root.addLayout(mode_form)
 
-        # Count estimate label
-        self.count_label = QLabel("(select project to estimate)")
-        self.count_label.setWordWrap(True)
-        layout.addWidget(self.count_label)
+        # ── Estimate label ────────────────────────────────────────────
+        self.estimate_label = QLabel("(select a project to see estimate)")
+        self.estimate_label.setStyleSheet("color: #555; font-style: italic;")
+        self.estimate_label.setWordWrap(True)
+        root.addWidget(self.estimate_label)
 
-        self.project_combo.currentIndexChanged.connect(self._update_estimate)
+        root.addStretch()
 
-        # Buttons
+        # ── Dialog buttons ────────────────────────────────────────────
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setText("Add to Queue")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
+        root.addWidget(btns)
 
-        self._update_estimate()
+        # ── Connect signals ───────────────────────────────────────────
+        self.kind_combo.currentIndexChanged.connect(self._on_kind_changed)
+        self.project_combo.currentIndexChanged.connect(self._on_project_changed)
+        self.doc_search.textChanged.connect(self._filter_docs)
+        self.select_all_btn.clicked.connect(self._select_all_docs)
+        self.clear_sel_btn.clicked.connect(self.doc_list.clearSelection)
+        self.doc_list.itemSelectionChanged.connect(self._update_sel_label)
+        self.doc_list.itemSelectionChanged.connect(self._update_estimate)
+
+        # Initial state
+        self._on_kind_changed(0)
+
+    # ── Data loading ──────────────────────────────────────────────────
 
     def _load_projects(self) -> None:
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        self._project_ids = []
         if not self._db:
-            self.project_combo.addItem("(no DB session)", -1)
+            self.project_combo.addItem("(no database connection)")
+            self.project_combo.blockSignals(False)
             return
         try:
             from app.services.project_service import ProjectService
             with self._db.get_session() as session:
                 projects = ProjectService().list_projects(session)
-            self._project_ids = [p.project_id for p in projects]
             for p in projects:
                 name = getattr(p, "name", None) or f"Project {p.project_id}"
-                self.project_combo.addItem(name, p.project_id)
+                self.project_combo.addItem(name)
+                self._project_ids.append(p.project_id)
         except Exception as exc:
-            logger.warning("AddAllToQueueDialog: could not load projects: %s", exc)
-            self.project_combo.addItem("(error loading projects)", -1)
+            logger.warning("AddAllToQueueDialog: load projects failed: %s", exc)
+            self.project_combo.addItem("(error loading projects)")
+        self.project_combo.blockSignals(False)
+        self._on_project_changed(self.project_combo.currentIndex())
 
-    def _update_estimate(self) -> None:
-        pid = self.selected_project_id()
-        if pid < 0 or not self._db:
-            self.count_label.setText("(select a project to estimate)")
+    def _load_documents(self, project_id: int) -> None:
+        """Populate doc_list for the given project (sentences kind only)."""
+        self.doc_list.clear()
+        if not self._db or project_id < 0:
             return
         try:
-            from app.services.sentences_workspace_service import SentencesWorkspaceService
+            from sqlalchemy import select
+            from app.infra.sa_models import SourceDocument, SourceCorpus
             with self._db.get_session() as session:
-                ids = SentencesWorkspaceService().get_all_filtered_sentence_ids(session, pid)
-            self.count_label.setText(f"~{len(ids):,} sentences in this project")
-        except Exception:
-            self.count_label.setText("(estimate unavailable)")
+                stmt = (
+                    select(
+                        SourceDocument.doc_id,
+                        SourceDocument.file_name,
+                        SourceDocument.sentence_count,
+                        SourceDocument.level,
+                    )
+                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(SourceCorpus.project_id == project_id)
+                    .where(SourceDocument.status == "processed")
+                    .order_by(SourceDocument.file_name.asc())
+                )
+                rows = session.execute(stmt).all()
+            for doc_id, file_name, sent_count, level in rows:
+                count_str = f"{sent_count:,}" if sent_count else "?"
+                level_str = f"  [{level}]" if level else ""
+                label = f"{file_name}    {count_str} sent.{level_str}"
+                from PyQt6.QtWidgets import QListWidgetItem
+                item = QListWidgetItem(label)
+                item.setData(Qt.ItemDataRole.UserRole, doc_id)
+                item.setToolTip(f"doc_id={doc_id}  •  {count_str} sentences{level_str}")
+                self.doc_list.addItem(item)
+        except Exception as exc:
+            logger.warning("AddAllToQueueDialog: load docs failed: %s", exc)
+        self._update_sel_label()
+
+    # ── Slot handlers ─────────────────────────────────────────────────
+
+    def _on_kind_changed(self, index: int) -> None:
+        _, show_docs = self._KIND_META[index] if index < len(self._KIND_META) else ("sentence", True)
+        self.doc_group.setVisible(show_docs)
+        self._update_estimate()
+
+    def _on_project_changed(self, index: int) -> None:
+        pid = self._get_project_id(index)
+        kind_idx = self.kind_combo.currentIndex()
+        _, show_docs = self._KIND_META[kind_idx] if kind_idx < len(self._KIND_META) else ("sentence", True)
+        if show_docs:
+            self._load_documents(pid)
+        self._update_estimate()
+
+    def _filter_docs(self, text: str) -> None:
+        """Live filter: hide items that don't match the search text."""
+        lc = text.lower()
+        for i in range(self.doc_list.count()):
+            item = self.doc_list.item(i)
+            item.setHidden(lc not in item.text().lower())
+        self._update_sel_label()
+
+    def _select_all_docs(self) -> None:
+        """Select all currently visible items."""
+        self.doc_list.clearSelection()
+        for i in range(self.doc_list.count()):
+            item = self.doc_list.item(i)
+            if not item.isHidden():
+                item.setSelected(True)
+
+    def _update_sel_label(self) -> None:
+        selected = len(self.doc_list.selectedItems())
+        visible = sum(1 for i in range(self.doc_list.count()) if not self.doc_list.item(i).isHidden())
+        total = self.doc_list.count()
+        if total == 0:
+            self.doc_sel_label.setText("No documents")
+        elif selected == 0:
+            self.doc_sel_label.setText(f"All {visible:,} shown  (none selected = all docs)")
+        else:
+            self.doc_sel_label.setText(f"Selected: {selected:,} / {visible:,} shown  ({total:,} total)")
+
+    def _update_estimate(self) -> None:
+        """Fast COUNT estimate shown in the dialog."""
+        pid = self._get_project_id(self.project_combo.currentIndex())
+        kind_idx = self.kind_combo.currentIndex()
+        kind, _ = self._KIND_META[kind_idx] if kind_idx < len(self._KIND_META) else ("sentence", True)
+
+        if pid < 0 or not self._db:
+            self.estimate_label.setText("(select a project to see estimate)")
+            return
+        try:
+            from sqlalchemy import select, func
+            with self._db.get_session() as session:
+                if kind == "sentence":
+                    from app.infra.sa_models import DocumentSentence, SourceDocument, SourceCorpus
+                    doc_ids = self.selected_doc_ids()
+                    stmt = (
+                        select(func.count(DocumentSentence.sentence_id))
+                        .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+                        .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                        .where(SourceCorpus.project_id == pid)
+                    )
+                    if doc_ids:
+                        stmt = stmt.where(DocumentSentence.doc_id.in_(doc_ids))
+                    count = session.execute(stmt).scalar() or 0
+                    src = f"{len(doc_ids)} document(s)" if doc_ids else "all documents"
+                    self.estimate_label.setText(f"~{count:,} sentences from {src}")
+                elif kind == "lemma":
+                    from app.infra.sa_models import Lemma
+                    count = session.execute(
+                        select(func.count(Lemma.lemma_id))
+                        .where(Lemma.project_id == pid)
+                        .where(Lemma.is_noise == 0)
+                    ).scalar() or 0
+                    self.estimate_label.setText(f"~{count:,} lemmas (project-wide)")
+                else:  # term
+                    from app.infra.sa_models import TermCluster
+                    count = session.execute(
+                        select(func.count(TermCluster.cluster_id))
+                        .where(TermCluster.project_id == pid)
+                        .where(TermCluster.is_noise == 0)
+                        .where(TermCluster.curation_status != "rejected")
+                    ).scalar() or 0
+                    self.estimate_label.setText(f"~{count:,} terms (project-wide)")
+        except Exception as exc:
+            logger.debug("AddAllToQueueDialog estimate failed: %s", exc)
+            self.estimate_label.setText("(estimate unavailable)")
+
+    # ── Public getters ────────────────────────────────────────────────
+
+    def _get_project_id(self, combo_index: int) -> int:
+        if combo_index < 0 or combo_index >= len(self._project_ids):
+            return -1
+        return self._project_ids[combo_index]
 
     def selected_kind(self) -> str:
-        return "sentence" if self.kind_combo.currentIndex() == 0 else "lemma"
+        idx = self.kind_combo.currentIndex()
+        kind, _ = self._KIND_META[idx] if idx < len(self._KIND_META) else ("sentence", True)
+        return kind
 
     def selected_project_id(self) -> int:
-        idx = self.project_combo.currentIndex()
-        if idx < 0 or idx >= len(self._project_ids):
-            return -1
-        return self._project_ids[idx]
+        return self._get_project_id(self.project_combo.currentIndex())
+
+    def selected_doc_ids(self) -> List[int]:
+        """Return list of selected doc_ids, or [] for all documents."""
+        return [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self.doc_list.selectedItems()
+            if item.data(Qt.ItemDataRole.UserRole) is not None
+        ]
 
     def selected_add_mode(self) -> str:
         idx = self.mode_combo.currentIndex()
-        return ["append", "after_current", "prepend"][idx]
+        return ["append", "after_current", "prepend"][max(0, idx)]
 
 
 # ── Panel ─────────────────────────────────────────────────────────────────────
@@ -735,16 +959,17 @@ class AudioPlayerPanel(QWidget):
     # ── Context menu ──────────────────────────────────────────────────────────
 
     def _on_add_all_clicked(self) -> None:
-        """Open source picker dialog then launch AudioQueuePopulateWorker."""
-        dlg = AddAllToQueueDialog(db=self._db, parent=self)
+        """Open premium source picker dialog then launch AudioQueuePopulateWorker."""
+        dlg = AddAllToQueueDialog(parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         project_id = dlg.selected_project_id()
         if project_id < 0:
-            QMessageBox.warning(self, "Add All", "No project selected.")
+            QMessageBox.warning(self, "Add All", "No project selected. Please open a project first.")
             return
         kind = dlg.selected_kind()
         add_mode = dlg.selected_add_mode()
+        doc_ids = dlg.selected_doc_ids()  # [] = all documents
         current_pos = self.player.current_index
 
         try:
@@ -761,6 +986,7 @@ class AudioPlayerPanel(QWidget):
         worker = AudioQueuePopulateWorker(
             kind=kind,
             project_id=project_id,
+            doc_ids=doc_ids,
             add_mode=add_mode,
             current_position=current_pos,
         )

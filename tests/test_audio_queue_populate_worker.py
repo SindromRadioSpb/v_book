@@ -40,14 +40,30 @@ def test_worker_doc_filter_and_search():
     w = AudioQueuePopulateWorker(
         kind="sentence",
         project_id=3,
-        doc_id_filter=42,
+        doc_ids=[42, 99],
         text_search="שלום",
         add_mode="append",
         current_position=7,
     )
-    assert w.doc_id_filter == 42
+    assert w.doc_ids == [42, 99]
     assert w.text_search == "שלום"
     assert w.current_position == 7
+
+
+def test_worker_term_kind():
+    w = AudioQueuePopulateWorker(kind="term", project_id=5)
+    assert w.kind == "term"
+    assert w.doc_ids == []
+
+
+def test_worker_doc_ids_empty_list():
+    w = AudioQueuePopulateWorker(kind="sentence", project_id=1, doc_ids=[])
+    assert w.doc_ids == []
+
+
+def test_worker_doc_ids_none():
+    w = AudioQueuePopulateWorker(kind="sentence", project_id=1, doc_ids=None)
+    assert w.doc_ids == []
 
 
 def test_worker_signals_defined():
@@ -76,31 +92,23 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
     # Monkeypatch DBService and SentencesWorkspaceService to return 0 IDs
     import app.services.db_service as db_mod
 
+    class _FakeResult:
+        def all(self):
+            return []
+
     class _FakeSession:
         def __enter__(self):
             return self
         def __exit__(self, *a):
             pass
         def execute(self, *a, **kw):
-            return iter([])
+            return _FakeResult()
 
     class _FakeDB:
         def get_session(self):
             return _FakeSession()
 
     monkeypatch.setattr(db_mod.DBService, "get_instance", staticmethod(lambda: _FakeDB()))
-
-    import app.services.sentences_workspace_service as sws_mod
-
-    class _FakeSWS:
-        def get_all_filtered_sentence_ids(self, session, project_id, **kw):
-            return []
-
-    monkeypatch.setattr(
-        sws_mod,
-        "SentencesWorkspaceService",
-        lambda: _FakeSWS(),
-    )
 
     from PyQt6.QtCore import QEventLoop, QTimer
 
