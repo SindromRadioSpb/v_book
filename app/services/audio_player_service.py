@@ -38,6 +38,15 @@ def _normalize_play_mode(raw: str) -> str:
     return "enqueue" if value == "enqueue" else "interrupt"
 
 
+def _normalize_queue_kind(raw: str) -> str:
+    value = (raw or "").strip().lower()
+    if value in {"term_cluster", "terms"}:
+        return "term"
+    if value in {"surface", "sentences"}:
+        return "sentence"
+    return value
+
+
 def _clamp_ms(value: int, default: int) -> int:
     try:
         parsed = int(value)
@@ -518,6 +527,14 @@ class AudioPlayerService(QObject):
             self._set_state("idle")
             self._start_next_track()
         else:  # enqueue
+            # Premium UX: explicit single-row Play should not duplicate queue rows.
+            if start_immediately and len(items) == 1:
+                existing_index = self._find_existing_track_index(items[0])
+                if existing_index is not None:
+                    self._merge_existing_track(existing_index, items[0])
+                    self.jump_to_index(existing_index)
+                    return 0
+
             first_new_index = len(self._tracks)
             self._tracks.extend(items)
             self._emit_queue_changed()
@@ -536,6 +553,48 @@ class AudioPlayerService(QObject):
                 self._start_next_track()
 
         return len(items)
+
+    @staticmethod
+    def _source_key_from_context(context: Dict[str, Any]) -> Optional[tuple[str, int, Optional[int]]]:
+        kind = _normalize_queue_kind(str(context.get("kind") or ""))
+        source_id_raw = context.get("source_id")
+        if not kind or source_id_raw is None:
+            return None
+        try:
+            source_id = int(source_id_raw)
+        except (TypeError, ValueError):
+            return None
+        project_id_raw = context.get("project_id")
+        try:
+            project_id = int(project_id_raw) if project_id_raw is not None else None
+        except (TypeError, ValueError):
+            project_id = None
+        return (kind, source_id, project_id)
+
+    def _find_existing_track_index(self, track: AudioTrack) -> Optional[int]:
+        key = self._source_key_from_context(track.context or {})
+        if key is None:
+            return None
+        for idx, existing in enumerate(self._tracks):
+            existing_key = self._source_key_from_context(existing.context or {})
+            if existing_key == key:
+                return idx
+        return None
+
+    def _merge_existing_track(self, index: int, incoming: AudioTrack) -> None:
+        if index < 0 or index >= len(self._tracks):
+            return
+        existing = self._tracks[index]
+        existing.path = incoming.path
+        existing.label = incoming.label or existing.label
+
+        merged_ctx = dict(existing.context or {})
+        incoming_ctx = dict(incoming.context or {})
+        existing_play_count = merged_ctx.get("play_count")
+        merged_ctx.update(incoming_ctx)
+        if existing_play_count is not None:
+            merged_ctx["play_count"] = existing_play_count
+        existing.context = merged_ctx
 
     def pause(self) -> None:
         if self._backend is None:
