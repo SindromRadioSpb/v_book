@@ -115,11 +115,12 @@ def test_launch_audio_files_passes_contexts_to_internal_player(monkeypatch, tmp_
     class _FakePlayer:
         is_available = True
 
-        def play_paths(self, paths, *, labels=None, play_mode=None, contexts=None):
+        def play_paths(self, paths, *, labels=None, play_mode=None, contexts=None, start_immediately=False):
             captured["paths"] = list(paths)
             captured["labels"] = list(labels or [])
             captured["play_mode"] = play_mode
             captured["contexts"] = list(contexts or [])
+            captured["start_immediately"] = bool(start_immediately)
             return len(paths)
 
     monkeypatch.setattr(
@@ -144,4 +145,5 @@ def test_launch_audio_files_passes_contexts_to_internal_player(monkeypatch, tmp_
     assert captured["paths"] == [audio_file]
     assert captured["labels"] == ["שלום"]
     assert captured["play_mode"] == "enqueue"
+    assert captured["start_immediately"] is False
     assert captured["contexts"][0]["snapshot_source_label"] == "Dictionary"

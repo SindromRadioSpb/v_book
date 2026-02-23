@@ -888,9 +888,10 @@ class DictionaryView(QWidget):
                 }
             ],
             play_mode="enqueue",
+            start_immediately=True,
         )
 
-    def _play_audio_items(self, items: List[dict], *, play_mode: str) -> None:
+    def _play_audio_items(self, items: List[dict], *, play_mode: str, start_immediately: bool = False) -> None:
         """Resolve ready assets and route playback through internal player."""
         try:
             with self.db_service.get_session() as session:
@@ -938,6 +939,7 @@ class DictionaryView(QWidget):
                 labels=labels,
                 play_mode=play_mode,
                 contexts=contexts,
+                start_immediately=start_immediately,
             )
         except Exception as e:
             logger.error("Failed to play audio in Dictionary: %s", e, exc_info=True)

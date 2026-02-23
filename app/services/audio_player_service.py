@@ -474,6 +474,7 @@ class AudioPlayerService(QObject):
         labels: Optional[Sequence[str]] = None,
         play_mode: Optional[str] = None,
         contexts: Optional[Sequence[Dict[str, Any]]] = None,
+        start_immediately: bool = False,
     ) -> int:
         items: List[AudioTrack] = []
         for idx, path in enumerate(paths):
@@ -517,9 +518,21 @@ class AudioPlayerService(QObject):
             self._set_state("idle")
             self._start_next_track()
         else:  # enqueue
+            first_new_index = len(self._tracks)
             self._tracks.extend(items)
             self._emit_queue_changed()
-            if self._current is None and not self._timers_active():
+            if start_immediately:
+                # Premium UX for explicit row Play click: keep queue history,
+                # append new item(s), but start playback from the clicked item now.
+                self._stop_all_timers()
+                self._stop_backend_only()
+                self._current = None
+                self._item_play_count = 0
+                self._current_index = first_new_index - 1
+                self._emit_now_playing(None)
+                self._set_state("idle")
+                self._start_next_track()
+            elif self._current is None and not self._timers_active():
                 self._start_next_track()
 
         return len(items)

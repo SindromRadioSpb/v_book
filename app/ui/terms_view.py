@@ -1066,9 +1066,10 @@ class TermsView(QWidget):
                 }
             ],
             play_mode="enqueue",
+            start_immediately=True,
         )
 
-    def _play_audio_items(self, items: list[dict], *, play_mode: str) -> None:
+    def _play_audio_items(self, items: list[dict], *, play_mode: str, start_immediately: bool = False) -> None:
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -1115,6 +1116,7 @@ class TermsView(QWidget):
                 labels=labels,
                 play_mode=play_mode,
                 contexts=contexts,
+                start_immediately=start_immediately,
             )
         except Exception as e:
             logger.error("Failed to play audio in Terms: %s", e, exc_info=True)

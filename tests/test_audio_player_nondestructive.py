@@ -138,6 +138,28 @@ def test_enqueue_mode_appends(service, tmp_audio):
     assert len(service._tracks) == 4
 
 
+def test_enqueue_start_immediately_plays_newly_added_item(service, tmp_audio):
+    """enqueue + start_immediately plays newly appended item, not next old queue row."""
+    _inject_tracks(service, tmp_audio[:3])
+    service._current = service._tracks[0]
+    service._current_index = 0
+
+    with patch.object(service, "_begin_play_current") as begin_mock:
+        n = service.play_paths(
+            [tmp_audio[3]],
+            labels=["clicked"],
+            play_mode="enqueue",
+            contexts=[{"kind": "term", "source_id": 999}],
+            start_immediately=True,
+        )
+
+    assert n == 1
+    assert len(service._tracks) == 4
+    assert service._current_index == 3
+    assert service._current is service._tracks[3]
+    begin_mock.assert_called_once()
+
+
 # -- enqueue_from_db: items appear in queue without audio file --
 
 

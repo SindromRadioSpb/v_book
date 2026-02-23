@@ -65,6 +65,7 @@ class AudioPlaybackService:
         labels: Optional[Sequence[str]] = None,
         play_mode: str = "enqueue",
         contexts: Optional[Sequence[Dict[str, object]]] = None,
+        start_immediately: bool = False,
     ) -> int:
         """Play/enqueue many audio files using internal player (fallback: first external)."""
         valid_paths = [Path(p) for p in paths if p and Path(p).exists()]
@@ -81,6 +82,7 @@ class AudioPlaybackService:
                     labels=labels,
                     play_mode=play_mode,
                     contexts=contexts,
+                    start_immediately=start_immediately,
                 )
         except Exception:
             pass

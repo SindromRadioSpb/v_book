@@ -707,6 +707,7 @@ class UserDictionariesView(QWidget):
                 }
             ],
             play_mode="enqueue",
+            start_immediately=True,
         )
 
     def build_filters(self) -> Dict[str, object]:
@@ -1470,7 +1471,7 @@ class UserDictionariesView(QWidget):
             play_mode="enqueue",
         )
 
-    def _play_audio_items(self, items: List[Dict[str, str]], *, play_mode: str):
+    def _play_audio_items(self, items: List[Dict[str, str]], *, play_mode: str, start_immediately: bool = False):
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -1517,6 +1518,7 @@ class UserDictionariesView(QWidget):
                 labels=labels,
                 play_mode=play_mode,
                 contexts=contexts,
+                start_immediately=start_immediately,
             )
         except Exception as e:
             logger.error("Failed to play audio in User Dictionaries: %s", e, exc_info=True)
