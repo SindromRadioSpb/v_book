@@ -488,6 +488,12 @@ class AudioPlayerService(QObject):
             ctx: Dict[str, Any] = {}
             if contexts is not None and idx < len(contexts):
                 ctx = dict(contexts[idx] or {})
+            # Keep queue Plays column deterministic for all entrypoints:
+            # direct UI play actions (Dictionary/Terms/TM/UD) also start at 0.
+            try:
+                ctx["play_count"] = int(ctx.get("play_count", 0))
+            except Exception:
+                ctx["play_count"] = 0
             items.append(
                 AudioTrack(
                     path=path_obj,

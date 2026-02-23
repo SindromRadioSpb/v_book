@@ -326,6 +326,18 @@ def test_play_count_not_added_if_missing_from_context(service, tmp_audio):
     assert "play_count" not in service._tracks[0].context
 
 
+def test_play_paths_initializes_play_count_for_ui_context(service, tmp_audio):
+    """Direct play entrypoints must start with play_count=0 (not '-')."""
+    n = service.play_paths(
+        [tmp_audio[0]],
+        labels=["שלום"],
+        play_mode="enqueue",
+        contexts=[{"kind": "lemma", "source_id": 1}],
+    )
+    assert n == 1
+    assert service._tracks[0].context.get("play_count") == 0
+
+
 def test_play_count_increments_multiple_times(service, tmp_audio):
     """Each _on_post_roll_done call increments play_count by 1."""
     _inject_tracks(service, tmp_audio[:3])
