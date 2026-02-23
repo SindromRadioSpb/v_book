@@ -1700,7 +1700,7 @@ class TranslationManagementPanel(QWidget):
                     "src_text": entry.src_text,
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _play_audio_items(self, items: list[dict], *, play_mode: str):

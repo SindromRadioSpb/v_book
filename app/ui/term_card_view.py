@@ -534,7 +534,7 @@ class TermCardView(QWidget):
                     "src_text": card.representative_he,
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _play_audio_items(self, items: list[dict], *, play_mode: str):

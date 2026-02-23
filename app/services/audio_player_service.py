@@ -380,6 +380,7 @@ class AudioPlayerService(QObject):
         items: list,       # List[AudioQueueItemDTO] — avoids circular import
         *,
         mode: str = "append",   # "append" | "prepend" | "after_current"
+        resolved_paths: Optional[Dict[int, Path]] = None,  # item_id → abs Path
     ) -> int:
         """Add AudioQueueItemDTO objects to the in-memory queue without requiring
         an audio file on disk.  Items with no ready audio appear as 'missing'
@@ -409,7 +410,10 @@ class AudioPlayerService(QObject):
                 "audio_status": item.audio_status,
                 "play_count": item.play_count,
             }
-            tracks.append(AudioTrack(path=Path(""), label=label, context=ctx))
+            resolved_path = (
+                (resolved_paths or {}).get(item.item_id) or Path("")
+            )
+            tracks.append(AudioTrack(path=resolved_path, label=label, context=ctx))
 
         if not tracks:
             return 0

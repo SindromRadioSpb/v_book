@@ -1053,7 +1053,7 @@ class TermsView(QWidget):
                     "src_text": cluster.representative_he,
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _play_audio_items(self, items: list[dict], *, play_mode: str) -> None:

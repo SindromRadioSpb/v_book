@@ -706,7 +706,7 @@ class UserDictionariesView(QWidget):
                     "src_text": (card.src_text or "").strip(),
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def build_filters(self) -> Dict[str, object]:
@@ -1455,7 +1455,7 @@ class UserDictionariesView(QWidget):
                     "src_text": (item.src_text or "").strip(),
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _play_audio_items(self, items: List[Dict[str, str]], *, play_mode: str):

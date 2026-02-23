@@ -875,7 +875,7 @@ class DictionaryView(QWidget):
                     "src_text": lemma.lemma_text,
                 }
             ],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _play_audio_items(self, items: List[dict], *, play_mode: str) -> None:

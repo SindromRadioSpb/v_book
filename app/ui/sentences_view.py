@@ -822,7 +822,7 @@ class SentencesView(QWidget):
         norm = SentencesWorkspaceService._norm(src_lang, dto.text)
         self._play_audio_items(
             [{"src_lang": src_lang, "src_norm": norm, "src_text": dto.text}],
-            play_mode="interrupt",
+            play_mode="enqueue",
         )
 
     def _get_src_lang(self) -> str:

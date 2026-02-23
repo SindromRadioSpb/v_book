@@ -1037,14 +1037,40 @@ class AudioPlayerPanel(QWidget):
         try:
             from app.services.db_service import DBService
             from app.services.audio_queue_service import AudioQueueService
+            from app.infra.sa_models import AudioAsset as _AudioAsset
+            from app.services.audio_playback_service import _get_app_dir
             db = DBService.get_instance()
+            id_set = set(new_item_ids)
+            resolved_paths: Dict[int, Path] = {}
             with db.get_session() as session:
                 all_db_items = AudioQueueService().get_queue(session)
-            # Only consider the rows inserted by THIS worker run
-            id_set = set(new_item_ids)
-            candidate_items = [item for item in all_db_items if item.item_id in id_set]
-            # Dedup by (kind, source_id) — prevents the same source content
-            # from appearing twice even if "Add All" was clicked multiple times
+                # Filter to only rows inserted by THIS worker run
+                candidate_items = [item for item in all_db_items if item.item_id in id_set]
+                # Resolve audio file paths for ready items within the same session
+                ready_asset_ids = [
+                    item.audio_asset_id
+                    for item in candidate_items
+                    if item.audio_asset_id and item.audio_status == "ready"
+                ]
+                if ready_asset_ids:
+                    app_dir = _get_app_dir()
+                    asset_rows = (
+                        session.query(_AudioAsset)
+                        .filter(_AudioAsset.asset_id.in_(ready_asset_ids))
+                        .all()
+                    )
+                    asset_path_map: Dict[int, Path] = {}
+                    for row in asset_rows:
+                        if row.audio_rel_path:
+                            rel = Path(str(row.audio_rel_path))
+                            if not rel.is_absolute() and ".." not in rel.parts:
+                                abs_path = app_dir / rel
+                                if abs_path.exists():
+                                    asset_path_map[row.asset_id] = abs_path
+                    for item in candidate_items:
+                        if item.audio_asset_id and item.audio_asset_id in asset_path_map:
+                            resolved_paths[item.item_id] = asset_path_map[item.audio_asset_id]
+            # Dedup by (kind, source_id) — prevents same source content appearing twice
             existing_source_keys: set = {
                 (t.context.get("kind"), t.context.get("source_id"))
                 for t in self.player._tracks  # noqa: SLF001
@@ -1057,8 +1083,11 @@ class AudioPlayerPanel(QWidget):
                 if (item.kind, item.source_id) not in existing_source_keys
             ]
             if new_items:
-                self.player.enqueue_from_db(new_items, mode=add_mode)
-                logger.debug("_load_db_queue_to_player: loaded %d/%d items", len(new_items), len(candidate_items))
+                self.player.enqueue_from_db(new_items, mode=add_mode, resolved_paths=resolved_paths)
+                logger.debug(
+                    "_load_db_queue_to_player: loaded %d/%d items (%d with audio path)",
+                    len(new_items), len(candidate_items), len(resolved_paths),
+                )
         except Exception as exc:
             logger.warning("_load_db_queue_to_player failed: %s", exc)
 
