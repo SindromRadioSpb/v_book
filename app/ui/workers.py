@@ -3300,6 +3300,7 @@ class AudioQueuePopulateWorker(QThread):
             try:
                 with db.get_session() as session:
                     specs = self._build_specs(session, chunk_ids)
+                    self._resolve_audio_assets(session, specs)
                     new_ids = aq_svc.add_to_queue(
                         session,
                         specs,
@@ -3495,3 +3496,48 @@ class AudioQueuePopulateWorker(QThread):
                 audio_status="unknown",
             ))
         return specs
+
+    def _resolve_audio_assets(self, session, specs: List) -> None:
+        """Batch-lookup AudioAsset for specs and fill audio_asset_id + audio_status.
+
+        Uses the same normalize_for_tm normalization as the audio generation pipeline
+        so norm_text values align with what's stored in audio_asset.norm_text.
+        Non-fatal: any exception is logged at DEBUG level and silently ignored.
+        """
+        try:
+            from sqlalchemy import select as _sel, desc as _desc
+            from app.infra.sa_models import AudioAsset as _AA
+            from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+
+            _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
+            norm_to_specs: Dict[str, List] = {}
+            for spec in specs:
+                if not spec.snapshot_hebrew or spec.audio_asset_id is not None:
+                    continue
+                kind_str = _kind_map.get(spec.kind, spec.kind)
+                try:
+                    norm = _ntm("he", spec.snapshot_hebrew, kind_str).norm or spec.snapshot_hebrew
+                except Exception:
+                    norm = spec.snapshot_hebrew
+                if norm:
+                    norm_to_specs.setdefault(norm, []).append(spec)
+
+            if not norm_to_specs:
+                return
+
+            rows = session.execute(
+                _sel(_AA.norm_text, _AA.asset_id)
+                .where(_AA.lang == "he")
+                .where(_AA.norm_text.in_(list(norm_to_specs.keys())))
+                .where(_AA.asset_status == "ready")
+                .where(_AA.audio_rel_path.isnot(None))
+                .order_by(_desc(_AA.asset_id))  # highest asset_id = most recent
+            ).all()
+
+            for norm_text, asset_id in rows:
+                for spec in norm_to_specs.get(norm_text, []):
+                    if spec.audio_asset_id is None:  # first-win per spec
+                        spec.audio_asset_id = asset_id
+                        spec.audio_status = "ready"
+        except Exception as exc:
+            logger.debug("_resolve_audio_assets: non-fatal: %s", exc)

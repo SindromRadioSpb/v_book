@@ -124,3 +124,87 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
     assert finished_payloads[0]["total"] == 0
     assert "new_item_ids" in finished_payloads[0], "new_item_ids must be present in finished payload"
     assert finished_payloads[0]["new_item_ids"] == []
+
+
+# -- _resolve_audio_assets: fills audio_asset_id for matching norms ----------
+
+
+def test_resolve_audio_assets_fills_asset_id():
+    """_resolve_audio_assets sets audio_asset_id + audio_status for matching specs."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+    from app.services.audio_queue_service import AudioItemSpec
+
+    w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
+    specs = [
+        AudioItemSpec(kind="lemma", source_id=10, snapshot_hebrew="שלום", audio_status="unknown"),
+        AudioItemSpec(kind="lemma", source_id=11, snapshot_hebrew="עולם", audio_status="unknown"),
+    ]
+
+    # normalize_for_tm: "שלום" → norm "n_shalom", "עולם" → "n_olam"
+    def fake_ntm(lang, text, kind):
+        result = MagicMock()
+        result.norm = f"n_{text}"
+        return result
+
+    mock_session = MagicMock()
+    # Only "n_שלום" has a ready asset in DB
+    mock_session.execute.return_value.all.return_value = [("n_שלום", 42)]
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm):
+        w._resolve_audio_assets(mock_session, specs)
+
+    assert specs[0].audio_asset_id == 42
+    assert specs[0].audio_status == "ready"
+    assert specs[1].audio_asset_id is None
+    assert specs[1].audio_status == "unknown"
+
+
+def test_resolve_audio_assets_skips_already_set():
+    """_resolve_audio_assets skips specs that already have audio_asset_id."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+    from app.services.audio_queue_service import AudioItemSpec
+
+    w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
+    specs = [
+        AudioItemSpec(kind="lemma", source_id=10, snapshot_hebrew="שלום",
+                      audio_asset_id=99, audio_status="ready"),
+    ]
+
+    mock_session = MagicMock()
+    # Even if DB returns a row, the spec already has asset_id set — should not overwrite
+    mock_session.execute.return_value.all.return_value = [("n_שלום", 777)]
+
+    def fake_ntm(lang, text, kind):
+        result = MagicMock()
+        result.norm = f"n_{text}"
+        return result
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm):
+        w._resolve_audio_assets(mock_session, specs)
+
+    # spec already had asset_id=99; must not be overwritten to 777
+    assert specs[0].audio_asset_id == 99
+
+
+def test_resolve_audio_assets_nonfatal_on_exception():
+    """_resolve_audio_assets silently ignores exceptions (non-fatal)."""
+    from unittest.mock import MagicMock
+    from app.ui.workers import AudioQueuePopulateWorker
+    from app.services.audio_queue_service import AudioItemSpec
+
+    w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
+    specs = [
+        AudioItemSpec(kind="lemma", source_id=10, snapshot_hebrew="שלום", audio_status="unknown"),
+    ]
+
+    mock_session = MagicMock()
+    mock_session.execute.side_effect = RuntimeError("DB error")
+
+    # Should not raise
+    w._resolve_audio_assets(mock_session, specs)
+
+    # Spec unchanged
+    assert specs[0].audio_asset_id is None
+    assert specs[0].audio_status == "unknown"

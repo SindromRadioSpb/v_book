@@ -678,6 +678,10 @@ class AudioPlayerService(QObject):
         # Tally plays for repeat-count logic
         self._item_play_count += 1
 
+        # Update per-track play_count snapshot so the Plays column stays current
+        if "play_count" in self._current.context:
+            self._current.context["play_count"] += 1
+
         # Will we replay the same item?
         will_repeat_same = (
             self._repeat_mode == "one"
@@ -686,6 +690,7 @@ class AudioPlayerService(QObject):
 
         self._current = None
         self._emit_now_playing(None)
+        self._emit_queue_changed()  # refresh Plays column regardless of next-track path
 
         if will_repeat_same:
             # Gap still applies between repeats of the same item

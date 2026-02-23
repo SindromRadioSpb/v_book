@@ -1062,8 +1062,10 @@ class AudioPlayerPanel(QWidget):
         if not candidate_items:
             return
 
-        # ── Step 2: Best-effort path resolution via AudioAsset norm_text ─────
+        # ── Step 2: Best-effort path resolution ──────────────────────────────────
         # Non-fatal: if this fails items are still added (just without a resolved path).
+        # Path A: direct lookup by audio_asset_id (reliable — filled by worker _resolve_audio_assets)
+        # Path B: norm_text lookup fallback for items without audio_asset_id
         resolved_paths: Dict[int, Path] = {}
         try:
             from app.services.db_service import DBService as _DBService
@@ -1071,41 +1073,69 @@ class AudioPlayerPanel(QWidget):
             from app.services.audio_playback_service import _get_app_dir
             from sqlalchemy import select as _sa_select, desc as _sa_desc
             _db = _DBService.get_instance()
-            _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
-            item_norms: List[tuple] = []  # (item_id, norm_text)
-            for item in candidate_items:
-                if not item.snapshot_hebrew:
-                    continue
-                try:
-                    from app.domain.normalization.normalizer import normalize_for_tm as _ntm
-                    kind_str = _kind_map.get(item.kind, item.kind)
-                    norm = _ntm("he", item.snapshot_hebrew, kind_str).norm or item.snapshot_hebrew
-                except Exception:
-                    norm = item.snapshot_hebrew
-                item_norms.append((item.item_id, norm))
-            if item_norms:
-                all_norms = list({norm for _, norm in item_norms})
-                app_dir = _get_app_dir()
-                with _db.get_session() as session:
-                    asset_rows = session.execute(
-                        _sa_select(_AudioAsset.norm_text, _AudioAsset.audio_rel_path)
-                        .where(_AudioAsset.lang == "he")
-                        .where(_AudioAsset.norm_text.in_(all_norms))
+            app_dir = _get_app_dir()
+
+            def _to_abs_path(rel_path_str):
+                if not rel_path_str:
+                    return None
+                rel = Path(str(rel_path_str))
+                if rel.is_absolute() or ".." in rel.parts:
+                    return None
+                abs_path = app_dir / rel
+                return abs_path if abs_path.exists() else None
+
+            # Path A: direct lookup by audio_asset_id
+            items_with_aid = [(item.item_id, item.audio_asset_id)
+                              for item in candidate_items if item.audio_asset_id]
+            if items_with_aid:
+                aid_to_item: Dict[int, int] = {aid: iid for iid, aid in items_with_aid}
+                with _db.get_session() as _sess:
+                    a_rows = _sess.execute(
+                        _sa_select(_AudioAsset.asset_id, _AudioAsset.audio_rel_path)
+                        .where(_AudioAsset.asset_id.in_(list(aid_to_item.keys())))
                         .where(_AudioAsset.asset_status == "ready")
                         .where(_AudioAsset.audio_rel_path.isnot(None))
-                        .order_by(_sa_desc(_AudioAsset.updated_at))
                     ).all()
-                norm_to_path: Dict[str, Path] = {}
-                for norm_text, rel_path in asset_rows:
-                    if norm_text not in norm_to_path and rel_path:
-                        rel = Path(str(rel_path))
-                        if not rel.is_absolute() and ".." not in rel.parts:
-                            abs_path = app_dir / rel
-                            if abs_path.exists():
+                for aid, rel_path in a_rows:
+                    abs_path = _to_abs_path(rel_path)
+                    if abs_path and aid in aid_to_item:
+                        resolved_paths[aid_to_item[aid]] = abs_path
+
+            # Path B: norm_text lookup for items without audio_asset_id (fallback)
+            b_candidates = [item for item in candidate_items
+                            if item.item_id not in resolved_paths and item.snapshot_hebrew]
+            if b_candidates:
+                _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
+                item_norms: List[tuple] = []
+                for item in b_candidates:
+                    try:
+                        from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+                        kind_str = _kind_map.get(item.kind, item.kind)
+                        norm = _ntm("he", item.snapshot_hebrew, kind_str).norm or item.snapshot_hebrew
+                    except Exception:
+                        norm = item.snapshot_hebrew
+                    if norm:
+                        item_norms.append((item.item_id, norm))
+                if item_norms:
+                    all_norms = list({norm for _, norm in item_norms})
+                    with _db.get_session() as _sess:
+                        b_rows = _sess.execute(
+                            _sa_select(_AudioAsset.norm_text, _AudioAsset.audio_rel_path)
+                            .where(_AudioAsset.lang == "he")
+                            .where(_AudioAsset.norm_text.in_(all_norms))
+                            .where(_AudioAsset.asset_status == "ready")
+                            .where(_AudioAsset.audio_rel_path.isnot(None))
+                            .order_by(_sa_desc(_AudioAsset.updated_at))
+                        ).all()
+                    norm_to_path: Dict[str, Path] = {}
+                    for norm_text, rel_path in b_rows:
+                        if norm_text not in norm_to_path:
+                            abs_path = _to_abs_path(rel_path)
+                            if abs_path:
                                 norm_to_path[norm_text] = abs_path
-                for item_id, norm in item_norms:
-                    if norm in norm_to_path:
-                        resolved_paths[item_id] = norm_to_path[norm]
+                    for item_id, norm in item_norms:
+                        if norm in norm_to_path and item_id not in resolved_paths:
+                            resolved_paths[item_id] = norm_to_path[norm]
         except Exception as path_exc:
             logger.debug("_load_db_queue_to_player: path resolution skipped (%s)", path_exc)
 

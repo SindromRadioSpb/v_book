@@ -296,3 +296,50 @@ def test_add_all_enqueue_then_jump_plays_correct_track(service, tmp_audio):
     assert service._current is service._tracks[1]
     assert service._current.path == path_b
     assert service._current.path.exists()
+
+
+# -- play_count increments after _on_post_roll_done -------------------------
+
+
+def test_play_count_increments_after_post_roll(service, tmp_audio):
+    """context['play_count'] increments by 1 when _on_post_roll_done is called."""
+    _inject_tracks(service, tmp_audio[:2])
+    # Add play_count key (as enqueue_from_db would)
+    service._tracks[0].context["play_count"] = 0
+    service._current_index = 0
+    service._current = service._tracks[0]
+
+    service._on_post_roll_done()
+
+    assert service._tracks[0].context["play_count"] == 1
+
+
+def test_play_count_not_added_if_missing_from_context(service, tmp_audio):
+    """Tracks without play_count key are unaffected (no crash, no insertion)."""
+    _inject_tracks(service, tmp_audio[:2])
+    # No play_count key in context
+    service._current_index = 0
+    service._current = service._tracks[0]
+
+    service._on_post_roll_done()  # must not raise
+
+    assert "play_count" not in service._tracks[0].context
+
+
+def test_play_count_increments_multiple_times(service, tmp_audio):
+    """Each _on_post_roll_done call increments play_count by 1."""
+    _inject_tracks(service, tmp_audio[:3])
+    service._tracks[0].context["play_count"] = 0
+    service._tracks[1].context["play_count"] = 0
+
+    # Simulate track[0] finishing
+    service._current_index = 0
+    service._current = service._tracks[0]
+    service._on_post_roll_done()
+    assert service._tracks[0].context["play_count"] == 1
+
+    # Simulate track[1] finishing (service advanced _current_index in _start_next_track)
+    service._current = service._tracks[1]
+    service._on_post_roll_done()
+    assert service._tracks[1].context["play_count"] == 1
+    assert service._tracks[0].context["play_count"] == 1  # unchanged
