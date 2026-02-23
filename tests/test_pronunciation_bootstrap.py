@@ -58,6 +58,25 @@ class _DiacriticGenerator(PronunciationGenerator):
         }
 
 
+class _SeparatorNiqqudGenerator(PronunciationGenerator):
+    def generate(self, lang: str, source_texts: list[str]):
+        _ = lang
+        # Same letters as source, but with separator artifact between prefix and word.
+        target = "\u05d4\u05ea\u05e0\u05d4\u05d2\u05d5\u05ea \u05d4\u05d7\u05d5\u05de\u05e8"
+        return {
+            text: {
+                "niqqud_text": (
+                    "\u05d4\u05b4\u05ea\u05b0\u05e0\u05b7\u05d4\u05b2\u05d2\u05d5\u05bc\u05ea \u05d4\u05b7|\u05d7\u05b9\u05d5\u05de\u05b6\u05e8"
+                    if text == target
+                    else text
+                ),
+                "ipa": None,
+                "notes": "fake_separator",
+            }
+            for text in source_texts
+        }
+
+
 def test_bootstrap_is_idempotent_on_second_run(monkeypatch):
     temp_dir = _workspace_temp_dir("pron_bootstrap_")
     engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
@@ -255,6 +274,53 @@ def test_bootstrap_skips_when_generated_has_no_nikud_marks():
             assert result.skipped == 2
             rows = session.query(PronunciationEntry).all()
             assert len(rows) == 0, "No entries should be written when no Hebrew nikud marks exist"
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_bootstrap_accepts_spacing_only_structure_variation():
+    """Generated nikud with separator spacing artifacts should still be persisted.
+
+    Contract: if source/candidate letters match after stripping spaces, bootstrap must
+    keep niqqud (qc:source_spacing_variation) instead of falling back to plain source.
+    """
+    temp_dir = _workspace_temp_dir("pron_bootstrap_spacing_variation_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'pron.db'}")
+    try:
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        service = PronunciationBootstrapService(generator=_SeparatorNiqqudGenerator())
+        src_text = "\u05d4\u05ea\u05e0\u05d4\u05d2\u05d5\u05ea \u05d4\u05d7\u05d5\u05de\u05e8"
+        src_norm = normalize_for_tm("he", src_text, "surface").norm
+
+        with Session(engine) as session:
+            result = service.bootstrap(
+                session,
+                lang="he",
+                chunk_size=10,
+                include_lemmas=False,
+                include_terms=True,
+                include_user_dictionary=False,
+                selected_items=[
+                    {
+                        "src_lang": "he",
+                        "src_norm": src_norm,
+                        "src_text": src_text,
+                        "source_group": "terms",
+                    }
+                ],
+            )
+            session.commit()
+
+            assert result.total_candidates == 1
+            assert result.updated == 1
+            assert result.skipped == 0
+
+            row = session.query(PronunciationEntry).filter(PronunciationEntry.src_norm == src_norm).one_or_none()
+            assert row is not None
+            assert row.niqqud_text is not None and row.niqqud_text.strip() != ""
+            assert "\u05b7" in row.niqqud_text or "\u05b9" in row.niqqud_text
+            assert "qc:source_spacing_variation" in (row.notes or "")
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
