@@ -645,6 +645,12 @@ class AudioPlayerPanel(QWidget):
         self.add_all_btn.clicked.connect(self._on_add_all_clicked)
         tab_header.addWidget(self.add_all_btn)
 
+        self.refresh_queue_btn = QPushButton("↻")
+        self.refresh_queue_btn.setToolTip("Refresh Niqqud / Translation / Source from DB")
+        self.refresh_queue_btn.setFixedWidth(32)
+        self.refresh_queue_btn.clicked.connect(self._refresh_display_contexts)
+        tab_header.addWidget(self.refresh_queue_btn)
+
         self.columns_btn = QToolButton()
         self.columns_btn.setText("⚙")
         self.columns_btn.setToolTip("Toggle visible columns")
@@ -1022,6 +1028,9 @@ class AudioPlayerPanel(QWidget):
         new_item_ids = result.get("new_item_ids", [])
         if added > 0 and new_item_ids:
             self._load_db_queue_to_player(add_mode, new_item_ids=new_item_ids)
+            # Defer context refresh to next event loop tick (non-blocking)
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._refresh_display_contexts)
         msg = f"Added {added:,} items to queue."
         if cancelled:
             msg += " (cancelled)"
@@ -1247,3 +1256,220 @@ class AudioPlayerPanel(QWidget):
         snapshot = self.player.queue_snapshot()
         self._queue_model.load(snapshot, self.player.current_index)
         self.tab_widget.setTabText(0, f"Queue ({len(snapshot)})")
+
+    def _refresh_display_contexts(self) -> None:
+        """Batch-refresh Niqqud / Translation / Source for all queue tracks from DB.
+
+        Groups tracks by kind and runs appropriate batch SELECTs (no per-row SQL).
+        Updates track contexts in-place then calls _refresh_queue() to redraw.
+        Non-fatal: any DB error is logged at DEBUG level and silently ignored.
+        """
+        tracks = self.player._tracks  # noqa: SLF001
+        if not tracks:
+            return
+        try:
+            from app.services.db_service import DBService
+            _db = DBService.get_instance()
+
+            # Group by kind
+            sentence_pairs: List[tuple] = []  # (track,)
+            lemma_pairs: List[tuple] = []
+            term_pairs: List[tuple] = []
+            for t in tracks:
+                ctx = t.context if isinstance(t.context, dict) else {}
+                kind = ctx.get("kind")
+                if kind == "sentence":
+                    sentence_pairs.append(t)
+                elif kind == "lemma":
+                    lemma_pairs.append(t)
+                elif kind == "term":
+                    term_pairs.append(t)
+
+            updated = 0
+            with _db.get_session() as _sess:
+                updated += self._refresh_sentence_display(_sess, sentence_pairs)
+                updated += self._refresh_lemma_display(_sess, lemma_pairs)
+                updated += self._refresh_term_display(_sess, term_pairs)
+
+            if updated:
+                logger.debug("_refresh_display_contexts: updated %d tracks", updated)
+                self._refresh_queue()
+        except Exception as exc:
+            logger.debug("_refresh_display_contexts: non-fatal: %s", exc)
+
+    def _refresh_sentence_display(self, session, tracks: List) -> int:
+        """Batch-refresh Source / Niqqud / Translation for sentence tracks."""
+        if not tracks:
+            return 0
+        from sqlalchemy import select as _sel
+        from app.infra.sa_models import DocumentSentence as _DS, SourceDocument as _SD
+
+        sids = [t.context["source_id"] for t in tracks if t.context.get("source_id")]
+        if not sids:
+            return 0
+
+        # Fetch doc_id + text for source label and translation lookup
+        sid_to_did: Dict[int, int] = {}
+        sid_to_text: Dict[int, str] = {}
+        try:
+            for sid, txt, did in session.execute(
+                _sel(_DS.sentence_id, _DS.text, _DS.doc_id).where(_DS.sentence_id.in_(sids))
+            ).all():
+                if did is not None:
+                    sid_to_did[sid] = did
+                sid_to_text[sid] = txt or ""
+        except Exception:
+            pass
+
+        # Resolve document filenames
+        doc_names: Dict[int, str] = {}
+        try:
+            unique_dids = list(set(sid_to_did.values()))
+            if unique_dids:
+                for did, fname in session.execute(
+                    _sel(_SD.doc_id, _SD.file_name).where(_SD.doc_id.in_(unique_dids))
+                ).all():
+                    if fname:
+                        doc_names[did] = fname
+        except Exception:
+            pass
+
+        # Batch niqqud
+        sid_to_niqqud: Dict[int, str] = {}
+        try:
+            from app.services.sentence_pronunciation_service import SentencePronunciationService
+            overlays = SentencePronunciationService().bulk_get_niqqud(session, sids)
+            for sid, overlay in overlays.items():
+                if overlay and overlay.niqqud_text:
+                    sid_to_niqqud[sid] = overlay.niqqud_text
+        except Exception:
+            pass
+
+        # Batch translation
+        text_to_transl: Dict[str, str] = {}
+        try:
+            from app.services.sentences_workspace_service import SentencesWorkspaceService
+            svc = SentencesWorkspaceService()
+            project_id = next(
+                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
+            )
+            texts = [v for v in sid_to_text.values() if v]
+            if project_id and texts:
+                raw = svc._batch_get_translations(session, project_id, "he", texts)
+                for txt in texts:
+                    norm = svc._norm("he", txt)
+                    if norm in raw:
+                        text_to_transl[txt] = raw[norm][0]
+        except Exception:
+            pass
+
+        updated = 0
+        for t in tracks:
+            sid = t.context.get("source_id")
+            if sid is None:
+                continue
+            changed = False
+            did = sid_to_did.get(sid)
+            source = doc_names.get(did, "") if did else ""
+            if source and t.context.get("snapshot_source_label") != source:
+                t.context["snapshot_source_label"] = source
+                changed = True
+            niqqud = sid_to_niqqud.get(sid)
+            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+                t.context["snapshot_niqqud"] = niqqud
+                changed = True
+            text = sid_to_text.get(sid, "")
+            transl = text_to_transl.get(text) if text else None
+            if transl and t.context.get("snapshot_translation") != transl:
+                t.context["snapshot_translation"] = transl
+                changed = True
+            if changed:
+                updated += 1
+        return updated
+
+    def _refresh_lemma_display(self, session, tracks: List) -> int:
+        """Batch-refresh Source / Niqqud / Translation for lemma tracks."""
+        if not tracks:
+            return 0
+        from sqlalchemy import select as _sel
+
+        # Collect norms
+        lid_to_norm: Dict[int, str] = {}
+        try:
+            from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+            for t in tracks:
+                lid = t.context.get("source_id")
+                text = t.context.get("snapshot_hebrew") or ""
+                if lid and text:
+                    try:
+                        lid_to_norm[lid] = _ntm("he", text, "lemma").norm or text
+                    except Exception:
+                        lid_to_norm[lid] = text
+        except Exception:
+            pass
+
+        all_norms = list(set(lid_to_norm.values()))
+
+        # Batch niqqud
+        norm_to_niqqud: Dict[str, str] = {}
+        try:
+            from app.services.pronunciation_service import PronunciationService
+            if all_norms:
+                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
+                norm_to_niqqud = {n: dto.niqqud_text for n, dto in bulk.items() if dto.niqqud_text}
+        except Exception:
+            pass
+
+        # Batch translation from TMEntry
+        norm_to_transl: Dict[str, str] = {}
+        try:
+            from app.infra.sa_models import TMEntry as _TM
+            project_id = next(
+                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
+            )
+            if all_norms and project_id:
+                tm_rows = session.execute(
+                    _sel(_TM.src_norm, _TM.translation)
+                    .where(_TM.kind == "lemma")
+                    .where(_TM.src_lang == "he")
+                    .where(_TM.src_norm.in_(all_norms))
+                    .where(_TM.project_id == project_id)
+                    .where(_TM.status.in_(["draft", "approved"]))
+                    .order_by(_TM.status.desc())
+                ).all()
+                for norm, transl in tm_rows:
+                    if norm not in norm_to_transl and transl:
+                        norm_to_transl[norm] = transl
+        except Exception:
+            pass
+
+        updated = 0
+        for t in tracks:
+            lid = t.context.get("source_id")
+            norm = lid_to_norm.get(lid, "")
+            changed = False
+            if t.context.get("snapshot_source_label") != "Dictionary":
+                t.context["snapshot_source_label"] = "Dictionary"
+                changed = True
+            niqqud = norm_to_niqqud.get(norm)
+            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+                t.context["snapshot_niqqud"] = niqqud
+                changed = True
+            transl = norm_to_transl.get(norm)
+            if transl and t.context.get("snapshot_translation") != transl:
+                t.context["snapshot_translation"] = transl
+                changed = True
+            if changed:
+                updated += 1
+        return updated
+
+    def _refresh_term_display(self, session, tracks: List) -> int:
+        """Batch-refresh Source for term tracks (translation already stored from pinned_translation)."""
+        if not tracks:
+            return 0
+        updated = 0
+        for t in tracks:
+            if t.context.get("snapshot_source_label") != "Terms":
+                t.context["snapshot_source_label"] = "Terms"
+                updated += 1
+        return updated

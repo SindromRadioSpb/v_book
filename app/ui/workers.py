@@ -3398,11 +3398,30 @@ class AudioQueuePopulateWorker(QThread):
         from app.infra.sa_models import DocumentSentence
         from app.services.audio_queue_service import AudioItemSpec
 
-        # Fetch text
-        stmt = select(DocumentSentence.sentence_id, DocumentSentence.text).where(
+        # Fetch text + doc_id (for source label)
+        stmt = select(DocumentSentence.sentence_id, DocumentSentence.text, DocumentSentence.doc_id).where(
             DocumentSentence.sentence_id.in_(sentence_ids)
         )
-        texts: Dict[int, str] = {sid: txt for sid, txt in session.execute(stmt).all()}
+        texts: Dict[int, str] = {}
+        sid_to_docid: Dict[int, int] = {}
+        for sid, txt, did in session.execute(stmt).all():
+            texts[sid] = txt
+            if did is not None:
+                sid_to_docid[sid] = did
+
+        # Batch-resolve document filenames for source label (best-effort)
+        doc_filenames: Dict[int, str] = {}
+        try:
+            from app.infra.sa_models import SourceDocument as _SD
+            unique_doc_ids = list(set(sid_to_docid.values()))
+            if unique_doc_ids:
+                dn_rows = session.execute(
+                    select(_SD.doc_id, _SD.file_name)
+                    .where(_SD.doc_id.in_(unique_doc_ids))
+                ).all()
+                doc_filenames = {did: fname for did, fname in dn_rows if fname}
+        except Exception:
+            pass
 
         # Fetch niqqud overlay (best-effort)
         niqqud_map: Dict[int, str] = {}
@@ -3433,6 +3452,10 @@ class AudioQueuePopulateWorker(QThread):
         specs = []
         for sid in sentence_ids:
             text = texts.get(sid, "")
+            did = sid_to_docid.get(sid)
+            source_label = doc_filenames.get(did, "") if did else ""
+            if not source_label:
+                source_label = f"sentence:{sid}"
             specs.append(AudioItemSpec(
                 kind="sentence",
                 source_id=sid,
@@ -3440,7 +3463,7 @@ class AudioQueuePopulateWorker(QThread):
                 snapshot_hebrew=text,
                 snapshot_niqqud=niqqud_map.get(sid) or None,
                 snapshot_translation=transl_map.get(text) or None,
-                snapshot_source_label=f"sentence:{sid}",
+                snapshot_source_label=source_label,
                 audio_status="unknown",
             ))
         return specs
@@ -3455,15 +3478,64 @@ class AudioQueuePopulateWorker(QThread):
         )
         rows: Dict[int, str] = {lid: txt for lid, txt in session.execute(stmt).all()}
 
+        # Compute norms for batch lookups
+        lid_to_norm: Dict[int, str] = {}
+        try:
+            from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+            for lid in lemma_ids:
+                text = rows.get(lid, "")
+                if text:
+                    try:
+                        lid_to_norm[lid] = _ntm("he", text, "lemma").norm or text
+                    except Exception:
+                        lid_to_norm[lid] = text
+        except Exception:
+            pass
+
+        # Batch niqqud from pronunciation_entry (best-effort)
+        norm_to_niqqud: Dict[str, str] = {}
+        try:
+            from app.services.pronunciation_service import PronunciationService
+            all_norms = list(lid_to_norm.values())
+            if all_norms:
+                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
+                norm_to_niqqud = {norm: dto.niqqud_text for norm, dto in bulk.items() if dto.niqqud_text}
+        except Exception:
+            pass
+
+        # Batch translation from TMEntry kind="lemma" (best-effort)
+        norm_to_transl: Dict[str, str] = {}
+        try:
+            from app.infra.sa_models import TMEntry as _TM
+            all_norms = list(lid_to_norm.values())
+            if all_norms:
+                tm_rows = session.execute(
+                    select(_TM.src_norm, _TM.translation)
+                    .where(_TM.kind == "lemma")
+                    .where(_TM.src_lang == "he")
+                    .where(_TM.src_norm.in_(all_norms))
+                    .where(_TM.project_id == self.project_id)
+                    .where(_TM.status.in_(["draft", "approved"]))
+                    .order_by(_TM.status.desc())
+                ).all()
+                for norm, transl in tm_rows:
+                    if norm not in norm_to_transl and transl:
+                        norm_to_transl[norm] = transl
+        except Exception:
+            pass
+
         specs = []
         for lid in lemma_ids:
             lemma_text = rows.get(lid, "")
+            norm = lid_to_norm.get(lid, "")
             specs.append(AudioItemSpec(
                 kind="lemma",
                 source_id=lid,
                 project_id=self.project_id,
                 snapshot_hebrew=lemma_text,
-                snapshot_source_label=f"lemma:{lid}",
+                snapshot_niqqud=norm_to_niqqud.get(norm) or None,
+                snapshot_translation=norm_to_transl.get(norm) or None,
+                snapshot_source_label="Dictionary",
                 audio_status="unknown",
             ))
         return specs
@@ -3492,7 +3564,7 @@ class AudioQueuePopulateWorker(QThread):
                 project_id=self.project_id,
                 snapshot_hebrew=rep_he or "",
                 snapshot_translation=transl or None,
-                snapshot_source_label=f"term:{cid}",
+                snapshot_source_label="Terms",
                 audio_status="unknown",
             ))
         return specs
@@ -3539,5 +3611,11 @@ class AudioQueuePopulateWorker(QThread):
                     if spec.audio_asset_id is None:  # first-win per spec
                         spec.audio_asset_id = asset_id
                         spec.audio_status = "ready"
+
+            resolved = sum(1 for s in specs if s.audio_asset_id is not None)
+            logger.debug(
+                "_resolve_audio_assets: %d/%d specs resolved to ready AudioAsset",
+                resolved, len(specs),
+            )
         except Exception as exc:
             logger.debug("_resolve_audio_assets: non-fatal: %s", exc)

@@ -208,3 +208,155 @@ def test_resolve_audio_assets_nonfatal_on_exception():
     # Spec unchanged
     assert specs[0].audio_asset_id is None
     assert specs[0].audio_status == "unknown"
+
+
+# -- _build_sentence_specs: source label uses document filename ---------------
+
+
+def test_build_sentence_specs_source_label_uses_doc_filename():
+    """_build_sentence_specs stores document filename as snapshot_source_label."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+
+    w = AudioQueuePopulateWorker(kind="sentence", project_id=1)
+
+    mock_session = MagicMock()
+
+    # DocumentSentence query: sentence_id=10, text="שלום", doc_id=5
+    # SourceDocument query: doc_id=5, file_name="chapter01.docx"
+    call_count = [0]
+
+    def fake_execute(stmt, *args, **kwargs):
+        call_count[0] += 1
+        result = MagicMock()
+        if call_count[0] == 1:  # DocumentSentence query
+            result.all.return_value = [(10, "שלום", 5)]
+        elif call_count[0] == 2:  # SourceDocument.file_name query
+            result.all.return_value = [(5, "chapter01.docx")]
+        else:
+            result.all.return_value = []
+        return result
+
+    mock_session.execute.side_effect = fake_execute
+
+    # Patch out SentencePronunciationService and SentencesWorkspaceService
+    with patch("app.services.sentence_pronunciation_service.SentencePronunciationService"), \
+         patch("app.services.sentences_workspace_service.SentencesWorkspaceService"):
+        specs = w._build_sentence_specs(mock_session, [10])
+
+    assert len(specs) == 1
+    assert specs[0].snapshot_source_label == "chapter01.docx"
+
+
+def test_build_sentence_specs_source_label_fallback_on_missing_doc():
+    """Falls back to 'sentence:{id}' when doc filename is unavailable."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+
+    w = AudioQueuePopulateWorker(kind="sentence", project_id=1)
+    mock_session = MagicMock()
+
+    call_count = [0]
+
+    def fake_execute(stmt, *args, **kwargs):
+        call_count[0] += 1
+        result = MagicMock()
+        if call_count[0] == 1:  # DocumentSentence: sentence_id=99, doc_id=None
+            result.all.return_value = [(99, "בית", None)]
+        else:
+            result.all.return_value = []
+        return result
+
+    mock_session.execute.side_effect = fake_execute
+
+    with patch("app.services.sentence_pronunciation_service.SentencePronunciationService"), \
+         patch("app.services.sentences_workspace_service.SentencesWorkspaceService"):
+        specs = w._build_sentence_specs(mock_session, [99])
+
+    assert specs[0].snapshot_source_label == "sentence:99"
+
+
+# -- _build_lemma_specs: enriched with translation + niqqud ------------------
+
+
+def test_build_lemma_specs_source_label_is_dictionary():
+    """_build_lemma_specs uses 'Dictionary' as snapshot_source_label."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+
+    w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
+    mock_session = MagicMock()
+
+    def fake_execute(stmt, *args, **kwargs):
+        result = MagicMock()
+        result.all.return_value = [(1, "שלום")]  # Lemma row
+        return result
+
+    mock_session.execute.side_effect = fake_execute
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm") as ntm, \
+         patch("app.services.pronunciation_service.PronunciationService"), \
+         patch("app.infra.sa_models.TMEntry"):
+        ntm.return_value.norm = "shalom"
+        specs = w._build_lemma_specs(mock_session, [1])
+
+    assert len(specs) == 1
+    assert specs[0].snapshot_source_label == "Dictionary"
+
+
+def test_build_lemma_specs_niqqud_and_translation_populated():
+    """_build_lemma_specs populates niqqud and translation when DB has them."""
+    from unittest.mock import MagicMock, patch
+    from app.ui.workers import AudioQueuePopulateWorker
+    from app.services.pronunciation_service import PronunciationService
+
+    w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
+    mock_session = MagicMock()
+
+    # Lemma query returns one row
+    lemma_execute_result = MagicMock()
+    lemma_execute_result.all.return_value = [(10, "שָׁלוֹם")]
+
+    # TMEntry query returns one row
+    tm_execute_result = MagicMock()
+    tm_execute_result.all.return_value = [("shalom_norm", "peace")]
+
+    execute_calls = [lemma_execute_result, tm_execute_result]
+    mock_session.execute.side_effect = lambda *a, **kw: execute_calls.pop(0) if execute_calls else MagicMock()
+
+    # PronunciationService.bulk_lookup returns niqqud for "shalom_norm"
+    mock_niqqud_dto = MagicMock()
+    mock_niqqud_dto.niqqud_text = "שָׁלוֹם"
+    mock_pron_svc = MagicMock()
+    mock_pron_svc.return_value.bulk_lookup.return_value = {"shalom_norm": mock_niqqud_dto}
+
+    def fake_ntm(lang, text, kind):
+        r = MagicMock()
+        r.norm = "shalom_norm"
+        return r
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
+         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+        specs = w._build_lemma_specs(mock_session, [10])
+
+    assert len(specs) == 1
+    assert specs[0].snapshot_niqqud == "שָׁלוֹם"
+    assert specs[0].snapshot_translation == "peace"
+
+
+# -- _build_term_specs: source label is "Terms" --------------------------------
+
+
+def test_build_term_specs_source_label_is_terms():
+    """_build_term_specs uses 'Terms' as snapshot_source_label."""
+    from unittest.mock import MagicMock
+    from app.ui.workers import AudioQueuePopulateWorker
+
+    w = AudioQueuePopulateWorker(kind="term", project_id=1)
+    mock_session = MagicMock()
+    mock_session.execute.return_value.all.return_value = [(5, "שלום", "peace")]
+
+    specs = w._build_term_specs(mock_session, [5])
+
+    assert len(specs) == 1
+    assert specs[0].snapshot_source_label == "Terms"
