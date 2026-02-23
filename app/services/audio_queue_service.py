@@ -320,6 +320,26 @@ class AudioQueueService:
             q = q.filter(AudioQueueItem.project_id == project_id)
         return [row.item_id for row in q.all()]
 
+    def mark_stale_by_source(
+        self,
+        session: Session,
+        *,
+        kind: str,
+        source_id: int,
+        project_id: Optional[int] = None,
+    ) -> int:
+        """Mark all queue rows for a source as stale.
+
+        Returns number of updated queue rows.
+        """
+        item_ids = self.find_stale_by_source(
+            session,
+            kind=kind,
+            source_id=source_id,
+            project_id=project_id,
+        )
+        return self.mark_stale(session, item_ids)
+
     # ── Playlists ─────────────────────────────────────────────────────────────
 
     def get_playlists(self, session: Session) -> List[AudioPlaylistDTO]:

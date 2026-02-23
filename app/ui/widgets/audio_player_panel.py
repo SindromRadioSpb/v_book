@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
@@ -948,19 +948,41 @@ class AudioPlayerPanel(QWidget):
     def _source_payload_from_context(self, ctx: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not ctx:
             return None
+        kind_raw = ctx.get("kind")
+        if not kind_raw:
+            return None
+        kind = self._normalize_queue_kind(str(kind_raw))
+        project_id = ctx.get("project_id")
         source_id = ctx.get("source_id")
-        kind = ctx.get("kind")
-        if source_id is None or not kind:
-            return None
-        try:
-            source_id_int = int(source_id)
-        except (TypeError, ValueError):
-            return None
-        return {
-            "kind": str(kind),
-            "source_id": source_id_int,
-            "project_id": ctx.get("project_id"),
-        }
+        if source_id is not None:
+            try:
+                source_id_int = int(source_id)
+            except (TypeError, ValueError):
+                source_id_int = None
+            if source_id_int is not None:
+                return {
+                    "kind": kind,
+                    "source_id": source_id_int,
+                    "project_id": project_id,
+                }
+        if kind in {"sentence", "surface"}:
+            source_text = str(ctx.get("snapshot_hebrew") or ctx.get("source_text") or "").strip()
+            if source_text and project_id is not None:
+                return {
+                    "kind": "sentence",
+                    "project_id": project_id,
+                    "source_text": source_text,
+                }
+        return None
+
+    @staticmethod
+    def _normalize_queue_kind(kind: str) -> str:
+        raw = (kind or "").strip().lower()
+        if raw in {"term_cluster", "terms"}:
+            return "term"
+        if raw in {"surface", "sentences"}:
+            return "sentence"
+        return raw
 
     def _on_queue_selection_changed(self, *_args) -> None:
         selected_rows = sorted({idx.row() for idx in self.queue_table.selectionModel().selectedRows()})
@@ -1307,16 +1329,228 @@ class AudioPlayerPanel(QWidget):
         progress_dialog.accept()
         QMessageBox.critical(self, "Add All — Error", msg)
 
+    def _selected_queue_rows(self) -> List[int]:
+        return sorted({idx.row() for idx in self.queue_table.selectionModel().selectedRows()})
+
+    def _track_at_row(self, row: int) -> Optional[Dict[str, Any]]:
+        snapshot = self.player.queue_snapshot()
+        if row < 0 or row >= len(snapshot):
+            return None
+        track = snapshot[row]
+        return track if isinstance(track, dict) else None
+
+    def _track_ctx_at_row(self, row: int) -> Dict[str, Any]:
+        track = self._track_at_row(row) or {}
+        ctx = track.get("context") or {}
+        return ctx if isinstance(ctx, dict) else {}
+
+    def _queue_source_key_from_context(self, ctx: Dict[str, Any]) -> Optional[Tuple[str, int, Optional[int]]]:
+        kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+        source_id = ctx.get("source_id")
+        if not kind or source_id is None:
+            return None
+        try:
+            source_id_int = int(source_id)
+        except (TypeError, ValueError):
+            return None
+        project_id_raw = ctx.get("project_id")
+        try:
+            project_id = int(project_id_raw) if project_id_raw is not None else None
+        except (TypeError, ValueError):
+            project_id = None
+        return (kind, source_id_int, project_id)
+
+    def _mark_queue_sources_stale(self, source_keys: List[Tuple[str, int, Optional[int]]]) -> None:
+        if not source_keys:
+            return
+        try:
+            from app.services.audio_queue_service import AudioQueueService
+            from app.services.db_service import DBService
+
+            svc = AudioQueueService()
+            with DBService.get_instance().get_session() as session:
+                for kind, source_id, project_id in source_keys:
+                    svc.mark_stale_by_source(
+                        session,
+                        kind=kind,
+                        source_id=source_id,
+                        project_id=project_id,
+                    )
+                session.commit()
+        except Exception as exc:
+            logger.debug("mark stale by source skipped: %s", exc)
+
+        source_set = set(source_keys)
+        for track in self.player._tracks:  # noqa: SLF001
+            ctx = track.context if isinstance(track.context, dict) else None
+            if not ctx:
+                continue
+            key = self._queue_source_key_from_context(ctx)
+            if key in source_set:
+                ctx["is_stale"] = True
+                ctx["audio_status"] = "stale"
+        self._refresh_queue()
+
+    def _build_translate_items(self, rows: List[int]):
+        from app.services.batch_mt_translate_service import BatchTranslateItem
+        from app.services.db_service import DBService
+        from app.services.project_service import ProjectService
+
+        project_lang_map: Dict[int, Tuple[str, str]] = {}
+
+        def _get_lang_pair(project_id: Optional[int]) -> Tuple[str, str]:
+            if project_id is None:
+                return ("he", "ru")
+            if project_id in project_lang_map:
+                return project_lang_map[project_id]
+            src, tgt = "he", "ru"
+            try:
+                with DBService.get_instance().get_session() as session:
+                    project = ProjectService().get_project(session, int(project_id))
+                if project:
+                    src = str(getattr(project, "src_lang", "") or src)
+                    tgt = str(getattr(project, "tgt_lang", "") or tgt)
+            except Exception:
+                pass
+            project_lang_map[int(project_id)] = (src, tgt)
+            return src, tgt
+
+        items = []
+        for row in rows:
+            track = self._track_at_row(row) or {}
+            ctx = self._track_ctx_at_row(row)
+            kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+            source_text = str(ctx.get("snapshot_hebrew") or track.get("label") or "").strip()
+            if not source_text:
+                continue
+            project_id_raw = ctx.get("project_id")
+            try:
+                project_id = int(project_id_raw) if project_id_raw is not None else None
+            except (TypeError, ValueError):
+                project_id = None
+            src_lang, tgt_lang = _get_lang_pair(project_id)
+            source_id = ctx.get("source_id")
+            entity_type = {
+                "lemma": "lemma",
+                "term": "term_cluster",
+                "sentence": "surface",
+            }.get(kind)
+            if not entity_type:
+                continue
+            entity_id = str(source_id if source_id is not None else row)
+            items.append(
+                BatchTranslateItem(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    source_text=source_text,
+                    src_lang=src_lang,
+                    tgt_lang=tgt_lang,
+                    current_translation=str(ctx.get("snapshot_translation") or ""),
+                    project_id=project_id,
+                )
+            )
+        return items
+
+    def _build_audio_generation_items(self, rows: List[int]) -> List[Dict[str, Any]]:
+        from app.domain.normalization.normalizer import normalize_for_tm
+
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            track = self._track_at_row(row) or {}
+            ctx = self._track_ctx_at_row(row)
+            kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+            if kind not in {"sentence", "lemma", "term"}:
+                continue
+            source_text = str(ctx.get("snapshot_hebrew") or track.get("label") or "").strip()
+            if not source_text:
+                continue
+            src_lang = str(ctx.get("src_lang") or "he").strip() or "he"
+            norm_kind = {"term": "term_cluster", "sentence": "surface"}.get(kind, kind)
+            src_norm = normalize_for_tm(src_lang, source_text, norm_kind).norm
+            if not src_norm:
+                continue
+            row_id = ctx.get("item_id") or ctx.get("source_id") or row
+            items.append(
+                {
+                    "row_id": str(row_id),
+                    "src_text": source_text,
+                    "src_lang": src_lang,
+                    "src_norm": src_norm,
+                }
+            )
+        return items
+
+    def _build_pronunciation_selected_items(self, rows: List[int]) -> List[Dict[str, str]]:
+        from app.domain.normalization.normalizer import normalize_for_tm
+
+        items: List[Dict[str, str]] = []
+        for row in rows:
+            track = self._track_at_row(row) or {}
+            ctx = self._track_ctx_at_row(row)
+            kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+            source_text = str(ctx.get("snapshot_hebrew") or track.get("label") or "").strip()
+            if not source_text:
+                continue
+            src_lang = str(ctx.get("src_lang") or "he").strip() or "he"
+            source_group = {
+                "lemma": "lemmas",
+                "term": "terms",
+                "sentence": "sentences",
+            }.get(kind)
+            if source_group is None:
+                continue
+            src_norm = normalize_for_tm(src_lang, source_text, "surface").norm
+            if not src_norm:
+                continue
+            items.append(
+                {
+                    "src_lang": src_lang,
+                    "src_text": source_text,
+                    "src_norm": src_norm,
+                    "source_group": source_group,
+                }
+            )
+        return items
+
     def _on_queue_context_menu(self, pos) -> None:
-        rows = sorted({idx.row() for idx in self.queue_table.selectedIndexes()})
+        rows = self._selected_queue_rows()
         if not rows:
             return
+
+        first_ctx = self._track_ctx_at_row(rows[0])
+        first_kind = self._normalize_queue_kind(str(first_ctx.get("kind") or ""))
+        source_payload = self._source_payload_from_context(first_ctx) if len(rows) == 1 else None
+
+        translate_items = self._build_translate_items(rows)
+        audio_items = self._build_audio_generation_items(rows)
+        pronunciation_items = self._build_pronunciation_selected_items(rows)
+
         menu = QMenu(self)
 
-        play_act = menu.addAction("▶ Play from here")
+        play_act = menu.addAction("Play from here")
         play_act.setEnabled(len(rows) == 1)
 
+        go_to_source_act = menu.addAction("Go to Source")
+        go_to_source_act.setEnabled(len(rows) == 1 and source_payload is not None)
+
         remove_act = menu.addAction("Remove from Queue")
+        menu.addSeparator()
+
+        translate_act = menu.addAction(f"Translate Selected ({len(rows)})...")
+        translate_act.setEnabled(len(translate_items) > 0)
+
+        niqqud_act = menu.addAction(f"Niqqudize Selected ({len(rows)})...")
+        niqqud_act.setEnabled(len(pronunciation_items) > 0)
+
+        regen_audio_act = menu.addAction(f"Regenerate Audio Selected ({len(rows)})...")
+        regen_audio_act.setEnabled(len(audio_items) > 0)
+
+        edit_pron_act = menu.addAction("Mispronounced -> Edit Pronunciation...")
+        edit_pron_act.setEnabled(len(rows) == 1 and first_kind in {"lemma", "term"})
+
+        edit_sentence_act = menu.addAction("Edit Sentence Niqqud...")
+        edit_sentence_act.setEnabled(len(rows) == 1 and first_kind == "sentence")
+
         menu.addSeparator()
         copy_heb_act = menu.addAction("Copy Hebrew")
         copy_niqqud_act = menu.addAction("Copy Niqqud")
@@ -1328,16 +1562,405 @@ class AudioPlayerPanel(QWidget):
 
         if action == play_act and rows:
             self._play_from_row(rows[0])
+        elif action == go_to_source_act and source_payload is not None:
+            self.go_to_source_requested.emit(source_payload)
         elif action == remove_act:
-            # Remove in reverse order to preserve indices
             for r in reversed(rows):
                 self.player.remove_queue_index(r)
+        elif action == translate_act:
+            self._on_queue_translate_selected(rows)
+        elif action == niqqud_act:
+            self._on_queue_niqqudize_selected(rows)
+        elif action == regen_audio_act:
+            self._on_queue_regenerate_audio_selected(rows)
+        elif action == edit_pron_act and rows:
+            self._on_queue_edit_pronunciation(rows[0])
+        elif action == edit_sentence_act and rows:
+            self._on_queue_edit_sentence_niqqud(rows[0])
         elif action == copy_heb_act:
             self._copy_cell(rows[0], _COL_HEBREW)
         elif action == copy_niqqud_act:
             self._copy_cell(rows[0], _COL_NIQQUD)
         elif action == copy_transl_act:
             self._copy_cell(rows[0], _COL_TRANSLATION)
+
+    def _source_keys_from_rows(self, rows: List[int]) -> List[Tuple[str, int, Optional[int]]]:
+        keys: List[Tuple[str, int, Optional[int]]] = []
+        for row in rows:
+            key = self._queue_source_key_from_context(self._track_ctx_at_row(row))
+            if key is not None:
+                keys.append(key)
+        # Deduplicate while preserving stable order.
+        return list(dict.fromkeys(keys))
+
+    def _rows_for_source_keys(self, source_keys: List[Tuple[str, int, Optional[int]]]) -> List[int]:
+        if not source_keys:
+            return []
+        source_set = set(source_keys)
+        rows: List[int] = []
+        for idx, track in enumerate(self.player._tracks):  # noqa: SLF001
+            ctx = track.context if isinstance(track.context, dict) else {}
+            key = self._queue_source_key_from_context(ctx)
+            if key is not None and key in source_set:
+                rows.append(idx)
+        return rows
+
+    def _clear_queue_sources_stale(self, source_keys: List[Tuple[str, int, Optional[int]]]) -> None:
+        if not source_keys:
+            return
+        try:
+            from app.services.audio_queue_service import AudioQueueService
+            from app.services.db_service import DBService
+
+            svc = AudioQueueService()
+            with DBService.get_instance().get_session() as session:
+                for kind, source_id, project_id in source_keys:
+                    item_ids = svc.find_stale_by_source(
+                        session,
+                        kind=kind,
+                        source_id=source_id,
+                        project_id=project_id,
+                    )
+                    for item_id in item_ids:
+                        svc.update_item_snapshot(session, item_id, is_stale=False)
+                session.commit()
+        except Exception as exc:
+            logger.debug("clear stale by source skipped: %s", exc)
+
+        source_set = set(source_keys)
+        for track in self.player._tracks:  # noqa: SLF001
+            ctx = track.context if isinstance(track.context, dict) else None
+            if not ctx:
+                continue
+            key = self._queue_source_key_from_context(ctx)
+            if key in source_set:
+                ctx["is_stale"] = False
+                if ctx.get("audio_status") == "stale":
+                    ctx["audio_status"] = "ready"
+
+    def _refresh_audio_paths_for_rows(self, rows: List[int], *, clear_stale_if_ready: bool) -> int:
+        if not rows:
+            return 0
+        try:
+            from app.domain.normalization.normalizer import normalize_for_tm
+            from app.services.audio_playback_service import AudioPlaybackService
+            from app.services.db_service import DBService
+        except Exception:
+            return 0
+
+        updated = 0
+        unique_rows = sorted(set(rows))
+        try:
+            with DBService.get_instance().get_session() as session:
+                for row in unique_rows:
+                    if row < 0 or row >= len(self.player._tracks):  # noqa: SLF001
+                        continue
+                    track = self.player._tracks[row]  # noqa: SLF001
+                    ctx = track.context if isinstance(track.context, dict) else {}
+
+                    kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+                    if kind not in {"sentence", "lemma", "term"}:
+                        continue
+
+                    src_text = str(ctx.get("snapshot_hebrew") or track.label or "").strip()
+                    if not src_text:
+                        continue
+                    src_lang = str(ctx.get("src_lang") or "he").strip() or "he"
+                    norm_kind = {"term": "term_cluster", "sentence": "surface"}.get(kind, kind)
+                    try:
+                        src_norm = normalize_for_tm(src_lang, src_text, norm_kind).norm or ""
+                    except Exception:
+                        src_norm = ""
+                    if not src_norm:
+                        continue
+
+                    ready_path = AudioPlaybackService.resolve_ready_path(
+                        session,
+                        lang=src_lang,
+                        norm_text=src_norm,
+                    )
+
+                    changed = False
+                    if ready_path:
+                        if track.path != ready_path:
+                            track.path = ready_path
+                            changed = True
+                        if ctx.get("audio_status") != "ready":
+                            ctx["audio_status"] = "ready"
+                            changed = True
+                        if clear_stale_if_ready and bool(ctx.get("is_stale")):
+                            ctx["is_stale"] = False
+                            changed = True
+                    else:
+                        if str(track.path) not in ("", "."):
+                            track.path = Path("")
+                            changed = True
+                        if ctx.get("audio_status") != "missing":
+                            ctx["audio_status"] = "missing"
+                            changed = True
+                    if changed:
+                        updated += 1
+        except Exception as exc:
+            logger.debug("refresh audio paths skipped: %s", exc)
+            return 0
+
+        if updated:
+            self._refresh_queue()
+        return updated
+
+    def _on_queue_translate_selected(self, rows: List[int]) -> None:
+        from app.services.batch_mt_translate_service import BatchTranslateOptions
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
+        from app.ui.workers import BatchTranslateWorker
+
+        items = self._build_translate_items(rows)
+        if not items:
+            return
+
+        accepted, provider_mode, write_mode, _scope = show_batch_translate_dialog(
+            parent=self,
+            selected_count=len(items),
+            scope_enabled=False,
+        )
+        if not accepted:
+            return
+
+        options = BatchTranslateOptions(
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+        )
+        progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
+        progress_dialog.setWindowTitle("Batch Translate Selected Rows")
+        progress_dialog.show()
+
+        worker = BatchTranslateWorker(
+            items=items,
+            options=options,
+            tab_type="audio_player_queue",
+        )
+        self._queue_translate_worker = worker
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.row_translated.connect(progress_dialog.add_recent_item)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+        worker.finished.connect(lambda result: self._on_queue_translate_finished(result, progress_dialog))
+        worker.error.connect(lambda msg: self._on_queue_worker_error("Translation", msg, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
+        worker.start()
+
+    def _on_queue_translate_finished(self, result: object, progress_dialog) -> None:
+        progress_dialog.set_completed()
+        progress_dialog.accept()
+        try:
+            succeeded = int(getattr(result, "succeeded", 0))
+            skipped = int(getattr(result, "skipped", 0))
+            failed = int(getattr(result, "failed", 0))
+        except Exception:
+            succeeded = skipped = failed = 0
+        self._refresh_display_contexts()
+        QMessageBox.information(
+            self,
+            "Translation Complete",
+            f"Succeeded: {succeeded}\nSkipped: {skipped}\nFailed: {failed}",
+        )
+        worker = getattr(self, "_queue_translate_worker", None)
+        if worker is not None:
+            worker.deleteLater()
+            self._queue_translate_worker = None
+
+    def _on_queue_regenerate_audio_selected(self, rows: List[int]) -> None:
+        from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.workers import BatchGenerateAudioWorker
+
+        items = self._build_audio_generation_items(rows)
+        if not items:
+            return
+
+        accepted, provider_mode, write_mode, _scope = show_batch_audio_dialog(
+            parent=self,
+            selected_count=len(items),
+            scope_enabled=False,
+            filtered_count=len(items),
+        )
+        if not accepted:
+            return
+
+        source_keys = self._source_keys_from_rows(rows)
+        success_source_keys: set[Tuple[str, int, Optional[int]]] = set()
+        row_to_source: Dict[str, Tuple[str, int, Optional[int]]] = {}
+        for row in rows:
+            ctx = self._track_ctx_at_row(row)
+            source_key = self._queue_source_key_from_context(ctx)
+            if source_key is None:
+                continue
+            row_id = str(ctx.get("item_id") or ctx.get("source_id") or row)
+            row_to_source[row_id] = source_key
+
+        progress_dialog = BatchProgressDialogV3(parent=self, total=len(items))
+        progress_dialog.setWindowTitle("Batch Generate Source Audio")
+        progress_dialog.show()
+
+        worker = BatchGenerateAudioWorker(
+            items=items,
+            provider_mode=provider_mode,
+            write_mode=write_mode,
+            audio_chunk=25,
+        )
+        self._queue_audio_worker = worker
+        worker.progress.connect(progress_dialog.update_progress)
+        worker.stats_updated.connect(progress_dialog.update_counts)
+        worker.stage_updated.connect(progress_dialog.set_stage)
+
+        def _on_row_audio(entity_id: str, message: str, success: bool) -> None:
+            progress_dialog.add_recent_item(entity_id, message, success)
+            if success:
+                source_key = row_to_source.get(str(entity_id))
+                if source_key is not None:
+                    success_source_keys.add(source_key)
+
+        worker.row_translated.connect(_on_row_audio)
+        worker.finished.connect(
+            lambda result: self._on_queue_audio_finished(
+                result,
+                progress_dialog,
+                source_keys,
+                success_source_keys,
+            )
+        )
+        worker.error.connect(lambda msg: self._on_queue_worker_error("Audio Generation", msg, progress_dialog))
+        progress_dialog.cancel_requested.connect(worker.cancel)
+        progress_dialog.pause_requested.connect(worker.pause)
+        progress_dialog.resume_requested.connect(worker.resume)
+        worker.start()
+
+    def _on_queue_audio_finished(
+        self,
+        result: dict,
+        progress_dialog,
+        source_keys: List[Tuple[str, int, Optional[int]]],
+        success_source_keys: set[Tuple[str, int, Optional[int]]],
+    ) -> None:
+        progress_dialog.set_completed()
+        progress_dialog.update_counts(
+            int(result.get("succeeded", 0)),
+            int(result.get("skipped", 0)),
+            int(result.get("failed", 0)),
+        )
+        progress_dialog.accept()
+
+        affected_rows = self._rows_for_source_keys(source_keys)
+        self._refresh_audio_paths_for_rows(affected_rows, clear_stale_if_ready=False)
+        if success_source_keys:
+            self._clear_queue_sources_stale(list(success_source_keys))
+        self._refresh_display_contexts()
+        self._refresh_queue()
+
+        QMessageBox.information(
+            self,
+            "Audio Generation Complete",
+            f"Ready: {int(result.get('succeeded', 0))}\n"
+            f"Skipped: {int(result.get('skipped', 0))}\n"
+            f"Failed: {int(result.get('failed', 0))}",
+        )
+
+        worker = getattr(self, "_queue_audio_worker", None)
+        if worker is not None:
+            worker.deleteLater()
+            self._queue_audio_worker = None
+
+    def _on_queue_niqqudize_selected(self, rows: List[int]) -> None:
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+
+        selected_items = self._build_pronunciation_selected_items(rows)
+        if not selected_items:
+            return
+
+        changed = show_pronunciation_bootstrap_dialog(
+            parent=self,
+            selected_items=selected_items,
+        )
+        if not changed:
+            return
+
+        self._mark_queue_sources_stale(self._source_keys_from_rows(rows))
+        self._refresh_display_contexts()
+
+    def _on_queue_edit_pronunciation(self, row: int) -> None:
+        from app.domain.normalization.normalizer import normalize_for_tm
+        from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+
+        ctx = self._track_ctx_at_row(row)
+        kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+        if kind not in {"lemma", "term"}:
+            return
+
+        src_text = str(ctx.get("snapshot_hebrew") or (self._track_at_row(row) or {}).get("label") or "").strip()
+        if not src_text:
+            return
+        src_lang = str(ctx.get("src_lang") or "he").strip() or "he"
+        norm_kind = "term_cluster" if kind == "term" else "lemma"
+        src_norm = normalize_for_tm(src_lang, src_text, norm_kind).norm
+        if not src_norm:
+            return
+
+        changed = show_edit_pronunciation_dialog(
+            parent=self,
+            src_lang=src_lang,
+            src_norm=src_norm,
+            src_text=src_text,
+        )
+        if not changed:
+            return
+
+        source_key = self._queue_source_key_from_context(ctx)
+        if source_key is not None:
+            self._mark_queue_sources_stale([source_key])
+        self._refresh_display_contexts()
+
+    def _on_queue_edit_sentence_niqqud(self, row: int) -> None:
+        from app.ui.dialogs.edit_sentence_niqqud_dialog import show_edit_sentence_niqqud_dialog
+
+        ctx = self._track_ctx_at_row(row)
+        kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+        if kind != "sentence":
+            return
+
+        source_id_raw = ctx.get("source_id")
+        try:
+            sentence_id = int(source_id_raw)
+        except (TypeError, ValueError):
+            return
+
+        source_text = str(ctx.get("snapshot_hebrew") or (self._track_at_row(row) or {}).get("label") or "").strip()
+        current_niqqud = str(ctx.get("snapshot_niqqud") or ctx.get("niqqud") or "").strip()
+        changed = show_edit_sentence_niqqud_dialog(
+            self,
+            sentence_id=sentence_id,
+            sentence_text=source_text,
+            current_niqqud=current_niqqud or None,
+        )
+        if not changed:
+            return
+
+        source_key = self._queue_source_key_from_context(ctx)
+        if source_key is not None:
+            self._mark_queue_sources_stale([source_key])
+        self._refresh_display_contexts()
+
+    def _on_queue_worker_error(self, label: str, msg: str, progress_dialog) -> None:
+        progress_dialog.set_stage(f"Error: {msg[:80]}")
+        progress_dialog.accept()
+        QMessageBox.warning(self, f"{label} Failed", msg)
+
+        for attr in ("_queue_translate_worker", "_queue_audio_worker"):
+            worker = getattr(self, attr, None)
+            if worker is not None:
+                worker.deleteLater()
+                setattr(self, attr, None)
 
     def _on_queue_row_double_clicked(self, index: QModelIndex) -> None:
         self._play_from_row(index.row())
@@ -1348,6 +1971,35 @@ class AudioPlayerPanel(QWidget):
 
     def _play_from_row(self, row: int) -> None:
         """Set the cursor to 'row - 1' and call next_track so it plays row."""
+        if row < 0 or row >= len(self.player._tracks):  # noqa: SLF001
+            return
+
+        ctx = self._track_ctx_at_row(row)
+        if bool(ctx.get("is_stale")):
+            self._refresh_audio_paths_for_rows([row], clear_stale_if_ready=True)
+            ctx = self._track_ctx_at_row(row)
+            if bool(ctx.get("is_stale")):
+                QMessageBox.information(
+                    self,
+                    "Audio Stale",
+                    "Audio is stale for this row. Regenerate audio to play the latest pronunciation.",
+                )
+                return
+
+        track = self.player._tracks[row]  # noqa: SLF001
+        path_ok = str(track.path) not in ("", ".") and Path(track.path).exists()
+        if not path_ok:
+            self._refresh_audio_paths_for_rows([row], clear_stale_if_ready=True)
+            track = self.player._tracks[row]  # noqa: SLF001
+            path_ok = str(track.path) not in ("", ".") and Path(track.path).exists()
+        if not path_ok:
+            QMessageBox.information(
+                self,
+                "Audio Missing",
+                "No ready audio found for this row. Use 'Regenerate Audio' first.",
+            )
+            return
+
         self.player._current_index = row - 1  # noqa: SLF001 — internal
         saved_mode = self.player._repeat_mode  # noqa: SLF001
         self.player._repeat_mode = "none"  # noqa: SLF001
@@ -1668,3 +2320,4 @@ class AudioPlayerPanel(QWidget):
             if changed:
                 updated += 1
         return updated
+
