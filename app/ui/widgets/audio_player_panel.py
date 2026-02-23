@@ -514,11 +514,13 @@ class AudioPlayerPanel(QWidget):
         self._history_entries: List[str] = []
         self._selected_source_payload: Optional[Dict[str, Any]] = None
         self._selected_queue_row_count: int = 0
+        self._refresh_in_progress: bool = False
 
         self._init_ui()
         self._connect_signals()
         self._restore_settings()
         self._refresh_queue()
+        self._init_auto_refresh()
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -795,6 +797,26 @@ class AudioPlayerPanel(QWidget):
         self._add_shortcut("-", self._speed_down)
         self._add_shortcut("R", self._cycle_repeat)
         self._add_shortcut("Esc", lambda: self.player.stop(clear_queue=False))
+
+    def _init_auto_refresh(self) -> None:
+        """Periodic non-blocking queue overlay refresh.
+
+        Keeps Niqqud/Translation/Source in sync with source tables when edits are
+        performed outside Audio Player. Refresh button remains as explicit manual tool.
+        """
+        interval = int(self.settings.get_int("audio_player/auto_refresh_ms", 2500) or 2500)
+        interval = max(1200, min(10000, interval))
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(interval)
+        self._auto_refresh_timer.timeout.connect(self._on_auto_refresh_tick)
+        self._auto_refresh_timer.start()
+
+    def _on_auto_refresh_tick(self) -> None:
+        if not self.isVisible():
+            return
+        if not self.player._tracks:  # noqa: SLF001 - bounded list in dock state
+            return
+        self._refresh_display_contexts()
 
     def _add_shortcut(self, key: str, slot: Callable) -> None:
         sc = QShortcut(QKeySequence(key), self)
@@ -2290,9 +2312,12 @@ class AudioPlayerPanel(QWidget):
         Updates track contexts in-place then calls _refresh_queue() to redraw.
         Non-fatal: any DB error is logged at DEBUG level and silently ignored.
         """
+        if self.__dict__.get("_refresh_in_progress", False):
+            return
         tracks = self.player._tracks  # noqa: SLF001
         if not tracks:
             return
+        self.__dict__["_refresh_in_progress"] = True
         try:
             from app.services.db_service import DBService
             _db = DBService.get_instance()
@@ -2322,6 +2347,8 @@ class AudioPlayerPanel(QWidget):
                 self._refresh_queue()
         except Exception as exc:
             logger.debug("_refresh_display_contexts: non-fatal: %s", exc)
+        finally:
+            self.__dict__["_refresh_in_progress"] = False
 
     def _refresh_sentence_display(self, session, tracks: List) -> int:
         """Batch-refresh Source / Niqqud / Translation for sentence tracks."""
@@ -2330,7 +2357,15 @@ class AudioPlayerPanel(QWidget):
         from sqlalchemy import select as _sel
         from app.infra.sa_models import DocumentSentence as _DS, SourceDocument as _SD
 
-        sids = [t.context["source_id"] for t in tracks if t.context.get("source_id")]
+        track_rows: List[Tuple[Any, int]] = []
+        for t in tracks:
+            sid_raw = t.context.get("source_id") if isinstance(t.context, dict) else None
+            try:
+                sid = int(sid_raw)
+            except (TypeError, ValueError):
+                continue
+            track_rows.append((t, sid))
+        sids = [sid for _, sid in track_rows]
         if not sids:
             return 0
 
@@ -2378,17 +2413,15 @@ class AudioPlayerPanel(QWidget):
             svc = SentencesWorkspaceService()
             project_to_texts: Dict[int, List[str]] = {}
             sid_to_project: Dict[int, int] = {}
-            for t in tracks:
-                sid = t.context.get("source_id")
-                project_id = t.context.get("project_id")
+            for t, sid in track_rows:
+                project_id = t.context.get("project_id") if isinstance(t.context, dict) else None
                 if sid is None or project_id is None:
                     continue
                 try:
-                    sid_int = int(sid)
                     project_id_int = int(project_id)
                 except (TypeError, ValueError):
                     continue
-                sid_to_project[sid_int] = project_id_int
+                sid_to_project[sid] = project_id_int
             for sid, text in sid_to_text.items():
                 if not text:
                     continue
@@ -2407,10 +2440,7 @@ class AudioPlayerPanel(QWidget):
             pass
 
         updated = 0
-        for t in tracks:
-            sid = t.context.get("source_id")
-            if sid is None:
-                continue
+        for t, sid in track_rows:
             changed = False
             did = sid_to_did.get(sid)
             source = doc_names.get(did, "") if did else ""
@@ -2450,74 +2480,112 @@ class AudioPlayerPanel(QWidget):
         if not tracks:
             return 0
         from sqlalchemy import select as _sel
+        from app.infra.sa_models import Lemma as _Lemma
 
-        # Collect norms
-        lid_to_norm: Dict[int, str] = {}
+        track_rows: List[Tuple[Any, int, Optional[int]]] = []
+        for t in tracks:
+            ctx = t.context if isinstance(t.context, dict) else {}
+            sid_raw = ctx.get("source_id")
+            pid_raw = ctx.get("project_id")
+            try:
+                sid = int(sid_raw)
+            except (TypeError, ValueError):
+                continue
+            try:
+                pid = int(pid_raw) if pid_raw is not None else None
+            except (TypeError, ValueError):
+                pid = None
+            track_rows.append((t, sid, pid))
+        if not track_rows:
+            return 0
+
+        lemma_rows = session.execute(
+            _sel(_Lemma.lemma_id, _Lemma.lemma_text, _Lemma.norm_text)
+            .where(_Lemma.lemma_id.in_([sid for _, sid, _ in track_rows]))
+        ).all()
+        lid_to_db: Dict[int, Tuple[str, str]] = {
+            int(lid): (str(txt or ""), str(norm or ""))
+            for lid, txt, norm in lemma_rows
+        }
+
+        lid_to_pron_norm: Dict[int, str] = {}
+        lid_to_tm_norm: Dict[int, str] = {}
         try:
             from app.domain.normalization.normalizer import normalize_for_tm as _ntm
-            for t in tracks:
-                lid = t.context.get("source_id")
-                text = t.context.get("snapshot_hebrew") or ""
-                if lid and text:
-                    try:
-                        lid_to_norm[lid] = _ntm("he", text, "lemma").norm or text
-                    except Exception:
-                        lid_to_norm[lid] = text
+            for t, lid, _pid in track_rows:
+                db_text, db_norm = lid_to_db.get(lid, ("", ""))
+                text = (db_text or str(t.context.get("snapshot_hebrew") or "")).strip()
+                if not text and not db_norm:
+                    continue
+                try:
+                    pron_norm = _ntm("he", text, "surface").norm if text else ""
+                except Exception:
+                    pron_norm = ""
+                try:
+                    tm_norm = _ntm("he", text, "lemma").norm if text else ""
+                except Exception:
+                    tm_norm = ""
+                lid_to_pron_norm[lid] = (pron_norm or db_norm or text).strip()
+                lid_to_tm_norm[lid] = (tm_norm or db_norm or text).strip()
         except Exception:
             pass
-
-        all_norms = list(set(lid_to_norm.values()))
 
         # Batch niqqud
         norm_to_niqqud: Dict[str, str] = {}
         try:
             from app.services.pronunciation_service import PronunciationService
-            if all_norms:
-                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
+            all_pron_norms = sorted({n for n in lid_to_pron_norm.values() if n})
+            if all_pron_norms:
+                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_pron_norms)
                 norm_to_niqqud = {n: dto.niqqud_text for n, dto in bulk.items() if dto.niqqud_text}
         except Exception:
             pass
 
-        # Batch translation from TMEntry
-        norm_to_transl: Dict[str, str] = {}
+        # Batch translation from TMEntry (project-aware)
+        norm_to_transl: Dict[Tuple[int, str], str] = {}
         try:
             from app.infra.sa_models import TMEntry as _TM
-            project_id = next(
-                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
-            )
-            if all_norms and project_id:
+            project_ids = sorted({pid for _, _sid, pid in track_rows if pid is not None})
+            all_tm_norms = sorted({n for n in lid_to_tm_norm.values() if n})
+            if all_tm_norms and project_ids:
                 tm_rows = session.execute(
-                    _sel(_TM.src_norm, _TM.translation)
+                    _sel(_TM.project_id, _TM.src_norm, _TM.translation)
                     .where(_TM.kind == "lemma")
                     .where(_TM.src_lang == "he")
-                    .where(_TM.src_norm.in_(all_norms))
-                    .where(_TM.project_id == project_id)
+                    .where(_TM.src_norm.in_(all_tm_norms))
+                    .where(_TM.project_id.in_(project_ids))
                     .where(_TM.status.in_(["draft", "approved"]))
                     .order_by(_TM.status.desc())
                 ).all()
-                for norm, transl in tm_rows:
-                    if norm not in norm_to_transl:
-                        norm_to_transl[norm] = transl or ""
+                for project_id, norm, transl in tm_rows:
+                    key = (int(project_id), str(norm or ""))
+                    if key not in norm_to_transl:
+                        norm_to_transl[key] = str(transl or "")
         except Exception:
             pass
 
         updated = 0
-        for t in tracks:
-            lid = t.context.get("source_id")
-            norm = lid_to_norm.get(lid, "")
+        for t, lid, pid in track_rows:
+            db_text, _db_norm = lid_to_db.get(lid, ("", ""))
+            pron_norm = lid_to_pron_norm.get(lid, "")
+            tm_norm = lid_to_tm_norm.get(lid, "")
             changed = False
             if t.context.get("snapshot_source_label") != "Dictionary":
                 t.context["snapshot_source_label"] = "Dictionary"
                 changed = True
-            niqqud = norm_to_niqqud.get(norm)
+            if db_text and t.context.get("snapshot_hebrew") != db_text:
+                t.context["snapshot_hebrew"] = db_text
+                changed = True
+            niqqud = norm_to_niqqud.get(pron_norm)
             if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
                 t.context["snapshot_niqqud"] = niqqud
                 changed = True
             elif niqqud is None and (t.context.get("snapshot_niqqud") or "") != "":
                 t.context["snapshot_niqqud"] = ""
                 changed = True
-            transl = norm_to_transl.get(norm)
-            if norm in norm_to_transl:
+            transl_key = (pid, tm_norm) if pid is not None and tm_norm else None
+            transl = norm_to_transl.get(transl_key) if transl_key else None
+            if transl_key is not None and transl_key in norm_to_transl:
                 if t.context.get("snapshot_translation") != transl:
                     t.context["snapshot_translation"] = transl
                     changed = True
@@ -2533,71 +2601,110 @@ class AudioPlayerPanel(QWidget):
         if not tracks:
             return 0
         from sqlalchemy import select as _sel
+        from app.infra.sa_models import TermCluster as _TermCluster
 
-        cid_to_norm: Dict[int, str] = {}
+        track_rows: List[Tuple[Any, int, Optional[int]]] = []
+        for t in tracks:
+            ctx = t.context if isinstance(t.context, dict) else {}
+            sid_raw = ctx.get("source_id")
+            pid_raw = ctx.get("project_id")
+            try:
+                sid = int(sid_raw)
+            except (TypeError, ValueError):
+                continue
+            try:
+                pid = int(pid_raw) if pid_raw is not None else None
+            except (TypeError, ValueError):
+                pid = None
+            track_rows.append((t, sid, pid))
+        if not track_rows:
+            return 0
+
+        term_rows = session.execute(
+            _sel(_TermCluster.cluster_id, _TermCluster.representative_he, _TermCluster.norm_text)
+            .where(_TermCluster.cluster_id.in_([sid for _, sid, _ in track_rows]))
+        ).all()
+        cid_to_db: Dict[int, Tuple[str, str]] = {
+            int(cid): (str(txt or ""), str(norm or ""))
+            for cid, txt, norm in term_rows
+        }
+
+        cid_to_pron_norm: Dict[int, str] = {}
+        cid_to_tm_norm: Dict[int, str] = {}
         try:
             from app.domain.normalization.normalizer import normalize_for_tm as _ntm
-            for t in tracks:
-                cid = t.context.get("source_id")
-                text = t.context.get("snapshot_hebrew") or ""
-                if cid and text:
-                    try:
-                        cid_to_norm[cid] = _ntm("he", text, "term_cluster").norm or text
-                    except Exception:
-                        cid_to_norm[cid] = text
+            for t, cid, _pid in track_rows:
+                db_text, db_norm = cid_to_db.get(cid, ("", ""))
+                text = (db_text or str(t.context.get("snapshot_hebrew") or "")).strip()
+                if not text and not db_norm:
+                    continue
+                try:
+                    pron_norm = _ntm("he", text, "surface").norm if text else ""
+                except Exception:
+                    pron_norm = ""
+                try:
+                    tm_norm = _ntm("he", text, "term_cluster").norm if text else ""
+                except Exception:
+                    tm_norm = ""
+                cid_to_pron_norm[cid] = (pron_norm or db_norm or text).strip()
+                cid_to_tm_norm[cid] = (tm_norm or db_norm or text).strip()
         except Exception:
             pass
-
-        all_norms = list(set(cid_to_norm.values()))
 
         norm_to_niqqud: Dict[str, str] = {}
         try:
             from app.services.pronunciation_service import PronunciationService
-            if all_norms:
-                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
+            all_pron_norms = sorted({n for n in cid_to_pron_norm.values() if n})
+            if all_pron_norms:
+                bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_pron_norms)
                 norm_to_niqqud = {n: dto.niqqud_text for n, dto in bulk.items() if dto.niqqud_text}
         except Exception:
             pass
 
-        norm_to_transl: Dict[str, str] = {}
+        norm_to_transl: Dict[Tuple[int, str], str] = {}
         try:
             from app.infra.sa_models import TMEntry as _TM
-            project_id = next(
-                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
-            )
-            if all_norms and project_id:
+            project_ids = sorted({pid for _, _sid, pid in track_rows if pid is not None})
+            all_tm_norms = sorted({n for n in cid_to_tm_norm.values() if n})
+            if all_tm_norms and project_ids:
                 tm_rows = session.execute(
-                    _sel(_TM.src_norm, _TM.translation)
+                    _sel(_TM.project_id, _TM.src_norm, _TM.translation)
                     .where(_TM.kind == "term_cluster")
                     .where(_TM.src_lang == "he")
-                    .where(_TM.src_norm.in_(all_norms))
-                    .where(_TM.project_id == project_id)
+                    .where(_TM.src_norm.in_(all_tm_norms))
+                    .where(_TM.project_id.in_(project_ids))
                     .where(_TM.status.in_(["draft", "approved"]))
                     .order_by(_TM.status.desc())
                 ).all()
-                for norm, transl in tm_rows:
-                    if norm not in norm_to_transl:
-                        norm_to_transl[norm] = transl or ""
+                for project_id, norm, transl in tm_rows:
+                    key = (int(project_id), str(norm or ""))
+                    if key not in norm_to_transl:
+                        norm_to_transl[key] = str(transl or "")
         except Exception:
             pass
 
         updated = 0
-        for t in tracks:
-            cid = t.context.get("source_id")
-            norm = cid_to_norm.get(cid, "")
+        for t, cid, pid in track_rows:
+            db_text, _db_norm = cid_to_db.get(cid, ("", ""))
+            pron_norm = cid_to_pron_norm.get(cid, "")
+            tm_norm = cid_to_tm_norm.get(cid, "")
             changed = False
             if t.context.get("snapshot_source_label") != "Terms":
                 t.context["snapshot_source_label"] = "Terms"
                 changed = True
-            niqqud = norm_to_niqqud.get(norm)
+            if db_text and t.context.get("snapshot_hebrew") != db_text:
+                t.context["snapshot_hebrew"] = db_text
+                changed = True
+            niqqud = norm_to_niqqud.get(pron_norm)
             if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
                 t.context["snapshot_niqqud"] = niqqud
                 changed = True
             elif niqqud is None and (t.context.get("snapshot_niqqud") or "") != "":
                 t.context["snapshot_niqqud"] = ""
                 changed = True
-            transl = norm_to_transl.get(norm)
-            if norm in norm_to_transl:
+            transl_key = (pid, tm_norm) if pid is not None and tm_norm else None
+            transl = norm_to_transl.get(transl_key) if transl_key else None
+            if transl_key is not None and transl_key in norm_to_transl:
                 if t.context.get("snapshot_translation") != transl:
                     t.context["snapshot_translation"] = transl
                     changed = True

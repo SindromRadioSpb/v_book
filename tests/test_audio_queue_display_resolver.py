@@ -90,11 +90,15 @@ def test_refresh_term_display_populates_niqqud_and_translation(qapp):
     t = _make_track("term", 5, "שלום עולם", source_label="term:5", project_id=7)
     panel.player._tracks = [t]
     mock_session = MagicMock()
-    mock_session.execute.return_value.all.return_value = [("shalom_olam", "peace world")]
+    mock_term_rows = MagicMock()
+    mock_term_rows.all.return_value = [(5, "שלום עולם", "shalom_olam_tm")]
+    mock_tm_rows = MagicMock()
+    mock_tm_rows.all.return_value = [(7, "shalom_olam_tm", "peace world")]
+    mock_session.execute.side_effect = [mock_term_rows, mock_tm_rows]
 
     def fake_ntm(lang, text, kind):
         r = MagicMock()
-        r.norm = "shalom_olam"
+        r.norm = "shalom_olam" if kind == "surface" else "shalom_olam_tm"
         return r
 
     mock_niqqud_dto = MagicMock()
