@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -349,7 +350,6 @@ class AddAllToQueueDialog(QDialog):
                 count_str = f"{sent_count:,}" if sent_count else "?"
                 level_str = f"  [{level}]" if level else ""
                 label = f"{file_name}    {count_str} sent.{level_str}"
-                from PyQt6.QtWidgets import QListWidgetItem
                 item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, doc_id)
                 item.setToolTip(f"doc_id={doc_id}  •  {count_str} sentences{level_str}")
