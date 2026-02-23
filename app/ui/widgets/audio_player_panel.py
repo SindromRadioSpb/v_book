@@ -54,6 +54,7 @@ from PyQt6.QtWidgets import (
 
 from app.infra.settings import SettingsService
 from app.services.audio_player_service import AudioPlayerService
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 
 logger = logging.getLogger(__name__)
 
@@ -679,6 +680,13 @@ class AudioPlayerPanel(QWidget):
         self.queue_table.customContextMenuRequested.connect(self._on_queue_context_menu)
         self.queue_table.doubleClicked.connect(self._on_queue_row_double_clicked)
 
+        # Play delegate on Status column: ▶ button for ready tracks
+        self._queue_play_delegate = AudioPlayDelegate(
+            self.queue_table,
+            on_play_clicked=self._on_queue_play_cell_clicked,
+        )
+        self.queue_table.setItemDelegateForColumn(_COL_STATUS, self._queue_play_delegate)
+
         # Restore column widths
         hdr = self.queue_table.horizontalHeader()
         default_widths = [30, 200, 180, 160, 120, 70, 45]
@@ -1039,6 +1047,7 @@ class AudioPlayerPanel(QWidget):
             from app.services.audio_queue_service import AudioQueueService
             from app.infra.sa_models import AudioAsset as _AudioAsset
             from app.services.audio_playback_service import _get_app_dir
+            from sqlalchemy import select as _sa_select, desc as _sa_desc
             db = DBService.get_instance()
             id_set = set(new_item_ids)
             resolved_paths: Dict[int, Path] = {}
@@ -1046,30 +1055,44 @@ class AudioPlayerPanel(QWidget):
                 all_db_items = AudioQueueService().get_queue(session)
                 # Filter to only rows inserted by THIS worker run
                 candidate_items = [item for item in all_db_items if item.item_id in id_set]
-                # Resolve audio file paths for ready items within the same session
-                ready_asset_ids = [
-                    item.audio_asset_id
-                    for item in candidate_items
-                    if item.audio_asset_id and item.audio_status == "ready"
-                ]
-                if ready_asset_ids:
+                # Batch-resolve audio paths via (lang, norm_text) lookup in AudioAsset.
+                # Workers insert queue items with audio_status="unknown" / audio_asset_id=None,
+                # so we cannot use audio_asset_id here — instead normalize snapshot_hebrew and
+                # look up the most-recent ready asset with matching norm_text.
+                item_norms: List[tuple] = []  # (item_id, norm_text)
+                _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
+                for item in candidate_items:
+                    if not item.snapshot_hebrew:
+                        continue
+                    try:
+                        from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+                        kind_str = _kind_map.get(item.kind, item.kind)
+                        norm = _ntm("he", item.snapshot_hebrew, kind_str).norm or item.snapshot_hebrew
+                    except Exception:
+                        norm = item.snapshot_hebrew
+                    item_norms.append((item.item_id, norm))
+                if item_norms:
+                    all_norms = list({norm for _, norm in item_norms})
                     app_dir = _get_app_dir()
-                    asset_rows = (
-                        session.query(_AudioAsset)
-                        .filter(_AudioAsset.asset_id.in_(ready_asset_ids))
-                        .all()
-                    )
-                    asset_path_map: Dict[int, Path] = {}
-                    for row in asset_rows:
-                        if row.audio_rel_path:
-                            rel = Path(str(row.audio_rel_path))
+                    asset_rows = session.execute(
+                        _sa_select(_AudioAsset.norm_text, _AudioAsset.audio_rel_path)
+                        .where(_AudioAsset.lang == "he")
+                        .where(_AudioAsset.norm_text.in_(all_norms))
+                        .where(_AudioAsset.asset_status == "ready")
+                        .where(_AudioAsset.audio_rel_path.is_not(None))
+                        .order_by(_sa_desc(_AudioAsset.updated_at))
+                    ).all()
+                    norm_to_path: Dict[str, Path] = {}
+                    for norm_text, rel_path in asset_rows:
+                        if norm_text not in norm_to_path and rel_path:
+                            rel = Path(str(rel_path))
                             if not rel.is_absolute() and ".." not in rel.parts:
                                 abs_path = app_dir / rel
                                 if abs_path.exists():
-                                    asset_path_map[row.asset_id] = abs_path
-                    for item in candidate_items:
-                        if item.audio_asset_id and item.audio_asset_id in asset_path_map:
-                            resolved_paths[item.item_id] = asset_path_map[item.audio_asset_id]
+                                    norm_to_path[norm_text] = abs_path
+                    for item_id, norm in item_norms:
+                        if norm in norm_to_path:
+                            resolved_paths[item_id] = norm_to_path[norm]
             # Dedup by (kind, source_id) — prevents same source content appearing twice
             existing_source_keys: set = {
                 (t.context.get("kind"), t.context.get("source_id"))
@@ -1129,6 +1152,10 @@ class AudioPlayerPanel(QWidget):
             self._copy_cell(rows[0], _COL_TRANSLATION)
 
     def _on_queue_row_double_clicked(self, index: QModelIndex) -> None:
+        self._play_from_row(index.row())
+
+    def _on_queue_play_cell_clicked(self, index: QModelIndex) -> None:
+        """AudioPlayDelegate ▶ callback on Status column: jump to and play this row."""
         self._play_from_row(index.row())
 
     def _play_from_row(self, row: int) -> None:

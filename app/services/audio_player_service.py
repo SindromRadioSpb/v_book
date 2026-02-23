@@ -375,6 +375,19 @@ class AudioPlayerService(QObject):
         self._current = None
         self._emit_queue_changed()
 
+    def jump_to_index(self, index: int) -> None:
+        """Stop current playback and immediately start the track at *index*."""
+        if not self._tracks or not (0 <= index < len(self._tracks)):
+            return
+        if self._backend and self._current is not None:
+            self._backend.stop()
+        self._current = None
+        self._item_play_count = 0
+        self._current_index = index
+        self._current = self._tracks[index]
+        self._emit_queue_changed()
+        self._begin_play_current()
+
     def enqueue_from_db(
         self,
         items: list,       # List[AudioQueueItemDTO] — avoids circular import
