@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import QItemSelectionModel
 from PyQt6.QtWidgets import QApplication
 
 from app.services.audio_player_service import AudioBackendBase, AudioPlayerService
@@ -161,3 +162,56 @@ def test_track_finished_without_item_id_does_not_write_db(monkeypatch, qtbot, tm
     panel._on_track_finished({"label": "x", "context": {"kind": "lemma"}})
 
     assert calls["mark"] == 0
+
+
+def test_go_to_source_uses_single_selected_queue_row_when_not_playing(qtbot, tmp_path):
+    panel, player, audio_file = _build_panel(tmp_path)
+    qtbot.addWidget(panel)
+    captured = []
+    panel.go_to_source_requested.connect(captured.append)
+
+    second_file = tmp_path / "sample_2.wav"
+    second_file.write_bytes(b"RIFF")
+    player.play_paths(
+        [audio_file, second_file],
+        labels=["first", "second"],
+        play_mode="interrupt",
+        contexts=[
+            {"kind": "lemma", "source_id": 11, "project_id": 5},
+            {"kind": "term", "source_id": 22, "project_id": 5},
+        ],
+    )
+    player.stop(clear_queue=False)
+
+    panel.queue_table.selectRow(1)
+    assert panel.goto_source_btn.isEnabled() is True
+    panel.goto_source_btn.click()
+
+    assert len(captured) == 1
+    assert captured[0]["kind"] == "term"
+    assert captured[0]["source_id"] == 22
+
+
+def test_go_to_source_disabled_for_multi_selection(qtbot, tmp_path):
+    panel, player, audio_file = _build_panel(tmp_path)
+    qtbot.addWidget(panel)
+
+    second_file = tmp_path / "sample_2.wav"
+    second_file.write_bytes(b"RIFF")
+    player.play_paths(
+        [audio_file, second_file],
+        labels=["first", "second"],
+        play_mode="interrupt",
+        contexts=[
+            {"kind": "lemma", "source_id": 11, "project_id": 5},
+            {"kind": "term", "source_id": 22, "project_id": 5},
+        ],
+    )
+
+    sel = panel.queue_table.selectionModel()
+    idx0 = panel._queue_model.index(0, 0)  # noqa: SLF001
+    idx1 = panel._queue_model.index(1, 0)  # noqa: SLF001
+    sel.select(idx0, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+    sel.select(idx1, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+
+    assert panel.goto_source_btn.isEnabled() is False

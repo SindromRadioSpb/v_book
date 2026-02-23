@@ -448,6 +448,106 @@ def test_sort_by_kind(populated_db):
     assert kinds == sorted(kinds), "kind should be sorted ascending"
 
 
+def test_count_tm_ids_for_translation_respects_kinds(populated_db):
+    """count_tm_ids_for_translation must honor multi-kind filters."""
+    session, project_ids = populated_db
+    service = TranslationAdminService()
+
+    session.add_all(
+        [
+            TMEntry(
+                kind='surface',
+                src_lang='he',
+                tgt_lang='ru',
+                src_text='sentence_alpha_1',
+                src_norm='sentence_alpha_1',
+                translation='',
+                translation_norm=None,
+                status='draft',
+                project_id=project_ids[0],
+                origin='mt_auto',
+                source_ref='sentence:1001',
+            ),
+            TMEntry(
+                kind='surface',
+                src_lang='he',
+                tgt_lang='ru',
+                src_text='sentence_beta_1',
+                src_norm='sentence_beta_1',
+                translation='предложение',
+                translation_norm='предложение',
+                status='approved',
+                project_id=project_ids[1],
+                origin='mt_auto',
+                source_ref='sentence:2001',
+            ),
+        ]
+    )
+    session.commit()
+
+    count_surface_all = service.count_tm_ids_for_translation(
+        session=session,
+        filters={"kinds": ["surface"]},
+        write_mode="OVERWRITE",
+    )
+    assert count_surface_all == 2
+
+    count_surface_fill_empty = service.count_tm_ids_for_translation(
+        session=session,
+        filters={"kinds": ["surface"]},
+        write_mode="FILL_EMPTY",
+    )
+    assert count_surface_fill_empty == 1
+
+
+def test_fetch_tm_ids_for_translation_respects_kinds(populated_db):
+    """fetch_tm_ids_for_translation must honor multi-kind filters."""
+    session, project_ids = populated_db
+    service = TranslationAdminService()
+
+    session.add_all(
+        [
+            TMEntry(
+                kind='surface',
+                src_lang='he',
+                tgt_lang='ru',
+                src_text='sentence_alpha_1',
+                src_norm='sentence_alpha_1',
+                translation='',
+                translation_norm=None,
+                status='draft',
+                project_id=project_ids[0],
+                origin='mt_auto',
+                source_ref='sentence:1001',
+            ),
+            TMEntry(
+                kind='surface',
+                src_lang='he',
+                tgt_lang='ru',
+                src_text='sentence_beta_1',
+                src_norm='sentence_beta_1',
+                translation='предложение',
+                translation_norm='предложение',
+                status='approved',
+                project_id=project_ids[1],
+                origin='mt_auto',
+                source_ref='sentence:2001',
+            ),
+        ]
+    )
+    session.commit()
+
+    ids = service.fetch_tm_ids_for_translation(
+        session=session,
+        filters={"kinds": ["surface"]},
+        write_mode="OVERWRITE",
+        limit=20,
+        offset=0,
+    )
+
+    assert len(ids) == 2
+
+
 def test_sort_by_status(populated_db):
     """Test sorting by status column."""
     session, project_ids = populated_db

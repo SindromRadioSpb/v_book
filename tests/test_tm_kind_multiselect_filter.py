@@ -143,3 +143,11 @@ class TestKindFilterDialogLogic:
         selected = ["lemma", "surface"]
         result = selected if (len(selected) != len(all_kinds) and len(selected) != 0) else None
         assert result == ["lemma", "surface"]
+
+
+class TestKindFilterDefaults:
+    def test_tm_default_kind_filter_keeps_sentences_off(self):
+        from app.ui.translation_management_panel import TranslationManagementPanel
+
+        assert 'surface' not in TranslationManagementPanel.DEFAULT_KIND_FILTER
+
