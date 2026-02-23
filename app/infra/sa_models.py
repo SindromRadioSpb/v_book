@@ -982,3 +982,107 @@ class MTCache(Base):
     __table_args__ = (
         UniqueConstraint("provider", "src_lang", "tgt_lang", "request_key", name="uq_mt_cache_request"),
     )
+
+
+# ── Audio Player v2 (migration 025) ──────────────────────────────────────────
+
+
+class AudioQueueItem(Base):
+    """One entry in the playback queue (non-destructive — never removed on play)."""
+
+    __tablename__ = "audio_queue_item"
+
+    item_id = Column(Integer, primary_key=True)
+    position = Column(Integer, nullable=False, default=0)
+    kind = Column(String, nullable=False, default="sentence")
+    source_id = Column(Integer)
+    project_id = Column(Integer)
+
+    snapshot_hebrew = Column(Text)
+    snapshot_niqqud = Column(Text)
+    snapshot_translation = Column(Text)
+    snapshot_source_label = Column(Text)
+
+    audio_asset_id = Column(Integer, ForeignKey("audio_asset.asset_id", ondelete="SET NULL"))
+    audio_status = Column(String, nullable=False, default="unknown")
+
+    is_stale = Column(Integer, nullable=False, default=0)
+
+    play_count = Column(Integer, nullable=False, default=0)
+    last_played_at = Column(String)
+    created_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('sentence', 'lemma', 'term', 'custom_text')", name="ck_aq_item_kind"),
+        CheckConstraint(
+            "audio_status IN ('unknown', 'ready', 'missing', 'generating', 'failed')",
+            name="ck_aq_item_audio_status",
+        ),
+        CheckConstraint("is_stale IN (0, 1)", name="ck_aq_item_is_stale"),
+        CheckConstraint("play_count >= 0", name="ck_aq_item_play_count"),
+    )
+
+
+class AudioPlaylist(Base):
+    """Named, saved playlist for study sessions."""
+
+    __tablename__ = "audio_playlist"
+
+    playlist_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    created_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now)
+
+    entries = relationship("AudioPlaylistEntry", back_populates="playlist",
+                           cascade="all, delete-orphan", order_by="AudioPlaylistEntry.position")
+
+
+class AudioPlaylistEntry(Base):
+    """One item inside a named playlist (independent snapshot copy)."""
+
+    __tablename__ = "audio_playlist_entry"
+
+    entry_id = Column(Integer, primary_key=True)
+    playlist_id = Column(Integer, ForeignKey("audio_playlist.playlist_id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    kind = Column(String, nullable=False, default="sentence")
+    source_id = Column(Integer)
+    project_id = Column(Integer)
+
+    snapshot_hebrew = Column(Text)
+    snapshot_niqqud = Column(Text)
+    snapshot_translation = Column(Text)
+    snapshot_source_label = Column(Text)
+
+    audio_asset_id = Column(Integer, ForeignKey("audio_asset.asset_id", ondelete="SET NULL"))
+    audio_status = Column(String, nullable=False, default="unknown")
+    created_at = Column(String, nullable=False, default=utc_now)
+
+    playlist = relationship("AudioPlaylist", back_populates="entries")
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('sentence', 'lemma', 'term', 'custom_text')", name="ck_ape_kind"),
+        CheckConstraint(
+            "audio_status IN ('unknown', 'ready', 'missing', 'generating', 'failed')",
+            name="ck_ape_audio_status",
+        ),
+    )
+
+
+class AudioHistory(Base):
+    """Append-only listen history (never deleted)."""
+
+    __tablename__ = "audio_history"
+
+    history_id = Column(Integer, primary_key=True)
+    kind = Column(String, nullable=False, default="sentence")
+    source_id = Column(Integer)
+    project_id = Column(Integer)
+    snapshot_hebrew = Column(Text)
+    rate_used = Column(Float, nullable=False, default=1.0)
+    played_at = Column(String, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('sentence', 'lemma', 'term', 'custom_text')", name="ck_ah_kind"),
+        CheckConstraint("rate_used > 0", name="ck_ah_rate_used"),
+    )
