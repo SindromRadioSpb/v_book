@@ -569,6 +569,21 @@ class DictionaryView(QWidget):
 
         self.page_size_combo.blockSignals(False)
 
+    def focus_lemma_by_id(self, lemma_id: int) -> bool:
+        """Best-effort focus helper used by Audio Player 'Go to Source'."""
+        for source_row, lemma in enumerate(self.lemma_model.lemmas):
+            if int(getattr(lemma, "lemma_id", 0) or 0) != int(lemma_id):
+                continue
+            source_index = self.lemma_model.index(source_row, 0)
+            proxy_index = self.proxy_model.mapFromSource(source_index)
+            if not proxy_index.isValid():
+                return False
+            self.lemma_table.setCurrentIndex(proxy_index)
+            self.lemma_table.selectRow(proxy_index.row())
+            self.lemma_table.scrollTo(proxy_index, QTableView.ScrollHint.PositionAtCenter)
+            return True
+        return False
+
     def start_translation_worker(self, lemmas: List[LemmaStats]):
         """M7 P1: Start worker to resolve translations."""
         if not lemmas:

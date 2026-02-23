@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStackedWidget, QMenuBar
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 
 from app.infra.settings import SettingsService
@@ -96,6 +96,7 @@ class AppWindow(QMainWindow):
             Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.audio_player_panel = AudioPlayerPanel(player=self.audio_player, parent=self.audio_player_dock)
+        self.audio_player_panel.go_to_source_requested.connect(self._on_audio_go_to_source_requested)
         self.audio_player_dock.setWidget(self.audio_player_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.audio_player_dock)
 
@@ -345,6 +346,77 @@ class AppWindow(QMainWindow):
         # Add to stack and show
         self.stack.addWidget(project_view)
         self.stack.setCurrentWidget(project_view)
+
+    def _find_project_view(self, project_id: int) -> Optional[ProjectView]:
+        for i in range(self.stack.count()):
+            widget = self.stack.widget(i)
+            if isinstance(widget, ProjectView) and getattr(widget, "project_id", None) == project_id:
+                return widget
+        return None
+
+    def _open_or_focus_project(self, project_id: int) -> Optional[ProjectView]:
+        project_view = self._find_project_view(project_id)
+        if project_view is None:
+            self.open_project(project_id)
+            project_view = self.stack.currentWidget()
+            if not isinstance(project_view, ProjectView):
+                return None
+        self.stack.setCurrentWidget(project_view)
+        return project_view
+
+    def _focus_project_source_row(self, project_view: ProjectView, kind: str, source_id: int) -> bool:
+        kind_norm = (kind or "").strip().lower()
+        if kind_norm in {"term_cluster", "term"}:
+            project_view.tabs.setCurrentWidget(project_view.terms_view)
+            return bool(project_view.terms_view.focus_term_by_id(source_id))
+        if kind_norm == "lemma":
+            project_view.tabs.setCurrentWidget(project_view.dictionary_view)
+            return bool(project_view.dictionary_view.focus_lemma_by_id(source_id))
+        if kind_norm in {"sentence", "sentences"}:
+            project_view.tabs.setCurrentWidget(project_view.sentences_view)
+            return bool(project_view.sentences_view.focus_sentence_by_id(source_id))
+        return False
+
+    def _on_audio_go_to_source_requested(self, payload: dict) -> None:
+        """Best-effort navigation from Audio Player queue to the owning source row."""
+        if not isinstance(payload, dict):
+            return
+
+        kind = str(payload.get("kind") or "").strip()
+        source_id = payload.get("source_id")
+        project_id = payload.get("project_id")
+        if not kind or source_id is None or project_id is None:
+            self.statusBar().showMessage("Go to Source is unavailable for this queue row", 4000)
+            return
+
+        try:
+            source_id_int = int(source_id)
+            project_id_int = int(project_id)
+        except (TypeError, ValueError):
+            self.statusBar().showMessage("Go to Source payload is invalid", 4000)
+            return
+
+        project_view = self._open_or_focus_project(project_id_int)
+        if project_view is None:
+            self.statusBar().showMessage("Failed to open project for source navigation", 4000)
+            return
+
+        max_attempts = 12
+        retry_ms = 200
+
+        def _attempt_focus(attempt: int = 0) -> None:
+            focused = self._focus_project_source_row(project_view, kind, source_id_int)
+            if focused:
+                return
+            if attempt + 1 >= max_attempts:
+                self.statusBar().showMessage(
+                    "Source row was not found on currently loaded page",
+                    5000,
+                )
+                return
+            QTimer.singleShot(retry_ms, lambda: _attempt_focus(attempt + 1))
+
+        _attempt_focus()
 
     def back_to_dashboard(self):
         """Return to dashboard."""

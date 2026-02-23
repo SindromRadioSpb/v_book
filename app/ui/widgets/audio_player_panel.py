@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -484,6 +484,8 @@ class AddAllToQueueDialog(QDialog):
 class AudioPlayerPanel(QWidget):
     """Premium audio player dock panel (v2)."""
 
+    go_to_source_requested = pyqtSignal(dict)
+
     PRESETS = {
         "Normal": (200, 550, 300),
         "Study": (300, 800, 450),
@@ -755,6 +757,7 @@ class AudioPlayerPanel(QWidget):
         self.play_pause_btn.clicked.connect(self.player.toggle_pause)
         self.next_btn.clicked.connect(self.player.next_track)
         self.stop_btn.clicked.connect(lambda: self.player.stop(clear_queue=False))
+        self.goto_source_btn.clicked.connect(self._on_goto_source_clicked)
 
         # Speed
         self.speed_spin.valueChanged.connect(self._on_speed_changed)
@@ -941,7 +944,7 @@ class AudioPlayerPanel(QWidget):
         niqqud = ctx.get("snapshot_niqqud") or ctx.get("niqqud") or ""
         display = niqqud if niqqud and niqqud != "—" else label
         self.now_playing_label.setText(f"▶  {display}")
-        has_source = bool(ctx.get("source_id") or ctx.get("kind"))
+        has_source = bool(ctx.get("source_id")) and bool(ctx.get("kind"))
         self.goto_source_btn.setEnabled(has_source)
 
     def _on_state_changed(self, state: str) -> None:
@@ -971,6 +974,77 @@ class AudioPlayerPanel(QWidget):
         self.history_list.insertItem(0, QListWidgetItem(entry))
         if self.history_list.count() > 200:
             self.history_list.takeItem(200)
+        self._sync_play_stats_to_db(data)
+
+    def _current_track_context(self) -> Optional[Dict[str, Any]]:
+        idx = self.player.current_index
+        if idx < 0:
+            return None
+        snapshot = self.player.queue_snapshot()
+        if idx >= len(snapshot):
+            return None
+        payload = snapshot[idx] if isinstance(snapshot[idx], dict) else {}
+        ctx = payload.get("context") or {}
+        return ctx if isinstance(ctx, dict) else None
+
+    def _on_goto_source_clicked(self) -> None:
+        ctx = self._current_track_context()
+        if not ctx:
+            return
+        source_id = ctx.get("source_id")
+        kind = ctx.get("kind")
+        if source_id is None or not kind:
+            return
+        try:
+            source_id_int = int(source_id)
+        except (TypeError, ValueError):
+            return
+        self.go_to_source_requested.emit(
+            {
+                "kind": str(kind),
+                "source_id": source_id_int,
+                "project_id": ctx.get("project_id"),
+            }
+        )
+
+    def _sync_play_stats_to_db(self, payload: Dict[str, Any]) -> None:
+        """Best-effort sync of queue play counters/history for DB-backed queue rows."""
+        from datetime import datetime, timezone
+
+        ctx = payload.get("context") or {}
+        if not isinstance(ctx, dict):
+            return
+        item_id = ctx.get("item_id")
+        if item_id is None:
+            return
+        try:
+            item_id_int = int(item_id)
+        except (TypeError, ValueError):
+            return
+
+        try:
+            from app.services.audio_queue_service import AudioQueueService
+            from app.services.db_service import DBService
+
+            with DBService.get_instance().get_session() as session:
+                AudioQueueService().mark_played(
+                    session,
+                    item_id_int,
+                    rate_used=float(self.player.get_playback_rate() or 1.0),
+                )
+                session.commit()
+        except Exception as exc:
+            logger.debug("Audio queue play sync skipped: %s", exc)
+            return
+
+        last_played_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        for track in self.player._tracks:  # noqa: SLF001 - bounded list in dock state
+            track_ctx = track.context if isinstance(track.context, dict) else None
+            if not track_ctx:
+                continue
+            if track_ctx.get("item_id") == item_id_int:
+                track_ctx["last_played_at"] = last_played_at
+                break
 
     # ── Context menu ──────────────────────────────────────────────────────────
 

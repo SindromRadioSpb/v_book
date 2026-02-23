@@ -669,6 +669,21 @@ class TermsView(QWidget):
 
         self.page_size_combo.blockSignals(False)
 
+    def focus_term_by_id(self, cluster_id: int) -> bool:
+        """Best-effort focus helper used by Audio Player 'Go to Source'."""
+        for source_row, cluster in enumerate(self.terms_model.clusters):
+            if int(getattr(cluster, "cluster_id", 0) or 0) != int(cluster_id):
+                continue
+            source_index = self.terms_model.index(source_row, 0)
+            proxy_index = self.proxy_model.mapFromSource(source_index)
+            if not proxy_index.isValid():
+                return False
+            self.terms_table.setCurrentIndex(proxy_index)
+            self.terms_table.selectRow(proxy_index.row())
+            self.terms_table.scrollTo(proxy_index, QTableView.ScrollHint.PositionAtCenter)
+            return True
+        return False
+
     def on_extract(self):
         """Handle extract terms button."""
         from PyQt6.QtWidgets import QMessageBox

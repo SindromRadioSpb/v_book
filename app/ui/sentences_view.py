@@ -457,6 +457,19 @@ class SentencesView(QWidget):
         self.current_page = page
         self._reload()
 
+    def focus_sentence_by_id(self, sentence_id: int) -> bool:
+        """Best-effort focus helper used by Audio Player 'Go to Source'."""
+        for row, dto in enumerate(self._current_dtos):
+            if int(getattr(dto, "sentence_id", 0) or 0) != int(sentence_id):
+                continue
+            self.table.setCurrentCell(row, COL_ID)
+            self.table.selectRow(row)
+            item = self.table.item(row, COL_ID)
+            if item is not None:
+                self.table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Filter handlers
     # ------------------------------------------------------------------
