@@ -511,6 +511,8 @@ class AudioPlayerPanel(QWidget):
         self._col_visible: List[bool] = [True] * len(_COLUMNS)
         self._col_visible[_COL_NUM] = True  # always shown
         self._history_entries: List[str] = []
+        self._selected_source_payload: Optional[Dict[str, Any]] = None
+        self._selected_queue_row_count: int = 0
 
         self._init_ui()
         self._connect_signals()
@@ -689,6 +691,7 @@ class AudioPlayerPanel(QWidget):
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_table.customContextMenuRequested.connect(self._on_queue_context_menu)
         self.queue_table.doubleClicked.connect(self._on_queue_row_double_clicked)
+        self.queue_table.selectionModel().selectionChanged.connect(self._on_queue_selection_changed)
 
         # Play delegate on Status column: ▶ button for ready tracks
         self._queue_play_delegate = AudioPlayDelegate(
@@ -932,11 +935,60 @@ class AudioPlayerPanel(QWidget):
         if 0 <= idx < count:
             model_idx = self._queue_model.index(idx, 0)
             self.queue_table.scrollTo(model_idx, QAbstractItemView.ScrollHint.EnsureVisible)
+        self._on_queue_selection_changed()
+
+    def _queue_row_context(self, row: int) -> Optional[Dict[str, Any]]:
+        snapshot = self.player.queue_snapshot()
+        if row < 0 or row >= len(snapshot):
+            return None
+        payload = snapshot[row] if isinstance(snapshot[row], dict) else {}
+        ctx = payload.get("context") or {}
+        return ctx if isinstance(ctx, dict) else None
+
+    def _source_payload_from_context(self, ctx: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not ctx:
+            return None
+        source_id = ctx.get("source_id")
+        kind = ctx.get("kind")
+        if source_id is None or not kind:
+            return None
+        try:
+            source_id_int = int(source_id)
+        except (TypeError, ValueError):
+            return None
+        return {
+            "kind": str(kind),
+            "source_id": source_id_int,
+            "project_id": ctx.get("project_id"),
+        }
+
+    def _on_queue_selection_changed(self, *_args) -> None:
+        selected_rows = sorted({idx.row() for idx in self.queue_table.selectionModel().selectedRows()})
+        self._selected_queue_row_count = len(selected_rows)
+        if len(selected_rows) != 1:
+            self._selected_source_payload = None
+            self._update_goto_source_state()
+            return
+        self._selected_source_payload = self._source_payload_from_context(
+            self._queue_row_context(selected_rows[0])
+        )
+        self._update_goto_source_state()
+
+    def _update_goto_source_state(self) -> None:
+        if self._selected_queue_row_count > 1:
+            self.goto_source_btn.setEnabled(False)
+            return
+        if self._selected_source_payload is not None:
+            self.goto_source_btn.setEnabled(True)
+            return
+        self.goto_source_btn.setEnabled(
+            self._source_payload_from_context(self._current_track_context()) is not None
+        )
 
     def _on_now_playing_changed(self, payload: object) -> None:
         if not payload:
             self.now_playing_label.setText("▶  (idle)")
-            self.goto_source_btn.setEnabled(False)
+            self._update_goto_source_state()
             return
         data = payload if isinstance(payload, dict) else {}
         label = str(data.get("label") or "(untitled)")
@@ -944,8 +996,7 @@ class AudioPlayerPanel(QWidget):
         niqqud = ctx.get("snapshot_niqqud") or ctx.get("niqqud") or ""
         display = niqqud if niqqud and niqqud != "—" else label
         self.now_playing_label.setText(f"▶  {display}")
-        has_source = bool(ctx.get("source_id")) and bool(ctx.get("kind"))
-        self.goto_source_btn.setEnabled(has_source)
+        self._update_goto_source_state()
 
     def _on_state_changed(self, state: str) -> None:
         if state == "playing":
@@ -988,24 +1039,12 @@ class AudioPlayerPanel(QWidget):
         return ctx if isinstance(ctx, dict) else None
 
     def _on_goto_source_clicked(self) -> None:
-        ctx = self._current_track_context()
-        if not ctx:
+        payload = self._selected_source_payload
+        if payload is None:
+            payload = self._source_payload_from_context(self._current_track_context())
+        if payload is None:
             return
-        source_id = ctx.get("source_id")
-        kind = ctx.get("kind")
-        if source_id is None or not kind:
-            return
-        try:
-            source_id_int = int(source_id)
-        except (TypeError, ValueError):
-            return
-        self.go_to_source_requested.emit(
-            {
-                "kind": str(kind),
-                "source_id": source_id_int,
-                "project_id": ctx.get("project_id"),
-            }
-        )
+        self.go_to_source_requested.emit(payload)
 
     def _sync_play_stats_to_db(self, payload: Dict[str, Any]) -> None:
         """Best-effort sync of queue play counters/history for DB-backed queue rows."""

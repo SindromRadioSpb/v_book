@@ -256,6 +256,7 @@ class AppWindow(QMainWindow):
         tm_panel.open_user_dictionaries_requested.connect(
             lambda pid=context_project_id: self.open_user_dictionaries(project_id=pid)
         )
+        tm_panel.go_to_source_requested.connect(self._on_audio_go_to_source_requested)
 
         # Add to stack and show
         self.stack.addWidget(tm_panel)
@@ -372,10 +373,38 @@ class AppWindow(QMainWindow):
         if kind_norm == "lemma":
             project_view.tabs.setCurrentWidget(project_view.dictionary_view)
             return bool(project_view.dictionary_view.focus_lemma_by_id(source_id))
-        if kind_norm in {"sentence", "sentences"}:
+        if kind_norm in {"sentence", "sentences", "surface"}:
             project_view.tabs.setCurrentWidget(project_view.sentences_view)
             return bool(project_view.sentences_view.focus_sentence_by_id(source_id))
         return False
+
+    def _resolve_sentence_source_id(self, project_id: int, source_text: str) -> Optional[int]:
+        text = (source_text or "").strip()
+        if not text:
+            return None
+        try:
+            from sqlalchemy import select
+
+            from app.infra.sa_models import DocumentSentence, SourceCorpus, SourceDocument
+            from app.services.db_service import DBService
+
+            stmt = (
+                select(DocumentSentence.sentence_id)
+                .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(
+                    SourceCorpus.project_id == project_id,
+                    DocumentSentence.text == text,
+                )
+                .order_by(DocumentSentence.sentence_id.asc())
+                .limit(1)
+            )
+            with DBService.get_instance().get_session() as session:
+                value = session.execute(stmt).scalar()
+            return int(value) if value is not None else None
+        except Exception as exc:
+            logger.debug("Failed to resolve sentence source id: %s", exc)
+            return None
 
     def _on_audio_go_to_source_requested(self, payload: dict) -> None:
         """Best-effort navigation from Audio Player queue to the owning source row."""
@@ -383,17 +412,33 @@ class AppWindow(QMainWindow):
             return
 
         kind = str(payload.get("kind") or "").strip()
+        kind_norm = kind.lower()
         source_id = payload.get("source_id")
         project_id = payload.get("project_id")
-        if not kind or source_id is None or project_id is None:
+        source_text = str(payload.get("source_text") or "").strip()
+        if not kind or project_id is None:
             self.statusBar().showMessage("Go to Source is unavailable for this queue row", 4000)
             return
 
         try:
-            source_id_int = int(source_id)
             project_id_int = int(project_id)
         except (TypeError, ValueError):
             self.statusBar().showMessage("Go to Source payload is invalid", 4000)
+            return
+
+        source_id_int: Optional[int] = None
+        if source_id is not None:
+            try:
+                source_id_int = int(source_id)
+            except (TypeError, ValueError):
+                source_id_int = None
+
+        if source_id_int is None and kind_norm in {"sentence", "sentences", "surface"}:
+            source_id_int = self._resolve_sentence_source_id(project_id_int, source_text)
+            kind = "sentence"
+
+        if source_id_int is None:
+            self.statusBar().showMessage("Go to Source is unavailable for this queue row", 4000)
             return
 
         project_view = self._open_or_focus_project(project_id_int)

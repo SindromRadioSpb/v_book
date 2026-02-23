@@ -636,6 +636,11 @@ class BatchMTTranslateService:
         """
         normalized = normalize_for_tm(item.src_lang, item.source_text, "surface")
         src_norm = normalized.norm
+        sentence_source_ref = "batch_translate"
+        try:
+            sentence_source_ref = f"sentence:{int(item.entity_id)}"
+        except (TypeError, ValueError):
+            sentence_source_ref = "batch_translate"
 
         stmt = select(TMEntry).where(
             TMEntry.project_id == item.project_id,
@@ -648,6 +653,7 @@ class BatchMTTranslateService:
             existing.translation = translation
             existing.status = "approved"
             existing.origin = "mt_auto"
+            existing.source_ref = sentence_source_ref
             existing.updated_at = datetime.now()
             session.flush()
             TMGlobalService().upsert_and_link(
@@ -664,6 +670,7 @@ class BatchMTTranslateService:
                 translation=translation,
                 status="approved",
                 origin="mt_auto",
+                source_ref=sentence_source_ref,
             )
             session.add(tm_entry)
             session.flush()

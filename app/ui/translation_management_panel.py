@@ -8,6 +8,7 @@ Allows users to:
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional, List
 
@@ -245,7 +246,13 @@ class HistoryDialog(QDialog):
 class KindFilterDialog(QDialog):
     """Multi-select checklist dialog for TM Kind filter."""
 
-    ALL_KINDS = ["lemma", "term_cluster", "ngram", "surface"]
+    KIND_OPTIONS = [
+        ("lemma", "Lemmas"),
+        ("term_cluster", "Terms"),
+        ("ngram", "N-grams"),
+        ("surface", "Sentences"),
+    ]
+    ALL_KINDS = [kind for kind, _label in KIND_OPTIONS]
 
     def __init__(self, selected_kinds: Optional[List[str]], parent=None):
         super().__init__(parent)
@@ -262,11 +269,12 @@ class KindFilterDialog(QDialog):
 
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        for kind in self.ALL_KINDS:
-            item = QListWidgetItem(kind)
+        for kind, label in self.KIND_OPTIONS:
+            item = QListWidgetItem(label)
             item.setCheckState(
                 Qt.CheckState.Checked if kind in self._selected else Qt.CheckState.Unchecked
             )
+            item.setData(Qt.ItemDataRole.UserRole, kind)
             self.list_widget.addItem(item)
         layout.addWidget(self.list_widget)
 
@@ -302,7 +310,7 @@ class KindFilterDialog(QDialog):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.checkState() == Qt.CheckState.Checked:
-                selected.append(item.text())
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
         if len(selected) == len(self.ALL_KINDS) or len(selected) == 0:
             return None  # None = All (no filter)
         return selected
@@ -313,6 +321,13 @@ class TranslationManagementPanel(QWidget):
 
     back_requested = pyqtSignal()
     open_user_dictionaries_requested = pyqtSignal()
+    go_to_source_requested = pyqtSignal(dict)
+
+    DEFAULT_KIND_FILTER = ["lemma", "term_cluster", "ngram"]  # Sentences (surface) off by default.
+    _SENTENCE_SOURCE_PATTERNS = (
+        re.compile(r"sentence:(\d+)", re.IGNORECASE),
+        re.compile(r"sentence[_-]?id[:=](\d+)", re.IGNORECASE),
+    )
 
     def __init__(self, project_id: Optional[int] = None):
         super().__init__()
@@ -338,10 +353,20 @@ class TranslationManagementPanel(QWidget):
         )
 
         # State: selected kinds (None = All; [] treated as None)
+        self._kind_filter_init_key = "tm_panel/kind_filter_initialized_v2"
         _saved_kinds = self.settings.get_json("tm_panel/kind_filter", None)
-        self.selected_kinds: Optional[List[str]] = (
-            _saved_kinds if isinstance(_saved_kinds, list) and len(_saved_kinds) > 0 else None
-        )
+        if isinstance(_saved_kinds, list) and len(_saved_kinds) > 0:
+            self.selected_kinds: Optional[List[str]] = [str(k) for k in _saved_kinds if k]
+        else:
+            was_initialized = self.settings.get_bool(self._kind_filter_init_key, False)
+            if not was_initialized:
+                self.selected_kinds = list(self.DEFAULT_KIND_FILTER)
+                self.settings.set_value("tm_panel/kind_filter", self.selected_kinds)
+                self.settings.set_value(self._kind_filter_init_key, True)
+            else:
+                self.selected_kinds = None
+
+        self._selected_source_payload: Optional[dict] = None
 
         # State: selected project IDs (None = all projects)
         self.selected_project_ids: Optional[List[int]] = None
@@ -678,6 +703,11 @@ class TranslationManagementPanel(QWidget):
         self.play_audio_btn.setEnabled(False)
         actions_layout.addWidget(self.play_audio_btn)
 
+        self.go_to_source_btn = QPushButton("Go to Source")
+        self.go_to_source_btn.clicked.connect(self.on_go_to_source_selected)
+        self.go_to_source_btn.setEnabled(False)
+        actions_layout.addWidget(self.go_to_source_btn)
+
         self.pronunciation_bootstrap_btn = QPushButton("Pronunciation Bootstrap...")
         self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
         self.pronunciation_bootstrap_btn.setEnabled(False)
@@ -765,9 +795,9 @@ class TranslationManagementPanel(QWidget):
         """Clear all filters."""
         self.search_edit.clear()
         self.source_ref_edit.clear()
-        self.selected_kinds = None
+        self.selected_kinds = list(self.DEFAULT_KIND_FILTER)
         self.kind_filter_btn.setText(self._kind_btn_label())
-        self.settings.set_value("tm_panel/kind_filter", None)
+        self.settings.set_value("tm_panel/kind_filter", self.selected_kinds)
         self.status_combo.setCurrentIndex(0)
         self.origin_combo.setCurrentIndex(0)
         self._apply_scope_mode(reset_page=False)
@@ -775,11 +805,13 @@ class TranslationManagementPanel(QWidget):
 
     def _kind_btn_label(self) -> str:
         """Return button label reflecting current kind selection."""
+        kind_labels = {kind: label for kind, label in KindFilterDialog.KIND_OPTIONS}
         if not self.selected_kinds:
-            return "All ▾"
+            return "All v"
         if len(self.selected_kinds) == 1:
-            return f"{self.selected_kinds[0]} ▾"
-        return f"{len(self.selected_kinds)} kinds ▾"
+            kind = self.selected_kinds[0]
+            return f"{kind_labels.get(kind, kind)} v"
+        return f"{len(self.selected_kinds)} kinds v"
 
     def on_select_kinds(self):
         """Open KindFilterDialog and apply selection."""
@@ -1361,11 +1393,18 @@ class TranslationManagementPanel(QWidget):
         if not hasattr(self, "batch_translate_btn"):
             return
         selected_rows = self.table_view.selectionModel().selectedRows()
-        has_selection = len(selected_rows) > 0
+        selection_count = len(selected_rows)
+        has_selection = selection_count > 0
         self.batch_translate_btn.setEnabled(has_selection)
         self.generate_audio_btn.setEnabled(has_selection)
         self.play_audio_btn.setEnabled(has_selection)
         self.pronunciation_bootstrap_btn.setEnabled(has_selection)
+        self._selected_source_payload = None
+        if selection_count == 1:
+            entry = self.model.get_entry(selected_rows[0].row())
+            self._selected_source_payload = self._build_source_payload_for_entry(entry)
+        if hasattr(self, "go_to_source_btn"):
+            self.go_to_source_btn.setEnabled(selection_count == 1 and self._selected_source_payload is not None)
 
     def _get_selected_tm_entries(self) -> List[TMEntryDTO]:
         """Return selected TM entries in deterministic order."""
@@ -1376,6 +1415,48 @@ class TranslationManagementPanel(QWidget):
             if entry:
                 entries.append(entry)
         return entries
+
+    @classmethod
+    def _extract_sentence_id_from_source_ref(cls, source_ref: Optional[str]) -> Optional[int]:
+        ref = str(source_ref or "").strip()
+        if not ref:
+            return None
+        for pattern in cls._SENTENCE_SOURCE_PATTERNS:
+            match = pattern.search(ref)
+            if not match:
+                continue
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @classmethod
+    def _build_source_payload_for_entry(cls, entry: Optional[TMEntryDTO]) -> Optional[dict]:
+        if entry is None:
+            return None
+
+        try:
+            project_id = int(entry.project_id) if entry.project_id is not None else None
+        except (TypeError, ValueError):
+            project_id = None
+        if project_id is None:
+            return None
+
+        kind = str(entry.kind or "").strip().lower()
+        if kind == "lemma" and entry.lemma_id:
+            return {"kind": "lemma", "source_id": int(entry.lemma_id), "project_id": project_id}
+        if kind == "term_cluster" and entry.cluster_id:
+            return {"kind": "term_cluster", "source_id": int(entry.cluster_id), "project_id": project_id}
+        if kind in {"surface", "sentence", "sentences"}:
+            sentence_id = cls._extract_sentence_id_from_source_ref(entry.source_ref)
+            payload = {"kind": "sentence", "project_id": project_id}
+            if sentence_id is not None:
+                payload["source_id"] = sentence_id
+            if entry.src_text:
+                payload["source_text"] = entry.src_text
+            return payload if ("source_id" in payload or "source_text" in payload) else None
+        return None
 
     def _get_selected_audio_items(self) -> list[dict]:
         """Build source-audio payloads from selected TM rows."""
@@ -1694,6 +1775,12 @@ class TranslationManagementPanel(QWidget):
             return
         self._play_audio_items(items, play_mode="enqueue")
 
+    def on_go_to_source_selected(self):
+        """Navigate from selected TM row to project source entity."""
+        if self._selected_source_payload is None:
+            return
+        self.go_to_source_requested.emit(dict(self._selected_source_payload))
+
     def on_audio_cell_play_clicked(self, index):
         """Delegate callback: play one row from Audio column."""
         entry = self.model.get_entry(index.row())
@@ -1837,6 +1924,16 @@ class TranslationManagementPanel(QWidget):
         play_audio_action = QAction(f"Play Audio Selected ({count:,} rows)", self)
         play_audio_action.triggered.connect(self.on_play_audio_selected)
         menu.addAction(play_audio_action)
+
+        go_to_source_action = QAction("Go to Source", self)
+        selected_payload = None
+        if count == 1:
+            selected_payload = self._build_source_payload_for_entry(
+                self.model.get_entry(selected_indexes[0].row())
+            )
+        go_to_source_action.setEnabled(count == 1 and selected_payload is not None)
+        go_to_source_action.triggered.connect(self.on_go_to_source_selected)
+        menu.addAction(go_to_source_action)
 
         add_to_dict_action = QAction(f"Add Selected to User Dictionary ({count:,} rows)...", self)
         add_to_dict_action.triggered.connect(self.on_add_selected_to_user_dictionary)

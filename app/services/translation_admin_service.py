@@ -303,7 +303,11 @@ class TranslationAdminService:
         stmt = select(func.count()).select_from(TMEntry)
 
         # Apply same filters as search
-        if "kind" in filters and filters["kind"]:
+        if "kinds" in filters and filters["kinds"]:
+            kinds_list = [k for k in filters["kinds"] if k]
+            if kinds_list:
+                stmt = stmt.where(TMEntry.kind.in_(kinds_list))
+        elif "kind" in filters and filters["kind"]:
             stmt = stmt.where(TMEntry.kind == filters["kind"])
 
         if "status" in filters and filters["status"]:
@@ -379,7 +383,11 @@ class TranslationAdminService:
         stmt = select(func.count()).select_from(TMEntry)
 
         # Apply same filters as search/count
-        if "kind" in filters and filters["kind"]:
+        if "kinds" in filters and filters["kinds"]:
+            kinds_list = [k for k in filters["kinds"] if k]
+            if kinds_list:
+                stmt = stmt.where(TMEntry.kind.in_(kinds_list))
+        elif "kind" in filters and filters["kind"]:
             stmt = stmt.where(TMEntry.kind == filters["kind"])
 
         if "status" in filters and filters["status"]:
@@ -456,7 +464,11 @@ class TranslationAdminService:
         stmt = select(TMEntry.tm_id)
 
         # Apply same filters as search/count
-        if "kind" in filters and filters["kind"]:
+        if "kinds" in filters and filters["kinds"]:
+            kinds_list = [k for k in filters["kinds"] if k]
+            if kinds_list:
+                stmt = stmt.where(TMEntry.kind.in_(kinds_list))
+        elif "kind" in filters and filters["kind"]:
             stmt = stmt.where(TMEntry.kind == filters["kind"])
 
         if "status" in filters and filters["status"]:
