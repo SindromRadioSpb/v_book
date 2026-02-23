@@ -93,8 +93,11 @@ Queue:
 
 Playlists:
 
-- UI shell exists.
-- Full playlist entry table and CRUD wiring in panel are pending.
+- DB-backed UI is available in panel:
+  - create / rename / delete playlist,
+  - add selected Queue rows into selected playlist,
+  - load playlist entries to Queue (append / after current / prepend),
+  - remove and reorder playlist entries.
 
 History:
 
@@ -106,7 +109,7 @@ History:
 - `Go to Source` button is visible but navigation wiring is pending.
 - Queue context actions from Task 25 PATCH-05 are pending:
   - Translate/Niqqudize/Regen/Edit Pronunciation/Edit Sentence Niqqud.
-- Playlist and history tabs in panel are not yet fully bound to DB service data.
+- History tab in panel is still session-local (DB binding remains in next patch).
 - No persisted queue restore on app restart in panel flow yet.
 
 ## Technical notes

@@ -448,6 +448,49 @@ class AudioQueueService:
         self._repack_playlist_positions(session, playlist_id)
         return count
 
+    def reorder_playlist_entries(
+        self,
+        session: Session,
+        playlist_id: int,
+        ordered_entry_ids: List[int],
+    ) -> None:
+        """Reassign playlist entry positions based on the supplied order.
+
+        Any playlist entries not present in ``ordered_entry_ids`` are appended
+        after the ordered block, preserving their previous relative order.
+        """
+        rows = (
+            session.query(AudioPlaylistEntry)
+            .filter(AudioPlaylistEntry.playlist_id == playlist_id)
+            .order_by(AudioPlaylistEntry.position)
+            .all()
+        )
+        if not rows:
+            return
+
+        row_by_id = {row.entry_id: row for row in rows}
+        seen: set[int] = set()
+        ordered_rows: List[AudioPlaylistEntry] = []
+        for entry_id in ordered_entry_ids:
+            row = row_by_id.get(entry_id)
+            if row is None or entry_id in seen:
+                continue
+            ordered_rows.append(row)
+            seen.add(entry_id)
+
+        for row in rows:
+            if row.entry_id not in seen:
+                ordered_rows.append(row)
+
+        for position, row in enumerate(ordered_rows):
+            row.position = position
+
+        from datetime import datetime, timezone
+
+        pl = session.get(AudioPlaylist, playlist_id)
+        if pl:
+            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
     def move_queue_to_playlist(
         self,
         session: Session,
@@ -484,6 +527,23 @@ class AudioQueueService:
         current_position: int = 0,
     ) -> int:
         """Copy all playlist entries to the queue.  Returns count added."""
+        return len(
+            self.load_playlist_to_queue_ids(
+                session,
+                playlist_id,
+                mode=mode,
+                current_position=current_position,
+            )
+        )
+
+    def load_playlist_to_queue_ids(
+        self,
+        session: Session,
+        playlist_id: int,
+        mode: str = "append",
+        current_position: int = 0,
+    ) -> List[int]:
+        """Copy playlist entries to queue and return inserted queue item_ids."""
         entries = self.get_playlist_entries(session, playlist_id)
         specs = [
             AudioItemSpec(
@@ -499,8 +559,7 @@ class AudioQueueService:
             )
             for e in entries
         ]
-        self.add_to_queue(session, specs, mode=mode, current_position=current_position)
-        return len(specs)
+        return self.add_to_queue(session, specs, mode=mode, current_position=current_position)
 
     # ── History ───────────────────────────────────────────────────────────────
 

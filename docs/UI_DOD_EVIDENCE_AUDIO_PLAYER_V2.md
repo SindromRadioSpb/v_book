@@ -21,7 +21,7 @@ Last verified against code/tests: 2026-02-23
 - [x] Clicked row play in source tables appends and starts clicked item immediately.
 - [ ] Queue context actions: Translate/Niqqudize/Regen/Edit Pronunciation/Edit Sentence Niqqud.
 - [ ] Go to Source navigation wiring.
-- [ ] Full playlist CRUD table UI in panel.
+- [x] Full playlist CRUD table UI in panel.
 - [ ] DB-backed history binding in panel UI.
 - [ ] DB `play_count`/`last_played_at` sync from panel playback completion.
 
@@ -46,6 +46,7 @@ Last verified against code/tests: 2026-02-23
 10. Verify repeat cycling (`R`) and repeat count behavior.
 11. Verify auto-pause pauses after each item.
 12. Verify context menu currently includes only play/remove/copy actions (expected current scope).
+13. In Playlists tab: create playlist, add Queue selected rows, load to Queue, reorder and remove entries.
 
 ## Automated evidence references
 

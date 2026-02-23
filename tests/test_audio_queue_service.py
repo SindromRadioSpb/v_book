@@ -190,6 +190,32 @@ def test_load_playlist_to_queue(session, svc):
     assert len(svc.get_queue(session)) == 3
 
 
+def test_load_playlist_to_queue_ids_returns_inserted_ids(session, svc):
+    pl_id = svc.create_playlist(session, "Load IDs")
+    session.commit()
+    svc.add_to_playlist(session, pl_id, _specs(2))
+    session.commit()
+    new_ids = svc.load_playlist_to_queue_ids(session, pl_id, mode="append")
+    session.commit()
+    assert len(new_ids) == 2
+    queue_ids = [row.item_id for row in svc.get_queue(session)]
+    assert new_ids == queue_ids
+
+
+def test_reorder_playlist_entries(session, svc):
+    pl_id = svc.create_playlist(session, "Reorder PL")
+    session.commit()
+    svc.add_to_playlist(session, pl_id, _specs(3))
+    session.commit()
+    entries = svc.get_playlist_entries(session, pl_id)
+    ids = [entry.entry_id for entry in entries]
+    svc.reorder_playlist_entries(session, pl_id, [ids[2], ids[0], ids[1]])
+    session.commit()
+    reordered = svc.get_playlist_entries(session, pl_id)
+    assert [entry.entry_id for entry in reordered] == [ids[2], ids[0], ids[1]]
+    assert [entry.position for entry in reordered] == [0, 1, 2]
+
+
 def test_get_history(session, svc):
     ids = svc.add_to_queue(session, _specs(5))
     session.commit()
