@@ -251,3 +251,51 @@ def test_play_from_row_blocks_stale_without_fresh_audio(monkeypatch, qtbot, tmp_
 
     assert shown_titles
     assert shown_titles[0] == "Audio Stale"
+
+
+def test_queue_niqqudize_sentences_uses_sentence_dialog(monkeypatch, qtbot, tmp_path):
+    panel, player, audio_file = _build_panel(tmp_path)
+    qtbot.addWidget(panel)
+
+    player.play_paths(
+        [audio_file],
+        labels=["sentence"],
+        play_mode="interrupt",
+        contexts=[
+            {
+                "kind": "sentence",
+                "source_id": 123,
+                "project_id": 11,
+                "src_lang": "he",
+                "snapshot_hebrew": "בית הספר החדש",
+            }
+        ],
+    )
+
+    called = {"sentence": 0, "stale": 0, "refresh": 0}
+
+    def _fake_sentence_dialog(*_args, **kwargs):
+        called["sentence"] += 1
+        assert kwargs["selected_ids"] == [123]
+        assert kwargs["all_ids"] == [123]
+        return True
+
+    def _fake_lexical_dialog(*_args, **_kwargs):
+        raise AssertionError("Lexical pronunciation dialog must not be used for sentence rows")
+
+    monkeypatch.setattr(
+        "app.ui.dialogs.sentence_niqqud_bootstrap_dialog.show_sentence_niqqud_bootstrap_dialog",
+        _fake_sentence_dialog,
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.pronunciation_bootstrap_dialog.show_pronunciation_bootstrap_dialog",
+        _fake_lexical_dialog,
+    )
+    monkeypatch.setattr(panel, "_mark_queue_sources_stale", lambda _keys: called.__setitem__("stale", called["stale"] + 1))
+    monkeypatch.setattr(panel, "_refresh_display_contexts", lambda: called.__setitem__("refresh", called["refresh"] + 1))
+
+    panel._on_queue_niqqudize_selected([0])
+
+    assert called["sentence"] == 1
+    assert called["stale"] == 1
+    assert called["refresh"] == 1

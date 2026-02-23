@@ -112,6 +112,34 @@ def test_refresh_term_display_populates_niqqud_and_translation(qapp):
     assert t.context["snapshot_translation"] == "peace world"
 
 
+def test_refresh_term_display_clears_stale_snapshots_when_source_missing(qapp):
+    """If source no longer has niqqud/translation, stale queue snapshots are cleared."""
+    panel = _make_panel(qapp)
+    t = _make_track("term", 77, "שלום עולם", source_label="Terms", project_id=7)
+    t.context["snapshot_niqqud"] = "שָׁלוֹם עוֹלָם"
+    t.context["snapshot_translation"] = "old value"
+    panel.player._tracks = [t]
+
+    mock_session = MagicMock()
+    mock_session.execute.return_value.all.return_value = []
+
+    def fake_ntm(_lang, _text, _kind):
+        r = MagicMock()
+        r.norm = "shalom_olam"
+        return r
+
+    mock_pron_svc = MagicMock()
+    mock_pron_svc.return_value.bulk_lookup.return_value = {}
+
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
+         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+        count = panel._refresh_term_display(mock_session, [t])
+
+    assert count >= 1
+    assert t.context["snapshot_niqqud"] == ""
+    assert t.context["snapshot_translation"] == ""
+
+
 def test_refresh_term_display_empty_list(qapp):
     """_refresh_term_display with empty list returns 0 without error."""
     from app.ui.widgets.audio_player_panel import AudioPlayerPanel
@@ -217,3 +245,35 @@ def test_refresh_display_contexts_empty_queue_is_noop(qapp):
     with patch("app.services.db_service.DBService.get_instance") as mock_db:
         panel._refresh_display_contexts()
         mock_db.assert_not_called()
+
+
+def test_refresh_display_contexts_normalizes_kind_aliases(qapp):
+    """Kind aliases (surface/term_cluster) must route to sentence/term refresh branches."""
+    panel = _make_panel(qapp)
+    panel.player._tracks = [
+        _make_track("term_cluster", 10, "שלום"),
+        _make_track("surface", 20, "שלום עולם"),
+    ]
+
+    called = {"sentence": 0, "lemma": 0, "term": 0}
+
+    class _DummyCtx:
+        def __enter__(self):
+            return MagicMock()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _DummyDB:
+        def get_session(self):
+            return _DummyCtx()
+
+    with patch("app.services.db_service.DBService.get_instance", return_value=_DummyDB()), \
+         patch.object(panel, "_refresh_sentence_display", side_effect=lambda _s, tracks: called.__setitem__("sentence", len(tracks)) or 0), \
+         patch.object(panel, "_refresh_lemma_display", side_effect=lambda _s, tracks: called.__setitem__("lemma", len(tracks)) or 0), \
+         patch.object(panel, "_refresh_term_display", side_effect=lambda _s, tracks: called.__setitem__("term", len(tracks)) or 0):
+        panel._refresh_display_contexts()
+
+    assert called["sentence"] == 1
+    assert called["term"] == 1
+    assert called["lemma"] == 0
