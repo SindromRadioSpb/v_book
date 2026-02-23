@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QInputDialog,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -1545,6 +1546,11 @@ class AudioPlayerPanel(QWidget):
         regen_audio_act = menu.addAction(f"Regenerate Audio Selected ({len(rows)})...")
         regen_audio_act.setEnabled(len(audio_items) > 0)
 
+        edit_translation_act = menu.addAction("Edit Translation...")
+        edit_translation_act.setEnabled(len(rows) == 1)
+        clear_translation_act = menu.addAction(f"Clear Translation ({len(rows)})...")
+        clear_translation_act.setEnabled(len(rows) > 0)
+
         edit_pron_act = menu.addAction("Mispronounced -> Edit Pronunciation...")
         edit_pron_act.setEnabled(len(rows) == 1 and first_kind in {"lemma", "term"})
 
@@ -1573,6 +1579,10 @@ class AudioPlayerPanel(QWidget):
             self._on_queue_niqqudize_selected(rows)
         elif action == regen_audio_act:
             self._on_queue_regenerate_audio_selected(rows)
+        elif action == edit_translation_act and rows:
+            self._on_queue_edit_translation(rows[0])
+        elif action == clear_translation_act and rows:
+            self._on_queue_clear_translation(rows)
         elif action == edit_pron_act and rows:
             self._on_queue_edit_pronunciation(rows[0])
         elif action == edit_sentence_act and rows:
@@ -1874,20 +1884,251 @@ class AudioPlayerPanel(QWidget):
 
     def _on_queue_niqqudize_selected(self, rows: List[int]) -> None:
         from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
 
-        selected_items = self._build_pronunciation_selected_items(rows)
-        if not selected_items:
+        sentence_ids: List[int] = []
+        lexical_rows: List[int] = []
+        sentence_lang = "he"
+        for row in rows:
+            ctx = self._track_ctx_at_row(row)
+            kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+            if kind == "sentence":
+                sid_raw = ctx.get("source_id")
+                try:
+                    sid = int(sid_raw)
+                except (TypeError, ValueError):
+                    continue
+                sentence_ids.append(sid)
+                sentence_lang = str(ctx.get("src_lang") or sentence_lang or "he").strip() or "he"
+            elif kind in {"lemma", "term"}:
+                lexical_rows.append(row)
+
+        changed = False
+        if lexical_rows:
+            selected_items = self._build_pronunciation_selected_items(lexical_rows)
+            if selected_items:
+                changed = bool(
+                    show_pronunciation_bootstrap_dialog(
+                        parent=self,
+                        selected_items=selected_items,
+                    )
+                ) or changed
+
+        unique_sentence_ids = sorted(set(sentence_ids))
+        if unique_sentence_ids:
+            changed = bool(
+                show_sentence_niqqud_bootstrap_dialog(
+                    self,
+                    selected_ids=unique_sentence_ids,
+                    page_ids=unique_sentence_ids,
+                    all_ids=unique_sentence_ids,
+                    lang=sentence_lang,
+                )
+            ) or changed
+
+        if changed:
+            self._mark_queue_sources_stale(self._source_keys_from_rows(rows))
+            self._refresh_display_contexts()
+
+    def _on_queue_edit_translation(self, row: int) -> None:
+        ctx = self._track_ctx_at_row(row)
+        source_key = self._queue_source_key_from_context(ctx)
+        if source_key is None:
             return
 
-        changed = show_pronunciation_bootstrap_dialog(
-            parent=self,
-            selected_items=selected_items,
+        current_translation = str(ctx.get("snapshot_translation") or "").strip()
+        new_translation, ok = QInputDialog.getText(
+            self,
+            "Edit Translation",
+            "Translation:",
+            text=current_translation,
         )
-        if not changed:
+        if not ok:
             return
 
-        self._mark_queue_sources_stale(self._source_keys_from_rows(rows))
+        translation_value = (new_translation or "").strip()
+        if translation_value == current_translation:
+            return
+
+        if not self._save_source_translation(source_key, translation_value):
+            return
+
+        self._apply_queue_translation_snapshot(source_key, translation_value)
         self._refresh_display_contexts()
+        self._refresh_queue()
+
+    def _on_queue_clear_translation(self, rows: List[int]) -> None:
+        source_keys = []
+        for row in rows:
+            key = self._queue_source_key_from_context(self._track_ctx_at_row(row))
+            if key is not None:
+                source_keys.append(key)
+        if not source_keys:
+            return
+        unique_keys = sorted(set(source_keys))
+        reply = QMessageBox.question(
+            self,
+            "Clear Translation",
+            f"Clear translation for {len(unique_keys)} selected source row(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        success = 0
+        failed = 0
+        for source_key in unique_keys:
+            if self._save_source_translation(source_key, ""):
+                success += 1
+                self._apply_queue_translation_snapshot(source_key, "")
+            else:
+                failed += 1
+
+        self._refresh_display_contexts()
+        self._refresh_queue()
+        if failed:
+            QMessageBox.warning(
+                self,
+                "Clear Translation",
+                f"Cleared: {success}\nFailed: {failed}",
+            )
+
+    def _save_source_translation(
+        self,
+        source_key: Tuple[str, int, Optional[int]],
+        translation_value: str,
+    ) -> bool:
+        from datetime import datetime
+
+        from sqlalchemy import select
+
+        from app.domain.normalization.normalizer import normalize_for_tm
+        from app.infra.db_retry import with_retry_on_locked
+        from app.infra.sa_models import Lemma, TMEntry, TermCluster
+        from app.services.db_service import DBService
+        from app.services.project_service import ProjectService
+        from app.services.tm_global_service import TMGlobalService
+
+        kind, source_id, project_id = source_key
+        row = next(iter(self._rows_for_source_keys([source_key])), None)
+        if row is None:
+            return False
+        ctx = self._track_ctx_at_row(row)
+        src_text = str(
+            ctx.get("snapshot_hebrew") or (self._track_at_row(row) or {}).get("label") or ""
+        ).strip()
+        if not src_text:
+            return False
+
+        kind_tm = {"term": "term_cluster", "sentence": "surface", "lemma": "lemma"}.get(kind)
+        if not kind_tm:
+            return False
+
+        with DBService.get_instance().get_session() as session:
+            src_lang = str(ctx.get("src_lang") or "he").strip() or "he"
+            tgt_lang = str(ctx.get("tgt_lang") or "ru").strip() or "ru"
+            if project_id is not None:
+                try:
+                    project = ProjectService().get_project(session, int(project_id))
+                except Exception:
+                    project = None
+                if project:
+                    src_lang = str(getattr(project, "src_lang", "") or src_lang)
+                    tgt_lang = str(getattr(project, "tgt_lang", "") or tgt_lang)
+
+            src_norm = normalize_for_tm(src_lang, src_text, kind_tm).norm
+            if not src_norm:
+                return False
+
+            stmt = select(TMEntry).where(
+                TMEntry.project_id == project_id,
+                TMEntry.kind == kind_tm,
+                TMEntry.src_norm == src_norm,
+            )
+            existing = session.execute(stmt).scalar_one_or_none()
+
+            tm_entry = existing
+            if existing:
+                existing.translation = translation_value
+                existing.status = "approved"
+                existing.origin = "user_edit"
+                existing.updated_at = datetime.now()
+            else:
+                source_ref = {
+                    "lemma": "audio_player_inline_edit",
+                    "term_cluster": "audio_player_inline_edit",
+                    "surface": f"sentence:{source_id}",
+                }.get(kind_tm, "audio_player_inline_edit")
+                lemma_id = source_id if kind_tm == "lemma" else None
+                cluster_id = source_id if kind_tm == "term_cluster" else None
+                is_noise = 0
+                noise_reason = None
+                if kind_tm == "lemma":
+                    lemma = session.execute(
+                        select(Lemma).where(Lemma.lemma_id == source_id)
+                    ).scalar_one_or_none()
+                    if lemma is not None:
+                        is_noise = lemma.is_noise if lemma.is_noise is not None else 0
+                        noise_reason = lemma.noise_reason
+                elif kind_tm == "term_cluster":
+                    cluster = session.execute(
+                        select(TermCluster).where(TermCluster.cluster_id == source_id)
+                    ).scalar_one_or_none()
+                    if cluster is not None:
+                        is_noise = cluster.is_noise if cluster.is_noise is not None else 0
+                        noise_reason = cluster.noise_reason
+
+                tm_entry = TMEntry(
+                    project_id=project_id,
+                    kind=kind_tm,
+                    src_lang=src_lang,
+                    tgt_lang=tgt_lang,
+                    src_text=src_text,
+                    src_norm=src_norm,
+                    translation=translation_value,
+                    status="approved",
+                    origin="user_edit",
+                    source_ref=source_ref,
+                    lemma_id=lemma_id,
+                    cluster_id=cluster_id,
+                    is_noise=is_noise,
+                    noise_reason=noise_reason,
+                )
+                session.add(tm_entry)
+
+            def _flush_and_propagate() -> None:
+                session.flush()
+                TMGlobalService().upsert_and_link(
+                    session,
+                    tm_entry,
+                    force_global_update=(translation_value == ""),
+                )
+                session.commit()
+
+            try:
+                with_retry_on_locked(_flush_and_propagate, max_retries=3)
+            except Exception as exc:
+                logger.error("Failed to save translation from audio queue: %s", exc, exc_info=True)
+                QMessageBox.warning(self, "Edit Translation", f"Failed to save translation:\n{exc}")
+                return False
+
+        return True
+
+    def _apply_queue_translation_snapshot(
+        self,
+        source_key: Tuple[str, int, Optional[int]],
+        translation_value: str,
+    ) -> None:
+        rows = self._rows_for_source_keys([source_key])
+        for row in rows:
+            if row < 0 or row >= len(self.player._tracks):  # noqa: SLF001
+                continue
+            track = self.player._tracks[row]  # noqa: SLF001
+            ctx = track.context if isinstance(track.context, dict) else None
+            if not ctx:
+                continue
+            ctx["snapshot_translation"] = translation_value
 
     def _on_queue_edit_pronunciation(self, row: int) -> None:
         from app.domain.normalization.normalizer import normalize_for_tm
@@ -2062,7 +2303,7 @@ class AudioPlayerPanel(QWidget):
             term_pairs: List[tuple] = []
             for t in tracks:
                 ctx = t.context if isinstance(t.context, dict) else {}
-                kind = ctx.get("kind")
+                kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
                 if kind == "sentence":
                     sentence_pairs.append(t)
                 elif kind == "lemma":
@@ -2130,21 +2371,38 @@ class AudioPlayerPanel(QWidget):
         except Exception:
             pass
 
-        # Batch translation
-        text_to_transl: Dict[str, str] = {}
+        # Batch translation (project-aware; queue may contain mixed projects)
+        text_to_transl: Dict[Tuple[int, str], str] = {}
         try:
             from app.services.sentences_workspace_service import SentencesWorkspaceService
             svc = SentencesWorkspaceService()
-            project_id = next(
-                (t.context.get("project_id") for t in tracks if t.context.get("project_id")), None
-            )
-            texts = [v for v in sid_to_text.values() if v]
-            if project_id and texts:
+            project_to_texts: Dict[int, List[str]] = {}
+            sid_to_project: Dict[int, int] = {}
+            for t in tracks:
+                sid = t.context.get("source_id")
+                project_id = t.context.get("project_id")
+                if sid is None or project_id is None:
+                    continue
+                try:
+                    sid_int = int(sid)
+                    project_id_int = int(project_id)
+                except (TypeError, ValueError):
+                    continue
+                sid_to_project[sid_int] = project_id_int
+            for sid, text in sid_to_text.items():
+                if not text:
+                    continue
+                project_id = sid_to_project.get(sid)
+                if project_id is None:
+                    continue
+                project_to_texts.setdefault(project_id, []).append(text)
+
+            for project_id, texts in project_to_texts.items():
                 raw = svc._batch_get_translations(session, project_id, "he", texts)
                 for txt in texts:
                     norm = svc._norm("he", txt)
                     if norm in raw:
-                        text_to_transl[txt] = raw[norm][0]
+                        text_to_transl[(project_id, txt)] = raw[norm][0]
         except Exception:
             pass
 
@@ -2160,14 +2418,29 @@ class AudioPlayerPanel(QWidget):
                 t.context["snapshot_source_label"] = source
                 changed = True
             niqqud = sid_to_niqqud.get(sid)
-            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+            if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
                 t.context["snapshot_niqqud"] = niqqud
                 changed = True
-            text = sid_to_text.get(sid, "")
-            transl = text_to_transl.get(text) if text else None
-            if transl and t.context.get("snapshot_translation") != transl:
-                t.context["snapshot_translation"] = transl
+            elif niqqud is None and (t.context.get("snapshot_niqqud") or "") != "":
+                t.context["snapshot_niqqud"] = ""
                 changed = True
+            text = sid_to_text.get(sid, "")
+            if text:
+                project_id = t.context.get("project_id")
+                transl_key = None
+                try:
+                    if project_id is not None:
+                        transl_key = (int(project_id), text)
+                except (TypeError, ValueError):
+                    transl_key = None
+                transl = text_to_transl.get(transl_key) if transl_key else None
+                if transl_key in text_to_transl:
+                    if t.context.get("snapshot_translation") != transl:
+                        t.context["snapshot_translation"] = transl
+                        changed = True
+                elif (t.context.get("snapshot_translation") or "") != "":
+                    t.context["snapshot_translation"] = ""
+                    changed = True
             if changed:
                 updated += 1
         return updated
@@ -2223,8 +2496,8 @@ class AudioPlayerPanel(QWidget):
                     .order_by(_TM.status.desc())
                 ).all()
                 for norm, transl in tm_rows:
-                    if norm not in norm_to_transl and transl:
-                        norm_to_transl[norm] = transl
+                    if norm not in norm_to_transl:
+                        norm_to_transl[norm] = transl or ""
         except Exception:
             pass
 
@@ -2237,12 +2510,19 @@ class AudioPlayerPanel(QWidget):
                 t.context["snapshot_source_label"] = "Dictionary"
                 changed = True
             niqqud = norm_to_niqqud.get(norm)
-            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+            if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
                 t.context["snapshot_niqqud"] = niqqud
                 changed = True
+            elif niqqud is None and (t.context.get("snapshot_niqqud") or "") != "":
+                t.context["snapshot_niqqud"] = ""
+                changed = True
             transl = norm_to_transl.get(norm)
-            if transl and t.context.get("snapshot_translation") != transl:
-                t.context["snapshot_translation"] = transl
+            if norm in norm_to_transl:
+                if t.context.get("snapshot_translation") != transl:
+                    t.context["snapshot_translation"] = transl
+                    changed = True
+            elif (t.context.get("snapshot_translation") or "") != "":
+                t.context["snapshot_translation"] = ""
                 changed = True
             if changed:
                 updated += 1
@@ -2296,8 +2576,8 @@ class AudioPlayerPanel(QWidget):
                     .order_by(_TM.status.desc())
                 ).all()
                 for norm, transl in tm_rows:
-                    if norm not in norm_to_transl and transl:
-                        norm_to_transl[norm] = transl
+                    if norm not in norm_to_transl:
+                        norm_to_transl[norm] = transl or ""
         except Exception:
             pass
 
@@ -2310,12 +2590,19 @@ class AudioPlayerPanel(QWidget):
                 t.context["snapshot_source_label"] = "Terms"
                 changed = True
             niqqud = norm_to_niqqud.get(norm)
-            if niqqud and t.context.get("snapshot_niqqud") != niqqud:
+            if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
                 t.context["snapshot_niqqud"] = niqqud
                 changed = True
+            elif niqqud is None and (t.context.get("snapshot_niqqud") or "") != "":
+                t.context["snapshot_niqqud"] = ""
+                changed = True
             transl = norm_to_transl.get(norm)
-            if transl and t.context.get("snapshot_translation") != transl:
-                t.context["snapshot_translation"] = transl
+            if norm in norm_to_transl:
+                if t.context.get("snapshot_translation") != transl:
+                    t.context["snapshot_translation"] = transl
+                    changed = True
+            elif (t.context.get("snapshot_translation") or "") != "":
+                t.context["snapshot_translation"] = ""
                 changed = True
             if changed:
                 updated += 1

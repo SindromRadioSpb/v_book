@@ -24,6 +24,8 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QAbstractItemView,
     QMenu,
+    QInputDialog,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QAction
@@ -519,6 +521,13 @@ class SentencesView(QWidget):
         tr_action = menu.addAction(f"Translate Selected ({n})...")
         tr_action.triggered.connect(self.on_batch_translate)
 
+        edit_tr_action = menu.addAction("Edit Translation...")
+        edit_tr_action.setEnabled(n == 1)
+        edit_tr_action.triggered.connect(self.on_edit_translation_selected)
+
+        clear_tr_action = menu.addAction(f"Clear Translation ({n})...")
+        clear_tr_action.triggered.connect(self.on_clear_translation_selected)
+
         audio_action = menu.addAction(f"Generate Audio ({n})...")
         audio_action.triggered.connect(self.on_generate_audio)
 
@@ -682,6 +691,115 @@ class SentencesView(QWidget):
         worker.start()
         self._batch_audio_worker = worker
 
+    def on_edit_translation_selected(self):
+        """Edit translation for one selected sentence (manual TM surface write)."""
+        selected = self._get_selected_dtos()
+        if len(selected) != 1:
+            return
+        dto = selected[0]
+        current = (dto.translation or "").strip()
+        new_translation, ok = QInputDialog.getText(
+            self,
+            "Edit Translation",
+            "Translation:",
+            text=current,
+        )
+        if not ok:
+            return
+        value = (new_translation or "").strip()
+        if value == current:
+            return
+        try:
+            with self.db_service.get_session() as session:
+                self._upsert_sentence_translation(session, dto=dto, translation=value)
+                session.commit()
+            self._reload()
+        except Exception as e:
+            logger.error("Failed to edit sentence translation: %s", e, exc_info=True)
+            show_error(self, "Save Error", f"Failed to save translation:\n{e}")
+
+    def on_clear_translation_selected(self):
+        """Clear translation for selected sentence rows."""
+        selected = self._get_selected_dtos()
+        if not selected:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear Translation",
+            f"Clear translation for {len(selected)} selected sentence(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with self.db_service.get_session() as session:
+                for dto in selected:
+                    self._upsert_sentence_translation(session, dto=dto, translation="")
+                session.commit()
+            self._reload()
+            show_info(self, "Clear Translation", f"Cleared translation for {len(selected)} sentence(s).")
+        except Exception as e:
+            logger.error("Failed to clear sentence translation: %s", e, exc_info=True)
+            show_error(self, "Save Error", f"Failed to clear translation:\n{e}")
+
+    def _upsert_sentence_translation(self, session, *, dto: SentenceDTO, translation: str) -> None:
+        """Upsert TM kind=surface for sentence row and propagate to tm_global."""
+        from datetime import datetime
+
+        from sqlalchemy import select
+
+        from app.infra.db_retry import with_retry_on_locked
+        from app.infra.sa_models import TMEntry
+        from app.services.tm_global_service import TMGlobalService
+
+        src_lang = self._get_src_lang()
+        tgt_lang = self._get_tgt_lang()
+        src_norm = SentencesWorkspaceService._norm(src_lang, dto.text)
+        if not src_norm:
+            raise ValueError("Cannot save translation: invalid source norm")
+
+        stmt = select(TMEntry).where(
+            TMEntry.project_id == self.project_id,
+            TMEntry.kind == "surface",
+            TMEntry.src_norm == src_norm,
+        )
+        existing = session.execute(stmt).scalar_one_or_none()
+
+        value = (translation or "").strip()
+        tm_entry = existing
+        if existing:
+            existing.translation = value
+            existing.status = "approved"
+            existing.origin = "user_edit"
+            existing.source_ref = f"sentence:{dto.sentence_id}"
+            existing.updated_at = datetime.now()
+        else:
+            tm_entry = TMEntry(
+                project_id=self.project_id,
+                kind="surface",
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+                src_text=dto.text,
+                src_norm=src_norm,
+                translation=value,
+                status="approved",
+                origin="user_edit",
+                source_ref=f"sentence:{dto.sentence_id}",
+                is_noise=0,
+            )
+            session.add(tm_entry)
+
+        def _flush_and_propagate() -> None:
+            session.flush()
+            TMGlobalService().upsert_and_link(
+                session,
+                tm_entry,
+                force_global_update=(value == ""),
+            )
+
+        with_retry_on_locked(_flush_and_propagate, max_retries=3)
+
     def on_pronunciation_bootstrap(self):
         """Run pronunciation bootstrap for selected (or all) sentences."""
         from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
@@ -823,7 +941,7 @@ class SentencesView(QWidget):
         items = self._selected_audio_items()
         if not items:
             return
-        self._play_audio_items(items, play_mode="enqueue")
+        self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
 
     def on_audio_cell_play_clicked(self, index):
         """Handle in-cell play button click (AudioPlayDelegate callback)."""
@@ -834,8 +952,21 @@ class SentencesView(QWidget):
         src_lang = self._get_src_lang()
         norm = SentencesWorkspaceService._norm(src_lang, dto.text)
         self._play_audio_items(
-            [{"src_lang": src_lang, "src_norm": norm, "src_text": dto.text}],
+            [
+                {
+                    "src_lang": src_lang,
+                    "src_norm": norm,
+                    "src_text": dto.text,
+                    "kind": "sentence",
+                    "source_id": int(dto.sentence_id),
+                    "project_id": self.project_id,
+                    "source_label": dto.doc_name or "Sentences",
+                    "translation": dto.translation or "",
+                    "pronunciation_text": dto.pronunciation_text or "",
+                }
+            ],
             play_mode="enqueue",
+            start_immediately=True,
         )
 
     def _get_src_lang(self) -> str:
@@ -848,6 +979,16 @@ class SentencesView(QWidget):
         except Exception:
             return "he"
 
+    def _get_tgt_lang(self) -> str:
+        """Return project target language, defaulting to 'ru'."""
+        try:
+            from app.services.project_service import ProjectService
+            with self.db_service.get_session() as session:
+                proj = ProjectService().get_project(session, self.project_id)
+                return proj.tgt_lang if proj else "ru"
+        except Exception:
+            return "ru"
+
     def _selected_audio_items(self) -> list:
         """Build audio item dicts for all selected rows."""
         selected = self._get_selected_dtos()
@@ -859,13 +1000,18 @@ class SentencesView(QWidget):
                 "src_lang": src_lang,
                 "src_norm": SentencesWorkspaceService._norm(src_lang, dto.text),
                 "src_text": dto.text,
+                "kind": "sentence",
+                "source_id": int(dto.sentence_id),
+                "project_id": self.project_id,
+                "source_label": dto.doc_name or "Sentences",
+                "translation": dto.translation or "",
+                "pronunciation_text": dto.pronunciation_text or "",
             }
             for dto in selected
         ]
 
-    def _play_audio_items(self, items: list, *, play_mode: str) -> None:
+    def _play_audio_items(self, items: list, *, play_mode: str, start_immediately: bool = False) -> None:
         """Resolve and play audio files for given items (same pattern as all other views)."""
-        from PyQt6.QtWidgets import QMessageBox
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(
@@ -882,12 +1028,42 @@ class SentencesView(QWidget):
                 str((row[1] or {}).get("src_text") or row[0].stem)
                 for row in ready_items
             ]
+            contexts = []
+            for _, item in ready_items:
+                payload = item or {}
+                contexts.append(
+                    {
+                        "snapshot_hebrew": str(payload.get("src_text") or ""),
+                        "snapshot_niqqud": str(
+                            payload.get("pronunciation_text")
+                            or payload.get("snapshot_niqqud")
+                            or payload.get("niqqud")
+                            or ""
+                        ),
+                        "snapshot_translation": str(
+                            payload.get("translation")
+                            or payload.get("snapshot_translation")
+                            or ""
+                        ),
+                        "snapshot_source_label": str(
+                            payload.get("source_label")
+                            or payload.get("snapshot_source_label")
+                            or "Sentences"
+                        ),
+                        "kind": payload.get("kind"),
+                        "source_id": payload.get("source_id"),
+                        "project_id": payload.get("project_id"),
+                    }
+                )
             self.audio_playback_service.launch_audio_files(
-                paths, labels=labels, play_mode=play_mode
+                paths,
+                labels=labels,
+                play_mode=play_mode,
+                contexts=contexts,
+                start_immediately=start_immediately,
             )
         except Exception as e:
             logger.error("Failed to play audio: %s", e, exc_info=True)
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
     # ------------------------------------------------------------------

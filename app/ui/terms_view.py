@@ -1055,7 +1055,7 @@ class TermsView(QWidget):
         items = self._selected_audio_items()
         if not items:
             return
-        self._play_audio_items(items, play_mode="enqueue")
+        self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
 
     def on_audio_cell_play_clicked(self, index: QModelIndex):
         """Delegate callback: play one row from Audio column."""
