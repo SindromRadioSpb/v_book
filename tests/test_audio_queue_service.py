@@ -124,6 +124,31 @@ def test_find_stale_by_source(session, svc):
     assert set(found) == set(ids)
 
 
+def test_mark_stale_by_source(session, svc):
+    specs = [
+        AudioItemSpec(kind="term", source_id=7, project_id=3, snapshot_hebrew="A"),
+        AudioItemSpec(kind="term", source_id=7, project_id=3, snapshot_hebrew="B"),
+        AudioItemSpec(kind="term", source_id=8, project_id=3, snapshot_hebrew="C"),
+    ]
+    ids = svc.add_to_queue(session, specs)
+    session.commit()
+
+    updated = svc.mark_stale_by_source(
+        session,
+        kind="term",
+        source_id=7,
+        project_id=3,
+    )
+    session.commit()
+
+    assert updated == 2
+    rows = svc.get_queue(session)
+    stale_flags = {row.item_id: row.is_stale for row in rows}
+    assert stale_flags[ids[0]] is True
+    assert stale_flags[ids[1]] is True
+    assert stale_flags[ids[2]] is False
+
+
 def test_create_and_get_playlist(session, svc):
     pl_id = svc.create_playlist(session, "My Playlist")
     session.commit()

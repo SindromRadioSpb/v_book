@@ -215,3 +215,39 @@ def test_go_to_source_disabled_for_multi_selection(qtbot, tmp_path):
     sel.select(idx1, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
 
     assert panel.goto_source_btn.isEnabled() is False
+
+
+def test_play_from_row_blocks_stale_without_fresh_audio(monkeypatch, qtbot, tmp_path):
+    panel, player, audio_file = _build_panel(tmp_path)
+    qtbot.addWidget(panel)
+
+    player.play_paths(
+        [audio_file],
+        labels=["first"],
+        play_mode="interrupt",
+        contexts=[
+            {
+                "kind": "lemma",
+                "source_id": 11,
+                "project_id": 5,
+                "snapshot_hebrew": "שלום",
+                "is_stale": True,
+            }
+        ],
+    )
+    player.stop(clear_queue=False)
+    player._tracks[0].path = Path("")  # noqa: SLF001
+    player._tracks[0].context["audio_status"] = "stale"  # noqa: SLF001
+
+    shown_titles: list[str] = []
+
+    def _fake_info(_parent, title, _msg):
+        shown_titles.append(str(title))
+        return 0
+
+    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", _fake_info)
+
+    panel._play_from_row(0)
+
+    assert shown_titles
+    assert shown_titles[0] == "Audio Stale"
