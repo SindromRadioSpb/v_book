@@ -1042,77 +1042,93 @@ class AudioPlayerPanel(QWidget):
         """
         if not new_item_ids:
             return  # guard: no new rows to load (covers stale-DB and empty run)
+
+        # ── Step 1: Load candidate DTOs from DB (fatal on failure) ───────────
+        # get_queue() returns plain DTOs, safe to use after session closes.
+        candidate_items: list = []
         try:
             from app.services.db_service import DBService
             from app.services.audio_queue_service import AudioQueueService
+            db = DBService.get_instance()
+            id_set = set(new_item_ids)
+            with db.get_session() as session:
+                all_db_items = AudioQueueService().get_queue(session)
+            candidate_items = [item for item in all_db_items if item.item_id in id_set]
+            logger.debug("_load_db_queue_to_player: %d candidates found", len(candidate_items))
+        except Exception as exc:
+            logger.warning("_load_db_queue_to_player: DB load failed: %s", exc, exc_info=True)
+            return
+
+        if not candidate_items:
+            return
+
+        # ── Step 2: Best-effort path resolution via AudioAsset norm_text ─────
+        # Non-fatal: if this fails items are still added (just without a resolved path).
+        resolved_paths: Dict[int, Path] = {}
+        try:
+            from app.services.db_service import DBService as _DBService
             from app.infra.sa_models import AudioAsset as _AudioAsset
             from app.services.audio_playback_service import _get_app_dir
             from sqlalchemy import select as _sa_select, desc as _sa_desc
-            db = DBService.get_instance()
-            id_set = set(new_item_ids)
-            resolved_paths: Dict[int, Path] = {}
-            with db.get_session() as session:
-                all_db_items = AudioQueueService().get_queue(session)
-                # Filter to only rows inserted by THIS worker run
-                candidate_items = [item for item in all_db_items if item.item_id in id_set]
-                # Batch-resolve audio paths via (lang, norm_text) lookup in AudioAsset.
-                # Workers insert queue items with audio_status="unknown" / audio_asset_id=None,
-                # so we cannot use audio_asset_id here — instead normalize snapshot_hebrew and
-                # look up the most-recent ready asset with matching norm_text.
-                item_norms: List[tuple] = []  # (item_id, norm_text)
-                _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
-                for item in candidate_items:
-                    if not item.snapshot_hebrew:
-                        continue
-                    try:
-                        from app.domain.normalization.normalizer import normalize_for_tm as _ntm
-                        kind_str = _kind_map.get(item.kind, item.kind)
-                        norm = _ntm("he", item.snapshot_hebrew, kind_str).norm or item.snapshot_hebrew
-                    except Exception:
-                        norm = item.snapshot_hebrew
-                    item_norms.append((item.item_id, norm))
-                if item_norms:
-                    all_norms = list({norm for _, norm in item_norms})
-                    app_dir = _get_app_dir()
+            _db = _DBService.get_instance()
+            _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
+            item_norms: List[tuple] = []  # (item_id, norm_text)
+            for item in candidate_items:
+                if not item.snapshot_hebrew:
+                    continue
+                try:
+                    from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+                    kind_str = _kind_map.get(item.kind, item.kind)
+                    norm = _ntm("he", item.snapshot_hebrew, kind_str).norm or item.snapshot_hebrew
+                except Exception:
+                    norm = item.snapshot_hebrew
+                item_norms.append((item.item_id, norm))
+            if item_norms:
+                all_norms = list({norm for _, norm in item_norms})
+                app_dir = _get_app_dir()
+                with _db.get_session() as session:
                     asset_rows = session.execute(
                         _sa_select(_AudioAsset.norm_text, _AudioAsset.audio_rel_path)
                         .where(_AudioAsset.lang == "he")
                         .where(_AudioAsset.norm_text.in_(all_norms))
                         .where(_AudioAsset.asset_status == "ready")
-                        .where(_AudioAsset.audio_rel_path.is_not(None))
+                        .where(_AudioAsset.audio_rel_path.isnot(None))
                         .order_by(_sa_desc(_AudioAsset.updated_at))
                     ).all()
-                    norm_to_path: Dict[str, Path] = {}
-                    for norm_text, rel_path in asset_rows:
-                        if norm_text not in norm_to_path and rel_path:
-                            rel = Path(str(rel_path))
-                            if not rel.is_absolute() and ".." not in rel.parts:
-                                abs_path = app_dir / rel
-                                if abs_path.exists():
-                                    norm_to_path[norm_text] = abs_path
-                    for item_id, norm in item_norms:
-                        if norm in norm_to_path:
-                            resolved_paths[item_id] = norm_to_path[norm]
-            # Dedup by (kind, source_id) — prevents same source content appearing twice
-            existing_source_keys: set = {
-                (t.context.get("kind"), t.context.get("source_id"))
-                for t in self.player._tracks  # noqa: SLF001
-                if isinstance(t.context, dict)
-                and t.context.get("kind") is not None
-                and t.context.get("source_id") is not None
-            }
-            new_items = [
-                item for item in candidate_items
-                if (item.kind, item.source_id) not in existing_source_keys
-            ]
-            if new_items:
-                self.player.enqueue_from_db(new_items, mode=add_mode, resolved_paths=resolved_paths)
-                logger.debug(
-                    "_load_db_queue_to_player: loaded %d/%d items (%d with audio path)",
-                    len(new_items), len(candidate_items), len(resolved_paths),
-                )
-        except Exception as exc:
-            logger.warning("_load_db_queue_to_player failed: %s", exc)
+                norm_to_path: Dict[str, Path] = {}
+                for norm_text, rel_path in asset_rows:
+                    if norm_text not in norm_to_path and rel_path:
+                        rel = Path(str(rel_path))
+                        if not rel.is_absolute() and ".." not in rel.parts:
+                            abs_path = app_dir / rel
+                            if abs_path.exists():
+                                norm_to_path[norm_text] = abs_path
+                for item_id, norm in item_norms:
+                    if norm in norm_to_path:
+                        resolved_paths[item_id] = norm_to_path[norm]
+        except Exception as path_exc:
+            logger.debug("_load_db_queue_to_player: path resolution skipped (%s)", path_exc)
+
+        # ── Step 3: Dedup + enqueue (always runs if candidates exist) ─────────
+        # Dedup by (kind, source_id) — prevents same source content appearing twice
+        # when "Add All" is clicked multiple times.
+        existing_source_keys: set = {
+            (t.context.get("kind"), t.context.get("source_id"))
+            for t in self.player._tracks  # noqa: SLF001
+            if isinstance(t.context, dict)
+            and t.context.get("kind") is not None
+            and t.context.get("source_id") is not None
+        }
+        new_items = [
+            item for item in candidate_items
+            if (item.kind, item.source_id) not in existing_source_keys
+        ]
+        if new_items:
+            self.player.enqueue_from_db(new_items, mode=add_mode, resolved_paths=resolved_paths)
+            logger.debug(
+                "_load_db_queue_to_player: loaded %d/%d items (%d with audio path)",
+                len(new_items), len(candidate_items), len(resolved_paths),
+            )
 
     def _on_add_all_error(self, msg: str, progress_dialog) -> None:
         progress_dialog.set_stage(f"Error: {msg[:80]}")

@@ -221,3 +221,78 @@ def test_enqueue_from_db_does_not_start_playback(service):
     service.enqueue_from_db(dtos, mode="append")
     # _current should remain None (no auto-start on db load)
     assert service._current is None
+
+
+# -- resolved_paths: path propagated correctly --------------------------------
+
+
+def test_enqueue_from_db_with_resolved_path(service, tmp_audio):
+    """enqueue_from_db with resolved_paths={item_id: path} → track.path == path and exists."""
+    dto = _FakeDTO(77, "שלום")
+    real_path = tmp_audio[0]
+    n = service.enqueue_from_db([dto], mode="append", resolved_paths={77: real_path})
+    assert n == 1
+    track = service._tracks[0]
+    assert track.path == real_path
+    assert track.path.exists()
+
+
+def test_enqueue_from_db_unresolved_item_gets_empty_path(service, tmp_audio):
+    """Items without a matching resolved_path get Path("") (missing audio)."""
+    dto = _FakeDTO(99, "בית")
+    # Only item 77 has a path; item 99 has none
+    n = service.enqueue_from_db([dto], mode="append", resolved_paths={77: tmp_audio[0]})
+    assert n == 1
+    assert service._tracks[0].path == Path("")
+
+
+# -- jump_to_index ------------------------------------------------------------
+
+
+def test_jump_to_index_sets_current(service, tmp_audio):
+    """jump_to_index(i) sets _current_index=i and _current=tracks[i]."""
+    _inject_tracks(service, tmp_audio[:4])
+    with patch.object(service, "_begin_play_current"):
+        service.jump_to_index(2)
+    assert service._current_index == 2
+    assert service._current is service._tracks[2]
+
+
+def test_jump_to_index_out_of_bounds_is_noop(service, tmp_audio):
+    """jump_to_index with out-of-range index does nothing."""
+    _inject_tracks(service, tmp_audio[:2])
+    service._current_index = 0
+    service.jump_to_index(5)   # beyond end
+    service.jump_to_index(-1)  # below 0
+    assert service._current_index == 0
+
+
+# -- Full Add-All scenario: enqueue with path → jump_to plays correct track ---
+
+
+def test_add_all_enqueue_then_jump_plays_correct_track(service, tmp_audio):
+    """Simulate Add All: enqueue two items with resolved paths, then jump_to plays
+    the right track.  This confirms the 'Add All → Play from Status column' flow.
+    """
+    dto_a = _FakeDTO(10, "שלום")
+    dto_b = _FakeDTO(11, "עולם")
+    path_a = tmp_audio[0]
+    path_b = tmp_audio[1]
+
+    # Both items have resolved audio paths
+    service.enqueue_from_db(
+        [dto_a, dto_b],
+        mode="append",
+        resolved_paths={10: path_a, 11: path_b},
+    )
+    assert len(service._tracks) == 2
+    assert service._tracks[0].path == path_a
+    assert service._tracks[1].path == path_b
+
+    # Play track 1 via jump_to_index (simulating Status-column ▶ click)
+    with patch.object(service, "_begin_play_current"):
+        service.jump_to_index(1)
+
+    assert service._current is service._tracks[1]
+    assert service._current.path == path_b
+    assert service._current.path.exists()
