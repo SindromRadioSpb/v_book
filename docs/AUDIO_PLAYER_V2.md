@@ -1,195 +1,116 @@
-# Audio Player v2 — Usage Guide
+# Audio Player v2 - Usage Guide
 
-**Task:** 25 — Audio Player v2 (Premium)
-**Date:** 2026-02-23
-
----
+Task: 25 - Audio Player v2 (Premium)  
+Last verified against code: 2026-02-23
 
 ## Overview
 
-The Audio Player v2 transforms the minimal v1 list-player into a premium
-learning tool for Hebrew audio review.  Key improvements:
+Audio Player v2 is now the in-app playback surface for Hebrew study flow:
 
-| Feature | v1 | v2 |
-|---------|----|----|
-| Queue | Destructive (items removed on play) | **Non-destructive** (cursor advances, items stay) |
-| Columns | Label only | Hebrew · Niqqud · Translation · Source · Status · Plays |
-| Speed | None | **On-the-fly** 0.25×–4.0×, persisted |
-| Repeat | None | **None / One / All** + repeat count |
-| Auto-pause | None | ✓ after each item |
-| Previous track | None | ✓ J hotkey |
-| History | None | **Session history** in History tab |
-| Playlists | None | DB-backed (PATCH-04+) |
-| Column toggles | None | ✓ gear menu, persisted |
+- Non-destructive queue (items stay in queue after playback).
+- Runtime playback controls (speed, repeat, auto-pause, gap, cadence presets).
+- Queue table with user-togglable columns: Hebrew, Niqqud, Translation, Source, Status, Plays.
+- Add All flow with SQL chunking + worker + V3 progress dialog.
+- Row-level play via delegate in `Status` column.
 
----
+## Open the panel
 
-## Opening the Player
+- Menu: `View -> Toggle Audio Player`
+- Shortcut: `Ctrl+Alt+L`
+- Dock: bottom by default, resizable and dockable.
 
-- **Menu:** View → Toggle Audio Player
-- **Shortcut:** `Ctrl+Alt+L`
-- **Dock:** Bottom (resizable; can be dragged to Right)
+## Queue behavior (confirmed)
 
----
+- Queue is non-destructive (`AudioPlayerService._tracks` is not popped on play).
+- Current row is represented by `_current_index`.
+- `Previous` (`J`) moves back to prior queue item.
+- Clicking row play in a source table appends to queue and starts that clicked item immediately.
+- `Plays` starts at `0` for both:
+  - DB-loaded Add All rows.
+  - Direct `Play Audio` row actions from tables.
+- `Plays` increments on each completed item playback.
 
-## Queue Semantics
+## Add All behavior (confirmed)
 
-### What "non-destructive" means
+- `Add All...` opens source picker (project, kind, document filter for sentences, add mode).
+- Population runs in `AudioQueuePopulateWorker` with `BatchProgressDialogV3`.
+- No UI selection expansion is used for all rows; IDs are fetched via SQL.
+- After insertion:
+  - rows are synced into in-memory queue by `new_item_ids` only,
+  - resolved audio paths are bound using:
+    1. direct `audio_asset_id`,
+    2. fallback lookup by normalized `norm_text`,
+  - existing unresolved duplicate tracks are upgraded in place.
+- Display overlays (Niqqud / Translation / Source) are refreshed in batch right after completion.
 
-In v1, each track was **removed** from the queue the moment it started playing
-(`deque.popleft()`). In v2:
+## Playback controls
 
-- All tracks stay in `_tracks: List[AudioTrack]`.
-- A `_current_index: int` cursor points to the track being played.
-- After play, the cursor advances; **nothing is deleted**.
-- You can use **Previous** (J) to replay already-heard items.
-- The queue list always shows **all items** with the current one highlighted in green.
+Transport:
 
-### Queue / Playlist / History (DB layer)
+- `Space` play/pause
+- `J` previous
+- `K` next
+- `Esc` stop (keep queue)
 
-From PATCH-04 onward, the DB tables `audio_queue_item`, `audio_playlist`, and
-`audio_history` store rich snapshots (Hebrew · Niqqud · Translation) and
-survive app restarts.  The in-memory `_tracks` list remains the playback engine
-(the DB layer acts as persistent metadata).
+Runtime controls:
 
----
+- Speed: `0.25x..4.0x`, persisted in `audio/playback/rate`.
+- Repeat: `Off | One | All` plus repeat count for `One`.
+- Auto-pause after each item.
+- Gap between items (ms).
+- Presets:
+  - Normal `200/550/300`
+  - Study `300/800/450`
+  - Fast `100/250/120`
 
-## Playback Controls
+## Queue table
 
-### Transport buttons
+Columns:
 
-| Button | Hotkey | Action |
-|--------|--------|--------|
-| ⏮ | J | Previous track |
-| ▶/⏸ | Space | Play / Pause |
-| ⏭ | K | Next track |
-| ⏹ | Esc | Stop (keep queue) |
+- `#`, `Hebrew`, `Niqqud`, `Translation`, `Source`, `Status`, `Plays`.
 
-### Speed control
+Column visibility:
 
-- Range: **0.25×** to **4.0×**, step 0.1.
-- Changed on-the-fly via `QMediaPlayer.setPlaybackRate()`.
-- **Persisted** to QSettings `audio/playback/rate`.
-- Hotkeys: `+` / `=` speed up; `-` speed down (each step = 0.1×).
+- Toggle via gear menu.
+- Persisted to `audio_player/columns_visible`.
 
-### Repeat modes (R hotkey to cycle)
+Row visuals:
 
-| Mode | Behaviour |
-|------|-----------|
-| **Off** | Queue plays once end-to-end, then stops. |
-| **One** | Current item replays (infinite or N times per `repeat_count`). |
-| **All** | Queue loops back to item 0 at the end. |
+- Current row highlight (green).
+- Stale row highlight (amber).
 
-### Auto-pause
+Context menu (current scope):
 
-When checked, playback **pauses after each item** instead of auto-advancing.
-Press Space or ⏭ to continue.
-
-### Gap between items
-
-Sets the silence between consecutive items (0–3 000 ms).  Updated live.
-
-### Cadence presets
-
-| Preset | Pre-roll | Gap | Post-roll |
-|--------|----------|-----|-----------|
-| Normal | 200 ms | 550 ms | 300 ms |
-| Study  | 300 ms | 800 ms | 450 ms |
-| Fast   | 100 ms | 250 ms | 120 ms |
-
----
-
-## Column Visibility
-
-Click the **⚙** gear button to toggle columns:
-- Niqqud, Translation, Source, Status, Plays
-- Column visibility is persisted to QSettings `audio_player/columns_visible`.
-
----
+- Play from here
+- Remove from Queue
+- Copy Hebrew / Copy Niqqud / Copy Translation
 
 ## Tabs
 
-### Queue tab
+Queue:
 
-Shows **all** items in the current queue.
-- **▶** marker in the `#` column = currently playing.
-- Green row = current track.
-- Yellow/orange row = stale (source text changed since audio was cached).
-- Double-click a row to jump to it.
-- Right-click for context menu: Play from here · Remove · Copy Hebrew/Niqqud/Translation.
+- Fully functional table-based queue.
 
-### Playlists tab
+Playlists:
 
-Named playlists persisted to the `audio_playlist` / `audio_playlist_entry` DB
-tables (from PATCH-04).  Placeholder shown if DB session not available.
+- UI shell exists.
+- Full playlist entry table and CRUD wiring in panel are pending.
 
-### History tab
+History:
 
-Session listen history (last 200 entries, newest at top).  Entries persist
-in the `audio_history` DB table between sessions (from PATCH-04).
+- Session history list (last 200) is shown in panel.
+- DB-backed history exists in service layer but is not yet bound to panel UI.
 
----
+## Current limitations (open items)
 
-## Adding Items to the Queue
+- `Go to Source` button is visible but navigation wiring is pending.
+- Queue context actions from Task 25 PATCH-05 are pending:
+  - Translate/Niqqudize/Regen/Edit Pronunciation/Edit Sentence Niqqud.
+- Playlist and history tabs in panel are not yet fully bound to DB service data.
+- No persisted queue restore on app restart in panel flow yet.
 
-Items are added by selecting rows in any view (Sentences, Dictionary, Terms,
-User Dictionaries) and using **Play Audio Selected** from the context menu or
-toolbar.
+## Technical notes
 
-From PATCH-04 onward, **Add All Filtered (All pages)** will bulk-load the
-entire current filtered view via a background SQL worker with a V3 progress
-dialog (no UI freeze).
-
----
-
-## Go to Source
-
-The **Go to Source** button (enabled when a track with source metadata is
-playing) navigates to the originating row in the correct view
-(Sentences / Dictionary / Terms).
-
----
-
-## Hotkeys Summary
-
-| Key | Action |
-|-----|--------|
-| Space | Play / Pause |
-| J | Previous track |
-| K | Next track |
-| + or = | Speed up 0.1× |
-| - | Speed down 0.1× |
-| R | Cycle repeat mode |
-| Esc | Stop (keep queue) |
-
-Hotkeys are **WidgetWithChildrenShortcut** — active when the Audio Player dock
-has keyboard focus.
-
----
-
-## Technical Notes
-
-### Backend: QMediaPlayer.setPlaybackRate()
-
-Runtime speed is implemented via `QtMultimediaBackend.set_rate()` which calls
-`QMediaPlayer.setPlaybackRate(float)`.  This is available in Qt 6 and requires
-no audio re-generation.  The `speed` column in `AudioAsset` records the speed
-at which TTS was *generated* — that is separate from runtime rate.
-
-### Non-destructive queue implementation
-
-```
-AudioPlayerService._tracks: List[AudioTrack]   # all items (never popped)
-AudioPlayerService._current_index: int          # cursor (-1 = not started)
-AudioPlayerService._current: Optional[AudioTrack]  # item held by backend now
-```
-
-### Repeat-one count
-
-`set_repeat_count(N)` (N > 0): play current item N times before advancing.
-`set_repeat_count(0)`: infinite repeat of current item.
-
-### WAL / DB safety
-
-`AudioQueueService` methods accept an open `Session`; the caller is responsible
-for committing.  All writes use short transactions; no long locks.
+- Runtime speed uses `QMediaPlayer.setPlaybackRate()` through `QtMultimediaBackend.set_rate()`.
+- Generation speed in `audio_asset.speed` is independent from runtime playback rate.
+- Queue state machine and cadence run in the player service; no long operation runs in UI thread.

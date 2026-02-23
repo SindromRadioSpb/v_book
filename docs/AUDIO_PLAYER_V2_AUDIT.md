@@ -1,206 +1,112 @@
-# Audio Player v2 — Codebase Audit
+# Audio Player v2 - Codebase Audit
 
-**Date:** 2026-02-23
-**Task:** Task 25 — Audio Player v2 (Premium)
+Date: 2026-02-23  
+Task: 25 - Audio Player v2 (Premium)
 
----
+## 1) Entry points and architecture
 
-## 1. Current Audio Player UI
+Primary UI panel:
 
-### `app/ui/widgets/audio_player_panel.py` (163 lines)
+- `app/ui/widgets/audio_player_panel.py`
+  - queue table model: `AudioQueueTableModel`
+  - source picker dialog: `AddAllToQueueDialog`
+  - panel widget: `AudioPlayerPanel`
 
-- **Class:** `AudioPlayerPanel(QWidget)` — compact dock widget
-- **Queue display:** `QListWidget` (minimal label display only)
-- **Controls:** Play/Pause, Stop, Next, Clear Queue buttons
-- **Cadence presets:** Normal (200/550/300 ms), Study (300/800/450), Fast (100/250/120)
-- **Hotkeys:** Space=play/pause (WidgetWithChildrenShortcut), Esc=stop
-- **Settings persisted:** `audio/playback/pre_roll_ms`, `audio/playback/gap_ms`, `audio/playback/post_roll_ms`
-- **Connects to:** `AudioPlayerService` signals: `queue_changed`, `now_playing_changed`, `playback_state_changed`, `playback_error`
+Playback engine:
 
-**Gaps:**
-- No speed control
-- No column toggles
-- No Hebrew/Niqqud/Translation display
-- No history or playlists
-- No context menu on queue items
-- No "Add All Filtered" functionality
-- Double-click: removes items before selected to jump to position (hacky)
+- `app/services/audio_player_service.py`
+  - `AudioPlayerService` (singleton)
+  - `AudioTrack`
+  - `QtMultimediaBackend`
 
-### `app/ui/app_window.py` — Dock integration
+Queue/playlist/history persistence service:
 
-- Dock: `audio_player_dock`, `Qt.DockWidgetArea.BottomDockWidgetArea`
-- Action: `premium.audio_player`, title "Toggle Audio Player"
-- Visibility persisted: QSettings `audio_player_dock_visible`
+- `app/services/audio_queue_service.py`
+  - `AudioQueueService`
+  - DTOs and source-link payload
 
----
+Audio path resolver:
 
-## 2. Audio Player Service
+- `app/services/audio_playback_service.py`
+  - `resolve_ready_path()` uses `updated_at DESC, asset_id DESC`
+  - relative-path safety checks enforced
 
-### `app/services/audio_player_service.py` (472 lines)
+Add All worker:
 
-**`AudioTrack` dataclass (L40-55):**
-```python
-path: Path
-label: str = ""
-context: Dict[str, Any] = field(default_factory=dict)
-```
-Minimal — no source reference, no snapshot data, no play count.
+- `app/ui/workers.py`
+  - `AudioQueuePopulateWorker`
+  - SQL ID collection + chunked insert
+  - V3 progress signals
 
-**`AudioBackendBase` (L58-75):** Abstract interface — `play()`, `stop()`, `pause()`, `resume()`.
-Signals: `finished`, `error`, `state_changed`.
-**No `set_rate()` / `get_rate()` method.**
+DB schema:
 
-**`QtMultimediaBackend` (L78-137):**
-- `QMediaPlayer` + `QAudioOutput`
-- **`QMediaPlayer.setPlaybackRate(float)` exists in Qt6 API but is NEVER called**
-- All methods: play, stop, pause, resume (= `_player.play()`)
+- `app/infra/migrations/025_audio_player_v2.sql`
+  - `audio_queue_item`
+  - `audio_playlist`
+  - `audio_playlist_entry`
+  - `audio_history`
 
-**`AudioPlayerService` (L140-471):**
-- Singleton via `get_instance()`
-- Queue: `self._queue: Deque[AudioTrack]`
-- **`_start_next_track()` → `self._queue.popleft()` — DESTRUCTIVE, items removed after playing**
-- Cadence engine: `_pre_timer`, `_gap_timer`, `_post_timer` (QTimer, single-shot)
-- `play_paths()` → enqueue mode or interrupt (clears + replays)
-- No persistence (queue lost on restart)
-- No repeat modes
-- No `previous_track()`
-- Settings read: `audio/playback/pre_roll_ms`, `gap_ms`, `post_roll_ms`, `play_mode`
+## 2) Confirmed implemented behavior
 
----
+Queue and playback:
 
-## 3. Audio Playback Service
+- Non-destructive queue in `AudioPlayerService` (`_tracks` + `_current_index`).
+- Runtime speed control wired to `QMediaPlayer.setPlaybackRate()`.
+- Repeat modes (`none|one|all`) and repeat count.
+- Auto-pause and gap between items.
+- Delegate-based row play in queue `Status` column.
 
-### `app/services/audio_playback_service.py` (142 lines)
+Recent bug-fix coverage already in tests:
 
-- `resolve_ready_paths(session, items)` — queries `AudioAsset` for `asset_status='ready'`
-- `launch_audio_files(paths, labels, play_mode)` — delegates to `AudioPlayerService.play_paths()`
-- Fallback: OS-native player if internal backend unavailable
+- Add All unresolved sentinel (`Path("") -> "."`) correctly treated as `missing`.
+- Add All rerun upgrades unresolved duplicate rows in place.
+- Add All rows with ready assets become playable after DB-to-memory sync.
+- Queue display batch refresh updates Niqqud/Translation/Source.
+- Direct-play rows initialize `play_count=0` and increment on playback.
+- Enqueue with explicit row play starts clicked appended item immediately.
 
----
+## 3) Current panel limitations (confirmed in code)
 
-## 4. Views with Play Audio (all share same pattern)
+- `Go to Source` button is present but not wired to navigation handler.
+- Queue context menu currently includes only:
+  - Play from here
+  - Remove
+  - Copy Hebrew/Niqqud/Translation
+- Playlists tab is a shell (no entry table CRUD wiring in panel).
+- History tab in panel is in-memory session list; DB history service is not yet wired there.
+- Queue DB stats (`mark_played`) are not called by panel playback flow yet.
 
-| View | File | Method |
-|------|------|--------|
-| sentences_view | sentences_view.py | `_selected_audio_items()`, `_play_audio_items()`, `on_play_audio()`, `on_audio_cell_play_clicked()` |
-| dictionary_view | dictionary_view.py | Same pattern |
-| terms_view | terms_view.py | Same pattern |
-| user_dictionaries_view | user_dictionaries_view.py | Same pattern |
-| term_card_view | term_card_view.py | Same pattern |
+## 4) Regression-sensitive zones
 
-**Common pattern:**
-1. Build `items = [{"src_lang": ..., "src_norm": ..., "src_text": ...}]`
-2. `resolve_ready_paths(session, items=items)`
-3. `launch_audio_files(paths, labels, play_mode="enqueue"|"interrupt")`
+- `_load_db_queue_to_player()` path resolution and dedup upgrade logic.
+- `_refresh_display_contexts()` batch enrichment logic (must stay no per-row SQL).
+- `play_paths(..., start_immediately=True)` semantics for row-click UX.
+- Consistency between in-memory queue and persisted queue rows.
 
----
+## 5) Existing automated coverage relevant to Audio Player
 
-## 5. TTS / Audio Cache Model
+Core tests:
 
-### `AudioAsset` ORM (sa_models.py L818-849)
+- `tests/test_audio_player_nondestructive.py`
+- `tests/test_audio_player_queue_engine.py`
+- `tests/test_audio_player_rate.py`
+- `tests/test_audio_player_repeat.py`
+- `tests/test_audio_track_source_url.py`
+- `tests/test_audio_queue_display_resolver.py`
+- `tests/test_audio_queue_populate_worker.py`
+- `tests/test_audio_player_panel_dock_state.py`
+- `tests/test_audio_queue_service.py`
+- `tests/test_audio_player_history.py`
 
-| Column | Type | Notes |
-|--------|------|-------|
-| asset_id | INTEGER PK | |
-| lang | TEXT | e.g. "he" |
-| norm_text | TEXT | normalized source text |
-| voice_id | TEXT | default="default" |
-| speed | FLOAT | default=1.0 (pre-generated at speed, NOT runtime) |
-| provider | TEXT | azure/google/elevenlabs/none |
-| asset_status | TEXT | missing/ready/failed |
-| audio_rel_path | TEXT | relative path in HDLE storage |
-| duration_ms | INTEGER | |
-| sha256 | TEXT | file hash |
-| error_text | TEXT | failure reason |
-| created_at / updated_at | TEXT | ISO UTC |
+## 6) Recommended next implementation slice
 
-**Unique:** (lang, norm_text, voice_id, speed, provider)
+Minimal-risk next slice for premium completion:
 
-> Note: `speed` in AudioAsset means the audio was TTS-generated at that speed. It is NOT runtime playback rate. Runtime rate control requires `QMediaPlayer.setPlaybackRate()`.
-
----
-
-## 6. Edit Dialogs
-
-| Dialog | File | Opens From |
-|--------|------|-----------|
-| `EditPronunciationDialog` | `edit_pronunciation_dialog.py` | dictionary_view.py, terms_view.py context menus |
-| `EditSentenceNiqqudDialog` | `edit_sentence_niqqud_dialog.py` | sentences_view.py `on_edit_niqqud_selected()` |
-
-Both are reusable — can be called from Audio Player context menu.
-
----
-
-## 7. Workers
-
-### Existing Audio Workers (workers.py)
-
-- `UserDictGenerateAudioWorker` — generates TTS for user dictionary scope
-- `BatchGenerateAudioWorker` — generates TTS for explicit item list
-
-**V3 Signal contract (both):**
-```python
-progress = pyqtSignal(int, int)           # (completed, total)
-stats_updated = pyqtSignal(int, int, int) # (succeeded, skipped, failed)
-row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
-stage_updated = pyqtSignal(str)
-finished = pyqtSignal(dict)
-error = pyqtSignal(str)
-paused = pyqtSignal()
-resumed = pyqtSignal()
-```
-
----
-
-## 8. BatchProgressDialogV3
-
-### `app/ui/dialogs/batch_progress_dialog_v3.py`
-
-**Public API for workers:**
-- `update_progress(completed, total)` — progress bar + ETA
-- `update_counts(succeeded, skipped, failed)` — counters
-- `add_recent_item(entity_id, translation, success)` — recent activity deque(maxlen=5)
-- `set_stage(stage)` — current operation label
-- `set_completed()` — final state
-- `accept()` — dismiss the modal (required after set_completed)
-
-**Emits:**
-- `cancel_requested`, `pause_requested`, `resume_requested`
-
----
-
-## 9. Migration Sequence
-
-```
-001–019: various features
-020: pronunciation_entry
-021: audio_usage_tracking
-022: pronunciation_layer_v2
-023: documents_metadata
-024: sentence_pronunciation  ← latest applied
-025: [RESERVED for Audio Player v2]
-```
-
----
-
-## 10. Design Decisions
-
-### Persistence: SQLite (preferred)
-DB tables for Queue/Playlist/History — crash-safe, migrable, testable.
-QSettings for UI state only (column widths, visibility, speed, repeat mode).
-
-### Queue: Non-destructive cursor
-Replace `deque.popleft()` with `List[AudioTrack]` + `_current_index: int`.
-Items stay in queue after playing; cursor advances.
-Back-compat: all existing API (`play_paths`, `clear_queue`, `next_track`, `queue_snapshot`) preserved.
-
-### Playback Rate: QMediaPlayer.setPlaybackRate()
-Qt6 `QMediaPlayer` supports `setPlaybackRate(float)` natively.
-Add `set_rate(rate)` to `AudioBackendBase` + `QtMultimediaBackend`.
-Persist in QSettings `audio/playback/rate`.
-Fallback: if backend unavailable, rate setting is a no-op.
-
-### Source References
-`AudioQueueItem` stores `(kind, source_id, project_id)` as the source reference
-plus `snapshot_*` fields for display without DB round-trips.
-`resolve_source_link()` maps `(kind, source_id)` → `{view_name, row_id}` for "Go to source".
+- Wire `Go to Source` using `AudioQueueService.resolve_source_link()`.
+- Wire DB-backed `mark_played()` updates from playback completion.
+- Promote playlists/history tabs from shell/session to DB-backed UI.
+- Add PATCH-05 queue context actions via workers + V3 progress:
+  - Translate
+  - Niqqudize
+  - Regenerate audio
+  - Edit Pronunciation / Edit Sentence Niqqud
