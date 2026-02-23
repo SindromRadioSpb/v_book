@@ -26,7 +26,16 @@ class _SettingsStub:
     def get_string(self, key: str, default: str = "") -> str:
         return str(self._data.get(key, default))
 
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        return bool(self._data.get(key, default))
+
+    def get_json(self, key: str, default=None):
+        return self._data.get(key, default)
+
     def set_value(self, key: str, value):
+        self._data[key] = value
+
+    def set_json(self, key: str, value):
         self._data[key] = value
 
     def sync(self):
@@ -66,7 +75,8 @@ def test_audio_player_panel_updates_queue_and_dock_visibility(qtbot, tmp_path):
     p2.write_bytes(b"RIFF")
     player.play_paths([p1, p2], labels=["one", "two"], play_mode="enqueue")
 
-    assert panel.queue_list.count() == 1
+    # v2: non-destructive queue — both items stay; table model shows 2 rows
+    assert panel._queue_model.rowCount() == 2
     assert "one" in panel.now_playing_label.text()
 
     dock.setVisible(False)

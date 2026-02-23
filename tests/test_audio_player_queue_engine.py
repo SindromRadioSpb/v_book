@@ -70,7 +70,8 @@ def test_enqueue_mode_plays_items_in_order(tmp_path):
     assert service.play_paths([p1], labels=["one"], play_mode="interrupt") == 1
     assert service.play_paths([p2, p3], labels=["two", "three"], play_mode="enqueue") == 2
     assert started_labels == ["one"]
-    assert len(service.queue_snapshot()) == 2
+    # v2: non-destructive — all 3 items stay in queue (p1 is current at index 0)
+    assert len(service.queue_snapshot()) == 3
 
     backend.finished.emit()
     assert started_labels == ["one", "two"]
@@ -97,11 +98,13 @@ def test_interrupt_mode_clears_queue_and_starts_new_track(tmp_path):
     p3 = _touch_audio(tmp_path / "c.wav")
 
     service.play_paths([p1, p2], labels=["a", "b"], play_mode="enqueue")
-    assert len(service.queue_snapshot()) == 1
+    # v2: non-destructive — both items stay in queue (p1 is current at index 0)
+    assert len(service.queue_snapshot()) == 2
 
     service.play_paths([p3], labels=["c"], play_mode="interrupt")
     assert backend.stopped is True
     assert backend.played_paths[-1] == p3
-    assert len(service.queue_snapshot()) == 0
+    # After interrupt, queue is replaced with just p3 (p3 is current at index 0)
+    assert len(service.queue_snapshot()) == 1
 
     service.stop(clear_queue=True)
