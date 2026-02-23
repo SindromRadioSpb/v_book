@@ -1,7 +1,7 @@
 """Main application window."""
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStackedWidget, QMenuBar
 from PyQt6.QtCore import Qt, QTimer
@@ -54,6 +54,15 @@ class AppWindow(QMainWindow):
         # Alias for existing code (zero changes to navigation)
         self.stack = self.workspace.stack
 
+        # Debounced cross-view refresh queue (used for Audio Player edit/generate actions).
+        self._pending_refresh_fields: Set[str] = set()
+        self._pending_refresh_project_ids: Set[int] = set()
+        self._pending_refresh_all_projects: bool = False
+        self._cross_refresh_timer = QTimer(self)
+        self._cross_refresh_timer.setSingleShot(True)
+        self._cross_refresh_timer.setInterval(250)
+        self._cross_refresh_timer.timeout.connect(self._flush_cross_view_refresh)
+
         # Menu bar (now workspace exists)
         self.create_menu_bar()
 
@@ -97,6 +106,7 @@ class AppWindow(QMainWindow):
         )
         self.audio_player_panel = AudioPlayerPanel(player=self.audio_player, parent=self.audio_player_dock)
         self.audio_player_panel.go_to_source_requested.connect(self._on_audio_go_to_source_requested)
+        self.audio_player_panel.data_changed.connect(self._on_audio_player_data_changed)
         self.audio_player_dock.setWidget(self.audio_player_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.audio_player_dock)
 
@@ -462,6 +472,81 @@ class AppWindow(QMainWindow):
             QTimer.singleShot(retry_ms, lambda: _attempt_focus(attempt + 1))
 
         _attempt_focus()
+
+    def _on_audio_player_data_changed(self, payload: dict) -> None:
+        """Collect refresh hints from Audio Player and debounce cross-view reload."""
+        if not isinstance(payload, dict):
+            return
+        fields = payload.get("fields") or []
+        project_ids = payload.get("project_ids") or []
+        for field in fields:
+            value = str(field or "").strip().lower()
+            if value:
+                self._pending_refresh_fields.add(value)
+        parsed_project_ids: Set[int] = set()
+        for pid in project_ids:
+            try:
+                parsed_project_ids.add(int(pid))
+            except (TypeError, ValueError):
+                continue
+        if parsed_project_ids:
+            self._pending_refresh_project_ids.update(parsed_project_ids)
+        else:
+            self._pending_refresh_all_projects = True
+        if not self._cross_refresh_timer.isActive():
+            self._cross_refresh_timer.start()
+
+    def _flush_cross_view_refresh(self) -> None:
+        """Apply one debounced refresh pass to relevant open views."""
+        project_filter: Optional[Set[int]]
+        if self._pending_refresh_all_projects:
+            project_filter = None
+        else:
+            project_filter = set(self._pending_refresh_project_ids)
+        self._pending_refresh_fields.clear()
+        self._pending_refresh_project_ids.clear()
+        self._pending_refresh_all_projects = False
+        self._refresh_open_views(project_filter=project_filter)
+
+    def _refresh_open_views(self, *, project_filter: Optional[Set[int]]) -> None:
+        """Refresh open views for affected projects (or all when project_filter is None)."""
+        for i in range(self.stack.count()):
+            widget = self.stack.widget(i)
+            if widget is None:
+                continue
+            try:
+                if isinstance(widget, ProjectView):
+                    if project_filter is not None and widget.project_id not in project_filter:
+                        continue
+                    if hasattr(widget, "dictionary_view") and widget.dictionary_view is not None:
+                        widget.dictionary_view.refresh()
+                    if hasattr(widget, "terms_view") and widget.terms_view is not None:
+                        widget.terms_view.perform_search()
+                    if hasattr(widget, "sentences_view") and widget.sentences_view is not None:
+                        widget.sentences_view._reload()
+                    if hasattr(widget, "term_card_view") and widget.term_card_view is not None:
+                        widget.term_card_view.load_review_queue()
+                    if hasattr(widget, "user_dictionaries_view") and widget.user_dictionaries_view is not None:
+                        widget.user_dictionaries_view.load_items()
+                        if getattr(widget.user_dictionaries_view, "_view_mode", "browse") == "review":
+                            widget.user_dictionaries_view.load_review_queue(reset_index=False)
+                    continue
+
+                if isinstance(widget, TranslationManagementPanel):
+                    wid_pid = getattr(widget, "project_id", None)
+                    if project_filter is None or wid_pid is None or wid_pid in project_filter:
+                        widget.perform_search()
+                    continue
+
+                if isinstance(widget, UserDictionariesView):
+                    wid_pid = getattr(widget, "project_id", None)
+                    if project_filter is None or wid_pid is None or wid_pid in project_filter:
+                        widget.load_items()
+                        if getattr(widget, "_view_mode", "browse") == "review":
+                            widget.load_review_queue(reset_index=False)
+                    continue
+            except Exception as exc:
+                logger.debug("Cross-view refresh skipped for %s: %s", type(widget).__name__, exc)
 
     def back_to_dashboard(self):
         """Return to dashboard."""

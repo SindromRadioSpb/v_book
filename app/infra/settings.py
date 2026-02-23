@@ -33,6 +33,13 @@ class SettingsService:
     @classmethod
     def get_instance(cls) -> 'SettingsService':
         """Get or create singleton instance."""
+        if cls._instance is not None:
+            try:
+                # pytest-qt can tear down QApplication between tests, invalidating
+                # underlying C++ QSettings object held by singleton.
+                cls._instance._settings.fileName()
+            except RuntimeError:
+                cls._instance = None
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance

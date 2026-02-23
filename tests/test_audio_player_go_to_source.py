@@ -299,3 +299,37 @@ def test_queue_niqqudize_sentences_uses_sentence_dialog(monkeypatch, qtbot, tmp_
     assert called["sentence"] == 1
     assert called["stale"] == 1
     assert called["refresh"] == 1
+
+
+def test_queue_translate_finished_emits_data_changed(qtbot, tmp_path, monkeypatch):
+    panel, _player, _audio_file = _build_panel(tmp_path)
+    qtbot.addWidget(panel)
+    captured = []
+    panel.data_changed.connect(captured.append)
+
+    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: None)
+
+    class _Dialog:
+        def set_completed(self):
+            return None
+
+        def accept(self):
+            return None
+
+    class _Result:
+        succeeded = 1
+        skipped = 0
+        failed = 0
+
+    panel._on_queue_translate_finished(
+        _Result(),
+        _Dialog(),
+        [("lemma", 42, 7)],
+    )
+
+    assert captured
+    payload = captured[-1]
+    assert payload["fields"] == ["translation"]
+    assert payload["project_ids"] == [7]
+    assert payload["source_keys"][0]["kind"] == "lemma"
+    assert payload["source_keys"][0]["source_id"] == 42

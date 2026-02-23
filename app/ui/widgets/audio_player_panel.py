@@ -486,6 +486,7 @@ class AudioPlayerPanel(QWidget):
     """Premium audio player dock panel (v2)."""
 
     go_to_source_requested = pyqtSignal(dict)
+    data_changed = pyqtSignal(dict)
 
     PRESETS = {
         "Normal": (200, 550, 300),
@@ -1625,6 +1626,32 @@ class AudioPlayerPanel(QWidget):
         # Deduplicate while preserving stable order.
         return list(dict.fromkeys(keys))
 
+    def _emit_data_changed(
+        self,
+        *,
+        fields: List[str],
+        source_keys: Optional[List[Tuple[str, int, Optional[int]]]] = None,
+    ) -> None:
+        """Broadcast cross-view refresh hint to AppWindow (best-effort)."""
+        keys = list(source_keys or [])
+        project_ids = sorted({int(pid) for _k, _sid, pid in keys if pid is not None})
+        payload = {
+            "fields": sorted({str(f).strip().lower() for f in (fields or []) if str(f).strip()}),
+            "project_ids": project_ids,
+            "source_keys": [
+                {
+                    "kind": kind,
+                    "source_id": int(source_id),
+                    "project_id": int(project_id) if project_id is not None else None,
+                }
+                for kind, source_id, project_id in keys
+            ],
+        }
+        try:
+            self.data_changed.emit(payload)
+        except Exception as exc:
+            logger.debug("AudioPlayerPanel data_changed emit skipped: %s", exc)
+
     def _rows_for_source_keys(self, source_keys: List[Tuple[str, int, Optional[int]]]) -> List[int]:
         if not source_keys:
             return []
@@ -1776,14 +1803,22 @@ class AudioPlayerPanel(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_queue_translate_finished(result, progress_dialog))
+        source_keys = self._source_keys_from_rows(rows)
+        worker.finished.connect(
+            lambda result: self._on_queue_translate_finished(result, progress_dialog, source_keys)
+        )
         worker.error.connect(lambda msg: self._on_queue_worker_error("Translation", msg, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
         progress_dialog.resume_requested.connect(worker.resume)
         worker.start()
 
-    def _on_queue_translate_finished(self, result: object, progress_dialog) -> None:
+    def _on_queue_translate_finished(
+        self,
+        result: object,
+        progress_dialog,
+        source_keys: Optional[List[Tuple[str, int, Optional[int]]]] = None,
+    ) -> None:
         progress_dialog.set_completed()
         progress_dialog.accept()
         try:
@@ -1793,6 +1828,8 @@ class AudioPlayerPanel(QWidget):
         except Exception:
             succeeded = skipped = failed = 0
         self._refresh_display_contexts()
+        if source_keys and succeeded > 0:
+            self._emit_data_changed(fields=["translation"], source_keys=source_keys)
         QMessageBox.information(
             self,
             "Translation Complete",
@@ -1890,6 +1927,8 @@ class AudioPlayerPanel(QWidget):
             self._clear_queue_sources_stale(list(success_source_keys))
         self._refresh_display_contexts()
         self._refresh_queue()
+        if success_source_keys:
+            self._emit_data_changed(fields=["audio"], source_keys=sorted(success_source_keys))
 
         QMessageBox.information(
             self,
@@ -1949,8 +1988,10 @@ class AudioPlayerPanel(QWidget):
             ) or changed
 
         if changed:
-            self._mark_queue_sources_stale(self._source_keys_from_rows(rows))
+            source_keys = self._source_keys_from_rows(rows)
+            self._mark_queue_sources_stale(source_keys)
             self._refresh_display_contexts()
+            self._emit_data_changed(fields=["pronunciation"], source_keys=source_keys)
 
     def _on_queue_edit_translation(self, row: int) -> None:
         ctx = self._track_ctx_at_row(row)
@@ -1978,6 +2019,7 @@ class AudioPlayerPanel(QWidget):
         self._apply_queue_translation_snapshot(source_key, translation_value)
         self._refresh_display_contexts()
         self._refresh_queue()
+        self._emit_data_changed(fields=["translation"], source_keys=[source_key])
 
     def _on_queue_clear_translation(self, rows: List[int]) -> None:
         source_keys = []
@@ -2009,6 +2051,8 @@ class AudioPlayerPanel(QWidget):
 
         self._refresh_display_contexts()
         self._refresh_queue()
+        if success > 0:
+            self._emit_data_changed(fields=["translation"], source_keys=unique_keys)
         if failed:
             QMessageBox.warning(
                 self,
@@ -2183,6 +2227,8 @@ class AudioPlayerPanel(QWidget):
         if source_key is not None:
             self._mark_queue_sources_stale([source_key])
         self._refresh_display_contexts()
+        if source_key is not None:
+            self._emit_data_changed(fields=["pronunciation"], source_keys=[source_key])
 
     def _on_queue_edit_sentence_niqqud(self, row: int) -> None:
         from app.ui.dialogs.edit_sentence_niqqud_dialog import show_edit_sentence_niqqud_dialog
@@ -2213,6 +2259,8 @@ class AudioPlayerPanel(QWidget):
         if source_key is not None:
             self._mark_queue_sources_stale([source_key])
         self._refresh_display_contexts()
+        if source_key is not None:
+            self._emit_data_changed(fields=["pronunciation"], source_keys=[source_key])
 
     def _on_queue_worker_error(self, label: str, msg: str, progress_dialog) -> None:
         progress_dialog.set_stage(f"Error: {msg[:80]}")
