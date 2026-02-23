@@ -160,6 +160,36 @@ def test_enqueue_start_immediately_plays_newly_added_item(service, tmp_audio):
     begin_mock.assert_called_once()
 
 
+def test_enqueue_start_immediately_reuses_existing_source_track_without_duplicate(service, tmp_audio):
+    """Single-row Play reuses existing queue row by (kind, source_id, project_id)."""
+    _inject_tracks(service, tmp_audio[:3])
+    service._tracks[1].context = {
+        "kind": "term_cluster",
+        "source_id": "42",
+        "project_id": 11,
+        "play_count": 3,
+    }
+    service._current = service._tracks[0]
+    service._current_index = 0
+
+    with patch.object(service, "_begin_play_current") as begin_mock:
+        n = service.play_paths(
+            [tmp_audio[3]],
+            labels=["clicked"],
+            play_mode="enqueue",
+            contexts=[{"kind": "term", "source_id": 42, "project_id": 11}],
+            start_immediately=True,
+        )
+
+    assert n == 0
+    assert len(service._tracks) == 3
+    assert service._current_index == 1
+    assert service._current is service._tracks[1]
+    assert service._tracks[1].path == tmp_audio[3]
+    assert service._tracks[1].context["play_count"] == 3
+    begin_mock.assert_called_once()
+
+
 # -- enqueue_from_db: items appear in queue without audio file --
 
 
