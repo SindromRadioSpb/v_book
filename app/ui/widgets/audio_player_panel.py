@@ -1011,8 +1011,9 @@ class AudioPlayerPanel(QWidget):
         failed = result.get("failed", 0)
         cancelled = result.get("cancelled", False)
         add_mode = result.get("add_mode", "append")
-        if added > 0:
-            self._load_db_queue_to_player(add_mode)
+        new_item_ids = result.get("new_item_ids", [])
+        if added > 0 and new_item_ids:
+            self._load_db_queue_to_player(add_mode, new_item_ids=new_item_ids)
         msg = f"Added {added:,} items to queue."
         if cancelled:
             msg += " (cancelled)"
@@ -1021,27 +1022,43 @@ class AudioPlayerPanel(QWidget):
         QMessageBox.information(self, "Add All — Done", msg)
         self._refresh_queue()
 
-    def _load_db_queue_to_player(self, add_mode: str = "append") -> None:
+    def _load_db_queue_to_player(self, add_mode: str = "append", *, new_item_ids: Optional[List[int]] = None) -> None:
         """Sync newly-added DB queue items into the in-memory AudioPlayerService queue.
 
-        Only items not already present in _tracks (matched by item_id in context)
-        are appended, so manually-added play_paths() tracks are preserved.
+        Only the specific rows whose item_ids are in *new_item_ids* (the rows
+        just inserted by the current worker run) are candidates.  This prevents
+        stale rows from previous sessions polluting the queue.
+
+        Additionally deduplicates by (kind, source_id) so clicking "Add All"
+        multiple times in a row never adds the same source content twice.
         """
+        if not new_item_ids:
+            return  # guard: no new rows to load (covers stale-DB and empty run)
         try:
             from app.services.db_service import DBService
             from app.services.audio_queue_service import AudioQueueService
             db = DBService.get_instance()
             with db.get_session() as session:
                 all_db_items = AudioQueueService().get_queue(session)
-            # Determine which item_ids are already in the in-memory queue
-            existing_ids = {
-                t.context.get("item_id")
+            # Only consider the rows inserted by THIS worker run
+            id_set = set(new_item_ids)
+            candidate_items = [item for item in all_db_items if item.item_id in id_set]
+            # Dedup by (kind, source_id) — prevents the same source content
+            # from appearing twice even if "Add All" was clicked multiple times
+            existing_source_keys: set = {
+                (t.context.get("kind"), t.context.get("source_id"))
                 for t in self.player._tracks  # noqa: SLF001
-                if isinstance(t.context, dict) and t.context.get("item_id") is not None
+                if isinstance(t.context, dict)
+                and t.context.get("kind") is not None
+                and t.context.get("source_id") is not None
             }
-            new_items = [item for item in all_db_items if item.item_id not in existing_ids]
+            new_items = [
+                item for item in candidate_items
+                if (item.kind, item.source_id) not in existing_source_keys
+            ]
             if new_items:
                 self.player.enqueue_from_db(new_items, mode=add_mode)
+                logger.debug("_load_db_queue_to_player: loaded %d/%d items", len(new_items), len(candidate_items))
         except Exception as exc:
             logger.warning("_load_db_queue_to_player failed: %s", exc)
 

@@ -3283,7 +3283,7 @@ class AudioQueuePopulateWorker(QThread):
         total = len(ids)
         if total == 0:
             self.stage_updated.emit("No matching items found.")
-            self.finished.emit({"added": 0, "skipped": 0, "failed": 0, "total": 0, "cancelled": False})
+            self.finished.emit({"added": 0, "skipped": 0, "failed": 0, "total": 0, "cancelled": False, "new_item_ids": []})
             return
 
         self.stage_updated.emit(f"Adding {total} items to queue…")
@@ -3292,6 +3292,7 @@ class AudioQueuePopulateWorker(QThread):
         # ── Step 2: process in chunks ──────────────────────────────────
         added = 0
         failed = 0
+        all_new_item_ids: List[int] = []  # track exact DB rows inserted this run
         for chunk_start in range(0, total, self.CHUNK_SIZE):
             if self._cancel_requested:
                 break
@@ -3299,13 +3300,14 @@ class AudioQueuePopulateWorker(QThread):
             try:
                 with db.get_session() as session:
                     specs = self._build_specs(session, chunk_ids)
-                    aq_svc.add_to_queue(
+                    new_ids = aq_svc.add_to_queue(
                         session,
                         specs,
                         mode=self.add_mode,
                         current_position=self.current_position,
                     )
                     session.commit()
+                all_new_item_ids.extend(new_ids)
                 # Emit row signals for recent-activity display (first 5 in chunk)
                 for spec in specs[:5]:
                     label = spec.snapshot_hebrew or spec.snapshot_source_label or str(spec.source_id or "")
@@ -3330,6 +3332,7 @@ class AudioQueuePopulateWorker(QThread):
             "total": total,
             "cancelled": cancelled,
             "add_mode": self.add_mode,
+            "new_item_ids": all_new_item_ids,  # exact rows inserted this run
         })
 
     # ------------------------------------------------------------------

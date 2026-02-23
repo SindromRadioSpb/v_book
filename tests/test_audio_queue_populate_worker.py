@@ -122,3 +122,5 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
     assert finished_payloads, "finished signal not emitted"
     assert finished_payloads[0]["added"] == 0
     assert finished_payloads[0]["total"] == 0
+    assert "new_item_ids" in finished_payloads[0], "new_item_ids must be present in finished payload"
+    assert finished_payloads[0]["new_item_ids"] == []
