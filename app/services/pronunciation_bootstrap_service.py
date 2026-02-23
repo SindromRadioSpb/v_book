@@ -424,14 +424,24 @@ class PronunciationBootstrapService:
                 notes_value = (item.get("notes") or "").strip()
                 niqqud_value = niqqud_result.value
                 if PronunciationQualityService.has_source_structure_mismatch(source_text, niqqud_value):
-                    fallback_source = PronunciationQualityService.sanitize_spoken_text(source_text)
-                    if fallback_source:
-                        niqqud_value = fallback_source
-                        mismatch_note = "qc:source_structure_fallback"
+                    source_sig = PronunciationQualityService.spoken_letters_signature(source_text)
+                    candidate_sig = PronunciationQualityService.spoken_letters_signature(niqqud_value)
+                    source_sig_compact = source_sig.replace(" ", "")
+                    candidate_sig_compact = candidate_sig.replace(" ", "")
+                    # When only spacing differs (common Phonikud separator artifacts like "ה|חומר"),
+                    # keep generated nikud instead of falling back to plain source.
+                    if source_sig_compact and candidate_sig_compact and source_sig_compact == candidate_sig_compact:
+                        mismatch_note = "qc:source_spacing_variation"
                         notes_value = f"{notes_value}; {mismatch_note}".strip("; ").strip()
                     else:
-                        failed += 1
-                        continue
+                        fallback_source = PronunciationQualityService.sanitize_spoken_text(source_text)
+                        if fallback_source:
+                            niqqud_value = fallback_source
+                            mismatch_note = "qc:source_structure_fallback"
+                            notes_value = f"{notes_value}; {mismatch_note}".strip("; ").strip()
+                        else:
+                            failed += 1
+                            continue
                 if not PronunciationQualityService.has_hebrew_nikud(niqqud_value):
                     # Generator returned text unchanged (model unavailable or fallback mode).
                     # Writing source text as niqqud_text would pollute the column with

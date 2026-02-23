@@ -71,6 +71,7 @@ Running bootstrap twice with fill-only mode should produce no additional updates
 ## Quality notes
 
 - If model output contains malformed separators (`_`, `|`), the persisted value is sanitized and tagged in notes (`qc:*`).
+- Spacing-only structure drift (same Hebrew letters, different spacing such as `ה|חומר`) is accepted and tagged with `qc:source_spacing_variation`.
 - If auto-generated pronunciation becomes invalid after sanitize, bootstrap skips that row and reports failure count.
 
 ## Premium UI gate (in-app)
