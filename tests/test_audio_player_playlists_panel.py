@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -118,12 +119,40 @@ def test_playlists_create_add_queue_selected_and_load(panel, monkeypatch, tmp_pa
     _seed_queue_row(player, audio_file)
 
     monkeypatch.setattr("app.ui.widgets.audio_player_panel.QInputDialog.getText", lambda *_a, **_k: ("Lesson A", True))
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QInputDialog.getItem", lambda *_a, **_k: ("Append", True))
     monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QMessageBox.question",
+        lambda *_a, **_k: QMessageBox.StandardButton.Yes,
+    )
 
     widget._on_new_playlist_clicked()
     assert widget.playlists_list.count() == 1
     assert "Lesson A" in widget.playlists_list.item(0).text()
+
+    playlist_id = widget.playlists_list.item(0).data(0x0100)
+
+    class _Dialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            from PyQt6.QtWidgets import QDialog
+
+            return QDialog.DialogCode.Accepted
+
+        def selected_playlist_id(self):
+            return int(playlist_id)
+
+        def selected_add_mode(self):
+            return "append"
+
+        def dedup_enabled(self):
+            return True
+
+        def selected_after_entry_id(self):
+            return None
+
+    monkeypatch.setattr("app.ui.widgets.audio_player_panel.AddQueueToPlaylistDialog", _Dialog)
 
     widget.playlists_list.setCurrentRow(0)
     widget.queue_table.selectRow(0)
@@ -191,3 +220,45 @@ def test_playlists_reorder_and_remove_entries(panel):
     widget.playlist_entries_table.selectRow(1)
     widget._on_remove_playlist_entries_clicked()
     assert widget._playlist_entries_model.entry_count() == 2
+
+
+def test_playlist_keyboard_shortcuts_play_and_remove(panel, monkeypatch):
+    widget, _player, db = panel
+
+    with db.get_session() as session:
+        svc = AudioQueueService()
+        playlist_id = svc.create_playlist(session, "Shortcut Playlist")
+        svc.add_to_playlist(
+            session,
+            playlist_id,
+            [
+                AudioItemSpec(kind="term", source_id=11, snapshot_hebrew="alpha"),
+                AudioItemSpec(kind="term", source_id=12, snapshot_hebrew="beta"),
+            ],
+        )
+        session.commit()
+
+    widget._refresh_playlists(select_playlist_id=playlist_id)
+    widget.tab_widget.setCurrentIndex(1)
+    widget.playlist_entries_table.selectRow(0)
+    widget.playlist_entries_table.setFocus()
+
+    calls = {"play": 0, "remove": 0}
+
+    def _play():
+        calls["play"] += 1
+
+    def _remove():
+        calls["remove"] += 1
+
+    monkeypatch.setattr(widget, "_on_play_playlist_selected_clicked", _play)
+    monkeypatch.setattr(widget, "_on_remove_playlist_entries_clicked", _remove)
+
+    from PyQt6.QtTest import QTest
+
+    QTest.keyClick(widget.playlist_entries_table, Qt.Key.Key_Return)
+    QTest.keyClick(widget.playlist_entries_table, Qt.Key.Key_Space)
+    QTest.keyClick(widget.playlist_entries_table, Qt.Key.Key_Delete)
+
+    assert calls["play"] == 2
+    assert calls["remove"] == 1

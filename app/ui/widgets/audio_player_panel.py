@@ -70,9 +70,34 @@ _COL_TRANSLATION = 3
 _COL_SOURCE = 4
 _COL_STATUS = 5
 _COL_PLAYS = 6
+_COL_PROJECT = 7
+_COL_DOCUMENT = 8
+_COL_SOURCE_ID = 9
 
-_COLUMNS = ["#", "Hebrew", "Niqqud", "Translation", "Source", "Status", "Plays"]
-_COLUMN_KEYS = ["num", "hebrew", "niqqud", "translation", "source", "status", "plays"]
+_COLUMNS = [
+    "#",
+    "Hebrew",
+    "Niqqud",
+    "Translation",
+    "Source",
+    "Status",
+    "Plays",
+    "Project",
+    "Document",
+    "Source ID",
+]
+_COLUMN_KEYS = [
+    "num",
+    "hebrew",
+    "niqqud",
+    "translation",
+    "source",
+    "status",
+    "plays",
+    "project",
+    "document",
+    "source_id",
+]
 
 _PL_COL_NUM = 0
 _PL_COL_HEBREW = 1
@@ -80,8 +105,21 @@ _PL_COL_NIQQUD = 2
 _PL_COL_TRANSLATION = 3
 _PL_COL_SOURCE = 4
 _PL_COL_STATUS = 5
+_PL_COL_PROJECT = 6
+_PL_COL_DOCUMENT = 7
+_PL_COL_SOURCE_ID = 8
 
-_PLAYLIST_COLUMNS = ["#", "Hebrew", "Niqqud", "Translation", "Source", "Status"]
+_PLAYLIST_COLUMNS = [
+    "#",
+    "Hebrew",
+    "Niqqud",
+    "Translation",
+    "Source",
+    "Status",
+    "Project",
+    "Document",
+    "Source ID",
+]
 
 _CURRENT_BG = QColor(210, 240, 210)
 _STALE_BG = QColor(255, 240, 200)
@@ -148,6 +186,13 @@ class AudioQueueTableModel(QAbstractTableModel):
                 return "ready" if path and path != "." and os.path.exists(str(path)) else "missing"
             if col == _COL_PLAYS:
                 return str(ctx.get("play_count", "—"))
+            if col == _COL_PROJECT:
+                return ctx.get("snapshot_project_name") or "—"
+            if col == _COL_DOCUMENT:
+                return ctx.get("snapshot_document_name") or "—"
+            if col == _COL_SOURCE_ID:
+                source_id = ctx.get("source_id")
+                return str(source_id) if source_id is not None else "—"
             return None
 
         if role == Qt.ItemDataRole.BackgroundRole:
@@ -165,6 +210,12 @@ class AudioQueueTableModel(QAbstractTableModel):
                 return ctx.get("snapshot_niqqud") or ctx.get("niqqud") or ""
             if col == _COL_TRANSLATION:
                 return ctx.get("snapshot_translation") or ctx.get("translation") or ""
+            if col == _COL_SOURCE:
+                return ctx.get("snapshot_source_label") or ""
+            if col == _COL_PROJECT:
+                return ctx.get("snapshot_project_name") or ""
+            if col == _COL_DOCUMENT:
+                return ctx.get("snapshot_document_name") or ""
             return None
 
         if role == Qt.ItemDataRole.UserRole:
@@ -195,10 +246,18 @@ class AudioPlaylistEntriesTableModel(QAbstractTableModel):
                     "kind": getattr(entry, "kind", ""),
                     "source_id": getattr(entry, "source_id", None),
                     "project_id": getattr(entry, "project_id", None),
+                    "snapshot_project_name": getattr(entry, "snapshot_project_name", None),
+                    "snapshot_document_name": getattr(entry, "snapshot_document_name", None),
+                    "resolved_path": getattr(entry, "resolved_path", None),
                 }
             )
         self.beginResetModel()
         self._rows = rows
+        self.endResetModel()
+
+    def load_rows(self, rows: List[Dict[str, Any]]) -> None:
+        self.beginResetModel()
+        self._rows = [dict(row) for row in rows]
         self.endResetModel()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
@@ -234,16 +293,40 @@ class AudioPlaylistEntriesTableModel(QAbstractTableModel):
             if col == _PL_COL_SOURCE:
                 return payload.get("snapshot_source_label") or "—"
             if col == _PL_COL_STATUS:
-                return payload.get("audio_status") or "unknown"
+                status = str(payload.get("audio_status") or "unknown").strip().lower()
+                resolved = str(payload.get("resolved_path") or "")
+                if resolved and resolved != "." and os.path.exists(resolved):
+                    return "ready"
+                if status == "stale":
+                    return "stale"
+                if status in {"ready", "missing", "failed", "generating", "unknown"}:
+                    return status
+                return "unknown"
+            if col == _PL_COL_PROJECT:
+                return payload.get("snapshot_project_name") or "—"
+            if col == _PL_COL_DOCUMENT:
+                return payload.get("snapshot_document_name") or "—"
+            if col == _PL_COL_SOURCE_ID:
+                source_id = payload.get("source_id")
+                return str(source_id) if source_id is not None else "—"
             return None
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if col in (_PL_COL_HEBREW, _PL_COL_NIQQUD, _PL_COL_TRANSLATION, _PL_COL_SOURCE):
+            if col in (
+                _PL_COL_HEBREW,
+                _PL_COL_NIQQUD,
+                _PL_COL_TRANSLATION,
+                _PL_COL_SOURCE,
+                _PL_COL_PROJECT,
+                _PL_COL_DOCUMENT,
+            ):
                 key = {
                     _PL_COL_HEBREW: "snapshot_hebrew",
                     _PL_COL_NIQQUD: "snapshot_niqqud",
                     _PL_COL_TRANSLATION: "snapshot_translation",
                     _PL_COL_SOURCE: "snapshot_source_label",
+                    _PL_COL_PROJECT: "snapshot_project_name",
+                    _PL_COL_DOCUMENT: "snapshot_document_name",
                 }[col]
                 return payload.get(key) or ""
             return None
@@ -269,6 +352,11 @@ class AudioPlaylistEntriesTableModel(QAbstractTableModel):
             if entry_id is not None:
                 result.append(entry_id)
         return result
+
+    def row_payload(self, row: int) -> Optional[Dict[str, Any]]:
+        if row < 0 or row >= len(self._rows):
+            return None
+        return dict(self._rows[row])
 
 # ── Source picker dialog (premium) ────────────────────────────────────────────
 
@@ -585,6 +673,217 @@ class AddAllToQueueDialog(QDialog):
         return ["append", "after_current", "prepend"][max(0, idx)]
 
 
+class AddQueueToPlaylistDialog(QDialog):
+    """Queue -> playlist picker with dedup preview and add mode."""
+
+    def __init__(
+        self,
+        *,
+        parent: Optional[QWidget],
+        db_manager: Any,
+        selected_count: int,
+        source_keys: Optional[List[Tuple[Optional[int], str, Optional[int]]]] = None,
+        default_playlist_id: Optional[int] = None,
+        default_after_entry_id: Optional[int] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Selected Queue Rows to Playlist")
+        self.setMinimumWidth(460)
+        self.setMinimumHeight(360)
+        self._db = db_manager
+        self._selected_count = int(selected_count)
+        self._source_keys: List[Tuple[Optional[int], str, Optional[int]]] = list(source_keys or [])
+        self._default_playlist_id = default_playlist_id
+        self._default_after_entry_id = default_after_entry_id
+        self._playlist_ids: List[int] = []
+
+        root = QVBoxLayout(self)
+        root.setSpacing(8)
+
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("🔍"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search playlists…")
+        self.search_edit.setClearButtonEnabled(True)
+        search_row.addWidget(self.search_edit, 1)
+        self.new_btn = QPushButton("New…")
+        self.new_btn.setToolTip("Create a new playlist")
+        search_row.addWidget(self.new_btn)
+        root.addLayout(search_row)
+
+        self.playlists_list = QListWidget()
+        self.playlists_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.playlists_list.setAlternatingRowColors(True)
+        root.addWidget(self.playlists_list, 1)
+
+        options_row = QHBoxLayout()
+        options_row.addWidget(QLabel("Add mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Append", "Prepend", "After selected entry"])
+        options_row.addWidget(self.mode_combo)
+        options_row.addStretch(1)
+        self.dedup_cb = QCheckBox("Deduplicate by (project, kind, source_id)")
+        self.dedup_cb.setChecked(True)
+        options_row.addWidget(self.dedup_cb)
+        root.addLayout(options_row)
+
+        self.preview_label = QLabel("")
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setStyleSheet("color: #555;")
+        root.addWidget(self.preview_label)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setText("Add")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+        self.search_edit.textChanged.connect(self._filter_playlists)
+        self.new_btn.clicked.connect(self._on_new_playlist_clicked)
+        self.playlists_list.itemSelectionChanged.connect(self._update_preview)
+        self.mode_combo.currentTextChanged.connect(self._update_preview)
+        self.dedup_cb.toggled.connect(self._update_preview)
+
+        self._load_playlists()
+
+    def _load_playlists(self, select_playlist_id: Optional[int] = None) -> None:
+        self.playlists_list.blockSignals(True)
+        self.playlists_list.clear()
+        self._playlist_ids.clear()
+        selected_row = -1
+        if self._db is not None:
+            try:
+                from app.services.audio_queue_service import AudioQueueService
+
+                with self._db.get_session() as session:
+                    playlists = AudioQueueService().get_playlists(session)
+            except Exception:
+                playlists = []
+        else:
+            playlists = []
+        target = select_playlist_id if select_playlist_id is not None else self._default_playlist_id
+        for idx, playlist in enumerate(playlists):
+            item = QListWidgetItem(f"{playlist.name} ({playlist.entry_count})")
+            item.setData(Qt.ItemDataRole.UserRole, int(playlist.playlist_id))
+            self.playlists_list.addItem(item)
+            self._playlist_ids.append(int(playlist.playlist_id))
+            if target is not None and int(playlist.playlist_id) == int(target):
+                selected_row = idx
+        if selected_row >= 0:
+            self.playlists_list.setCurrentRow(selected_row)
+        elif self.playlists_list.count() > 0:
+            self.playlists_list.setCurrentRow(0)
+        self.playlists_list.blockSignals(False)
+        self._update_preview()
+
+    def _filter_playlists(self, text: str) -> None:
+        query = (text or "").strip().lower()
+        for idx in range(self.playlists_list.count()):
+            item = self.playlists_list.item(idx)
+            item.setHidden(query not in item.text().lower())
+
+    def _on_new_playlist_clicked(self) -> None:
+        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
+        if not ok:
+            return
+        name = str(name or "").strip()
+        if not name:
+            return
+        if self._db is None:
+            QMessageBox.warning(self, "Playlists", "Database connection is unavailable.")
+            return
+        try:
+            from app.services.audio_queue_service import AudioQueueService
+
+            with self._db.get_session() as session:
+                playlist_id = AudioQueueService().create_playlist(session, name)
+                session.commit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Playlists", f"Failed to create playlist:\n{exc}")
+            return
+        self._load_playlists(select_playlist_id=playlist_id)
+
+    def selected_playlist_id(self) -> Optional[int]:
+        item = self.playlists_list.currentItem()
+        if item is None:
+            return None
+        value = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def selected_add_mode(self) -> str:
+        label = str(self.mode_combo.currentText())
+        return {
+            "Append": "append",
+            "Prepend": "prepend",
+            "After selected entry": "after_selected",
+        }.get(label, "append")
+
+    def dedup_enabled(self) -> bool:
+        return bool(self.dedup_cb.isChecked())
+
+    def selected_after_entry_id(self) -> Optional[int]:
+        if self.selected_add_mode() != "after_selected":
+            return None
+        return self._default_after_entry_id
+
+    def _update_preview(self) -> None:
+        playlist_id = self.selected_playlist_id()
+        if playlist_id is None:
+            self.preview_label.setText("Select a playlist.")
+            return
+        mode = self.selected_add_mode()
+        dedup = self.dedup_enabled()
+        mode_hint = {
+            "append": "append",
+            "prepend": "prepend",
+            "after_selected": "after selected",
+        }.get(mode, "append")
+        text = f"Selected: {self._selected_count} rows ({mode_hint})."
+        if dedup and self._db is not None and self._source_keys:
+            try:
+                from app.services.audio_queue_service import AudioQueueService
+
+                with self._db.get_session() as session:
+                    entries = AudioQueueService().get_playlist_entries(session, playlist_id)
+                existing_keys = {
+                    (
+                        entry.project_id,
+                        str(entry.kind or "").strip().lower(),
+                        entry.source_id,
+                    )
+                    for entry in entries
+                }
+                duplicate_count = sum(
+                    1
+                    for key in self._source_keys
+                    if (
+                        key[0],
+                        str(key[1] or "").strip().lower(),
+                        key[2],
+                    )
+                    in existing_keys
+                )
+                new_count = max(0, self._selected_count - duplicate_count)
+                text = (
+                    f"Will add {self._selected_count} selected rows "
+                    f"({new_count} new, {duplicate_count} duplicates)."
+                )
+            except Exception:
+                text += " Duplicates will be skipped."
+        elif dedup:
+            text += " Duplicates will be skipped."
+        if mode == "after_selected" and self._default_after_entry_id is None:
+            text += " No selected playlist entry found; fallback to append."
+        self.preview_label.setText(text)
+
+
 # ── Panel ─────────────────────────────────────────────────────────────────────
 
 
@@ -619,6 +918,10 @@ class AudioPlayerPanel(QWidget):
         self._playlist_entries_model = AudioPlaylistEntriesTableModel(self)
         self._col_visible: List[bool] = [True] * len(_COLUMNS)
         self._col_visible[_COL_NUM] = True  # always shown
+        self._col_visible[_COL_SOURCE_ID] = False
+        self._playlist_col_visible: List[bool] = [True] * len(_PLAYLIST_COLUMNS)
+        self._playlist_col_visible[_PL_COL_NUM] = True  # always shown
+        self._playlist_col_visible[_PL_COL_SOURCE_ID] = False
         self._history_entries: List[str] = []
         self._selected_source_payload: Optional[Dict[str, Any]] = None
         self._selected_queue_row_count: int = 0
@@ -764,6 +1067,13 @@ class AudioPlayerPanel(QWidget):
         self.add_all_btn.clicked.connect(self._on_add_all_clicked)
         tab_header.addWidget(self.add_all_btn)
 
+        self.add_queue_to_playlist_btn = QPushButton("Add to Playlist…")
+        self.add_queue_to_playlist_btn.setToolTip("Copy selected Queue rows into a playlist")
+        self.add_queue_to_playlist_btn.setFixedWidth(104)
+        self.add_queue_to_playlist_btn.setEnabled(False)
+        self.add_queue_to_playlist_btn.clicked.connect(self._on_add_queue_selected_to_playlist_clicked)
+        tab_header.addWidget(self.add_queue_to_playlist_btn)
+
         self.refresh_queue_btn = QPushButton("↻")
         self.refresh_queue_btn.setToolTip("Refresh Niqqud / Translation / Source from DB")
         self.refresh_queue_btn.setFixedWidth(32)
@@ -815,7 +1125,7 @@ class AudioPlayerPanel(QWidget):
 
         # Restore column widths
         hdr = self.queue_table.horizontalHeader()
-        default_widths = [30, 200, 180, 160, 120, 70, 45]
+        default_widths = [30, 200, 180, 160, 120, 70, 45, 130, 170, 90]
         for i, w in enumerate(default_widths):
             hdr.resizeSection(i, w)
 
@@ -875,9 +1185,39 @@ class AudioPlayerPanel(QWidget):
         header_row = QHBoxLayout()
         header_row.addWidget(QLabel("Entries"))
         header_row.addStretch(1)
+        self.play_playlist_btn = QPushButton("Play")
+        self.play_playlist_btn.setToolTip("Play playlist from first entry (append to Queue)")
+        header_row.addWidget(self.play_playlist_btn)
+        self.play_playlist_selected_btn = QPushButton("Play Selected")
+        self.play_playlist_selected_btn.setToolTip("Play from selected playlist entry")
+        header_row.addWidget(self.play_playlist_selected_btn)
+        self.add_playlist_to_queue_btn = QPushButton("Add to Queue")
+        self.add_playlist_to_queue_btn.setToolTip("Append playlist entries to Queue")
+        header_row.addWidget(self.add_playlist_to_queue_btn)
         self.add_queue_selected_to_playlist_btn = QPushButton("Add Queue Selected")
         self.add_queue_selected_to_playlist_btn.setToolTip("Copy selected Queue rows to this playlist")
         header_row.addWidget(self.add_queue_selected_to_playlist_btn)
+        self.refresh_playlist_entries_btn = QPushButton("↻")
+        self.refresh_playlist_entries_btn.setToolTip("Refresh Niqqud / Translation / Source from DB")
+        self.refresh_playlist_entries_btn.setFixedWidth(32)
+        header_row.addWidget(self.refresh_playlist_entries_btn)
+        self.playlist_columns_btn = QToolButton()
+        self.playlist_columns_btn.setText("⚙")
+        self.playlist_columns_btn.setToolTip("Toggle playlist columns")
+        self.playlist_columns_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._playlist_columns_menu = QMenu(self)
+        self._playlist_col_actions = []
+        for idx, col_name in enumerate(_PLAYLIST_COLUMNS):
+            if idx == _PL_COL_NUM:
+                continue
+            act = self._playlist_columns_menu.addAction(col_name)
+            act.setCheckable(True)
+            act.setChecked(True)
+            act.setData(idx)
+            act.toggled.connect(self._on_playlist_column_toggled)
+            self._playlist_col_actions.append(act)
+        self.playlist_columns_btn.setMenu(self._playlist_columns_menu)
+        header_row.addWidget(self.playlist_columns_btn)
         rv.addLayout(header_row)
 
         self.playlist_entries_table = QTableView()
@@ -889,10 +1229,19 @@ class AudioPlayerPanel(QWidget):
         self.playlist_entries_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.playlist_entries_table.horizontalHeader().setStretchLastSection(True)
         self.playlist_entries_table.verticalHeader().setVisible(False)
-        playlist_widths = [30, 220, 190, 180, 140, 70]
+        self.playlist_entries_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_entries_table.installEventFilter(self)
+        self.playlist_entries_table.viewport().installEventFilter(self)
+        playlist_widths = [30, 220, 190, 180, 140, 70, 130, 170, 90]
         for idx, width in enumerate(playlist_widths):
             self.playlist_entries_table.horizontalHeader().resizeSection(idx, width)
         rv.addWidget(self.playlist_entries_table, 1)
+
+        self._playlist_play_delegate = AudioPlayDelegate(
+            self.playlist_entries_table,
+            on_play_clicked=self._on_playlist_play_cell_clicked,
+        )
+        self.playlist_entries_table.setItemDelegateForColumn(_PL_COL_STATUS, self._playlist_play_delegate)
 
         entry_btns = QHBoxLayout()
         self.playlist_move_up_btn = QPushButton("↑")
@@ -948,7 +1297,7 @@ class AudioPlayerPanel(QWidget):
         self.player.track_finished.connect(self._on_track_finished)
 
         # Hotkeys
-        self._add_shortcut("Space", self.player.toggle_pause)
+        self._add_shortcut("Space", self._on_space_shortcut)
         self._add_shortcut("J", self.player.previous_track)
         self._add_shortcut("K", self.player.next_track)
         self._add_shortcut("+", self._speed_up)
@@ -963,14 +1312,63 @@ class AudioPlayerPanel(QWidget):
         self.delete_playlist_btn.clicked.connect(self._on_delete_playlist_clicked)
         self.refresh_playlists_btn.clicked.connect(self._refresh_playlists)
         self.load_pl_btn.clicked.connect(self._on_load_playlist_to_queue_clicked)
+        self.add_playlist_to_queue_btn.clicked.connect(self._on_add_playlist_to_queue_clicked)
+        self.play_playlist_btn.clicked.connect(self._on_play_playlist_clicked)
+        self.play_playlist_selected_btn.clicked.connect(self._on_play_playlist_selected_clicked)
         self.add_queue_selected_to_playlist_btn.clicked.connect(self._on_add_queue_selected_to_playlist_clicked)
         self.remove_playlist_entries_btn.clicked.connect(self._on_remove_playlist_entries_clicked)
         self.playlist_move_up_btn.clicked.connect(lambda: self._on_move_playlist_entry(-1))
         self.playlist_move_down_btn.clicked.connect(lambda: self._on_move_playlist_entry(1))
+        self.refresh_playlist_entries_btn.clicked.connect(self._refresh_playlist_display_contexts)
         self.playlists_list.itemSelectionChanged.connect(self._on_playlist_selection_changed)
+        self.playlist_entries_table.customContextMenuRequested.connect(self._on_playlist_context_menu)
+        self.playlist_entries_table.doubleClicked.connect(self._on_playlist_double_clicked)
         self.playlist_entries_table.selectionModel().selectionChanged.connect(
             lambda *_args: self._update_playlist_action_state()
         )
+
+        queue_header = self.queue_table.horizontalHeader()
+        queue_header.sectionResized.connect(
+            lambda *_args: self._save_header_state(self.queue_table, "audio_player/queue/header_state")
+        )
+        queue_header.sectionMoved.connect(
+            lambda *_args: self._save_header_state(self.queue_table, "audio_player/queue/header_state")
+        )
+        playlist_header = self.playlist_entries_table.horizontalHeader()
+        playlist_header.sectionResized.connect(
+            lambda *_args: self._save_header_state(
+                self.playlist_entries_table,
+                "audio_player/playlist/header_state",
+            )
+        )
+        playlist_header.sectionMoved.connect(
+            lambda *_args: self._save_header_state(
+                self.playlist_entries_table,
+                "audio_player/playlist/header_state",
+            )
+        )
+
+    def _on_playlist_shortcut_play_selected(self) -> None:
+        if not self._selected_playlist_entry_rows():
+            return
+        self._on_play_playlist_selected_clicked()
+
+    def _on_playlist_shortcut_remove_selected(self) -> None:
+        if not self._selected_playlist_entry_rows():
+            return
+        self._on_remove_playlist_entries_clicked()
+
+    def eventFilter(self, watched, event):  # type: ignore[override]
+        if watched in (self.playlist_entries_table, self.playlist_entries_table.viewport()):
+            if event.type() == event.Type.KeyPress:
+                key = event.key()
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                    self._on_playlist_shortcut_play_selected()
+                    return True
+                if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                    self._on_playlist_shortcut_remove_selected()
+                    return True
+        return super().eventFilter(watched, event)
 
     def _init_auto_refresh(self) -> None:
         """Periodic non-blocking queue overlay refresh.
@@ -996,6 +1394,18 @@ class AudioPlayerPanel(QWidget):
         sc = QShortcut(QKeySequence(key), self)
         sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         sc.activated.connect(slot)
+
+    def _on_space_shortcut(self) -> None:
+        fw = self.focusWidget()
+        in_playlist_table = (
+            fw is self.playlist_entries_table
+            or fw is self.playlist_entries_table.viewport()
+            or (fw is not None and self.playlist_entries_table.isAncestorOf(fw))
+        )
+        if in_playlist_table and self._selected_playlist_entry_rows():
+            self._on_playlist_shortcut_play_selected()
+            return
+        self.player.toggle_pause()
 
     # ── Settings restore/save ─────────────────────────────────────────────────
 
@@ -1042,17 +1452,35 @@ class AudioPlayerPanel(QWidget):
                 self.preset_combo.blockSignals(False)
                 break
 
-        # Column visibility
-        col_vis = s.get_json("audio_player/columns_visible", None)
+        # Queue column visibility (with backward compatibility key)
+        col_vis = s.get_json("audio_player/queue/columns_visible", None)
+        if col_vis is None:
+            col_vis = s.get_json("audio_player/columns_visible", None)
         if isinstance(col_vis, list) and len(col_vis) == len(_COLUMNS):
             for i, visible in enumerate(col_vis):
                 self._col_visible[i] = bool(visible)
-            for act in self._col_actions:
-                col_idx = act.data()
-                act.blockSignals(True)
-                act.setChecked(bool(col_vis[col_idx]))
-                act.blockSignals(False)
+        for act in self._col_actions:
+            col_idx = act.data()
+            act.blockSignals(True)
+            act.setChecked(bool(self._col_visible[col_idx]))
+            act.blockSignals(False)
         self._apply_column_visibility()
+
+        # Playlist column visibility
+        pl_col_vis = s.get_json("audio_player/playlist/columns_visible", None)
+        if isinstance(pl_col_vis, list) and len(pl_col_vis) == len(_PLAYLIST_COLUMNS):
+            for i, visible in enumerate(pl_col_vis):
+                self._playlist_col_visible[i] = bool(visible)
+        for act in self._playlist_col_actions:
+            col_idx = act.data()
+            act.blockSignals(True)
+            act.setChecked(bool(self._playlist_col_visible[col_idx]))
+            act.blockSignals(False)
+        self._apply_playlist_column_visibility()
+
+        # Header states
+        self._restore_header_state(self.queue_table, "audio_player/queue/header_state")
+        self._restore_header_state(self.playlist_entries_table, "audio_player/playlist/header_state")
 
         # Apply to player service
         self.player.set_playback_rate(self.speed_spin.value())
@@ -1061,7 +1489,25 @@ class AudioPlayerPanel(QWidget):
         self.player.set_auto_pause(self.auto_pause_cb.isChecked())
 
     def _save_col_settings(self) -> None:
-        self.settings.set_json("audio_player/columns_visible", self._col_visible)
+        self.settings.set_json("audio_player/queue/columns_visible", self._col_visible)
+        self.settings.set_json("audio_player/playlist/columns_visible", self._playlist_col_visible)
+        self.settings.sync()
+
+    def _save_header_state(self, table: QTableView, key: str) -> None:
+        try:
+            state = bytes(table.horizontalHeader().saveState())
+        except Exception:
+            return
+        self.settings.set_value(key, state)
+        self.settings.sync()
+
+    def _restore_header_state(self, table: QTableView, key: str) -> None:
+        try:
+            state = self.settings.get_bytes(key, b"")
+            if state:
+                table.horizontalHeader().restoreState(state)
+        except Exception:
+            return
 
     # ── Playlists tab DB wiring ───────────────────────────────────────────────
 
@@ -1151,10 +1597,75 @@ class AudioPlayerPanel(QWidget):
             entries = []
 
         self._playlist_entries_model.load(entries)
+        QTimer.singleShot(0, self._refresh_playlist_display_contexts)
+        self._update_playlist_action_state()
+
+    class _CtxTrackProxy:
+        __slots__ = ("context",)
+
+        def __init__(self, context: Dict[str, Any]) -> None:
+            self.context = context
+
+    def _refresh_playlist_display_contexts(self) -> None:
+        """Batch refresh playlist Niqqud/Translation/Source/Project/Document."""
+        rows = [self._playlist_entries_model.row_payload(i) for i in range(self._playlist_entries_model.entry_count())]
+        payloads = [row for row in rows if row]
+        if not payloads:
+            self._update_playlist_action_state()
+            return
+
+        proxies = [self._CtxTrackProxy(row) for row in payloads]
+        sentence_proxies: List[Any] = []
+        lemma_proxies: List[Any] = []
+        term_proxies: List[Any] = []
+        for proxy in proxies:
+            kind = self._normalize_playlist_kind(str(proxy.context.get("kind") or ""))
+            if kind == "sentence":
+                sentence_proxies.append(proxy)
+            elif kind == "lemma":
+                lemma_proxies.append(proxy)
+            elif kind == "term":
+                term_proxies.append(proxy)
+
+        try:
+            db = self._get_db_manager()
+            if db is None:
+                self._update_playlist_action_state()
+                return
+            updated = 0
+            with db.get_session() as session:
+                updated += self._refresh_sentence_display(session, sentence_proxies)
+                updated += self._refresh_lemma_display(session, lemma_proxies)
+                updated += self._refresh_term_display(session, term_proxies)
+        except Exception as exc:
+            logger.warning("Playlist display refresh failed: %s", exc)
+            self._update_playlist_action_state()
+            return
+
+        # Batch resolve ready audio paths for status/play button.
+        try:
+            ready_paths, _, _, source_rows = self._resolve_playlist_row_paths(list(range(len(payloads))))
+            row_to_path = {
+                source_rows[idx]: str(path)
+                for idx, path in enumerate(ready_paths)
+                if idx < len(source_rows)
+            }
+            for row_idx, payload in enumerate(payloads):
+                resolved = row_to_path.get(row_idx)
+                payload["resolved_path"] = resolved or ""
+                payload["audio_status"] = "ready" if resolved else (payload.get("audio_status") or "missing")
+        except Exception as exc:
+            logger.warning("Playlist path refresh failed: %s", exc)
+
+        if updated or payloads:
+            self._playlist_entries_model.load_rows(payloads)
         self._update_playlist_action_state()
 
     def _selected_playlist_entry_rows(self) -> List[int]:
-        return sorted({idx.row() for idx in self.playlist_entries_table.selectionModel().selectedRows()})
+        sel = self.playlist_entries_table.selectionModel()
+        if sel is None:
+            return []
+        return sorted({idx.row() for idx in sel.selectedRows()})
 
     def _selected_playlist_entry_ids(self) -> List[int]:
         ids: List[int] = []
@@ -1175,7 +1686,11 @@ class AudioPlayerPanel(QWidget):
         self.rename_playlist_btn.setEnabled(has_playlist)
         self.delete_playlist_btn.setEnabled(has_playlist)
         self.load_pl_btn.setEnabled(has_playlist)
+        self.add_playlist_to_queue_btn.setEnabled(has_playlist)
+        self.play_playlist_btn.setEnabled(has_playlist and entry_count > 0)
+        self.play_playlist_selected_btn.setEnabled(has_playlist and has_entry_selection)
         self.add_queue_selected_to_playlist_btn.setEnabled(has_playlist and has_queue_selection)
+        self.refresh_playlist_entries_btn.setEnabled(has_playlist)
         self.remove_playlist_entries_btn.setEnabled(has_playlist and has_entry_selection)
         self.playlist_move_up_btn.setEnabled(
             has_playlist and single_entry_row is not None and single_entry_row > 0
@@ -1318,9 +1833,6 @@ class AudioPlayerPanel(QWidget):
         return specs
 
     def _on_add_queue_selected_to_playlist_clicked(self) -> None:
-        playlist_id = self._selected_playlist_id
-        if playlist_id is None:
-            return
         rows = self._selected_queue_rows()
         if not rows:
             QMessageBox.information(self, "Playlists", "Select Queue rows first.")
@@ -1334,37 +1846,71 @@ class AudioPlayerPanel(QWidget):
             QMessageBox.warning(self, "Playlists", "Database connection is unavailable.")
             return
 
+        after_entry_id = None
+        selected_playlist_rows = self._selected_playlist_entry_rows()
+        if len(selected_playlist_rows) == 1:
+            after_entry_id = self._playlist_entries_model.entry_id_at(selected_playlist_rows[0])
+
+        dialog = AddQueueToPlaylistDialog(
+            parent=self,
+            db_manager=db,
+            selected_count=len(specs),
+            source_keys=[(spec.project_id, spec.kind, spec.source_id) for spec in specs],
+            default_playlist_id=self._selected_playlist_id,
+            default_after_entry_id=after_entry_id,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        playlist_id = dialog.selected_playlist_id()
+        if playlist_id is None:
+            QMessageBox.warning(self, "Playlists", "Select a playlist.")
+            return
+        add_mode = dialog.selected_add_mode()
+        dedup = dialog.dedup_enabled()
+        after_selected_id = dialog.selected_after_entry_id()
+
         try:
             from app.services.audio_queue_service import AudioQueueService
 
             with db.get_session() as session:
-                AudioQueueService().add_to_playlist(session, playlist_id, specs)
+                added_count, skipped_count = AudioQueueService().add_items_to_playlist(
+                    session,
+                    playlist_id,
+                    specs,
+                    add_mode=add_mode,
+                    after_entry_id=after_selected_id,
+                    dedup_by_source=dedup,
+                )
                 session.commit()
         except Exception as exc:
             QMessageBox.warning(self, "Playlists", f"Failed to add entries:\n{exc}")
             return
 
         self._refresh_playlists(select_playlist_id=playlist_id)
+        QTimer.singleShot(0, self._refresh_playlist_display_contexts)
+        QMessageBox.information(
+            self,
+            "Playlists",
+            f"Added: {added_count}\nSkipped duplicates: {skipped_count}",
+        )
 
     def _on_load_playlist_to_queue_clicked(self) -> None:
         playlist_id = self._selected_playlist_id
         if playlist_id is None:
             return
-
-        mode_label, ok = QInputDialog.getItem(
+        total_entries = self._playlist_entries_model.entry_count()
+        if total_entries <= 0:
+            QMessageBox.information(self, "Playlists", "Selected playlist is empty.")
+            return
+        answer = QMessageBox.question(
             self,
             "Load Playlist to Queue",
-            "Add mode:",
-            ["Append", "After current", "Prepend"],
-            0,
-            False,
+            f"Replace current Queue with {total_entries} playlist entries?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if not ok:
+        if answer != QMessageBox.StandardButton.Yes:
             return
-        mode = {"Append": "append", "After current": "after_current", "Prepend": "prepend"}.get(
-            str(mode_label),
-            "append",
-        )
 
         db = self._get_db_manager()
         if db is None:
@@ -1375,23 +1921,289 @@ class AudioPlayerPanel(QWidget):
             from app.services.audio_queue_service import AudioQueueService
 
             with db.get_session() as session:
+                AudioQueueService().clear_queue(session)
                 new_item_ids = AudioQueueService().load_playlist_to_queue_ids(
                     session,
                     playlist_id,
-                    mode=mode,
-                    current_position=self.player.current_index,
+                    mode="append",
+                    current_position=0,
                 )
                 session.commit()
         except Exception as exc:
             QMessageBox.warning(self, "Playlists", f"Failed to load playlist:\n{exc}")
             return
 
+        self.player.clear_queue()
         if new_item_ids:
-            self._load_db_queue_to_player(mode, new_item_ids=new_item_ids)
+            self._load_db_queue_to_player("append", new_item_ids=new_item_ids)
             QTimer.singleShot(0, self._refresh_display_contexts)
             self._refresh_queue()
 
         QMessageBox.information(self, "Playlists", f"Loaded {len(new_item_ids)} entries to Queue.")
+
+    def _on_add_playlist_to_queue_clicked(self, rows: Optional[List[int]] = None) -> None:
+        """Append playlist rows to Queue without clearing existing queue."""
+        playlist_id = self._selected_playlist_id
+        if playlist_id is None:
+            return
+        db = self._get_db_manager()
+        if db is None:
+            QMessageBox.warning(self, "Playlists", "Database connection is unavailable.")
+            return
+
+        selected_rows = sorted(set(rows or []))
+        if selected_rows:
+            specs = []
+            for row in selected_rows:
+                payload = self._playlist_entries_model.row_payload(row)
+                if not payload:
+                    continue
+                from app.services.audio_queue_service import AudioItemSpec
+
+                specs.append(
+                    AudioItemSpec(
+                        kind=self._normalize_playlist_kind(str(payload.get("kind") or "sentence")),
+                        source_id=payload.get("source_id"),
+                        project_id=payload.get("project_id"),
+                        snapshot_hebrew=payload.get("snapshot_hebrew"),
+                        snapshot_niqqud=payload.get("snapshot_niqqud"),
+                        snapshot_translation=payload.get("snapshot_translation"),
+                        snapshot_source_label=payload.get("snapshot_source_label"),
+                        audio_asset_id=payload.get("audio_asset_id"),
+                        audio_status=payload.get("audio_status") or "unknown",
+                    )
+                )
+            if not specs:
+                return
+            try:
+                from app.services.audio_queue_service import AudioQueueService
+
+                with db.get_session() as session:
+                    new_item_ids = AudioQueueService().add_to_queue(
+                        session,
+                        specs,
+                        mode="append",
+                        current_position=self.player.current_index,
+                    )
+                    session.commit()
+            except Exception as exc:
+                QMessageBox.warning(self, "Playlists", f"Failed to append selected entries:\n{exc}")
+                return
+            if new_item_ids:
+                self._load_db_queue_to_player("append", new_item_ids=new_item_ids)
+                QTimer.singleShot(0, self._refresh_display_contexts)
+                self._refresh_queue()
+            QMessageBox.information(self, "Playlists", f"Appended {len(new_item_ids)} selected entries to Queue.")
+            return
+
+        try:
+            from app.services.audio_queue_service import AudioQueueService
+
+            with db.get_session() as session:
+                new_item_ids = AudioQueueService().load_playlist_to_queue_ids(
+                    session,
+                    playlist_id,
+                    mode="append",
+                    current_position=self.player.current_index,
+                )
+                session.commit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Playlists", f"Failed to append playlist:\n{exc}")
+            return
+        if new_item_ids:
+            self._load_db_queue_to_player("append", new_item_ids=new_item_ids)
+            QTimer.singleShot(0, self._refresh_display_contexts)
+            self._refresh_queue()
+        QMessageBox.information(self, "Playlists", f"Appended {len(new_item_ids)} entries to Queue.")
+
+    def _selected_playlist_row_indices(self) -> List[int]:
+        return self._selected_playlist_entry_rows()
+
+    def _playlist_rows_for_play(self, selected_only: bool) -> List[int]:
+        if selected_only:
+            rows = self._selected_playlist_row_indices()
+            return rows
+        return list(range(self._playlist_entries_model.entry_count()))
+
+    @staticmethod
+    def _normalize_playlist_kind(kind: str) -> str:
+        raw = (kind or "").strip().lower()
+        if raw in {"term_cluster", "terms"}:
+            return "term"
+        if raw in {"surface", "sentences"}:
+            return "sentence"
+        return raw
+
+    def _resolve_playlist_row_paths(
+        self,
+        rows: List[int],
+    ) -> Tuple[List[Path], List[str], List[Dict[str, Any]], List[int]]:
+        if not rows:
+            return ([], [], [], [])
+        db = self._get_db_manager()
+        if db is None:
+            return ([], [], [], [])
+
+        from app.domain.normalization.normalizer import normalize_for_tm
+
+        row_payload_pairs: List[Tuple[int, Dict[str, Any]]] = []
+        for row in rows:
+            payload = self._playlist_entries_model.row_payload(row)
+            if payload:
+                row_payload_pairs.append((row, payload))
+        if not row_payload_pairs:
+            return ([], [], [], [])
+
+        ready_by_asset: Dict[int, Path] = {}
+        ready_by_norm: Dict[str, Path] = {}
+        row_to_norm: Dict[int, str] = {}
+
+        # Collect asset IDs and fallback norms for one-shot lookup.
+        asset_ids = sorted(
+            {
+                int(payload["audio_asset_id"])
+                for _row, payload in row_payload_pairs
+                if payload.get("audio_asset_id") is not None
+                and str(payload.get("audio_asset_id")).strip().isdigit()
+            }
+        )
+        norm_list: List[str] = []
+        kind_to_norm_kind = {"term": "term_cluster", "sentence": "surface", "lemma": "lemma"}
+        for row, payload in row_payload_pairs:
+            kind = self._normalize_playlist_kind(str(payload.get("kind") or ""))
+            src_text = str(payload.get("snapshot_hebrew") or "").strip()
+            if not src_text:
+                continue
+            norm_kind = kind_to_norm_kind.get(kind, "surface")
+            try:
+                norm = normalize_for_tm("he", src_text, norm_kind).norm
+            except Exception:
+                norm = ""
+            if norm:
+                row_to_norm[row] = norm
+                norm_list.append(norm)
+
+        try:
+            from sqlalchemy import select as _sa_select, desc as _sa_desc
+            from app.infra.sa_models import AudioAsset as _AudioAsset
+
+            with db.get_session() as session:
+                if asset_ids:
+                    rows_asset = session.execute(
+                        _sa_select(_AudioAsset.asset_id, _AudioAsset.audio_rel_path)
+                        .where(_AudioAsset.asset_id.in_(asset_ids))
+                        .where(_AudioAsset.asset_status == "ready")
+                        .where(_AudioAsset.audio_rel_path.isnot(None))
+                    ).all()
+                    for asset_id, rel in rows_asset:
+                        if rel:
+                            abs_path = self._to_abs_audio_path(rel)
+                            if abs_path:
+                                ready_by_asset[int(asset_id)] = abs_path
+                unique_norms = sorted(set(norm_list))
+                if unique_norms:
+                    rows_norm = session.execute(
+                        _sa_select(_AudioAsset.norm_text, _AudioAsset.audio_rel_path)
+                        .where(_AudioAsset.lang == "he")
+                        .where(_AudioAsset.norm_text.in_(unique_norms))
+                        .where(_AudioAsset.asset_status == "ready")
+                        .where(_AudioAsset.audio_rel_path.isnot(None))
+                        .order_by(_sa_desc(_AudioAsset.updated_at), _sa_desc(_AudioAsset.asset_id))
+                    ).all()
+                    for norm, rel in rows_norm:
+                        if norm in ready_by_norm:
+                            continue
+                        abs_path = self._to_abs_audio_path(rel)
+                        if abs_path:
+                            ready_by_norm[str(norm)] = abs_path
+        except Exception as exc:
+            logger.warning("Playlist path resolver failed: %s", exc)
+
+        ready_paths: List[Path] = []
+        labels: List[str] = []
+        contexts: List[Dict[str, Any]] = []
+        source_rows: List[int] = []
+        for row, payload in row_payload_pairs:
+            path = None
+            asset_raw = payload.get("audio_asset_id")
+            if asset_raw is not None:
+                try:
+                    path = ready_by_asset.get(int(asset_raw))
+                except (TypeError, ValueError):
+                    path = None
+            if path is None:
+                norm = row_to_norm.get(row)
+                if norm:
+                    path = ready_by_norm.get(norm)
+            if path is None or str(path) in ("", ".") or not Path(path).exists():
+                continue
+
+            ready_paths.append(Path(path))
+            labels.append(str(payload.get("snapshot_hebrew") or Path(path).stem))
+            contexts.append(
+                {
+                    "snapshot_hebrew": str(payload.get("snapshot_hebrew") or ""),
+                    "snapshot_niqqud": str(payload.get("snapshot_niqqud") or ""),
+                    "snapshot_translation": str(payload.get("snapshot_translation") or ""),
+                    "snapshot_source_label": str(payload.get("snapshot_source_label") or ""),
+                    "snapshot_project_name": str(payload.get("snapshot_project_name") or ""),
+                    "snapshot_document_name": str(payload.get("snapshot_document_name") or ""),
+                    "kind": payload.get("kind"),
+                    "source_id": payload.get("source_id"),
+                    "project_id": payload.get("project_id"),
+                    "audio_status": "ready",
+                }
+            )
+            source_rows.append(row)
+        return (ready_paths, labels, contexts, source_rows)
+
+    @staticmethod
+    def _to_abs_audio_path(rel_path: Any) -> Optional[Path]:
+        try:
+            rel = Path(str(rel_path))
+            if rel.is_absolute() or ".." in rel.parts:
+                return None
+            base = Path(os.environ.get("LOCALAPPDATA", "")) / "HDLE"
+            abs_path = base / rel
+            if abs_path.exists():
+                return abs_path
+        except Exception:
+            return None
+        return None
+
+    def _play_playlist_rows(self, rows: List[int]) -> None:
+        if not rows:
+            return
+        ready_paths, labels, contexts, _ = self._resolve_playlist_row_paths(rows)
+        if not ready_paths:
+            QMessageBox.information(
+                self,
+                "Audio Missing",
+                "No ready audio found for selected playlist entries.",
+            )
+            return
+        try:
+            from app.services.audio_playback_service import AudioPlaybackService
+
+            AudioPlaybackService.launch_audio_files(
+                ready_paths,
+                labels=labels,
+                play_mode="enqueue",
+                contexts=contexts,
+                start_immediately=True,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Playback Error", f"Failed to play playlist entries:\n{exc}")
+            return
+        self._refresh_queue()
+
+    def _on_play_playlist_clicked(self) -> None:
+        rows = self._playlist_rows_for_play(selected_only=False)
+        self._play_playlist_rows(rows)
+
+    def _on_play_playlist_selected_clicked(self) -> None:
+        rows = self._playlist_rows_for_play(selected_only=True)
+        self._play_playlist_rows(rows)
 
     def _on_remove_playlist_entries_clicked(self) -> None:
         playlist_id = self._selected_playlist_id
@@ -1497,6 +2309,19 @@ class AudioPlayerPanel(QWidget):
         self._col_visible[col_idx] = checked
         self._apply_column_visibility()
         self._save_col_settings()
+        self._save_header_state(self.queue_table, "audio_player/queue/header_state")
+
+    def _on_playlist_column_toggled(self, checked: bool) -> None:
+        act = self.sender()
+        if act is None:
+            return
+        col_idx = act.data()
+        if col_idx is None:
+            return
+        self._playlist_col_visible[col_idx] = checked
+        self._apply_playlist_column_visibility()
+        self._save_col_settings()
+        self._save_header_state(self.playlist_entries_table, "audio_player/playlist/header_state")
 
     def _apply_column_visibility(self) -> None:
         for col, visible in enumerate(self._col_visible):
@@ -1506,6 +2331,15 @@ class AudioPlayerPanel(QWidget):
                 self.queue_table.showColumn(col)
             else:
                 self.queue_table.hideColumn(col)
+
+    def _apply_playlist_column_visibility(self) -> None:
+        for col, visible in enumerate(self._playlist_col_visible):
+            if col == _PL_COL_NUM:
+                self.playlist_entries_table.showColumn(col)
+            elif visible:
+                self.playlist_entries_table.showColumn(col)
+            else:
+                self.playlist_entries_table.hideColumn(col)
 
     def _on_queue_changed(self, queue_payload: list) -> None:
         self._queue_model.load(queue_payload, self.player.current_index)
@@ -1569,6 +2403,7 @@ class AudioPlayerPanel(QWidget):
     def _on_queue_selection_changed(self, *_args) -> None:
         selected_rows = sorted({idx.row() for idx in self.queue_table.selectionModel().selectedRows()})
         self._selected_queue_row_count = len(selected_rows)
+        self.add_queue_to_playlist_btn.setEnabled(bool(selected_rows))
         if len(selected_rows) != 1:
             self._selected_source_payload = None
             self._update_goto_source_state()
@@ -2128,6 +2963,8 @@ class AudioPlayerPanel(QWidget):
 
         regen_audio_act = menu.addAction(f"Regenerate Audio Selected ({len(rows)})...")
         regen_audio_act.setEnabled(len(audio_items) > 0)
+        add_to_playlist_act = menu.addAction(f"Add selected to Playlist ({len(rows)})...")
+        add_to_playlist_act.setEnabled(len(rows) > 0)
 
         edit_translation_act = menu.addAction("Edit Translation...")
         edit_translation_act.setEnabled(len(rows) == 1)
@@ -2162,6 +2999,8 @@ class AudioPlayerPanel(QWidget):
             self._on_queue_niqqudize_selected(rows)
         elif action == regen_audio_act:
             self._on_queue_regenerate_audio_selected(rows)
+        elif action == add_to_playlist_act:
+            self._on_add_queue_selected_to_playlist_clicked()
         elif action == edit_translation_act and rows:
             self._on_queue_edit_translation(rows[0])
         elif action == clear_translation_act and rows:
@@ -2176,6 +3015,58 @@ class AudioPlayerPanel(QWidget):
             self._copy_cell(rows[0], _COL_NIQQUD)
         elif action == copy_transl_act:
             self._copy_cell(rows[0], _COL_TRANSLATION)
+
+    def _on_playlist_context_menu(self, pos) -> None:
+        rows = self._selected_playlist_entry_rows()
+        if not rows:
+            return
+        menu = QMenu(self)
+        play_selected_act = menu.addAction("Play selected")
+        add_to_queue_act = menu.addAction("Add selected to Queue")
+        remove_act = menu.addAction("Remove selected from Playlist")
+        move_up_act = menu.addAction("Move up")
+        move_down_act = menu.addAction("Move down")
+        copy_hebrew_act = menu.addAction("Copy Hebrew")
+        copy_niqqud_act = menu.addAction("Copy Niqqud")
+        copy_translation_act = menu.addAction("Copy Translation")
+        move_up_act.setEnabled(len(rows) == 1 and rows[0] > 0)
+        move_down_act.setEnabled(len(rows) == 1 and rows[0] < (self._playlist_entries_model.entry_count() - 1))
+
+        action = menu.exec(self.playlist_entries_table.viewport().mapToGlobal(pos))
+        if action is None:
+            return
+        if action == play_selected_act:
+            self._on_play_playlist_selected_clicked()
+        elif action == add_to_queue_act:
+            self._on_add_playlist_to_queue_clicked(rows)
+        elif action == remove_act:
+            self._on_remove_playlist_entries_clicked()
+        elif action == move_up_act:
+            self._on_move_playlist_entry(-1)
+        elif action == move_down_act:
+            self._on_move_playlist_entry(1)
+        elif action == copy_hebrew_act:
+            self._copy_playlist_cell(rows[0], _PL_COL_HEBREW)
+        elif action == copy_niqqud_act:
+            self._copy_playlist_cell(rows[0], _PL_COL_NIQQUD)
+        elif action == copy_translation_act:
+            self._copy_playlist_cell(rows[0], _PL_COL_TRANSLATION)
+
+    def _on_playlist_double_clicked(self, index: QModelIndex) -> None:
+        self._play_playlist_rows([index.row()])
+
+    def _on_playlist_play_cell_clicked(self, index: QModelIndex) -> None:
+        self._play_playlist_rows([index.row()])
+
+    def _copy_playlist_cell(self, row: int, col: int) -> None:
+        try:
+            from PyQt6.QtWidgets import QApplication
+
+            idx = self._playlist_entries_model.index(row, col)
+            text = str(self._playlist_entries_model.data(idx, Qt.ItemDataRole.DisplayRole) or "")
+            QApplication.clipboard().setText(text)
+        except Exception:
+            pass
 
     def _source_keys_from_rows(self, rows: List[int]) -> List[Tuple[str, int, Optional[int]]]:
         keys: List[Tuple[str, int, Optional[int]]] = []
@@ -2241,7 +3132,7 @@ class AudioPlayerPanel(QWidget):
                         project_id=project_id,
                     )
                     for item_id in item_ids:
-                        svc.update_item_snapshot(session, item_id, is_stale=False)
+                        svc.update_snapshot(session, item_id, is_stale=False)
                 session.commit()
         except Exception as exc:
             logger.debug("clear stale by source skipped: %s", exc)
@@ -2963,7 +3854,12 @@ class AudioPlayerPanel(QWidget):
         if not tracks:
             return 0
         from sqlalchemy import select as _sel
-        from app.infra.sa_models import DocumentSentence as _DS, SourceDocument as _SD
+        from app.infra.sa_models import (
+            DictProject as _Project,
+            DocumentSentence as _DS,
+            SourceCorpus as _SC,
+            SourceDocument as _SD,
+        )
 
         track_rows: List[Tuple[Any, int]] = []
         for t in tracks:
@@ -2992,6 +3888,7 @@ class AudioPlayerPanel(QWidget):
 
         # Resolve document filenames
         doc_names: Dict[int, str] = {}
+        doc_project_names: Dict[int, str] = {}
         try:
             unique_dids = list(set(sid_to_did.values()))
             if unique_dids:
@@ -3000,6 +3897,14 @@ class AudioPlayerPanel(QWidget):
                 ).all():
                     if fname:
                         doc_names[did] = fname
+                for did, pname in session.execute(
+                    _sel(_SD.doc_id, _Project.name)
+                    .join(_SC, _SD.corpus_id == _SC.corpus_id)
+                    .join(_Project, _SC.project_id == _Project.project_id)
+                    .where(_SD.doc_id.in_(unique_dids))
+                ).all():
+                    if pname:
+                        doc_project_names[int(did)] = str(pname)
         except Exception:
             pass
 
@@ -3052,8 +3957,15 @@ class AudioPlayerPanel(QWidget):
             changed = False
             did = sid_to_did.get(sid)
             source = doc_names.get(did, "") if did else ""
+            project_name = doc_project_names.get(did, "") if did else ""
             if source and t.context.get("snapshot_source_label") != source:
                 t.context["snapshot_source_label"] = source
+                changed = True
+            if source and t.context.get("snapshot_document_name") != source:
+                t.context["snapshot_document_name"] = source
+                changed = True
+            if project_name and t.context.get("snapshot_project_name") != project_name:
+                t.context["snapshot_project_name"] = project_name
                 changed = True
             niqqud = sid_to_niqqud.get(sid)
             if niqqud is not None and t.context.get("snapshot_niqqud") != niqqud:
@@ -3088,7 +4000,7 @@ class AudioPlayerPanel(QWidget):
         if not tracks:
             return 0
         from sqlalchemy import select as _sel
-        from app.infra.sa_models import Lemma as _Lemma
+        from app.infra.sa_models import DictProject as _Project, Lemma as _Lemma
 
         track_rows: List[Tuple[Any, int, Optional[int]]] = []
         for t in tracks:
@@ -3151,6 +4063,7 @@ class AudioPlayerPanel(QWidget):
 
         # Batch translation from TMEntry (project-aware)
         norm_to_transl: Dict[Tuple[int, str], str] = {}
+        project_name_by_id: Dict[int, str] = {}
         try:
             from app.infra.sa_models import TMEntry as _TM
             project_ids = sorted({pid for _, _sid, pid in track_rows if pid is not None})
@@ -3169,6 +4082,10 @@ class AudioPlayerPanel(QWidget):
                     key = (int(project_id), str(norm or ""))
                     if key not in norm_to_transl:
                         norm_to_transl[key] = str(transl or "")
+                project_rows = session.execute(
+                    _sel(_Project.project_id, _Project.name).where(_Project.project_id.in_(project_ids))
+                ).all()
+                project_name_by_id = {int(pid): str(name or "") for pid, name in project_rows}
         except Exception:
             pass
 
@@ -3180,6 +4097,13 @@ class AudioPlayerPanel(QWidget):
             changed = False
             if t.context.get("snapshot_source_label") != "Dictionary":
                 t.context["snapshot_source_label"] = "Dictionary"
+                changed = True
+            if (t.context.get("snapshot_document_name") or "") != "":
+                t.context["snapshot_document_name"] = ""
+                changed = True
+            project_name = project_name_by_id.get(pid, "") if pid is not None else ""
+            if project_name and t.context.get("snapshot_project_name") != project_name:
+                t.context["snapshot_project_name"] = project_name
                 changed = True
             if db_text and t.context.get("snapshot_hebrew") != db_text:
                 t.context["snapshot_hebrew"] = db_text
@@ -3209,7 +4133,7 @@ class AudioPlayerPanel(QWidget):
         if not tracks:
             return 0
         from sqlalchemy import select as _sel
-        from app.infra.sa_models import TermCluster as _TermCluster
+        from app.infra.sa_models import DictProject as _Project, TermCluster as _TermCluster
 
         track_rows: List[Tuple[Any, int, Optional[int]]] = []
         for t in tracks:
@@ -3270,6 +4194,7 @@ class AudioPlayerPanel(QWidget):
             pass
 
         norm_to_transl: Dict[Tuple[int, str], str] = {}
+        project_name_by_id: Dict[int, str] = {}
         try:
             from app.infra.sa_models import TMEntry as _TM
             project_ids = sorted({pid for _, _sid, pid in track_rows if pid is not None})
@@ -3288,6 +4213,10 @@ class AudioPlayerPanel(QWidget):
                     key = (int(project_id), str(norm or ""))
                     if key not in norm_to_transl:
                         norm_to_transl[key] = str(transl or "")
+                project_rows = session.execute(
+                    _sel(_Project.project_id, _Project.name).where(_Project.project_id.in_(project_ids))
+                ).all()
+                project_name_by_id = {int(pid): str(name or "") for pid, name in project_rows}
         except Exception:
             pass
 
@@ -3299,6 +4228,13 @@ class AudioPlayerPanel(QWidget):
             changed = False
             if t.context.get("snapshot_source_label") != "Terms":
                 t.context["snapshot_source_label"] = "Terms"
+                changed = True
+            if (t.context.get("snapshot_document_name") or "") != "":
+                t.context["snapshot_document_name"] = ""
+                changed = True
+            project_name = project_name_by_id.get(pid, "") if pid is not None else ""
+            if project_name and t.context.get("snapshot_project_name") != project_name:
+                t.context["snapshot_project_name"] = project_name
                 changed = True
             if db_text and t.context.get("snapshot_hebrew") != db_text:
                 t.context["snapshot_hebrew"] = db_text
