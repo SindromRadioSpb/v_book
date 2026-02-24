@@ -43,6 +43,7 @@ Verification status:
   - `tests/test_p1_layout_persistence.py`
   - `tests/test_tm_scope_chip.py`
   - `tests/test_user_dictionaries_scope.py`
+  - `tests/test_workspace_app_window_contract.py`
 
 Smoke matrix:
 
@@ -56,6 +57,16 @@ Smoke matrix:
 8. Collapse/expand `Project Search` and `Tools`, restart app: section state is restored.
 9. No current project -> click `Open Project...`, then open a project: queued deep-link tab route is applied automatically.
 10. Startup shortcut conflict check reports no duplicate active bindings.
+
+Manual verification record (latest):
+
+- Date: 2026-02-24
+- Executor: Product Owner (manual UI/UX pass)
+- Result: PASS for full PATCH-01..PATCH-06 matrix
+- Notes:
+  - Active workspace state, current-project deep-links, and scope behavior validated.
+  - Sidebar search keyboard flow and section persistence validated across restart.
+  - Back/Home deterministic routing validated.
 
 ---
 
