@@ -1,112 +1,87 @@
-# Audio Player v2 - Codebase Audit
+﻿# Audio Player v2 - Codebase Audit
 
-Date: 2026-02-23  
-Task: 25 - Audio Player v2 (Premium)
+Date: 2026-02-24
+Task: 25/26 - Audio Player v2 (Premium)
 
 ## 1) Entry points and architecture
 
-Primary UI panel:
+Primary panel:
 
 - `app/ui/widgets/audio_player_panel.py`
-  - queue table model: `AudioQueueTableModel`
-  - source picker dialog: `AddAllToQueueDialog`
-  - panel widget: `AudioPlayerPanel`
+  - Queue model: `AudioQueueTableModel`
+  - Playlist entries model: `AudioPlaylistEntriesTableModel`
+  - Queue -> Playlist picker: `AddQueueToPlaylistDialog`
+  - Batch display refresh handlers:
+    - `_refresh_display_contexts()` (Queue)
+    - `_refresh_playlist_display_contexts()` (Playlists)
 
 Playback engine:
 
 - `app/services/audio_player_service.py`
-  - `AudioPlayerService` (singleton)
-  - `AudioTrack`
-  - `QtMultimediaBackend`
+  - non-destructive queue runtime (`_tracks`, `_current_index`)
 
-Queue/playlist/history persistence service:
+Queue/playlist/history persistence:
 
 - `app/services/audio_queue_service.py`
-  - `AudioQueueService`
-  - DTOs and source-link payload
+  - queue CRUD
+  - playlist CRUD/reorder/load
+  - `add_items_to_playlist(..., add_mode, dedup_by_source)`
 
 Audio path resolver:
 
 - `app/services/audio_playback_service.py`
-  - `resolve_ready_path()` uses `updated_at DESC, asset_id DESC`
-  - relative-path safety checks enforced
+  - `resolve_ready_path()` and safe relative path policy
 
 Add All worker:
 
 - `app/ui/workers.py`
-  - `AudioQueuePopulateWorker`
-  - SQL ID collection + chunked insert
-  - V3 progress signals
-
-DB schema:
-
-- `app/infra/migrations/025_audio_player_v2.sql`
-  - `audio_queue_item`
-  - `audio_playlist`
-  - `audio_playlist_entry`
-  - `audio_history`
+  - `AudioQueuePopulateWorker` with V3 progress contract
 
 ## 2) Confirmed implemented behavior
 
-Queue and playback:
+- Queue remains non-destructive.
+- Direct row play from source tabs appends and starts clicked row.
+- Queue `Plays` starts at `0` and increments on complete playback.
+- Queue -> Playlist works from Queue header button and Queue context menu.
+- Queue -> Playlist premium dialog supports:
+  - playlist search,
+  - inline create,
+  - dedup by `(project_id, kind, source_id)`,
+  - add modes (`append/prepend/after_selected`),
+  - add preview (`new` vs `duplicates`).
+- Playlist entries are playable directly:
+  - `Play`, `Play Selected`, row `▶`, and double click.
+- Playlist entries support keyboard actions:
+  - `Enter/Space` for play selected.
+  - `Del` for remove selected.
+- `Load to Queue` is explicit replace with confirmation.
+- `Add to Queue` appends playlist entries.
+- Queue and Playlist tables both support rich source columns and persisted toggles/header state.
+- Playlist display refresh is batched and non-fatal on resolver errors.
 
-- Non-destructive queue in `AudioPlayerService` (`_tracks` + `_current_index`).
-- Runtime speed control wired to `QMediaPlayer.setPlaybackRate()`.
-- Repeat modes (`none|one|all`) and repeat count.
-- Auto-pause and gap between items.
-- Delegate-based row play in queue `Status` column.
+## 3) Remaining limits (known)
 
-Recent bug-fix coverage already in tests:
-
-- Add All unresolved sentinel (`Path("") -> "."`) correctly treated as `missing`.
-- Add All rerun upgrades unresolved duplicate rows in place.
-- Add All rows with ready assets become playable after DB-to-memory sync.
-- Queue display batch refresh updates Niqqud/Translation/Source.
-- Direct-play rows initialize `play_count=0` and increment on playback.
-- Enqueue with explicit row play starts clicked appended item immediately.
-
-## 3) Current panel limitations (confirmed in code)
-
-- `Go to Source` button is present but not wired to navigation handler.
-- Queue context menu currently includes only:
-  - Play from here
-  - Remove
-  - Copy Hebrew/Niqqud/Translation
-- Playlists tab is a shell (no entry table CRUD wiring in panel).
-- History tab in panel is in-memory session list; DB history service is not yet wired there.
-- Queue DB stats (`mark_played`) are not called by panel playback flow yet.
+- History tab in panel is still session-local (DB history binding pending).
+- Persisted queue restore on app startup remains optional backlog.
 
 ## 4) Regression-sensitive zones
 
-- `_load_db_queue_to_player()` path resolution and dedup upgrade logic.
-- `_refresh_display_contexts()` batch enrichment logic (must stay no per-row SQL).
-- `play_paths(..., start_immediately=True)` semantics for row-click UX.
-- Consistency between in-memory queue and persisted queue rows.
+- `_load_db_queue_to_player()` path resolution + unresolved upgrade logic.
+- `_refresh_display_contexts()` and `_refresh_playlist_display_contexts()` batching contracts.
+- Queue/Playlist column visibility + header state persistence keys.
+- Playlist playback path resolution (`_resolve_playlist_row_paths`) and safe path guard.
 
-## 5) Existing automated coverage relevant to Audio Player
+## 5) Automated coverage relevant to task_26
 
-Core tests:
-
+- `tests/test_audio_player_playlists_playback.py`
+- `tests/test_audio_player_queue_add_to_playlist.py`
+- `tests/test_audio_player_playlist_columns_persistence.py`
+- `tests/test_audio_player_playlist_display_refresh.py`
+- `tests/test_audio_player_playlists_panel.py`
+- `tests/test_audio_queue_service.py`
+- `tests/test_audio_queue_display_resolver.py`
 - `tests/test_audio_player_nondestructive.py`
 - `tests/test_audio_player_queue_engine.py`
 - `tests/test_audio_player_rate.py`
 - `tests/test_audio_player_repeat.py`
 - `tests/test_audio_track_source_url.py`
-- `tests/test_audio_queue_display_resolver.py`
-- `tests/test_audio_queue_populate_worker.py`
-- `tests/test_audio_player_panel_dock_state.py`
-- `tests/test_audio_queue_service.py`
-- `tests/test_audio_player_history.py`
-
-## 6) Recommended next implementation slice
-
-Minimal-risk next slice for premium completion:
-
-- Wire `Go to Source` using `AudioQueueService.resolve_source_link()`.
-- Wire DB-backed `mark_played()` updates from playback completion.
-- Promote playlists/history tabs from shell/session to DB-backed UI.
-- Add PATCH-05 queue context actions via workers + V3 progress:
-  - Translate
-  - Niqqudize
-  - Regenerate audio
-  - Edit Pronunciation / Edit Sentence Niqqud
