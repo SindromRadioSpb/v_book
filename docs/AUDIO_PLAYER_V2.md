@@ -129,14 +129,29 @@ Column visibility + layout persistence:
 
 ## History tab
 
-- Session history list (last 200) is shown in panel.
-- DB-backed history exists in service layer but is not yet bound to panel UI.
+- History table is DB-backed (`audio_history`) and loaded directly in panel UI.
+- Controls:
+  - `Play Selected` (enqueue mode).
+  - `Add to Queue` (append selected history rows).
+  - `↻` refresh (reload + batch context refresh).
+- Row actions:
+  - `▶` in `Status` column and row double-click to play.
+  - Context menu with `Go to Source`, `Add selected to Queue`, copy actions.
+- History columns:
+  - `#`, `Hebrew`, `Niqqud`, `Translation`, `Source`, `Status`, `Played At`, `Rate`, `Project`, `Document`, `Source ID`.
 
 ## Current limitations (open items)
 
 - `Go to Source` button may be unavailable for rows with insufficient source payload.
-- History tab in panel is still session-local (DB history binding remains next slice).
 - No persisted queue restore on app restart in panel flow yet.
+
+## Go to Source behavior
+
+- `Go to Source` resolves payload from the active tab context:
+  - Queue tab -> selected queue row (single selection), fallback to current track.
+  - Playlists tab -> selected playlist row (single selection), fallback to current track.
+  - History tab -> selected history row (single selection), fallback to current track.
+- If multiple rows are selected in the active tab, button is disabled.
 
 ## Technical notes
 

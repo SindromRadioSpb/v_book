@@ -140,7 +140,6 @@ def test_track_finished_marks_played_in_db(monkeypatch, qtbot, tmp_path):
     assert calls["item_id"] == 99
     assert calls["commits"] == 1
     assert calls["rate_used"] == pytest.approx(expected_rate)
-    assert panel.history_list.count() == 1
     assert player._tracks[0].context.get("last_played_at")  # noqa: SLF001
 
 

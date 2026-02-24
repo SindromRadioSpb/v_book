@@ -25,6 +25,9 @@ Last verified against code/tests: 2026-02-24
 - [x] Playlist keyboard actions work (`Enter/Space` play selected, `Del` remove selected).
 - [x] `Load to Queue` is explicit replace-flow with confirmation.
 - [x] `Add to Queue` appends playlist entries without destructive reset.
+- [x] History tab is DB-backed in panel UI (`audio_history` binding).
+- [x] History rows support `Play Selected`, row `▶`, row double-click and `Add to Queue`.
+- [x] `Go to Source` uses active tab row (`Queue/Playlists/History`) for routing payload.
 
 ### Safety status
 
@@ -52,6 +55,10 @@ Last verified against code/tests: 2026-02-24
 14. Resize/reorder Queue and Playlist columns; restart app; header layout restores.
 15. In Playlist entries table, press `Enter` and `Space`; selected rows are played.
 16. In Playlist entries table, press `Del`; selected rows are removed.
+17. Play one row and open `History`; confirm new DB row is visible without app restart.
+18. In `History`, select one row and click `Go to Source`; target project tab opens and row is focused.
+19. In `Playlists`, select one row and click `Go to Source`; target source row is focused.
+20. In `Queue/Playlists/History`, select multiple rows; `Go to Source` is disabled.
 
 ## Automated evidence references
 
@@ -69,10 +76,10 @@ Last verified against code/tests: 2026-02-24
 - `tests/test_audio_player_panel_dock_state.py`
 - `tests/test_audio_player_rate.py`
 - `tests/test_audio_player_repeat.py`
+- `tests/test_audio_player_history_panel.py`
 
 ## Open premium backlog (next slice)
 
-- DB-backed history binding in panel UI.
 - Persisted queue resume between sessions (product decision).
 
 ## Screenshot/log checklist
@@ -83,3 +90,4 @@ Last verified against code/tests: 2026-02-24
 - Playlist playback started from selected entry without queue reset.
 - Queue and Playlist gear toggles persisted after restart.
 - Playlist `↻` refresh updating Niqqud/Translation/Source context.
+- History tab with DB rows and `Go to Source` from selected history row.

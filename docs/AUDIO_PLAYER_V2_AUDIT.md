@@ -58,16 +58,17 @@ Add All worker:
 - `Add to Queue` appends playlist entries.
 - Queue and Playlist tables both support rich source columns and persisted toggles/header state.
 - Playlist display refresh is batched and non-fatal on resolver errors.
+- History tab is DB-backed in panel UI with batch context refresh.
+- `Go to Source` resolves from active tab selection (`Queue/Playlists/History`).
 
 ## 3) Remaining limits (known)
 
-- History tab in panel is still session-local (DB history binding pending).
 - Persisted queue restore on app startup remains optional backlog.
 
 ## 4) Regression-sensitive zones
 
 - `_load_db_queue_to_player()` path resolution + unresolved upgrade logic.
-- `_refresh_display_contexts()` and `_refresh_playlist_display_contexts()` batching contracts.
+- `_refresh_display_contexts()`, `_refresh_playlist_display_contexts()`, `_refresh_history_display_contexts()` batching contracts.
 - Queue/Playlist column visibility + header state persistence keys.
 - Playlist playback path resolution (`_resolve_playlist_row_paths`) and safe path guard.
 
@@ -85,3 +86,4 @@ Add All worker:
 - `tests/test_audio_player_rate.py`
 - `tests/test_audio_player_repeat.py`
 - `tests/test_audio_track_source_url.py`
+- `tests/test_audio_player_history_panel.py`
