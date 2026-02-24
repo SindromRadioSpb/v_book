@@ -847,12 +847,6 @@ class AppWindow(QMainWindow):
         project_view = ProjectView(pid)
         project_view.back_to_dashboard.connect(self.back_to_dashboard)
         project_view.open_translation_management_requested.connect(self.open_translation_management)
-        project_view.destroyed.connect(
-            lambda *_args, _pid=pid, _key=project_key: (
-                self._project_instances.pop(_pid, None),
-                self._unregister_workspace_instance(_key),
-            )
-        )
 
         # Add to stack and show
         self.stack.addWidget(project_view)
