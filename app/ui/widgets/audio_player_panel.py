@@ -1265,7 +1265,7 @@ class AudioPlayerPanel(QWidget):
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(2)
 
-        # Tab bar + gear button in same row
+        # Top row: tabs only. Queue actions are rendered inside Queue tab header.
         tab_header = QHBoxLayout()
         self.tab_widget = QTabWidget()
         tab_header.addWidget(self.tab_widget, 1)
@@ -1274,20 +1274,17 @@ class AudioPlayerPanel(QWidget):
         self.add_all_btn.setToolTip("Add all items from a project source to the queue")
         self.add_all_btn.setFixedWidth(78)
         self.add_all_btn.clicked.connect(self._on_add_all_clicked)
-        tab_header.addWidget(self.add_all_btn)
 
         self.add_queue_to_playlist_btn = QPushButton("Add to Playlist…")
         self.add_queue_to_playlist_btn.setToolTip("Copy selected Queue rows into a playlist")
         self.add_queue_to_playlist_btn.setFixedWidth(104)
         self.add_queue_to_playlist_btn.setEnabled(False)
         self.add_queue_to_playlist_btn.clicked.connect(self._on_add_queue_selected_to_playlist_clicked)
-        tab_header.addWidget(self.add_queue_to_playlist_btn)
 
         self.refresh_queue_btn = QPushButton("↻")
         self.refresh_queue_btn.setToolTip("Refresh Niqqud / Translation / Source from DB")
         self.refresh_queue_btn.setFixedWidth(32)
         self.refresh_queue_btn.clicked.connect(self._refresh_display_contexts)
-        tab_header.addWidget(self.refresh_queue_btn)
 
         self.columns_btn = QToolButton()
         self.columns_btn.setText("⚙")
@@ -1306,7 +1303,6 @@ class AudioPlayerPanel(QWidget):
             act.toggled.connect(self._on_column_toggled)
             self._col_actions.append(act)
         self.columns_btn.setMenu(self._columns_menu)
-        tab_header.addWidget(self.columns_btn)
 
         vl.addLayout(tab_header)
 
@@ -1338,7 +1334,22 @@ class AudioPlayerPanel(QWidget):
         for i, w in enumerate(default_widths):
             hdr.resizeSection(i, w)
 
-        self.tab_widget.addTab(self.queue_table, "Queue")
+        queue_widget = QWidget()
+        queue_layout = QVBoxLayout(queue_widget)
+        queue_layout.setContentsMargins(0, 0, 0, 0)
+        queue_layout.setSpacing(4)
+
+        queue_header = QHBoxLayout()
+        queue_header.addWidget(QLabel("Queue"))
+        queue_header.addStretch(1)
+        queue_header.addWidget(self.add_all_btn)
+        queue_header.addWidget(self.add_queue_to_playlist_btn)
+        queue_header.addWidget(self.refresh_queue_btn)
+        queue_header.addWidget(self.columns_btn)
+        queue_layout.addLayout(queue_header)
+        queue_layout.addWidget(self.queue_table, 1)
+
+        self.tab_widget.addTab(queue_widget, "Queue")
 
         # ── Playlists tab ────────────────────────────────────────────────────
         playlists_widget = self._build_playlists_tab()
