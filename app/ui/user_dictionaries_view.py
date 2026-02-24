@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QSplitter,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -175,8 +176,12 @@ class UserDictionariesView(QWidget):
             4: "is_noise",
             5: "study_state",
             6: "last_grade",
-            8: "pronunciation",
+            7: "origin_project_id",
+            8: "origin_project_name",
+            10: "pronunciation",
         }
+        self._visible_columns_key = "user_dict/columns_visible"
+        self._column_actions: List[QAction] = []
 
         self._init_ui()
         self.load_dictionaries()
@@ -340,6 +345,11 @@ class UserDictionariesView(QWidget):
         self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
         filters_row.addWidget(self.hide_noise_checkbox)
 
+        self.columns_btn = QToolButton()
+        self.columns_btn.setText("⚙")
+        self.columns_btn.setToolTip("Select visible columns")
+        filters_row.addWidget(self.columns_btn)
+
         right_layout.addLayout(filters_row)
 
         self.items_table = QTableView()
@@ -353,7 +363,7 @@ class UserDictionariesView(QWidget):
             self.items_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.items_table.setItemDelegateForColumn(9, self.audio_play_delegate)
+        self.items_table.setItemDelegateForColumn(11, self.audio_play_delegate)
         self.items_table.horizontalHeader().sectionClicked.connect(self.on_items_header_clicked)
         self.items_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.items_table.customContextMenuRequested.connect(self.on_context_menu)
@@ -365,9 +375,23 @@ class UserDictionariesView(QWidget):
             settings=self.settings,
             table_id="user_dict_items",
             table=self.items_table,
-            default_widths={0: 120, 1: 220, 2: 220, 3: 110, 4: 90, 5: 110, 6: 120, 7: 120, 8: 180, 9: 90},
+            default_widths={
+                0: 110,
+                1: 220,
+                2: 220,
+                3: 110,
+                4: 85,
+                5: 110,
+                6: 120,
+                7: 90,
+                8: 180,
+                9: 110,
+                10: 180,
+                11: 90,
+            },
         )
         self.table_layout_controller.install()
+        self._init_column_visibility_menu()
 
         pagination = QHBoxLayout()
         self.first_btn = QPushButton("<<")
@@ -508,6 +532,65 @@ class UserDictionariesView(QWidget):
         layout.addWidget(self.main_stack, 1)
         self.on_mode_changed("browse")
         self._apply_scope_mode(reset_page=False)
+
+    def _init_column_visibility_menu(self) -> None:
+        menu = QMenu(self.columns_btn)
+        self.columns_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.columns_btn.setMenu(menu)
+        self._column_actions.clear()
+
+        for col_idx, header in enumerate(self.items_model.headers):
+            action = QAction(header, self)
+            action.setCheckable(True)
+            action.setData(col_idx)
+            action.toggled.connect(self._on_column_visibility_toggled)
+            menu.addAction(action)
+            self._column_actions.append(action)
+
+        self._restore_column_visibility_state()
+
+    def _restore_column_visibility_state(self) -> None:
+        raw = self.settings.get_json(self._visible_columns_key, None)
+        if not isinstance(raw, list) or len(raw) != len(self.items_model.headers):
+            visible = [True] * len(self.items_model.headers)
+        else:
+            visible = [bool(v) for v in raw]
+            if not any(visible):
+                visible = [True] * len(self.items_model.headers)
+
+        for action in self._column_actions:
+            col_idx = int(action.data())
+            action.blockSignals(True)
+            action.setChecked(visible[col_idx])
+            action.blockSignals(False)
+            self.items_table.setColumnHidden(col_idx, not visible[col_idx])
+
+        self._save_column_visibility_state()
+
+    def _save_column_visibility_state(self) -> None:
+        if not self._column_actions:
+            return
+        visible = [False] * len(self.items_model.headers)
+        for action in self._column_actions:
+            col_idx = int(action.data())
+            visible[col_idx] = bool(action.isChecked())
+        self.settings.set_json(self._visible_columns_key, visible)
+
+    def _on_column_visibility_toggled(self, checked: bool) -> None:
+        action = self.sender()
+        if not isinstance(action, QAction):
+            return
+        if not checked:
+            checked_count = sum(1 for a in self._column_actions if a.isChecked())
+            if checked_count <= 1:
+                action.blockSignals(True)
+                action.setChecked(True)
+                action.blockSignals(False)
+                return
+
+        col_idx = int(action.data())
+        self.items_table.setColumnHidden(col_idx, not bool(action.isChecked()))
+        self._save_column_visibility_state()
 
     def _apply_scope_mode(self, reset_page: bool = True):
         """Apply scope chip state to current filters."""

@@ -870,6 +870,8 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             "Noise",
             "Study Status",
             "Last Review",
+            "Project ID",
+            "Project",
             "Origin",
             "Niqqud",
             "Audio",
@@ -904,7 +906,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
                 if int(item.is_suspended or 0) == 1:
                     tooltip += "\nSuspended: yes"
                 return tooltip
-            if col == 8 and getattr(item, "pronunciation_text", None):
+            if col == 10 and getattr(item, "pronunciation_text", None):
                 source = getattr(item, "pronunciation_source", None) or "none"
                 confidence = getattr(item, "pronunciation_confidence", None)
                 qc = getattr(item, "pronunciation_qc", None) or "ok"
@@ -933,7 +935,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
                 return study_brush(item.computed_study_state)
             if col == 7:
                 return origin_brush(item.origin_kind)
-            if col == 9:
+            if col == 11:
                 return audio_status_brush(item.audio_status)
             return None
 
@@ -957,10 +959,18 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             if col == 6:
                 return last_review_label(item.last_grade, item.study_review_count)
             if col == 7:
-                return origin_marker(item.origin_kind)
+                return str(item.origin_project_id) if item.origin_project_id is not None else "-"
             if col == 8:
-                return item.pronunciation_text or ""
+                if item.origin_project_name:
+                    return item.origin_project_name
+                if item.origin_project_id is not None:
+                    return f"Project #{int(item.origin_project_id)}"
+                return "-"
             if col == 9:
+                return origin_marker(item.origin_kind)
+            if col == 10:
+                return item.pronunciation_text or ""
+            if col == 11:
                 return item.audio_status
         return None
 

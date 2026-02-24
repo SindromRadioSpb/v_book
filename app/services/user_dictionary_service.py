@@ -21,6 +21,7 @@ from app.domain.dto import StudyProgressSummaryDTO, UserDictionaryDTO, UserDicti
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import (
     AudioAsset,
+    DictProject,
     Lemma,
     StudyProgress,
     TMEntry,
@@ -51,6 +52,8 @@ class UserDictionaryService:
         "last_graded_at": StudyProgress.last_graded_at,
         "is_noise": UserDictionaryItem.is_noise,
         "pronunciation": UserDictionaryItem.src_norm,
+        "origin_project_id": UserDictionaryItem.origin_project_id,
+        "origin_project_name": DictProject.name,
         "created_at": UserDictionaryItem.created_at,
         "updated_at": UserDictionaryItem.updated_at,
         "translation": TMGlobal.translation,
@@ -1054,7 +1057,7 @@ class UserDictionaryService:
         filters = filters or {}
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         base_stmt = (
-            select(UserDictionaryItem, TMGlobal, StudyProgress)
+            select(UserDictionaryItem, TMGlobal, StudyProgress, DictProject.name)
             .select_from(UserDictionaryItem)
             .outerjoin(
                 TMGlobal,
@@ -1066,6 +1069,7 @@ class UserDictionaryService:
                 ),
             )
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
+            .outerjoin(DictProject, DictProject.project_id == UserDictionaryItem.origin_project_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
         base_stmt = self._apply_item_filters(base_stmt, filters, now_str, include_audio=True)
@@ -1084,6 +1088,7 @@ class UserDictionaryService:
                 ),
             )
             .outerjoin(StudyProgress, StudyProgress.id == UserDictionaryItem.study_progress_id)
+            .outerjoin(DictProject, DictProject.project_id == UserDictionaryItem.origin_project_id)
             .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
         count_stmt = self._apply_item_filters(count_stmt, filters, now_str, include_audio=True)
@@ -1094,7 +1099,7 @@ class UserDictionaryService:
         stmt = base_stmt.order_by(direction(order_col), asc(UserDictionaryItem.item_id)).limit(limit).offset(offset)
 
         rows = session.execute(stmt).all()
-        source_items = [item for item, _tm_global, _progress in rows]
+        source_items = [item for item, _tm_global, _progress, _project_name in rows]
         hashes = [item.canonical_hash for item in source_items]
 
         study_service = StudyService()
@@ -1158,7 +1163,7 @@ class UserDictionaryService:
 
         items = []
         now_dt = datetime.now(timezone.utc)
-        for item, tm_global, _progress in rows:
+        for item, tm_global, _progress, origin_project_name in rows:
             resolved_tm_global = self._resolve_tm_global_for_item(session, item, tm_global)
             summary = summaries.get(item.canonical_hash)
             if summary:
@@ -1171,6 +1176,7 @@ class UserDictionaryService:
                 summary,
                 audio_status_by_item.get(item.item_id, "missing"),
                 pronunciation_by_item.get(item.item_id, {}),
+                origin_project_name=str(origin_project_name or "").strip() or None,
             )
             items.append(dto)
         return items, total
@@ -1830,6 +1836,8 @@ class UserDictionaryService:
         summary: Optional[StudyProgressSummaryDTO],
         audio_status: str,
         pronunciation_payload: Optional[Dict[str, Any]],
+        *,
+        origin_project_name: Optional[str] = None,
     ) -> UserDictionaryItemDTO:
         """Convert ORM row to item DTO with resolved translation fields."""
         study_service = StudyService()
@@ -1886,6 +1894,7 @@ class UserDictionaryService:
             last_seen_at=item.last_seen_at,
             seen_count=item.seen_count or 0,
             origin_project_id=item.origin_project_id,
+            origin_project_name=origin_project_name,
             origin_entity_type=item.origin_entity_type,
             origin_entity_id=item.origin_entity_id,
             origin_tm_entry_id=item.origin_tm_entry_id,

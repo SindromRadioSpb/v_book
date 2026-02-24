@@ -311,6 +311,7 @@ class UserDictionaryItemDTO:
     last_seen_at: Optional[str]
     seen_count: int
     origin_project_id: Optional[int]
+    origin_project_name: Optional[str]
     origin_entity_type: Optional[str]
     origin_entity_id: Optional[str]
     origin_tm_entry_id: Optional[int]

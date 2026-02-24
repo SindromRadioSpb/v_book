@@ -79,6 +79,7 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
         "generate_audio": 0,
         "play_audio": 0,
         "add_playlist": 0,
+        "add_user_dict": 0,
         "bootstrap": 0,
     }
     view.on_batch_translate = lambda: state.__setitem__("translate", state["translate"] + 1)
@@ -87,6 +88,7 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
     view.on_generate_audio = lambda: state.__setitem__("generate_audio", state["generate_audio"] + 1)
     view.on_play_audio = lambda: state.__setitem__("play_audio", state["play_audio"] + 1)
     view.on_add_selected_to_playlist = lambda: state.__setitem__("add_playlist", state["add_playlist"] + 1)
+    view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add_user_dict", state["add_user_dict"] + 1)
     view.on_pronunciation_bootstrap = lambda: state.__setitem__("bootstrap", state["bootstrap"] + 1)
     view.on_niqqud_bootstrap_selected = lambda: None
     view.on_edit_niqqud_selected = lambda: None
@@ -98,6 +100,7 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
     assert FakeMenu.last is not None
     actions = [a.text for a in FakeMenu.last.actions]
     assert "Add Selected to Playlist (2)..." in actions
+    assert "Add Selected to User Dictionary (2)..." in actions
 
     next(a for a in FakeMenu.last.actions if a.text == "Translate Selected (2)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Edit Translation...").triggered.emit()
@@ -105,6 +108,7 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
     next(a for a in FakeMenu.last.actions if a.text == "Generate Audio (2)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if "Play Audio Selected (2)" in a.text).triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2)...").triggered.emit()
+    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to User Dictionary (2)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2)...").triggered.emit()
 
     assert state["translate"] == 1
@@ -113,4 +117,5 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
     assert state["generate_audio"] == 1
     assert state["play_audio"] == 1
     assert state["add_playlist"] == 1
+    assert state["add_user_dict"] == 1
     assert state["bootstrap"] == 1

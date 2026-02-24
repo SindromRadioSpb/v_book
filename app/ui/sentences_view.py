@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QInputDialog,
     QMessageBox,
+    QProgressDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QAction
@@ -33,11 +34,13 @@ from PyQt6.QtGui import QAction
 from app.services.db_service import DBService
 from app.services.sentences_workspace_service import SentencesWorkspaceService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.infra.settings import SettingsService
 from app.domain.dto import SentenceDTO
 from app.ui.dialogs import show_error, show_info, show_warning
+from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,7 @@ class SentencesView(QWidget):
         # Batch workers refs (to prevent GC)
         self._batch_translate_worker = None
         self._batch_audio_worker = None
+        self._user_dict_add_worker = None
 
         # Debounce timer for search
         self._filter_timer = QTimer()
@@ -202,6 +206,11 @@ class SentencesView(QWidget):
         self.play_btn.setEnabled(False)
         self.play_btn.clicked.connect(self.on_play_audio)
         action_row.addWidget(self.play_btn)
+
+        self.add_user_dict_btn = QPushButton("Add to User Dictionary...")
+        self.add_user_dict_btn.setEnabled(False)
+        self.add_user_dict_btn.clicked.connect(self.on_add_selected_to_user_dictionary)
+        action_row.addWidget(self.add_user_dict_btn)
 
         action_row.addStretch()
         layout.addLayout(action_row)
@@ -503,6 +512,7 @@ class SentencesView(QWidget):
         self.audio_btn.setEnabled(has_sel)
         self.play_btn.setEnabled(has_sel)
         self.niqqud_sel_btn.setEnabled(has_sel)
+        self.add_user_dict_btn.setEnabled(has_sel)
 
     def _get_selected_dtos(self) -> List[SentenceDTO]:
         rows = {item.row() for item in self.table.selectedItems()}
@@ -539,6 +549,9 @@ class SentencesView(QWidget):
 
         playlist_action = menu.addAction(f"Add Selected to Playlist ({n})...")
         playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+
+        add_user_dict_action = menu.addAction(f"Add Selected to User Dictionary ({n})...")
+        add_user_dict_action.triggered.connect(self.on_add_selected_to_user_dictionary)
 
         bootstrap_action = menu.addAction(f"Pronunciation Bootstrap Selected ({n})...")
         bootstrap_action.triggered.connect(self.on_pronunciation_bootstrap)
@@ -957,6 +970,101 @@ class SentencesView(QWidget):
             items=items,
             db_manager=self.db_service,
         )
+
+    def on_add_selected_to_user_dictionary(self):
+        """Add selected sentence rows to a user dictionary (kind=surface)."""
+        selected = self._get_selected_dtos()
+        if not selected:
+            return
+
+        src_lang = self._get_src_lang()
+        tgt_lang = self._get_tgt_lang()
+        payloads: List[Dict[str, Any]] = []
+        for dto in selected:
+            src_text = (dto.text or "").strip()
+            if not src_text:
+                continue
+            src_norm = SentencesWorkspaceService._norm(src_lang, src_text)
+            if not src_norm:
+                continue
+            payloads.append(
+                {
+                    "kind": "surface",
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "src_text": src_text,
+                    "src_norm": src_norm,
+                    "is_noise": 0,
+                    "noise_reason": None,
+                    "origin_project_id": self.project_id,
+                    "origin_entity_type": "sentence",
+                    "origin_entity_id": dto.sentence_id,
+                    "origin_doc_id": dto.doc_id,
+                    "origin_source_ref": "sentences_view",
+                }
+            )
+
+        if not payloads:
+            show_warning(self, "Add to User Dictionary", "No valid sentence rows selected.")
+            return
+
+        accepted, dictionary_id, options = show_add_to_user_dictionary_dialog(
+            parent=self,
+            selected_count=len(payloads),
+        )
+        if not accepted or not dictionary_id:
+            return
+
+        tags = options.get("tags", [])
+        preserve_origin = bool(options.get("preserve_origin_refs", True))
+        prepared = []
+        for item in payloads:
+            row = dict(item)
+            if tags:
+                row["tags_json"] = tags
+            if not preserve_origin:
+                row["origin_project_id"] = None
+                row["origin_entity_type"] = None
+                row["origin_entity_id"] = None
+                row["origin_tm_entry_id"] = None
+                row["origin_doc_id"] = None
+                row["origin_source_ref"] = None
+            prepared.append(row)
+
+        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress.setWindowTitle("User Dictionaries")
+        progress.setModal(True)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+
+        worker = UserDictionaryBulkAddWorker(
+            dictionary_id=dictionary_id,
+            items=prepared,
+            include_noise=bool(options.get("include_noise", False)),
+            skip_duplicates=bool(options.get("skip_duplicates", True)),
+            chunk_size=500,
+        )
+        self._user_dict_add_worker = worker
+        worker.progress.connect(lambda done, total: progress.setValue(done))
+        worker.finished.connect(lambda result: self._on_user_dict_add_finished(result, progress))
+        worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _on_user_dict_add_finished(self, result, progress_dialog):
+        progress_dialog.close()
+        show_info(
+            self,
+            "Add Complete",
+            f"Added: {result.get('added', 0)}\n"
+            f"Skipped: {result.get('skipped', 0)}\n"
+            f"Failed: {result.get('failed', 0)}",
+        )
+
+    def _on_user_dict_add_error(self, error_message: str, progress_dialog):
+        progress_dialog.close()
+        show_error(self, "Add Failed", f"Failed to add rows:\n{error_message}")
 
     def on_audio_cell_play_clicked(self, index):
         """Handle in-cell play button click (AudioPlayDelegate callback)."""
