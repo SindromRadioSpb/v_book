@@ -17,6 +17,7 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **Ctrl+Shift+V**: Run P1 Verification
 - **Ctrl+Shift+I**: Import Dictionary (CSV)
 - **Ctrl+Alt+O**: Open Pronunciation Bootstrap
+- **Ctrl+Alt+R**: Open Resources Manager
 
 ### Premium Features
 - **Ctrl+Shift+T**: Translation Management
@@ -85,6 +86,11 @@ When command palette is open (Ctrl+P):
 - **Up / Down**: Navigate results
 - **Enter**: Execute selected action
 - **Esc**: Close palette without executing
+
+Health check note:
+
+- `Run Health Check...` is available from `Tools` and command palette.
+- No default global shortcut is assigned to avoid collisions.
 
 ---
 

@@ -1,180 +1,129 @@
-# HDLE Premium - Installation Guide
+# HDLE Premium - Installation and First-Run Guide
 
-## System Requirements
+## Runtime data location
 
-- Python 3.11 or higher
-- Windows/Linux/macOS
-- 500 MB free disk space minimum
-- For GUI: Qt development tools (optional for M1)
+HDLE stores writable runtime data in a deterministic user folder, not in `Program Files`.
 
-## Quick Start (M1 - Foundation)
+Default data root:
 
-### 1. Clone/Extract Repository
+- Windows: `%LOCALAPPDATA%\HDLE`
+- macOS: `~/Library/Application Support/HDLE`
+- Linux: `~/.local/share/hdle`
 
-```bash
-cd J:\Project_Vibe\V_book
-```
+Subfolders:
 
-### 2. Create Virtual Environment
+- `models/` - local model resources
+- `datasets/` - optional baseline bundles
+- `logs/` - runtime logs
+- `tmp/` - temporary files
+- `backups/` - backups
 
-```bash
-python -m venv venv
-```
+Override options:
 
-### 3. Activate Virtual Environment
+- env: `HDLE_DATA_ROOT`
+- settings key: `resources/data_root`
 
-Windows (Git Bash/MSYS):
-```bash
-source venv/bin/activate
-```
+## Windows installer components
 
-Windows (CMD):
-```cmd
-venv\Scripts\activate
-```
+Installer supports component-based setup:
 
-Linux/macOS:
-```bash
-source venv/bin/activate
-```
+- `Core Application` (required)
+- `Local Models` (recommended)
+- `Hebrew Wikipedia Baseline` (optional, large)
 
-### 4. Install Dependencies
+The installer writes binaries to `Program Files` and keeps mutable data under `%LOCALAPPDATA%\HDLE`.
 
-**Core dependencies (no GUI):**
-```bash
-pip install SQLAlchemy python-docx PyPDF2 openpyxl pandas
-```
+## First run flow
 
-**Full dependencies (with GUI):**
-```bash
-pip install -e .
-```
+On first run, HDLE opens setup wizard (unless already completed):
 
-Note: PyQt6 requires Qt development tools (qmake). If installation fails, install Qt Creator first or use pre-built wheels.
+1. Choose data folder.
+2. Check local models (pronunciation + sentence niqqud).
+3. Optional baseline bundle decision.
+4. Optional cloud provider setup.
+5. Run Health Check summary.
 
-### 5. Test M1 (Foundation)
+You can skip and configure later.
 
-```bash
-python test_m1.py
-```
+## Resources Manager
 
-Expected output:
-```
-============================================================
-M1 TEST PASSED
-============================================================
+Open from:
 
-All core functionality working:
-  - Database initialization [OK]
-  - Migrations applied [OK]
-  - WAL mode enabled [OK]
-  - Foreign keys enabled [OK]
-  - Project management [OK]
-  - Corpus management [OK]
-```
+- `Tools -> Resources Manager...`
+- shortcut: `Ctrl+Alt+R`
 
-## Running the Application
+Capabilities:
 
-### With GUI (requires PyQt6):
+- View status per resource (`Installed / Missing / Corrupted / Not configured`)
+- Download (for downloadable resources)
+- Import from file (manual payloads)
+- Verify / Repair
+- Open resource folder
+- Import baseline `.hdleproj`
+- Run unified Health Check
 
-```bash
-python -m app.main
-```
+Download/import is worker-based with progress, cancel, and checksum verification.
 
-### Without GUI (API/Testing only):
+## Health Check
 
-Use the services programmatically:
+Open from:
 
-```python
-from pathlib import Path
-from app.infra.util.logging import setup_logging
-from app.services.db_service import DBService
-from app.services.project_service import ProjectService
+- `Tools -> Run Health Check...`
+- command line: `python -m app.main --run-health-check`
 
-# Initialize
-setup_logging(Path("logs"))
-DBService.initialize(Path("data/hdle.db"))
+Checks include:
 
-# Use services
-project_service = ProjectService()
-with project_service.db_service.get_session() as session:
-    projects = project_service.list_projects(session)
-    print(f"Projects: {len(projects)}")
+- required local resources installed and loadable,
+- pronunciation bootstrap readiness,
+- sentence niqqud bootstrap readiness,
+- cloud provider credential readiness (optional),
+- optional baseline bundle/project state.
 
-# Cleanup
-DBService.shutdown()
+## Startup command-line options
+
+```powershell
+python -m app.main --open-resources-manager
+python -m app.main --run-health-check
+python -m app.main --db-path "J:\Project_Vibe\V_book\hdle_premium.db"
 ```
 
 ## Troubleshooting
 
-### PyQt6 Installation Fails
+### Local model is missing
 
-**Error:** `qmake not found`
+Symptom:
 
-**Solution:** Install Qt development tools first:
-- Windows: Download Qt Creator from qt.io
-- Linux: `sudo apt-get install qt6-base-dev` (Ubuntu/Debian)
-- macOS: `brew install qt6`
+- Pronunciation/Sentence Niqqud health status is `error` or `fallback`.
 
-Or use pre-compiled wheels:
-```bash
-pip install PyQt6 --only-binary :all:
-```
+Fix:
 
-### Import Errors
+1. Open `Tools -> Resources Manager`.
+2. Import model file or download resource.
+3. Re-run `Health Check`.
 
-**Error:** `ModuleNotFoundError`
+### Checksum mismatch
 
-**Solution:** Ensure virtual environment is activated and dependencies installed:
-```bash
-pip install typing_extensions greenlet
-```
+Symptom:
 
-### Database Locked
+- resource status `Corrupted`.
 
-**Error:** `database is locked`
+Fix:
 
-**Solution:** Close all other connections to the database and ensure WAL mode is enabled (handled automatically).
+1. Use `Repair` in Resources Manager.
+2. Re-import/re-download payload.
 
-## Development Setup
+### Baseline not visible in dashboard
 
-### Install Development Dependencies
+Fix:
 
-```bash
-pip install -e ".[dev]"
-```
+1. In Resources Manager click `Import Baseline Bundle`.
+2. Ensure bundle extension is `.hdleproj`.
+3. Wait for import completion and reopen dashboard.
 
-### Run Tests
+### Database locked
 
-```bash
-pytest tests/
-```
+HDLE uses SQLite WAL and short transactions. If lock warnings appear:
 
-### Code Formatting
-
-```bash
-black app/ tests/
-```
-
-## Next Steps After M1
-
-1. **M2 - Document Ingestion:** Implement file extractors and drag-drop UI
-2. **M3 - NLP Pipeline:** Integrate Stanza Hebrew for lemmatization
-3. **M4 - Live Updates:** Implement incremental document processing
-4. **M5 - MWE Extraction:** Add multi-word expression detection
-5. **M6 - Concordance:** Implement FTS5 search and KWIC display
-6. **M7 - Translation Memory:** Add offline dictionary and TM
-7. **M8 - Term Cards:** Implement curation workflow
-8. **M9 - Export Center:** Add export to Excel/CSV/TBX/TMX
-9. **M10 - Packaging:** Create installer and final QA
-
-## Support
-
-For issues, refer to the log files:
-- Application logs: `<app_dir>/logs/hdle.log`
-- Test logs: `test_data/logs/hdle.log`
-
-Where `<app_dir>` is:
-- **Windows: `M:\V_book\HDLE`** (to avoid filling up C: drive)
-- macOS: `~/Library/Application Support/HDLE`
-- Linux: `~/.local/share/hdle`
+1. Close second running instance.
+2. Retry operation.
+3. Check `%LOCALAPPDATA%\HDLE\logs\hdle.log`.

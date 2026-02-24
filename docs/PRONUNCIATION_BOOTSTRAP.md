@@ -97,3 +97,19 @@ Capabilities:
   - selected rows are filtered by checked source groups before generation.
 - Fallback warning before bootstrap run.
 - Dry-run support with rollback summary.
+
+## Resources Manager and first-run integration
+
+Bootstrap readiness is now part of unified resource health:
+
+- `Tools -> Resources Manager...` shows model status and remediation actions.
+- `Tools -> Run Health Check...` reports pronunciation/sentence bootstrap readiness.
+- first-run wizard surfaces missing local models and routes user to Resources Manager.
+
+Deterministic model path resolution order:
+
+1. UI setting `pronunciation/phonikud/model_path`
+2. env `PHONIKUD_MODEL_PATH`
+3. auto-discovery in `<data_root>/models/phonikud` (`*int8.onnx` preferred)
+
+`data_root` resolves through `ResourcePaths` (`%LOCALAPPDATA%\HDLE` by default on Windows).

@@ -28,6 +28,28 @@ Main fields:
 
 - `asset_status`, `audio_rel_path`, `duration_ms`, `sha256`, `error_text`, timestamps.
 
+## Resource system and installer contract
+
+Resource roots are deterministic and writable:
+
+- `data_root = %LOCALAPPDATA%\HDLE` (default on Windows)
+- `models_root = data_root\models`
+- `datasets_root = data_root\datasets`
+- `tmp_root = data_root\tmp`
+
+No runtime writes are allowed under `Program Files`.
+
+Resource discovery contract:
+
+- local resources are declared in `app/resources/resource_manifest.json`;
+- runtime status (`installed|missing|corrupted|not_configured`) is resolved via `ResourceRegistry`;
+- setup and remediation are exposed through in-app `Resources Manager`.
+
+First-run behavior:
+
+- setup wizard guides user through data folder, model readiness, optional baseline, and health summary;
+- missing required models are remediated through `Resources Manager`, not hardcoded dev paths.
+
 ## Provider chain contract
 
 Default chain mode:

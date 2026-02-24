@@ -9,6 +9,7 @@ This in-app Help Center is the entrypoint for user guidance in HDLE Premium.
 3. Keyboard interaction patterns
 4. Translation workflows
 5. Audio and pronunciation workflows
+6. Resources and first-run setup
 
 ## Workspace Navigation (Primary Navigation)
 
@@ -60,3 +61,24 @@ Sentence rows can be added to User Dictionaries directly from Sentences view:
 - Context menu action: `Add Selected to User Dictionary (N)...`
 
 The flow uses the same dialog and worker path as Lemma/Term add operations.
+
+## Resources and First-Run Setup
+
+Resource-related entrypoints:
+
+- `Tools -> Resources Manager...`
+- `Tools -> Run Health Check...`
+
+What Resources Manager provides:
+
+- status matrix for required/optional resources,
+- model/dataset download or manual import,
+- checksum verification and repair,
+- baseline `.hdleproj` import,
+- open data/resource folders.
+
+First-run wizard:
+
+- appears when `setup/first_run_completed` is not set;
+- guides through data-root selection, local model readiness, baseline option, and health summary;
+- skip is allowed; setup remains accessible from Tools.
