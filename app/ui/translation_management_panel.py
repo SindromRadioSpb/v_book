@@ -1781,10 +1781,11 @@ class TranslationManagementPanel(QWidget):
         items = self._get_selected_audio_items()
         if not items:
             return
+        db_service = DBService.get_instance()
         add_selected_items_to_playlist_dialog(
             parent=self,
             items=items,
-            db_manager=self.db_service,
+            db_manager=db_service,
         )
 
     def on_go_to_source_selected(self):

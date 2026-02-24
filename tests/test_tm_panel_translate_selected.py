@@ -483,6 +483,28 @@ def test_selected_pronunciation_items_prefer_raw_src_norm():
     assert items[0]["src_norm"] == normalize_for_tm("he", "legacy src", "surface").norm
 
 
+def test_tm_add_selected_to_playlist_uses_dbservice_instance(monkeypatch):
+    panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
+    panel._get_selected_audio_items = lambda: [{"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}]
+
+    sentinel_db = object()
+    captured = {}
+    monkeypatch.setattr(
+        "app.ui.translation_management_panel.DBService.get_instance",
+        lambda: sentinel_db,
+    )
+    monkeypatch.setattr(
+        "app.ui.translation_management_panel.add_selected_items_to_playlist_dialog",
+        lambda **kwargs: captured.update(kwargs) or True,
+    )
+
+    TranslationManagementPanel.on_add_selected_to_playlist(panel)
+
+    assert captured["parent"] is panel
+    assert captured["items"] == [{"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}]
+    assert captured["db_manager"] is sentinel_db
+
+
 def test_tm_bootstrap_refreshes_search_on_success(monkeypatch):
     panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
     panel._get_selected_pronunciation_items = lambda: [
