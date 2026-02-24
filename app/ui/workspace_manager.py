@@ -38,6 +38,7 @@ class SidebarWidget(QFrame):
     """Collapsible sidebar with primary navigation and workspace context."""
 
     action_triggered = pyqtSignal(str)
+    section_state_changed = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -174,57 +175,131 @@ class SidebarWidget(QFrame):
 
         layout.addSpacing(8)
 
-        search_label = QLabel("<i>Project Search</i>")
-        search_label.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(search_label)
+        self.project_search_toggle_btn = QPushButton("Project Search [v]")
+        self.project_search_toggle_btn.setCheckable(True)
+        self.project_search_toggle_btn.setChecked(True)
+        self.project_search_toggle_btn.clicked.connect(
+            lambda: self._toggle_section("project_search", self.project_search_toggle_btn.isChecked())
+        )
+        layout.addWidget(self.project_search_toggle_btn)
+
+        self.project_search_section = QWidget()
+        project_search_layout = QVBoxLayout(self.project_search_section)
+        project_search_layout.setContentsMargins(0, 0, 0, 0)
+        project_search_layout.setSpacing(4)
 
         self.project_search_edit = QLineEdit()
         self.project_search_edit.setPlaceholderText("Type 2+ chars to search projects...")
         self.project_search_edit.textChanged.connect(lambda *_args: self._search_timer.start())
         self.project_search_edit.installEventFilter(self)
-        layout.addWidget(self.project_search_edit)
+        project_search_layout.addWidget(self.project_search_edit)
 
         self.project_results_list = QListWidget()
         self.project_results_list.itemActivated.connect(self._on_project_result_activated)
         self.project_results_list.itemClicked.connect(self._on_project_result_clicked)
-        layout.addWidget(self.project_results_list, 1)
+        project_search_layout.addWidget(self.project_results_list, 1)
 
         self.project_results_empty_label = QLabel("No projects found")
         self.project_results_empty_label.setStyleSheet("color: #666; font-size: 11px;")
         self.project_results_empty_label.setVisible(False)
-        layout.addWidget(self.project_results_empty_label)
+        project_search_layout.addWidget(self.project_results_empty_label)
+        layout.addWidget(self.project_search_section)
 
         layout.addSpacing(8)
-        tools_label = QLabel("<i>Tools</i>")
-        tools_label.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(tools_label)
+
+        self.tools_toggle_btn = QPushButton("Tools [v]")
+        self.tools_toggle_btn.setCheckable(True)
+        self.tools_toggle_btn.setChecked(True)
+        self.tools_toggle_btn.clicked.connect(
+            lambda: self._toggle_section("tools", self.tools_toggle_btn.isChecked())
+        )
+        layout.addWidget(self.tools_toggle_btn)
+
+        self.tools_section = QWidget()
+        tools_layout = QVBoxLayout(self.tools_section)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(4)
 
         self.import_btn = QPushButton("Import Dictionary")
         self.import_btn.setToolTip("Import dictionary from CSV (Ctrl+Shift+I)")
         self.import_btn.clicked.connect(lambda: self.action_triggered.emit("tools.import_dictionary"))
-        layout.addWidget(self.import_btn)
+        tools_layout.addWidget(self.import_btn)
 
         self.coverage_btn = QPushButton("QA / Coverage")
         self.coverage_btn.setToolTip("Open QA/Coverage (Ctrl+Shift+C)")
         self.coverage_btn.clicked.connect(lambda: self.action_triggered.emit("premium.coverage"))
-        layout.addWidget(self.coverage_btn)
+        tools_layout.addWidget(self.coverage_btn)
 
         self.verify_btn = QPushButton("P1 Verification")
         self.verify_btn.setToolTip("Run P1 verification suite (Ctrl+Shift+V)")
         self.verify_btn.clicked.connect(lambda: self.action_triggered.emit("tools.verification"))
-        layout.addWidget(self.verify_btn)
+        tools_layout.addWidget(self.verify_btn)
 
         self.refresh_badges_btn = QPushButton("Refresh Counters")
         self.refresh_badges_btn.setToolTip("Refresh workspace counters")
         self.refresh_badges_btn.clicked.connect(lambda: self.action_triggered.emit("workspace.refresh_badges"))
-        layout.addWidget(self.refresh_badges_btn)
+        tools_layout.addWidget(self.refresh_badges_btn)
+        layout.addWidget(self.tools_section)
 
         layout.addStretch(1)
 
         self.set_current_project(None, "", "All projects")
         self._apply_project_filter()
+        self._configure_tab_order(content)
 
         logger.debug("Sidebar initialized")
+
+    def _configure_tab_order(self, content: QWidget) -> None:
+        QWidget.setTabOrder(self.projects_btn, self.tm_btn)
+        QWidget.setTabOrder(self.tm_btn, self.user_dict_btn)
+        QWidget.setTabOrder(self.user_dict_btn, self.audio_btn)
+        QWidget.setTabOrder(self.audio_btn, self.open_current_project_btn)
+        QWidget.setTabOrder(self.open_current_project_btn, self.documents_link_btn)
+        QWidget.setTabOrder(self.documents_link_btn, self.sentences_link_btn)
+        QWidget.setTabOrder(self.sentences_link_btn, self.dictionary_link_btn)
+        QWidget.setTabOrder(self.dictionary_link_btn, self.terms_link_btn)
+        QWidget.setTabOrder(self.terms_link_btn, self.term_cards_link_btn)
+        QWidget.setTabOrder(self.term_cards_link_btn, self.export_link_btn)
+        QWidget.setTabOrder(self.export_link_btn, self.project_search_toggle_btn)
+        QWidget.setTabOrder(self.project_search_toggle_btn, self.project_search_edit)
+        QWidget.setTabOrder(self.project_search_edit, self.project_results_list)
+        QWidget.setTabOrder(self.project_results_list, self.tools_toggle_btn)
+        QWidget.setTabOrder(self.tools_toggle_btn, self.import_btn)
+        QWidget.setTabOrder(self.import_btn, self.coverage_btn)
+        QWidget.setTabOrder(self.coverage_btn, self.verify_btn)
+        QWidget.setTabOrder(self.verify_btn, self.refresh_badges_btn)
+        QWidget.setTabOrder(self.refresh_badges_btn, self.projects_btn)
+
+    def _toggle_section(self, section_key: str, expanded: bool) -> None:
+        if section_key == "project_search":
+            self.project_search_section.setVisible(bool(expanded))
+            self.project_search_toggle_btn.setText(
+                "Project Search [v]" if expanded else "Project Search [>]"
+            )
+        elif section_key == "tools":
+            self.tools_section.setVisible(bool(expanded))
+            self.tools_toggle_btn.setText("Tools [v]" if expanded else "Tools [>]")
+        self.section_state_changed.emit(self.get_sections_state())
+
+    def get_sections_state(self) -> Dict[str, bool]:
+        return {
+            "project_search_expanded": self.project_search_toggle_btn.isChecked(),
+            "tools_expanded": self.tools_toggle_btn.isChecked(),
+        }
+
+    def set_sections_state(self, state: Dict[str, bool]) -> None:
+        search_expanded = bool(state.get("project_search_expanded", True))
+        tools_expanded = bool(state.get("tools_expanded", True))
+
+        self.project_search_toggle_btn.blockSignals(True)
+        self.project_search_toggle_btn.setChecked(search_expanded)
+        self.project_search_toggle_btn.blockSignals(False)
+        self._toggle_section("project_search", search_expanded)
+
+        self.tools_toggle_btn.blockSignals(True)
+        self.tools_toggle_btn.setChecked(tools_expanded)
+        self.tools_toggle_btn.blockSignals(False)
+        self._toggle_section("tools", tools_expanded)
 
     def _make_nav_button(self, *, text: str, tooltip: str, action_id: str) -> QPushButton:
         btn = QPushButton(text)
@@ -298,7 +373,7 @@ class SidebarWidget(QFrame):
         if self._current_project_id is None:
             self.current_project_name_label.setText("Project: none")
             self.current_project_scope_label.setText(f"Scope: {scope_text}")
-            self.open_current_project_btn.setText("Open Project…")
+            self.open_current_project_btn.setText("Open Project...")
             self.open_current_project_btn.setEnabled(True)
             for btn in self._project_link_buttons:
                 btn.setEnabled(False)

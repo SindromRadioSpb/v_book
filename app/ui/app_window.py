@@ -45,6 +45,7 @@ class AppWindow(QMainWindow):
         self.current_project_id: Optional[int] = None
         self.current_project_name: str = ""
         self._recent_project_ids: List[int] = []
+        self._pending_project_tab: Optional[str] = None
         self._workspace_history: List[str] = []
         self._badge_error_logged_at_ms: int = 0
 
@@ -257,7 +258,9 @@ class AppWindow(QMainWindow):
 
     def _open_current_project_tab(self, tab_key: str) -> None:
         if self.current_project_id is None:
-            self._show_nav_status("No current project selected.")
+            self._pending_project_tab = str(tab_key or "").strip().lower() or None
+            self.back_to_dashboard(push_history=False)
+            self._show_nav_status("Open a project to continue. Target tab is queued.")
             return
         project_view = self._open_or_focus_project(self.current_project_id)
         if project_view is None:
@@ -311,6 +314,7 @@ class AppWindow(QMainWindow):
 
         # Connect sidebar actions
         self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)
+        self.workspace.sidebar.section_state_changed.connect(self._save_sidebar_sections_state)
 
         # Connect layout changes to autosave (debounced)
         self.workspace.layout_changed.connect(self._save_workspace_layout)
@@ -328,6 +332,7 @@ class AppWindow(QMainWindow):
 
         self._load_recent_project_ids()
         self._restore_current_project_context()
+        self._restore_sidebar_sections_state()
 
         # Restore workspace layout
         self._restore_workspace_layout()
@@ -340,16 +345,13 @@ class AppWindow(QMainWindow):
         self.palette_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
         self.palette_shortcut.activated.connect(self._open_command_palette)
 
-        # Global toggle for audio player dock.
-        self.audio_panel_shortcut = QShortcut(QKeySequence("Ctrl+Alt+L"), self)
-        self.audio_panel_shortcut.activated.connect(self.toggle_audio_player_panel)
-
         # Optional async badges refresh (non-blocking, low frequency).
         self._workspace_badges_timer = QTimer(self)
         self._workspace_badges_timer.setInterval(45000)
         self._workspace_badges_timer.timeout.connect(self._refresh_workspace_badges)
         self._workspace_badges_timer.start()
         self._refresh_workspace_badges()
+        self._validate_shortcut_conflicts()
 
         logger.info("AppWindow initialized")
 
@@ -433,6 +435,40 @@ class AppWindow(QMainWindow):
             tm_filtered_count=tm_count,
             ud_due_count=ud_due_count,
         )
+
+    def _collect_shortcut_conflicts(self) -> Dict[str, List[str]]:
+        by_shortcut: Dict[str, List[str]] = {}
+
+        def _add(shortcut_text: str, source: str) -> None:
+            key = str(shortcut_text or "").strip().upper()
+            if not key:
+                return
+            by_shortcut.setdefault(key, []).append(source)
+
+        for action in self.findChildren(QAction):
+            seq = action.shortcut().toString(QKeySequence.SequenceFormat.PortableText)
+            if not seq:
+                continue
+            source = f"QAction:{action.text().strip() or action.objectName() or '<unnamed>'}"
+            _add(seq, source)
+
+        for shortcut in self.findChildren(QShortcut):
+            seq = shortcut.key().toString(QKeySequence.SequenceFormat.PortableText)
+            if not seq:
+                continue
+            parent_name = shortcut.parent().objectName() if shortcut.parent() is not None else ""
+            source = f"QShortcut:{parent_name or '<window>'}"
+            _add(seq, source)
+
+        return {k: v for k, v in by_shortcut.items() if len(v) > 1}
+
+    def _validate_shortcut_conflicts(self) -> None:
+        conflicts = self._collect_shortcut_conflicts()
+        if not conflicts:
+            logger.info("Shortcut conflict check: no duplicates found")
+            return
+        for shortcut_text, sources in conflicts.items():
+            logger.warning("Shortcut conflict detected: %s used by %s", shortcut_text, ", ".join(sources))
 
     def _log_badge_refresh_warning(self, area: str, exc: Exception) -> None:
         now_stamp = int(monotonic() * 1000)
@@ -714,7 +750,12 @@ class AppWindow(QMainWindow):
             self._set_active_workspace("workspace.projects")
             self._set_current_project_context(pid)
             self._push_recent_project(pid)
-            self._show_nav_status(f"Project #{pid} focused.")
+            pending_tab = self._pending_project_tab
+            self._pending_project_tab = None
+            if pending_tab and project_view.focus_tab(pending_tab):
+                self._show_nav_status(f"Project #{pid} focused. Routed to {pending_tab.replace('_', ' ').title()}.")
+            else:
+                self._show_nav_status(f"Project #{pid} focused.")
             return
 
         # Create project view
@@ -737,7 +778,12 @@ class AppWindow(QMainWindow):
         self._set_active_workspace("workspace.projects")
         self._set_current_project_context(pid)
         self._push_recent_project(pid)
-        self._show_nav_status(f"Project #{pid} opened.")
+        pending_tab = self._pending_project_tab
+        self._pending_project_tab = None
+        if pending_tab and project_view.focus_tab(pending_tab):
+            self._show_nav_status(f"Project #{pid} opened. Routed to {pending_tab.replace('_', ' ').title()}.")
+        else:
+            self._show_nav_status(f"Project #{pid} opened.")
 
     def _find_project_view(self, project_id: int) -> Optional[ProjectView]:
         cached = self._project_instances.get(project_id)
@@ -1076,6 +1122,21 @@ class AppWindow(QMainWindow):
             logger.debug("Workspace layout saved")
         except Exception as e:
             logger.error(f"Failed to save workspace layout: {e}")
+
+    def _save_sidebar_sections_state(self, state: Dict[str, bool]) -> None:
+        try:
+            self.settings.set_json("workspace/sidebar_sections", state)
+        except Exception as exc:
+            logger.warning("Failed to save sidebar sections state: %s", exc)
+
+    def _restore_sidebar_sections_state(self) -> None:
+        try:
+            data = self.settings.get_json("workspace/sidebar_sections", {})
+            if not isinstance(data, dict):
+                data = {}
+            self.workspace.sidebar.set_sections_state(data)
+        except Exception as exc:
+            logger.warning("Failed to restore sidebar sections state: %s", exc)
 
     def _restore_workspace_layout(self):
         """Restore workspace layout from settings."""
