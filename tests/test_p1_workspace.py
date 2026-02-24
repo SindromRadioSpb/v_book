@@ -115,6 +115,7 @@ class TestWorkspaceManager:
 
         # Show sidebar and save layout
         workspace.sidebar.show()
+        workspace.set_active_workspace("workspace.tm")
         layout = workspace.save_layout()
 
         assert "layout_schema_version" in layout
@@ -122,6 +123,8 @@ class TestWorkspaceManager:
         assert layout["sidebar_visible"] is True
         assert "splitter_state" in layout
         assert isinstance(layout["splitter_state"], str)  # Hex string
+        assert layout["active_workspace"] == "workspace.tm"
+        assert isinstance(layout["sidebar_width"], int)
 
     def test_restore_layout_success(self, qtbot):
         """Test layout restoration with valid data."""
@@ -131,6 +134,7 @@ class TestWorkspaceManager:
 
         # Save layout
         workspace.sidebar.show()
+        workspace.set_active_workspace("workspace.audio")
         layout = workspace.save_layout()
 
         # Hide sidebar
@@ -140,6 +144,7 @@ class TestWorkspaceManager:
         success = workspace.restore_layout(layout)
         assert success is True
         assert workspace.sidebar.isVisible() is True
+        assert workspace.sidebar.active_workspace == "workspace.audio"
 
     def test_restore_layout_version_mismatch(self, qtbot):
         """Test layout restoration fails on version mismatch."""
@@ -170,6 +175,22 @@ class TestWorkspaceManager:
         }
         success = workspace.restore_layout(layout)
         assert success is False
+
+    def test_restore_layout_version2_back_compatibility(self, qtbot):
+        """Test v2 payload still restores with projects as default active workspace."""
+        workspace = WorkspaceManager()
+        qtbot.addWidget(workspace)
+        workspace.show()
+
+        base_layout = workspace.save_layout()
+        v2_layout = {
+            "layout_schema_version": 2,
+            "sidebar_visible": base_layout["sidebar_visible"],
+            "splitter_state": base_layout["splitter_state"],
+        }
+        success = workspace.restore_layout(v2_layout)
+        assert success is True
+        assert workspace.sidebar.active_workspace == "workspace.projects"
 
     def test_reset_to_default(self, qtbot):
         """Test reset to default layout."""
