@@ -216,6 +216,72 @@ def test_reorder_playlist_entries(session, svc):
     assert [entry.position for entry in reordered] == [0, 1, 2]
 
 
+def test_add_items_to_playlist_dedup_by_source(session, svc):
+    pl_id = svc.create_playlist(session, "Dedup")
+    session.commit()
+    specs = [
+        AudioItemSpec(kind="term", source_id=10, project_id=1, snapshot_hebrew="a"),
+        AudioItemSpec(kind="term", source_id=10, project_id=1, snapshot_hebrew="a-dup"),
+        AudioItemSpec(kind="term", source_id=11, project_id=1, snapshot_hebrew="b"),
+    ]
+    added, skipped = svc.add_items_to_playlist(
+        session,
+        pl_id,
+        specs,
+        add_mode="append",
+        dedup_by_source=True,
+    )
+    session.commit()
+    assert added == 2
+    assert skipped == 1
+    entries = svc.get_playlist_entries(session, pl_id)
+    assert len(entries) == 2
+    assert [e.position for e in entries] == [0, 1]
+
+
+def test_add_items_to_playlist_prepend_and_after_selected(session, svc):
+    pl_id = svc.create_playlist(session, "Insert modes")
+    session.commit()
+    svc.add_to_playlist(
+        session,
+        pl_id,
+        [
+            AudioItemSpec(kind="term", source_id=1, snapshot_hebrew="one"),
+            AudioItemSpec(kind="term", source_id=2, snapshot_hebrew="two"),
+        ],
+    )
+    session.commit()
+    # Prepend one item.
+    added, skipped = svc.add_items_to_playlist(
+        session,
+        pl_id,
+        [AudioItemSpec(kind="term", source_id=3, snapshot_hebrew="three")],
+        add_mode="prepend",
+        dedup_by_source=False,
+    )
+    assert added == 1
+    assert skipped == 0
+    session.commit()
+    entries = svc.get_playlist_entries(session, pl_id)
+    assert [e.source_id for e in entries] == [3, 1, 2]
+
+    # Insert after selected (after source_id=1).
+    after_entry_id = next(e.entry_id for e in entries if e.source_id == 1)
+    added2, skipped2 = svc.add_items_to_playlist(
+        session,
+        pl_id,
+        [AudioItemSpec(kind="term", source_id=4, snapshot_hebrew="four")],
+        add_mode="after_selected",
+        after_entry_id=after_entry_id,
+        dedup_by_source=False,
+    )
+    assert added2 == 1
+    assert skipped2 == 0
+    session.commit()
+    entries2 = svc.get_playlist_entries(session, pl_id)
+    assert [e.source_id for e in entries2] == [3, 1, 4, 2]
+
+
 def test_get_history(session, svc):
     ids = svc.add_to_queue(session, _specs(5))
     session.commit()

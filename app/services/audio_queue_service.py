@@ -432,6 +432,87 @@ class AudioQueueService:
 
         return entry_ids
 
+    def add_items_to_playlist(
+        self,
+        session: Session,
+        playlist_id: int,
+        specs: List[AudioItemSpec],
+        *,
+        add_mode: str = "append",   # append | prepend | after_selected
+        after_entry_id: Optional[int] = None,
+        dedup_by_source: bool = True,
+    ) -> Tuple[int, int]:
+        """Insert specs into playlist with optional dedup and positional mode.
+
+        Returns ``(added_count, skipped_duplicates_count)``.
+        """
+        if not specs:
+            return (0, 0)
+
+        from datetime import datetime, timezone
+
+        existing_rows = (
+            session.query(AudioPlaylistEntry)
+            .filter(AudioPlaylistEntry.playlist_id == playlist_id)
+            .order_by(AudioPlaylistEntry.position)
+            .all()
+        )
+
+        existing_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
+        if dedup_by_source:
+            for row in existing_rows:
+                existing_keys.add((row.project_id, row.kind, row.source_id))
+
+        filtered_specs: List[AudioItemSpec] = []
+        seen_new_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
+        skipped = 0
+        for spec in specs:
+            key = (spec.project_id, spec.kind, spec.source_id)
+            if dedup_by_source and (key in existing_keys or key in seen_new_keys):
+                skipped += 1
+                continue
+            filtered_specs.append(spec)
+            seen_new_keys.add(key)
+
+        if not filtered_specs:
+            return (0, skipped)
+
+        insert_at = len(existing_rows)
+        mode = (add_mode or "append").strip().lower()
+        if mode == "prepend":
+            insert_at = 0
+        elif mode == "after_selected" and after_entry_id is not None:
+            after_row = next((row for row in existing_rows if row.entry_id == after_entry_id), None)
+            if after_row is not None:
+                insert_at = int(after_row.position) + 1
+
+        if insert_at < len(existing_rows):
+            shift_by = len(filtered_specs)
+            for row in existing_rows:
+                if int(row.position) >= insert_at:
+                    row.position = int(row.position) + shift_by
+
+        for idx, spec in enumerate(filtered_specs):
+            entry = AudioPlaylistEntry(
+                playlist_id=playlist_id,
+                position=insert_at + idx,
+                kind=spec.kind,
+                source_id=spec.source_id,
+                project_id=spec.project_id,
+                snapshot_hebrew=spec.snapshot_hebrew,
+                snapshot_niqqud=spec.snapshot_niqqud,
+                snapshot_translation=spec.snapshot_translation,
+                snapshot_source_label=spec.snapshot_source_label,
+                audio_asset_id=spec.audio_asset_id,
+                audio_status=spec.audio_status,
+            )
+            session.add(entry)
+
+        pl = session.get(AudioPlaylist, playlist_id)
+        if pl:
+            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return (len(filtered_specs), skipped)
+
     def remove_from_playlist(
         self, session: Session, playlist_id: int, entry_ids: List[int]
     ) -> int:
