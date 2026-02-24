@@ -24,6 +24,38 @@ Reference:
 
 ---
 
+## Addendum (2026-02-24): Workspace Navigation Contract Hardening
+
+Scope of this addendum:
+
+- Primary navigation sidebar upgraded to workspace-first routing.
+- Current Project card and deep links.
+- Sidebar project search (debounced + keyboard-first).
+- Active workspace persistence and backward-compatible layout restore.
+- Manual/automatic workspace badge refresh.
+
+Verification status:
+
+- Manual smoke-check: PASS
+- Automated tests:
+  - `tests/test_workspace_navigation_v2.py`
+  - `tests/test_p1_workspace.py`
+  - `tests/test_p1_layout_persistence.py`
+  - `tests/test_tm_scope_chip.py`
+  - `tests/test_user_dictionaries_scope.py`
+
+Smoke matrix:
+
+1. Open TM from sidebar twice: second click focuses existing instance, no duplicate widget in stack.
+2. Open User Dictionaries twice with same project context: existing instance focused.
+3. Switch TM scope to Current Project and back to All: project picker is enabled only in All mode.
+4. Use sidebar project search (`2+` chars), navigate with arrows, press Enter: selected project opens.
+5. Restore session with saved active workspace (`TM`, `UD`, or `Audio`): workspace focus is restored.
+6. Click Current Project deep links (Documents/Sentences/Dictionary/Terms/Term Cards/Export): corresponding tab receives focus.
+7. Trigger `Refresh Counters` in sidebar tools: badges update without UI freeze.
+
+---
+
 ## Test Execution Summary
 
 **Total Tests**: 65 tests across 5 test files

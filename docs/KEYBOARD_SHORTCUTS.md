@@ -88,6 +88,12 @@ When command palette is open (Ctrl+P):
 - **User Dictionaries**: sidebar **User Dictionaries** or **Ctrl+Shift+U**
 - **Projects**: Double-click project in dashboard to open
 
+### Sidebar Project Search
+- **Type 2+ chars** in sidebar project search to filter projects
+- **Up / Down**: move through search results
+- **Enter**: open selected project
+- **Esc**: clear search text
+
 ---
 
 ## Tips

@@ -7,6 +7,33 @@
 1. **Translation Management Panel**: Search, edit, approve/reject translations in the Translation Memory (TM)
 2. **QA/Coverage Panel**: View coverage metrics and identify untranslated items
 
+## Workspace Navigation Contract (PATCH-01..06)
+
+The application now uses a deterministic workspace contract to avoid duplicate views and unstable routing:
+
+- Sidebar primary navigation: `Projects`, `Translation Management`, `User Dictionaries`, `Audio Player`.
+- Repeated open action focuses existing workspace instance when context is the same.
+- Current Project is a single source-of-truth (`current_project_id`) in `AppWindow`.
+- Sidebar `Current Project` card exposes deep links to:
+  - `Documents`
+  - `Sentences`
+  - `Dictionary`
+  - `Terms`
+  - `Term Cards`
+  - `Export`
+- Scope chips in TM and User Dictionaries are harmonized:
+  - `Current Project` vs `All`
+  - Scope selection persists per workspace between sessions.
+- Project quick search in sidebar:
+  - debounce `280ms`
+  - min query length `2`
+  - ranking order: recent boost, exact, prefix, contains
+  - keyboard navigation: `Up/Down/Enter/Esc`
+- Navigation feedback:
+  - status-line updates for route/focus operations
+  - deterministic home: `Projects Dashboard`
+  - workspace back flow focuses existing instances and does not create new views.
+
 ## Features
 
 ### Translation Management Panel
