@@ -461,18 +461,24 @@ class AudioQueueService:
         existing_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
         if dedup_by_source:
             for row in existing_rows:
-                existing_keys.add((row.project_id, row.kind, row.source_id))
+                if row.source_id is not None:
+                    existing_keys.add((row.project_id, row.kind, row.source_id))
 
         filtered_specs: List[AudioItemSpec] = []
         seen_new_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
         skipped = 0
         for spec in specs:
             key = (spec.project_id, spec.kind, spec.source_id)
-            if dedup_by_source and (key in existing_keys or key in seen_new_keys):
+            if (
+                dedup_by_source
+                and spec.source_id is not None
+                and (key in existing_keys or key in seen_new_keys)
+            ):
                 skipped += 1
                 continue
             filtered_specs.append(spec)
-            seen_new_keys.add(key)
+            if spec.source_id is not None:
+                seen_new_keys.add(key)
 
         if not filtered_specs:
             return (0, skipped)

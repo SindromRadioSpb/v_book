@@ -190,6 +190,33 @@ def test_enqueue_start_immediately_reuses_existing_source_track_without_duplicat
     begin_mock.assert_called_once()
 
 
+def test_enqueue_deduplicates_existing_source_rows_for_multi_item_enqueue(service, tmp_audio):
+    _inject_tracks(service, tmp_audio[:3])
+    service._tracks[1].context = {
+        "kind": "term_cluster",
+        "source_id": "42",
+        "project_id": 11,
+    }
+    service._current = service._tracks[0]
+    service._current_index = 0
+
+    n = service.play_paths(
+        [tmp_audio[3], tmp_audio[4]],
+        labels=["dup", "new"],
+        play_mode="enqueue",
+        contexts=[
+            {"kind": "term", "source_id": 42, "project_id": 11},
+            {"kind": "term", "source_id": 99, "project_id": 11},
+        ],
+        start_immediately=False,
+    )
+
+    assert n == 1
+    assert len(service._tracks) == 4
+    assert service._tracks[1].path == tmp_audio[3]
+    assert service._tracks[3].path == tmp_audio[4]
+
+
 # -- enqueue_from_db: items appear in queue without audio file --
 
 

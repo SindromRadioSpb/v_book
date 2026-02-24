@@ -367,6 +367,10 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
             self.text = text
             self.parent = parent
             self.triggered = DummySignal()
+            self.enabled = True
+
+        def setEnabled(self, value):
+            self.enabled = bool(value)
 
     class FakeMenu:
         last = None
@@ -419,12 +423,14 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
         "translate_called": 0,
         "generate_called": 0,
         "play_called": 0,
+        "playlist_called": 0,
         "edit_pron_called": 0,
         "bootstrap_called": 0,
     }
     panel.on_batch_translate = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
     panel.on_generate_audio_selected = lambda: state.__setitem__("generate_called", state["generate_called"] + 1)
     panel.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
+    panel.on_add_selected_to_playlist = lambda: state.__setitem__("playlist_called", state["playlist_called"] + 1)
     panel.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
     panel.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
     panel.set_entries_noise_status_bulk = lambda _flag: None
@@ -439,6 +445,7 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
     assert FakeMenu.last.actions[0].text == "Translate Selected (2 rows)..."
     assert FakeMenu.last.actions[1].text == "Generate Audio Selected (2 rows)..."
     assert FakeMenu.last.actions[2].text == "Play Audio Selected (2 rows)"
+    assert "Add Selected to Playlist (2 rows)..." in [a.text for a in FakeMenu.last.actions]
     assert "Mispronounced -> Add Pronunciation..." in [a.text for a in FakeMenu.last.actions]
     assert "Pronunciation Bootstrap Selected (2 rows)..." in [a.text for a in FakeMenu.last.actions]
 
@@ -446,11 +453,13 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
     FakeMenu.last.actions[2].triggered.emit()
+    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2 rows)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2 rows)...").triggered.emit()
     assert state["translate_called"] == 1
     assert state["generate_called"] == 1
     assert state["play_called"] == 1
+    assert state["playlist_called"] == 1
     assert state["edit_pron_called"] == 1
     assert state["bootstrap_called"] == 1
 

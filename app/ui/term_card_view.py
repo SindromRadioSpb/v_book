@@ -24,6 +24,7 @@ from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dia
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.workers import UserDictionaryBulkAddWorker, BatchGenerateAudioWorker
 
 logger = logging.getLogger(__name__)
@@ -524,6 +525,17 @@ class TermCardView(QWidget):
             return
         self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
 
+    def on_add_selected_to_playlist(self):
+        """Open playlist dialog and add selected queue rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+        add_selected_items_to_playlist_dialog(
+            parent=self,
+            items=items,
+            db_manager=self.db_service,
+        )
+
     def on_audio_cell_play_clicked(self, index):
         """Delegate callback: play one row from Audio column."""
         card = self.queue_model.get_card(index.row())
@@ -645,6 +657,9 @@ class TermCardView(QWidget):
         play_action = QAction(f"Play Audio Selected ({count} rows)", self)
         play_action.triggered.connect(self.on_play_audio_selected)
         menu.addAction(play_action)
+        playlist_action = QAction(f"Add Selected to Playlist ({count} rows)...", self)
+        playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+        menu.addAction(playlist_action)
         menu.addSeparator()
         add_action = QAction(f"Add Selected to User Dictionary ({count} rows)...", self)
         add_action.triggered.connect(self.on_add_selected_to_user_dictionary)

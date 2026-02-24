@@ -21,6 +21,7 @@ from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs import show_batch_translate_dialog
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
@@ -1196,6 +1197,9 @@ class TermsView(QWidget):
             add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
             menu.addAction(add_action)
+            add_playlist_action = QAction(f"Add Selected to Playlist ({len(selected_rows)} rows)...", self)
+            add_playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+            menu.addAction(add_playlist_action)
 
             edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
@@ -1310,6 +1314,16 @@ class TermsView(QWidget):
         worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
         progress.canceled.connect(worker.cancel)
         worker.start()
+
+    def on_add_selected_to_playlist(self) -> None:
+        items = self._selected_audio_items()
+        if not items:
+            return
+        add_selected_items_to_playlist_dialog(
+            parent=self,
+            items=items,
+            db_manager=self.db_service,
+        )
 
     def _on_user_dict_add_finished(self, result, progress_dialog):
         progress_dialog.close()

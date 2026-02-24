@@ -527,30 +527,54 @@ class AudioPlayerService(QObject):
             self._set_state("idle")
             self._start_next_track()
         else:  # enqueue
-            # Premium UX: explicit single-row Play should not duplicate queue rows.
-            if start_immediately and len(items) == 1:
-                existing_index = self._find_existing_track_index(items[0])
-                if existing_index is not None:
-                    self._merge_existing_track(existing_index, items[0])
-                    self.jump_to_index(existing_index)
-                    return 0
+            # Deduplicate by source key for all explicit source-backed rows.
+            # This prevents queue pollution when replaying playlist entries.
+            existing_key_to_index: Dict[tuple[str, int, Optional[int]], int] = {}
+            for idx, existing in enumerate(self._tracks):
+                key = self._source_key_from_context(existing.context or {})
+                if key is not None and key not in existing_key_to_index:
+                    existing_key_to_index[key] = idx
 
-            first_new_index = len(self._tracks)
-            self._tracks.extend(items)
-            self._emit_queue_changed()
-            if start_immediately:
-                # Premium UX for explicit row Play click: keep queue history,
-                # append new item(s), but start playback from the clicked item now.
+            append_items: List[AudioTrack] = []
+            changed_existing = False
+            first_target_index: Optional[int] = None
+
+            for incoming in items:
+                key = self._source_key_from_context(incoming.context or {})
+                if key is not None and key in existing_key_to_index:
+                    existing_index = existing_key_to_index[key]
+                    self._merge_existing_track(existing_index, incoming)
+                    changed_existing = True
+                    if first_target_index is None:
+                        first_target_index = existing_index
+                    continue
+
+                append_index = len(self._tracks) + len(append_items)
+                append_items.append(incoming)
+                if key is not None:
+                    existing_key_to_index[key] = append_index
+                if first_target_index is None:
+                    first_target_index = append_index
+
+            if append_items:
+                self._tracks.extend(append_items)
+            if append_items or changed_existing:
+                self._emit_queue_changed()
+
+            if start_immediately and first_target_index is not None:
+                # Keep queue history, start playback from selected item immediately.
                 self._stop_all_timers()
                 self._stop_backend_only()
                 self._current = None
                 self._item_play_count = 0
-                self._current_index = first_new_index - 1
+                self._current_index = first_target_index - 1
                 self._emit_now_playing(None)
                 self._set_state("idle")
                 self._start_next_track()
             elif self._current is None and not self._timers_active():
                 self._start_next_track()
+
+            return len(append_items)
 
         return len(items)
 

@@ -239,6 +239,27 @@ def test_add_items_to_playlist_dedup_by_source(session, svc):
     assert [e.position for e in entries] == [0, 1]
 
 
+def test_add_items_to_playlist_dedup_ignores_rows_without_source_id(session, svc):
+    pl_id = svc.create_playlist(session, "Dedup None Source")
+    session.commit()
+    specs = [
+        AudioItemSpec(kind="sentence", source_id=None, project_id=1, snapshot_hebrew="alpha"),
+        AudioItemSpec(kind="sentence", source_id=None, project_id=1, snapshot_hebrew="beta"),
+    ]
+    added, skipped = svc.add_items_to_playlist(
+        session,
+        pl_id,
+        specs,
+        add_mode="append",
+        dedup_by_source=True,
+    )
+    session.commit()
+    assert added == 2
+    assert skipped == 0
+    entries = svc.get_playlist_entries(session, pl_id)
+    assert len(entries) == 2
+
+
 def test_add_items_to_playlist_prepend_and_after_selected(session, svc):
     pl_id = svc.create_playlist(session, "Insert modes")
     session.commit()

@@ -46,6 +46,7 @@ from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
@@ -1775,6 +1776,17 @@ class TranslationManagementPanel(QWidget):
             return
         self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
 
+    def on_add_selected_to_playlist(self):
+        """Open playlist dialog and add selected TM rows."""
+        items = self._get_selected_audio_items()
+        if not items:
+            return
+        add_selected_items_to_playlist_dialog(
+            parent=self,
+            items=items,
+            db_manager=self.db_service,
+        )
+
     def on_go_to_source_selected(self):
         """Navigate from selected TM row to project source entity."""
         if self._selected_source_payload is None:
@@ -1924,6 +1936,10 @@ class TranslationManagementPanel(QWidget):
         play_audio_action = QAction(f"Play Audio Selected ({count:,} rows)", self)
         play_audio_action.triggered.connect(self.on_play_audio_selected)
         menu.addAction(play_audio_action)
+
+        add_playlist_action = QAction(f"Add Selected to Playlist ({count:,} rows)...", self)
+        add_playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+        menu.addAction(add_playlist_action)
 
         go_to_source_action = QAction("Go to Source", self)
         selected_payload = None

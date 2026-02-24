@@ -39,6 +39,7 @@ from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
 from app.ui.table_layout_controller import TableLayoutController
@@ -913,6 +914,9 @@ class UserDictionariesView(QWidget):
         play_audio_action = QAction(f"Play Audio Selected ({count} rows)", self)
         play_audio_action.triggered.connect(self.on_play_audio_selected)
         menu.addAction(play_audio_action)
+        add_playlist_action = QAction(f"Add Selected to Playlist ({count} rows)...", self)
+        add_playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+        menu.addAction(add_playlist_action)
         edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
         edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
         menu.addAction(edit_pron_action)
@@ -1449,6 +1453,16 @@ class UserDictionariesView(QWidget):
         if not items:
             return
         self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
+
+    def on_add_selected_to_playlist(self):
+        items = self._selected_audio_items()
+        if not items:
+            return
+        add_selected_items_to_playlist_dialog(
+            parent=self,
+            items=items,
+            db_manager=self.db_service,
+        )
 
     def on_audio_cell_play_clicked(self, index):
         item = self.items_model.get_item(index.row())
