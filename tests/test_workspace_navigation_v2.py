@@ -94,3 +94,15 @@ def test_sidebar_project_search_emits_workspace_open_project_action(qtbot):
     with qtbot.waitSignal(sidebar.action_triggered, timeout=1000) as blocker:
         qtbot.keyClick(sidebar.project_search_edit, Qt.Key.Key_Return)
     assert blocker.args[0].startswith("workspace.open_project:")
+
+
+def test_sidebar_section_state_roundtrip(qtbot):
+    sidebar = SidebarWidget()
+    qtbot.addWidget(sidebar)
+
+    sidebar.set_sections_state({"project_search_expanded": False, "tools_expanded": True})
+    state = sidebar.get_sections_state()
+    assert state["project_search_expanded"] is False
+    assert state["tools_expanded"] is True
+    assert sidebar.project_search_section.isHidden() is True
+    assert sidebar.tools_section.isHidden() is False

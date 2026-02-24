@@ -62,3 +62,12 @@ def test_scope_persistence(monkeypatch, qtbot):
     view2 = _view_without_db_load(monkeypatch, project_id=12)
     qtbot.addWidget(view2)
     assert view2.scope_mode == "all"
+
+
+def test_ud_cross_link_to_tm_is_discoverable(monkeypatch, qtbot):
+    view = _view_without_db_load(monkeypatch, project_id=15)
+    qtbot.addWidget(view)
+    view.show()
+
+    assert view.open_tm_btn.isVisible() is True
+    assert view.open_tm_btn.isEnabled() is True

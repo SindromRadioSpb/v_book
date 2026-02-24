@@ -40,3 +40,12 @@ def test_tm_scope_switch_to_global_clears_project_filter(monkeypatch, qtbot):
 
     assert panel.scope_mode == "global"
     assert panel.selected_project_ids is None
+
+
+def test_tm_cross_link_to_user_dictionaries_is_discoverable(monkeypatch, qtbot):
+    panel = _panel_without_initial_search(monkeypatch, project_id=44)
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert panel.open_user_dict_btn.isVisible() is True
+    assert panel.open_user_dict_btn.isEnabled() is True
