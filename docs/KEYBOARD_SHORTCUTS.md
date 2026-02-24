@@ -93,6 +93,7 @@ When command palette is open (Ctrl+P):
 - **Up / Down**: move through search results
 - **Enter**: open selected project
 - **Esc**: clear search text
+- **Tab / Shift+Tab**: move through sidebar controls (navigation, current project links, search, tools) without focus traps
 
 ---
 

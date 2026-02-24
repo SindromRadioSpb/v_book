@@ -29,10 +29,17 @@ The application now uses a deterministic workspace contract to avoid duplicate v
   - min query length `2`
   - ranking order: recent boost, exact, prefix, contains
   - keyboard navigation: `Up/Down/Enter/Esc`
+- Sidebar collapsible sections:
+  - `Project Search` and `Tools` have expanded/collapsed state persistence.
 - Navigation feedback:
   - status-line updates for route/focus operations
   - deterministic home: `Projects Dashboard`
   - workspace back flow focuses existing instances and does not create new views.
+- Current Project CTA behavior:
+  - when current project is not set, `Open Project...` routes to dashboard;
+  - deep-link tab request is queued and auto-routed after the user opens a project.
+- Shortcut safety:
+  - startup validates duplicate active shortcut bindings and emits warnings if conflicts are found.
 
 ## Features
 

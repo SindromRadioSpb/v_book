@@ -53,6 +53,9 @@ Smoke matrix:
 5. Restore session with saved active workspace (`TM`, `UD`, or `Audio`): workspace focus is restored.
 6. Click Current Project deep links (Documents/Sentences/Dictionary/Terms/Term Cards/Export): corresponding tab receives focus.
 7. Trigger `Refresh Counters` in sidebar tools: badges update without UI freeze.
+8. Collapse/expand `Project Search` and `Tools`, restart app: section state is restored.
+9. No current project -> click `Open Project...`, then open a project: queued deep-link tab route is applied automatically.
+10. Startup shortcut conflict check reports no duplicate active bindings.
 
 ---
 
