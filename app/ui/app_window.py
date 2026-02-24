@@ -24,6 +24,21 @@ from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
 
+_HEBREW_SHORTCUT_KEY_MAP: Dict[str, str] = {
+    "A": "ש",
+    "B": "נ",
+    "C": "ב",
+    "E": "ק",
+    "I": "ן",
+    "L": "ך",
+    "O": "ם",
+    "P": "פ",
+    "R": "ר",
+    "T": "א",
+    "U": "ו",
+    "V": "ה",
+}
+
 
 class AppWindow(QMainWindow):
     """Main application window."""
@@ -59,6 +74,38 @@ class AppWindow(QMainWindow):
         if not text:
             return
         self.statusBar().showMessage(text, timeout_ms)
+
+    def _expand_layout_shortcuts(self, primary_sequence: str) -> List[QKeySequence]:
+        """Return shortcut list for EN + Hebrew layouts when applicable."""
+        primary = str(primary_sequence or "").strip()
+        if not primary:
+            return []
+        sequences = [QKeySequence(primary)]
+        parts = primary.split("+")
+        if not parts:
+            return sequences
+        key_token = parts[-1].strip().upper()
+        mapped = _HEBREW_SHORTCUT_KEY_MAP.get(key_token)
+        if not mapped:
+            return sequences
+        alt = "+".join(parts[:-1] + [mapped])
+        if alt.strip().lower() != primary.lower():
+            sequences.append(QKeySequence(alt))
+        return sequences
+
+    def _set_action_shortcuts(self, action: QAction, primary_sequence: str) -> None:
+        seqs = self._expand_layout_shortcuts(primary_sequence)
+        if not seqs:
+            return
+        action.setShortcuts(seqs)
+
+    def _create_layout_shortcuts(self, primary_sequence: str, callback) -> List[QShortcut]:
+        shortcuts: List[QShortcut] = []
+        for seq in self._expand_layout_shortcuts(primary_sequence):
+            sc = QShortcut(seq, self)
+            sc.activated.connect(callback)
+            shortcuts.append(sc)
+        return shortcuts
 
     def _is_widget_in_stack(self, widget: object) -> bool:
         if widget is None:
@@ -342,8 +389,7 @@ class AppWindow(QMainWindow):
         self._register_actions()
 
         # Create Ctrl+P shortcut for command palette
-        self.palette_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
-        self.palette_shortcut.activated.connect(self._open_command_palette)
+        self.palette_shortcuts = self._create_layout_shortcuts("Ctrl+P", self._open_command_palette)
 
         # Optional async badges refresh (non-blocking, low frequency).
         self._workspace_badges_timer = QTimer(self)
@@ -385,6 +431,29 @@ class AppWindow(QMainWindow):
         self.audio_player_panel.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
         self._set_active_workspace("workspace.audio", push_history=push_history)
         self._show_nav_status("Audio Player opened.")
+
+    def _infer_workspace_from_stack(self) -> str:
+        current = self.stack.currentWidget()
+        if current is self.dashboard:
+            return "workspace.projects"
+        if isinstance(current, ProjectView):
+            return "workspace.projects"
+        if isinstance(current, TranslationManagementPanel):
+            return "workspace.tm"
+        if isinstance(current, UserDictionariesView):
+            return "workspace.user_dictionaries"
+        return "workspace.projects"
+
+    def _toggle_audio_workspace_from_sidebar(self) -> None:
+        """Sidebar behavior: first click shows Audio Player, repeated click hides it."""
+        is_audio_active = self._current_workspace_key() == "workspace.audio"
+        if is_audio_active and self.audio_player_dock.isVisible():
+            self.audio_player_dock.hide()
+            fallback_workspace = self._infer_workspace_from_stack()
+            self._set_active_workspace(fallback_workspace, push_history=False)
+            self._show_nav_status("Audio Player hidden.")
+            return
+        self.open_audio_workspace()
 
     def _restore_active_workspace(self) -> None:
         """Restore active workspace widget/focus from persisted state."""
@@ -446,11 +515,13 @@ class AppWindow(QMainWindow):
             by_shortcut.setdefault(key, []).append(source)
 
         for action in self.findChildren(QAction):
-            seq = action.shortcut().toString(QKeySequence.SequenceFormat.PortableText)
-            if not seq:
-                continue
             source = f"QAction:{action.text().strip() or action.objectName() or '<unnamed>'}"
-            _add(seq, source)
+            seqs = action.shortcuts() or [action.shortcut()]
+            for seq_obj in seqs:
+                seq = seq_obj.toString(QKeySequence.SequenceFormat.PortableText)
+                if not seq:
+                    continue
+                _add(seq, source)
 
         for shortcut in self.findChildren(QShortcut):
             seq = shortcut.key().toString(QKeySequence.SequenceFormat.PortableText)
@@ -486,25 +557,25 @@ class AppWindow(QMainWindow):
 
         # Verification action
         verification_action = QAction("&Verification (P1 Scenario 7)", self)
-        verification_action.setShortcut("Ctrl+Shift+V")
+        self._set_action_shortcuts(verification_action, "Ctrl+Shift+V")
         verification_action.triggered.connect(self.open_verification)
         tools_menu.addAction(verification_action)
 
         # Import Dictionary
         import_action = QAction("&Import Dictionary...", self)
-        import_action.setShortcut("Ctrl+Shift+I")
+        self._set_action_shortcuts(import_action, "Ctrl+Shift+I")
         import_action.triggered.connect(self.open_import_wizard)
         tools_menu.addAction(import_action)
 
         # Project Exchange (Export/Import bundles)
         tools_menu.addSeparator()
         export_bundle_action = QAction("&Export Project Bundle...", self)
-        export_bundle_action.setShortcut("Ctrl+Shift+E")
+        self._set_action_shortcuts(export_bundle_action, "Ctrl+Shift+E")
         export_bundle_action.triggered.connect(self.export_project_bundle)
         tools_menu.addAction(export_bundle_action)
 
         import_bundle_action = QAction("I&mport Project Bundle...", self)
-        import_bundle_action.setShortcut("Ctrl+Shift+B")
+        self._set_action_shortcuts(import_bundle_action, "Ctrl+Shift+B")
         import_bundle_action.triggered.connect(self.import_project_bundle)
         tools_menu.addAction(import_bundle_action)
 
@@ -514,24 +585,24 @@ class AppWindow(QMainWindow):
 
         # Translate Text
         translate_text_action = QAction("&Translate Text...", self)
-        translate_text_action.setShortcut("Ctrl+Alt+T")
+        self._set_action_shortcuts(translate_text_action, "Ctrl+Alt+T")
         translate_text_action.triggered.connect(self.open_translate_text_dialog)
         translation_menu.addAction(translate_text_action)
 
         # MT Provider Settings
         provider_settings_action = QAction("&MT Provider Settings...", self)
-        provider_settings_action.setShortcut("Ctrl+Alt+P")
+        self._set_action_shortcuts(provider_settings_action, "Ctrl+Alt+P")
         provider_settings_action.triggered.connect(self.open_provider_settings)
         translation_menu.addAction(provider_settings_action)
 
         # Audio Provider Settings
         audio_provider_settings_action = QAction("&Audio Provider Settings...", self)
-        audio_provider_settings_action.setShortcut("Ctrl+Alt+A")
+        self._set_action_shortcuts(audio_provider_settings_action, "Ctrl+Alt+A")
         audio_provider_settings_action.triggered.connect(self.open_audio_provider_settings)
         translation_menu.addAction(audio_provider_settings_action)
 
         pronunciation_bootstrap_action = QAction("&Pronunciation Bootstrap...", self)
-        pronunciation_bootstrap_action.setShortcut("Ctrl+Alt+O")
+        self._set_action_shortcuts(pronunciation_bootstrap_action, "Ctrl+Alt+O")
         pronunciation_bootstrap_action.triggered.connect(self.open_pronunciation_bootstrap)
         translation_menu.addAction(pronunciation_bootstrap_action)
 
@@ -540,19 +611,19 @@ class AppWindow(QMainWindow):
 
         # Translation Management
         tm_action = QAction("&Translation Management", self)
-        tm_action.setShortcut("Ctrl+Shift+T")
+        self._set_action_shortcuts(tm_action, "Ctrl+Shift+T")
         tm_action.triggered.connect(self.open_translation_management)
         premium_menu.addAction(tm_action)
 
         # User Dictionaries
         user_dict_action = QAction("&User Dictionaries", self)
-        user_dict_action.setShortcut("Ctrl+Shift+U")
+        self._set_action_shortcuts(user_dict_action, "Ctrl+Shift+U")
         user_dict_action.triggered.connect(self.open_user_dictionaries)
         premium_menu.addAction(user_dict_action)
 
         # QA/Coverage (requires project context)
         coverage_action = QAction("&QA / Coverage", self)
-        coverage_action.setShortcut("Ctrl+Shift+C")
+        self._set_action_shortcuts(coverage_action, "Ctrl+Shift+C")
         coverage_action.triggered.connect(self.open_coverage)
         premium_menu.addAction(coverage_action)
 
@@ -561,20 +632,26 @@ class AppWindow(QMainWindow):
 
         # Toggle Sidebar
         toggle_sidebar_action = QAction("Toggle &Sidebar", self)
-        toggle_sidebar_action.setShortcut("Ctrl+B")
+        self._set_action_shortcuts(toggle_sidebar_action, "Ctrl+B")
         toggle_sidebar_action.triggered.connect(self.workspace.toggle_sidebar)
         view_menu.addAction(toggle_sidebar_action)
 
         # Reset Layout
         reset_layout_action = QAction("&Reset Layout to Default", self)
-        reset_layout_action.setShortcut("Ctrl+Shift+R")
+        self._set_action_shortcuts(reset_layout_action, "Ctrl+Shift+R")
         reset_layout_action.triggered.connect(self.workspace.reset_to_default)
         view_menu.addAction(reset_layout_action)
 
         toggle_audio_panel_action = QAction("Toggle &Audio Player", self)
-        toggle_audio_panel_action.setShortcut("Ctrl+Alt+L")
+        self._set_action_shortcuts(toggle_audio_panel_action, "Ctrl+Alt+L")
         toggle_audio_panel_action.triggered.connect(self.toggle_audio_player_panel)
         view_menu.addAction(toggle_audio_panel_action)
+
+        help_menu = menubar.addMenu("&Help")
+        help_center_action = QAction("&Help Center", self)
+        self._set_action_shortcuts(help_center_action, "F1")
+        help_center_action.triggered.connect(self.open_help_center)
+        help_menu.addAction(help_center_action)
 
     def open_verification(self):
         """Open verification panel."""
@@ -730,6 +807,13 @@ class AppWindow(QMainWindow):
 
         logger.info("Opening pronunciation bootstrap dialog")
         show_pronunciation_bootstrap_dialog(parent=self)
+
+    def open_help_center(self):
+        """Open in-app help center dialog."""
+        from app.ui.help_center_dialog import show_help_center_dialog
+
+        logger.info("Opening help center dialog")
+        show_help_center_dialog(parent=self)
 
     def open_project(self, project_id: int):
         """Open a project view."""
@@ -1053,6 +1137,15 @@ class AppWindow(QMainWindow):
         ))
 
         registry.register(ActionSpec(
+            action_id="help.center",
+            title="Help Center",
+            keywords=["help", "guide", "shortcuts", "manual", "docs"],
+            shortcut="F1",
+            callback=self.open_help_center,
+            category="Help"
+        ))
+
+        registry.register(ActionSpec(
             action_id="premium.audio_player",
             title="Toggle Audio Player",
             keywords=["audio", "playback", "now playing", "queue", "dock"],
@@ -1157,12 +1250,14 @@ class AppWindow(QMainWindow):
         """Route sidebar action to appropriate handler."""
         if self._on_workspace_sidebar_open_project(action_id):
             return
+        if action_id == "workspace.audio":
+            self._toggle_audio_workspace_from_sidebar()
+            return
 
         action_map = {
             "workspace.projects": self.back_to_dashboard,
             "workspace.tm": self.open_translation_management,
             "workspace.user_dictionaries": self.open_user_dictionaries,
-            "workspace.audio": self.open_audio_workspace,
             "workspace.current_project.open": self._open_current_project,
             "workspace.project_tab.documents": lambda: self._open_current_project_tab("documents"),
             "workspace.project_tab.sentences": lambda: self._open_current_project_tab("sentences"),

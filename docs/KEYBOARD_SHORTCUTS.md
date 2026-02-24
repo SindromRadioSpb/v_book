@@ -6,10 +6,12 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 
 ### Command Palette
 - **Ctrl+P**: Open command palette (fuzzy search for all actions)
+- **Ctrl+פ**: Same command palette action on Hebrew layout
 
 ### Workspace
 - **Ctrl+B**: Toggle sidebar visibility
 - **Ctrl+Shift+R**: Reset layout to default
+- **F1**: Open Help Center
 
 ### Tools
 - **Ctrl+Shift+V**: Run P1 Verification
@@ -21,6 +23,11 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **Ctrl+Shift+U**: User Dictionaries
 - **Ctrl+Shift+C**: QA / Coverage (requires project context)
 - **Ctrl+Alt+L**: Toggle Audio Player panel
+
+Layout-independence note:
+
+- Global shortcuts are registered with EN and Hebrew key variants where applicable.
+- Example: `Ctrl+Shift+T` and `Ctrl+Shift+א` trigger the same action.
 
 ---
 
@@ -94,6 +101,10 @@ When command palette is open (Ctrl+P):
 - **Enter**: open selected project
 - **Esc**: clear search text
 - **Tab / Shift+Tab**: move through sidebar controls (navigation, current project links, search, tools) without focus traps
+
+See also:
+
+- `docs/KEYBOARD_INTERACTIONS.md` for keyboard interaction smoke patterns.
 
 ---
 

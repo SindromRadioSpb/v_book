@@ -1,10 +1,11 @@
-"""Integration-level contract tests for AppWindow workspace navigation."""
+﻿"""Integration-level contract tests for AppWindow workspace navigation."""
 
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QWidget
 
 from app.infra.settings import SettingsService
-from app.ui.app_window import AppWindow
+from app.ui.app_window import AppWindow, _HEBREW_SHORTCUT_KEY_MAP
 
 
 class _StubProjectView(QWidget):
@@ -59,3 +60,39 @@ def test_pending_project_tab_routes_after_open(monkeypatch, qtbot):
     current = window.stack.currentWidget()
     assert isinstance(current, _StubProjectView)
     assert current.focused_tabs == ["terms"]
+
+
+def test_expand_layout_shortcuts_adds_hebrew_variant(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+    seqs = window._expand_layout_shortcuts("Ctrl+Shift+T")
+    values = [seq.toString() for seq in seqs]
+    assert "Ctrl+Shift+T" in values
+    assert f"Ctrl+Shift+{_HEBREW_SHORTCUT_KEY_MAP['T']}" in values
+
+
+def test_collect_shortcut_conflicts_respects_multi_shortcuts(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+
+    a1 = QAction("A1", window)
+    a1.setShortcuts([QKeySequence("Ctrl+Shift+U"), QKeySequence(f"Ctrl+Shift+{_HEBREW_SHORTCUT_KEY_MAP['U']}")])
+    window.addAction(a1)
+
+    a2 = QAction("A2", window)
+    a2.setShortcut(QKeySequence(f"Ctrl+Shift+{_HEBREW_SHORTCUT_KEY_MAP['U']}"))
+    window.addAction(a2)
+
+    conflicts = window._collect_shortcut_conflicts()
+    assert f"CTRL+SHIFT+{_HEBREW_SHORTCUT_KEY_MAP['U']}" in conflicts
+
+
+def test_sidebar_audio_workspace_click_toggles_panel_visibility(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+    window.audio_player_dock.hide()
+
+    window._on_sidebar_action("workspace.audio")
+    assert window.audio_player_dock.isVisible() is True
+    assert window._current_workspace_key() == "workspace.audio"
+
+    window._on_sidebar_action("workspace.audio")
+    assert window.audio_player_dock.isVisible() is False
+    assert window._current_workspace_key() != "workspace.audio"
