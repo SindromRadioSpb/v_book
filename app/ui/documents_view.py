@@ -1,7 +1,7 @@
-"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
+﻿"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QSpinBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QTimer
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
@@ -29,7 +30,7 @@ from app.services.ingest_service import IngestService
 from app.services.document_service import DocumentService, validate_link_url, VALID_LEVELS
 from app.infra.settings import SettingsService
 from app.ui.table_layout_controller import TableLayoutController
-from app.ui.workers import IngestWorker, ProcessWorker
+from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker
 from app.ui.dialogs import show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class EditMetadataDialog(QDialog):
 
     def __init__(self, doc_name: str, tag: str, link_url: str, level: str, topic: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Edit Metadata — {doc_name}")
+        self.setWindowTitle(f"Edit Metadata вЂ” {doc_name}")
         self.setMinimumWidth(480)
         layout = QVBoxLayout()
 
@@ -81,7 +82,7 @@ class EditMetadataDialog(QDialog):
         self.setLayout(layout)
 
     def get_values(self):
-        """Return (tag, link_url, level, topic) — level is None if (none)."""
+        """Return (tag, link_url, level, topic) вЂ” level is None if (none)."""
         level_text = self.level_combo.currentText()
         return (
             self.tag_edit.text().strip() or None,
@@ -110,6 +111,34 @@ class DocumentsView(QWidget):
     COL_LINK = 9
     COL_LEVEL = 10
     COL_TOPIC = 11
+    HEADER_LABELS = [
+        "ID",
+        "File Name",
+        "Size (KB)",
+        "Status",
+        "Sentences",
+        "Tokens",
+        "Imported",
+        "Path",
+        "Tag",
+        "Link",
+        "Level",
+        "Topic",
+    ]
+    COLUMN_TO_DB = {
+        COL_ID: "doc_id",
+        COL_NAME: "file_name",
+        COL_SIZE: "file_size_bytes",
+        COL_STATUS: "status",
+        COL_SENTENCES: "sentence_count",
+        COL_TOKENS: "token_count",
+        COL_IMPORTED: "imported_at",
+        COL_PATH: "file_path",
+        COL_TAG: "tag",
+        COL_LINK: "link_url",
+        COL_LEVEL: "level",
+        COL_TOPIC: "topic",
+    }
 
     def __init__(self, project_id: int):
         super().__init__()
@@ -125,14 +154,42 @@ class DocumentsView(QWidget):
 
         self.current_worker = None
         self.process_worker = None
+        self.documents_worker: Optional[DocumentsPageWorker] = None
 
         self._loading = False  # Flag to suppress cellChanged during load
+        self._request_seq = 0
+        self._active_request_id = 0
+
+        # Pagination + sorting state (server-side).
+        self.current_page = 1
+        self.page_size = max(25, self.settings.get_int("documents_view/page_size", 25))
+        self.total_count = 0
+        self.sort_column = self.settings.get_string("documents_view/sort_column", "imported_at")
+        self.sort_direction = self.settings.get_string("documents_view/sort_direction", "desc")
+        if self.sort_column not in {
+            "doc_id",
+            "file_name",
+            "file_size_bytes",
+            "status",
+            "sentence_count",
+            "token_count",
+            "imported_at",
+            "file_path",
+            "tag",
+            "link_url",
+            "level",
+            "topic",
+        }:
+            self.sort_column = "imported_at"
+        if self.sort_direction not in ("asc", "desc"):
+            self.sort_direction = "desc"
+        self.current_filters: Dict[str, Optional[str]] = {}
 
         # Debounce timer for search/filter
         self._filter_timer = QTimer()
         self._filter_timer.setSingleShot(True)
-        self._filter_timer.setInterval(400)
-        self._filter_timer.timeout.connect(self.load_documents)
+        self._filter_timer.setInterval(300)
+        self._filter_timer.timeout.connect(self._on_filter_timeout)
 
         self.init_ui()
         self.load_corpus()
@@ -217,10 +274,10 @@ class DocumentsView(QWidget):
 
         # Engine info label
         if self.stanza_available:
-            engine_label = QLabel(f"✅ Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})")
+            engine_label = QLabel(f"вњ… Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})")
             engine_label.setStyleSheet("color: green;")
         else:
-            engine_label = QLabel("⚠️ Stanza not available - using Mock engine")
+            engine_label = QLabel("вљ пёЏ Stanza not available - using Mock engine")
             engine_label.setStyleSheet("color: orange;")
         nlp_layout.addWidget(engine_label)
 
@@ -237,7 +294,7 @@ class DocumentsView(QWidget):
 
         # Drag-drop hint
         self.hint_label = QLabel(
-            "💡 Drag and drop files here to import them\n"
+            "рџ’Ў Drag and drop files here to import them\n"
             "Supported formats: .txt, .docx, .pptx, .pdf"
         )
         self.hint_label.setStyleSheet(
@@ -252,10 +309,7 @@ class DocumentsView(QWidget):
         # Documents table (12 columns including metadata)
         self.docs_table = QTableWidget()
         self.docs_table.setColumnCount(12)
-        self.docs_table.setHorizontalHeaderLabels([
-            "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens",
-            "Imported", "Path", "Tag", "Link", "Level", "Topic"
-        ])
+        self.docs_table.setHorizontalHeaderLabels(self.HEADER_LABELS)
         self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
         # Enable F2 and double-click editing on File Name column
@@ -269,8 +323,9 @@ class DocumentsView(QWidget):
         # Connect cellChanged to rename handler
         self.docs_table.cellChanged.connect(self.on_cell_changed)
 
-        # Enable interactive column sorting
-        self.docs_table.setSortingEnabled(True)
+        # Server-side sorting only (global SQL sort before pagination).
+        self.docs_table.setSortingEnabled(False)
+        self.docs_table.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
 
         self.table_layout_controller = TableLayoutController(
             settings=self.settings,
@@ -301,6 +356,53 @@ class DocumentsView(QWidget):
         self.docs_table.cellClicked.connect(self.on_cell_clicked)
 
         layout.addWidget(self.docs_table)
+
+        # Pagination bar
+        pagination_layout = QHBoxLayout()
+        self.first_btn = QPushButton("<<")
+        self.first_btn.setToolTip("First page")
+        self.first_btn.clicked.connect(self.on_first_page)
+        pagination_layout.addWidget(self.first_btn)
+
+        self.prev_btn = QPushButton("<")
+        self.prev_btn.setToolTip("Previous page")
+        self.prev_btn.clicked.connect(self.on_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        pagination_layout.addWidget(QLabel("Page:"))
+        self.page_spinbox = QSpinBox()
+        self.page_spinbox.setMinimum(1)
+        self.page_spinbox.setMaximum(1)
+        self.page_spinbox.valueChanged.connect(self.on_page_changed)
+        pagination_layout.addWidget(self.page_spinbox)
+
+        self.page_total_label = QLabel("of 1")
+        pagination_layout.addWidget(self.page_total_label)
+
+        self.next_btn = QPushButton(">")
+        self.next_btn.setToolTip("Next page")
+        self.next_btn.clicked.connect(self.on_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        self.last_btn = QPushButton(">>")
+        self.last_btn.setToolTip("Last page")
+        self.last_btn.clicked.connect(self.on_last_page)
+        pagination_layout.addWidget(self.last_btn)
+
+        pagination_layout.addSpacing(12)
+        pagination_layout.addWidget(QLabel("Page size:"))
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["25", "50", "100", "250", "500"])
+        if str(self.page_size) not in {"25", "50", "100", "250", "500"}:
+            self.page_size = 25
+        self.page_size_combo.setCurrentText(str(self.page_size))
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pagination_layout.addWidget(self.page_size_combo)
+
+        pagination_layout.addStretch()
+        self.range_label = QLabel("Showing 0-0 of 0")
+        pagination_layout.addWidget(self.range_label)
+        layout.addLayout(pagination_layout)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -342,6 +444,8 @@ class DocumentsView(QWidget):
         self.docs_table.itemSelectionChanged.connect(self.on_selection_changed)
 
         self.setLayout(layout)
+        self._update_sort_header_labels()
+        self.update_pagination_controls(is_loading=False)
 
     def _check_stanza_available(self):
         """Check if Stanza is available."""
@@ -383,107 +487,16 @@ class DocumentsView(QWidget):
             show_error(self, "Error", f"Failed to load corpus: {e}")
 
     def load_documents(self):
-        """Load documents from database using DocumentService (with search/filter)."""
-        if not self.corpus_id:
-            return
-
-        try:
-            self._loading = True
-
-            # Read filter state
-            title_search = self.title_search_edit.text().strip() or None
-            tag_filter = self.tag_filter_edit.text().strip() or None
-            level_text = self.level_filter_combo.currentText()
-            level_filter = level_text if level_text != "All" else None
-
-            with self.db_service.get_session() as session:
-                dtos = self.document_service.list_documents(
-                    session,
-                    self.corpus_id,
-                    title_search=title_search,
-                    tag_filter=tag_filter,
-                    level_filter=level_filter,
-                    sort_by="imported_at",
-                    sort_dir="desc",
-                )
-
-                # Temporarily disable sorting while populating
-                self.docs_table.setSortingEnabled(False)
-                self.docs_table.setRowCount(len(dtos))
-
-                def _ro_item(text="", data=None):
-                    """Create a read-only QTableWidgetItem."""
-                    item = QTableWidgetItem(text)
-                    if data is not None:
-                        item.setData(Qt.ItemDataRole.DisplayRole, data)
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    return item
-
-                for row, doc in enumerate(dtos):
-                    # Col 0: ID
-                    id_item = _ro_item(data=doc.doc_id)
-                    id_item.setText(str(doc.doc_id))
-                    self.docs_table.setItem(row, self.COL_ID, id_item)
-
-                    # Col 1: File Name — EDITABLE, stores doc_id in UserRole
-                    fn_item = QTableWidgetItem(doc.file_name)
-                    fn_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
-                    self.docs_table.setItem(row, self.COL_NAME, fn_item)
-
-                    # Col 2: Size KB
-                    size_kb = doc.file_size_bytes / 1024
-                    sz_item = _ro_item(f"{size_kb:.1f}", data=size_kb)
-                    self.docs_table.setItem(row, self.COL_SIZE, sz_item)
-
-                    # Col 3: Status
-                    self.docs_table.setItem(row, self.COL_STATUS, _ro_item(doc.status))
-
-                    # Col 4: Sentences
-                    sc = doc.sentence_count or 0
-                    s_item = _ro_item(str(sc) if sc else "", data=sc)
-                    self.docs_table.setItem(row, self.COL_SENTENCES, s_item)
-
-                    # Col 5: Tokens
-                    tc = doc.token_count or 0
-                    t_item = _ro_item(str(tc) if tc else "", data=tc)
-                    self.docs_table.setItem(row, self.COL_TOKENS, t_item)
-
-                    # Col 6: Imported
-                    self.docs_table.setItem(row, self.COL_IMPORTED, _ro_item(doc.imported_at[:19]))
-
-                    # Col 7: Path
-                    self.docs_table.setItem(row, self.COL_PATH, _ro_item(doc.file_path))
-
-                    # Col 8: Tag
-                    self.docs_table.setItem(row, self.COL_TAG, _ro_item(doc.tag or ""))
-
-                    # Col 9: Link — store URL in UserRole for click handler
-                    link_text = doc.link_url or ""
-                    lk_item = _ro_item(link_text)
-                    lk_item.setData(Qt.ItemDataRole.UserRole + 1, doc.link_url)
-                    if doc.link_url:
-                        lk_item.setForeground(Qt.GlobalColor.blue)
-                        lk_item.setToolTip(f"Click to open: {doc.link_url}")
-                    self.docs_table.setItem(row, self.COL_LINK, lk_item)
-
-                    # Col 10: Level
-                    self.docs_table.setItem(row, self.COL_LEVEL, _ro_item(doc.level or ""))
-
-                    # Col 11: Topic
-                    self.docs_table.setItem(row, self.COL_TOPIC, _ro_item(doc.topic or ""))
-
-                self.docs_table.setSortingEnabled(True)
-                self.status_label.setText(f"Total documents: {len(dtos)}")
-
-        except Exception as e:
-            logger.exception("Failed to load documents")
-            show_error(self, "Error", f"Failed to load documents: {e}")
-        finally:
-            self._loading = False
+        """Load current page using server-side pagination (global filters/sort)."""
+        self.reload_documents(reset_page=False)
 
     def _on_filter_changed(self):
         """Debounced filter change handler."""
         self._filter_timer.start()
+
+    def _on_filter_timeout(self):
+        """Apply filters globally and reset to page 1."""
+        self.reload_documents(reset_page=True)
 
     def _on_clear_filters(self):
         """Clear all search/filter fields."""
@@ -494,10 +507,239 @@ class DocumentsView(QWidget):
         self.level_filter_combo.setCurrentIndex(0)
         self.title_search_edit.blockSignals(False)
         self.tag_filter_edit.blockSignals(False)
-        self.load_documents()
+        self.reload_documents(reset_page=True)
+
+    def build_filters(self) -> Dict[str, Optional[str]]:
+        """Build global SQL filters from current controls."""
+        title_search = self.title_search_edit.text().strip() or None
+        tag_filter = self.tag_filter_edit.text().strip() or None
+        level_text = self.level_filter_combo.currentText()
+        level_filter = level_text if level_text != "All" else None
+        return {
+            "title_search": title_search,
+            "tag_filter": tag_filter,
+            "level_filter": level_filter,
+            "topic_filter": None,
+            "status_filter": None,
+        }
+
+    def reload_documents(self, *, reset_page: bool):
+        """Start async page load; stale responses are ignored by request_id."""
+        if not self.corpus_id:
+            return
+        if reset_page:
+            self.current_page = 1
+        self.current_filters = self.build_filters()
+        self._request_seq += 1
+        request_id = int(self._request_seq)
+        self._active_request_id = request_id
+
+        if self.documents_worker and self.documents_worker.isRunning():
+            self.documents_worker.cancel()
+
+        self.update_pagination_controls(is_loading=True)
+        self.status_label.setText("Loading documents...")
+
+        worker = DocumentsPageWorker(
+            request_id=request_id,
+            corpus_id=self.corpus_id,
+            filters=self.current_filters,
+            sort_column=self.sort_column,
+            sort_direction=self.sort_direction,
+            page_size=self.page_size,
+            page_index=self.current_page,
+        )
+        self.documents_worker = worker
+        worker.status.connect(self.on_documents_worker_status)
+        worker.page_loaded.connect(self.on_documents_page_loaded)
+        worker.error.connect(self.on_documents_page_error)
+        worker.start()
+
+    def on_documents_worker_status(self, request_id: int, status_text: str):
+        if int(request_id) != self._active_request_id:
+            return
+        self.status_label.setText(status_text)
+
+    def on_documents_page_loaded(self, request_id: int, total_count: int, rows: list):
+        """Apply page result only when request is current (anti-stale)."""
+        if int(request_id) != self._active_request_id:
+            return
+
+        self.total_count = int(total_count)
+        total_pages = self.total_pages
+        if total_pages > 0 and self.current_page > total_pages:
+            self.current_page = total_pages
+            self.reload_documents(reset_page=False)
+            return
+
+        self._render_documents_rows(rows)
+        self.update_pagination_controls(is_loading=False)
+
+        start = 0 if self.total_count == 0 else self.current_offset + 1
+        end = min(self.current_offset + self.page_size, self.total_count)
+        self.status_label.setText(f"Loaded {start}-{end} of {self.total_count}")
+        self.on_selection_changed()
+
+    def on_documents_page_error(self, request_id: int, error_message: str):
+        if int(request_id) != self._active_request_id:
+            return
+        logger.error("Documents page load failed: %s", error_message)
+        self.status_label.setText(f"Load failed: {error_message}")
+        self.update_pagination_controls(is_loading=False)
+
+    def _render_documents_rows(self, dtos: list):
+        """Render one page of rows into QTableWidget (no in-memory global sort)."""
+        self._loading = True
+        try:
+            self.docs_table.setRowCount(len(dtos))
+
+            def _ro_item(text="", data=None):
+                item = QTableWidgetItem(text)
+                if data is not None:
+                    item.setData(Qt.ItemDataRole.DisplayRole, data)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                return item
+
+            for row, doc in enumerate(dtos):
+                id_item = _ro_item(data=doc.doc_id)
+                id_item.setText(str(doc.doc_id))
+                self.docs_table.setItem(row, self.COL_ID, id_item)
+
+                fn_item = QTableWidgetItem(doc.file_name)
+                fn_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
+                self.docs_table.setItem(row, self.COL_NAME, fn_item)
+
+                size_kb = doc.file_size_bytes / 1024
+                self.docs_table.setItem(row, self.COL_SIZE, _ro_item(f"{size_kb:.1f}", data=size_kb))
+                self.docs_table.setItem(row, self.COL_STATUS, _ro_item(doc.status))
+
+                sc = doc.sentence_count or 0
+                self.docs_table.setItem(row, self.COL_SENTENCES, _ro_item(str(sc) if sc else "", data=sc))
+
+                tc = doc.token_count or 0
+                self.docs_table.setItem(row, self.COL_TOKENS, _ro_item(str(tc) if tc else "", data=tc))
+                self.docs_table.setItem(row, self.COL_IMPORTED, _ro_item((doc.imported_at or "")[:19]))
+                self.docs_table.setItem(row, self.COL_PATH, _ro_item(doc.file_path))
+                self.docs_table.setItem(row, self.COL_TAG, _ro_item(doc.tag or ""))
+
+                link_text = doc.link_url or ""
+                lk_item = _ro_item(link_text)
+                lk_item.setData(Qt.ItemDataRole.UserRole + 1, doc.link_url)
+                if doc.link_url:
+                    lk_item.setForeground(Qt.GlobalColor.blue)
+                    lk_item.setToolTip(f"Click to open: {doc.link_url}")
+                self.docs_table.setItem(row, self.COL_LINK, lk_item)
+
+                self.docs_table.setItem(row, self.COL_LEVEL, _ro_item(doc.level or ""))
+                self.docs_table.setItem(row, self.COL_TOPIC, _ro_item(doc.topic or ""))
+        finally:
+            self._loading = False
+
+    @property
+    def total_pages(self) -> int:
+        if self.total_count <= 0:
+            return 1
+        return max(1, (self.total_count + self.page_size - 1) // self.page_size)
+
+    @property
+    def current_offset(self) -> int:
+        return (self.current_page - 1) * self.page_size
+
+    def update_pagination_controls(self, *, is_loading: bool):
+        total_pages = self.total_pages
+        self.page_spinbox.blockSignals(True)
+        self.page_spinbox.setMaximum(max(1, total_pages))
+        self.page_spinbox.setValue(min(max(1, self.current_page), total_pages))
+        self.page_spinbox.blockSignals(False)
+        self.page_total_label.setText(f"of {total_pages}")
+
+        if self.total_count <= 0:
+            self.range_label.setText("Showing 0-0 of 0")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + self.page_size, self.total_count)
+            self.range_label.setText(f"Showing {start}-{end} of {self.total_count}")
+
+        can_prev = (self.current_page > 1) and not is_loading
+        can_next = (self.current_page < total_pages) and not is_loading
+        self.first_btn.setEnabled(can_prev)
+        self.prev_btn.setEnabled(can_prev)
+        self.next_btn.setEnabled(can_next)
+        self.last_btn.setEnabled(can_next)
+        self.page_spinbox.setEnabled(not is_loading)
+
+    def on_first_page(self):
+        if self.current_page != 1:
+            self.current_page = 1
+            self.reload_documents(reset_page=False)
+
+    def on_prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.reload_documents(reset_page=False)
+
+    def on_next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.reload_documents(reset_page=False)
+
+    def on_last_page(self):
+        target = self.total_pages
+        if self.current_page != target:
+            self.current_page = target
+            self.reload_documents(reset_page=False)
+
+    def on_page_changed(self, page: int):
+        page = int(page)
+        if page != self.current_page:
+            self.current_page = page
+            self.reload_documents(reset_page=False)
+
+    def on_page_size_changed(self, value: str):
+        try:
+            new_size = int(value)
+        except (TypeError, ValueError):
+            return
+        if new_size <= 0 or new_size == self.page_size:
+            return
+        self.page_size = new_size
+        self.settings.set_value("documents_view/page_size", self.page_size)
+        self.current_page = 1
+        self.reload_documents(reset_page=False)
+
+    def on_header_clicked(self, column: int):
+        """Global sorting: SQL ORDER BY before pagination."""
+        sort_key = self.COLUMN_TO_DB.get(int(column))
+        if not sort_key:
+            return
+
+        if self.sort_column == sort_key:
+            self.sort_direction = "desc" if self.sort_direction == "asc" else "asc"
+        else:
+            self.sort_column = sort_key
+            self.sort_direction = "asc"
+
+        self.settings.set_value("documents_view/sort_column", self.sort_column)
+        self.settings.set_value("documents_view/sort_direction", self.sort_direction)
+        self.current_page = 1
+        self._update_sort_header_labels()
+        self.reload_documents(reset_page=False)
+
+    def _update_sort_header_labels(self):
+        """Show active server-side sort indicator in headers."""
+        for idx, base in enumerate(self.HEADER_LABELS):
+            item = self.docs_table.horizontalHeaderItem(idx)
+            if item is None:
+                item = QTableWidgetItem(base)
+                self.docs_table.setHorizontalHeaderItem(idx, item)
+            if self.COLUMN_TO_DB.get(idx) == self.sort_column:
+                indicator = " ▲" if self.sort_direction == "asc" else " ▼"
+                item.setText(f"{base}{indicator}")
+            else:
+                item.setText(base)
 
     def on_cell_clicked(self, row: int, column: int):
-        """Handle click on Link column — open URL safely."""
+        """Handle click on Link column вЂ” open URL safely."""
         if column != self.COL_LINK:
             return
         item = self.docs_table.item(row, column)
@@ -534,7 +776,7 @@ class DocumentsView(QWidget):
 
         # Update hint label
         self.hint_label.setText(
-            "ℹ️ This is a Reference Corpus (read-only documents)\n"
+            "в„№пёЏ This is a Reference Corpus (read-only documents)\n"
             "You can browse documents, extract terms, and manage translations,\n"
             "but cannot add or remove documents"
         )
@@ -716,7 +958,7 @@ class DocumentsView(QWidget):
             from PyQt6.QtWidgets import QMessageBox
             msg = (
                 f"{len(processed_docs)} document(s) already processed:\n\n" +
-                "\n".join(f"• {name}" for name in processed_docs[:5])
+                "\n".join(f"вЂў {name}" for name in processed_docs[:5])
             )
             if len(processed_docs) > 5:
                 msg += f"\n... and {len(processed_docs) - 5} more"
@@ -926,9 +1168,9 @@ class DocumentsView(QWidget):
         else:
             message = f"Delete {len(doc_ids)} documents?\n\n"
             if len(doc_names) <= 5:
-                message += "Documents:\n" + "\n".join(f"• {name}" for name in doc_names)
+                message += "Documents:\n" + "\n".join(f"вЂў {name}" for name in doc_names)
             else:
-                message += "Documents:\n" + "\n".join(f"• {name}" for name in doc_names[:5])
+                message += "Documents:\n" + "\n".join(f"вЂў {name}" for name in doc_names[:5])
                 message += f"\n... and {len(doc_names) - 5} more"
 
         reply = QMessageBox.question(
@@ -1042,7 +1284,7 @@ class DocumentsView(QWidget):
                     session, doc_id, new_file_name
                 )
 
-                logger.info(f"Renamed document {doc_id}: '{old_name}' → '{new_file_name}'")
+                logger.info(f"Renamed document {doc_id}: '{old_name}' в†’ '{new_file_name}'")
 
                 # Refresh to show updated name everywhere
                 self.load_documents()
@@ -1249,6 +1491,15 @@ class DocumentsView(QWidget):
             if self.process_worker.isRunning():
                 self.process_worker.terminate()
 
+        # Stop documents page worker if running
+        if self.documents_worker and self.documents_worker.isRunning():
+            logger.info("Stopping documents page worker on close")
+            self.documents_worker.cancel()
+            self.documents_worker.wait(1000)
+            if self.documents_worker.isRunning():
+                self.documents_worker.terminate()
+
         self.table_layout_controller.save_now()
 
         super().closeEvent(event)
+

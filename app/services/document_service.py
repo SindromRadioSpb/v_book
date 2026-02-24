@@ -11,7 +11,7 @@ import re
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import SourceDocument
@@ -33,6 +33,8 @@ _SORT_ALLOWLIST: Dict[str, Any] = {
     "token_count": SourceDocument.token_count,
     "imported_at": SourceDocument.imported_at,
     "processed_at": SourceDocument.processed_at,
+    "file_path": SourceDocument.file_path,
+    "link_url": SourceDocument.link_url,
     "tag": SourceDocument.tag,
     "level": SourceDocument.level,
     "topic": SourceDocument.topic,
@@ -120,6 +122,84 @@ def validate_topic(topic: Optional[str]) -> Optional[str]:
 class DocumentService:
     """CRUD + query service for SourceDocument with metadata support."""
 
+    def build_documents_query(
+        self,
+        corpus_id: int,
+        *,
+        title_search: Optional[str] = None,
+        tag_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        sort_by: str = "imported_at",
+        sort_dir: str = "desc",
+    ):
+        """Build safe global documents query (filters + sorting, no pagination)."""
+        stmt = select(SourceDocument).where(SourceDocument.corpus_id == corpus_id)
+        stmt = self._apply_documents_filters(
+            stmt,
+            title_search=title_search,
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+            topic_filter=topic_filter,
+            status_filter=status_filter,
+        )
+        stmt = self._apply_documents_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+        return stmt
+
+    def get_documents_total_count(
+        self,
+        session: Session,
+        corpus_id: int,
+        *,
+        title_search: Optional[str] = None,
+        tag_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
+    ) -> int:
+        """Return total rows count with global filters applied."""
+        stmt = select(func.count(SourceDocument.doc_id)).where(SourceDocument.corpus_id == corpus_id)
+        stmt = self._apply_documents_filters(
+            stmt,
+            title_search=title_search,
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+            topic_filter=topic_filter,
+            status_filter=status_filter,
+        )
+        return int(session.execute(stmt).scalar() or 0)
+
+    def fetch_documents_page(
+        self,
+        session: Session,
+        corpus_id: int,
+        *,
+        title_search: Optional[str] = None,
+        tag_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        sort_by: str = "imported_at",
+        sort_dir: str = "desc",
+        limit: int = 25,
+        offset: int = 0,
+    ) -> List[DocumentDTO]:
+        """Return one paged slice (global filter + global sort + LIMIT/OFFSET)."""
+        stmt = self.build_documents_query(
+            corpus_id,
+            title_search=title_search,
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+            topic_filter=topic_filter,
+            status_filter=status_filter,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+        stmt = stmt.limit(max(1, int(limit))).offset(max(0, int(offset)))
+        docs = session.execute(stmt).scalars().all()
+        return [self._to_dto(d) for d in docs]
+
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
@@ -154,36 +234,31 @@ class DocumentService:
         Returns:
             List of DocumentDTO.
         """
-        stmt = select(SourceDocument).where(SourceDocument.corpus_id == corpus_id)
-
-        # --- Filters ---
-        if title_search:
-            pattern = f"%{title_search}%"
-            stmt = stmt.where(SourceDocument.file_name.ilike(pattern))
-
-        if tag_filter:
-            stmt = stmt.where(SourceDocument.tag.ilike(f"%{tag_filter}%"))
-
-        if level_filter and level_filter in VALID_LEVELS:
-            stmt = stmt.where(SourceDocument.level == level_filter)
-
-        if topic_filter:
-            stmt = stmt.where(SourceDocument.topic.ilike(f"%{topic_filter}%"))
-
-        if status_filter:
-            stmt = stmt.where(SourceDocument.status == status_filter)
-
-        # --- Sort (safe allowlist) ---
-        sort_col = _SORT_ALLOWLIST.get(sort_by, SourceDocument.imported_at)
-        if sort_dir == "asc":
-            stmt = stmt.order_by(sort_col.asc())
-        else:
-            stmt = stmt.order_by(sort_col.desc())
-
-        # --- Pagination ---
         if limit is not None:
-            stmt = stmt.limit(limit).offset(offset)
+            return self.fetch_documents_page(
+                session,
+                corpus_id,
+                title_search=title_search,
+                tag_filter=tag_filter,
+                level_filter=level_filter,
+                topic_filter=topic_filter,
+                status_filter=status_filter,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+                limit=limit,
+                offset=offset,
+            )
 
+        stmt = self.build_documents_query(
+            corpus_id,
+            title_search=title_search,
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+            topic_filter=topic_filter,
+            status_filter=status_filter,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
         docs = session.execute(stmt).scalars().all()
         return [self._to_dto(d) for d in docs]
 
@@ -260,3 +335,37 @@ class DocumentService:
             level=doc.level,
             topic=doc.topic,
         )
+
+    @staticmethod
+    def _apply_documents_filters(
+        stmt,
+        *,
+        title_search: Optional[str] = None,
+        tag_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
+    ):
+        """Apply global documents filters to query."""
+        if title_search:
+            stmt = stmt.where(SourceDocument.file_name.ilike(f"%{title_search}%"))
+        if tag_filter:
+            stmt = stmt.where(SourceDocument.tag.ilike(f"%{tag_filter}%"))
+        if level_filter and level_filter in VALID_LEVELS:
+            stmt = stmt.where(SourceDocument.level == level_filter)
+        if topic_filter:
+            stmt = stmt.where(SourceDocument.topic.ilike(f"%{topic_filter}%"))
+        if status_filter:
+            stmt = stmt.where(SourceDocument.status == status_filter)
+        return stmt
+
+    @staticmethod
+    def _apply_documents_sort(stmt, *, sort_by: str, sort_dir: str):
+        """Apply safe global sorting with stable secondary ordering."""
+        sort_col = _SORT_ALLOWLIST.get(sort_by, SourceDocument.imported_at)
+        sort_dir_clean = str(sort_dir or "desc").strip().lower()
+        if sort_dir_clean == "asc":
+            stmt = stmt.order_by(sort_col.asc(), SourceDocument.doc_id.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc(), SourceDocument.doc_id.asc())
+        return stmt

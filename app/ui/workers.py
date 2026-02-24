@@ -794,6 +794,88 @@ class TMSearchWorker(QThread):
         self._cancelled = True
 
 
+class DocumentsPageWorker(QThread):
+    """Worker for Documents server-side count + page fetch (global filters/sort)."""
+
+    page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
+    error = pyqtSignal(int, str)              # request_id, message
+    status = pyqtSignal(int, str)             # request_id, status text
+
+    def __init__(
+        self,
+        *,
+        request_id: int,
+        corpus_id: int,
+        filters: Dict[str, Any],
+        sort_column: str,
+        sort_direction: str,
+        page_size: int,
+        page_index: int,
+    ):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.corpus_id = int(corpus_id)
+        self.filters = dict(filters or {})
+        self.sort_column = str(sort_column or "imported_at")
+        self.sort_direction = str(sort_direction or "desc")
+        self.page_size = max(1, int(page_size))
+        self.page_index = max(1, int(page_index))
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.document_service import DocumentService
+
+            self.status.emit(self.request_id, "Loading documents...")
+
+            db_service = DBService.get_instance()
+            doc_service = DocumentService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                total_count = doc_service.get_documents_total_count(
+                    session,
+                    self.corpus_id,
+                    title_search=self.filters.get("title_search"),
+                    tag_filter=self.filters.get("tag_filter"),
+                    level_filter=self.filters.get("level_filter"),
+                    topic_filter=self.filters.get("topic_filter"),
+                    status_filter=self.filters.get("status_filter"),
+                )
+
+                if self._cancelled:
+                    return
+
+                offset = (self.page_index - 1) * self.page_size
+                rows = doc_service.fetch_documents_page(
+                    session,
+                    self.corpus_id,
+                    title_search=self.filters.get("title_search"),
+                    tag_filter=self.filters.get("tag_filter"),
+                    level_filter=self.filters.get("level_filter"),
+                    topic_filter=self.filters.get("topic_filter"),
+                    status_filter=self.filters.get("status_filter"),
+                    sort_by=self.sort_column,
+                    sort_dir=self.sort_direction,
+                    limit=self.page_size,
+                    offset=offset,
+                )
+
+                if self._cancelled:
+                    return
+
+                self.page_loaded.emit(self.request_id, int(total_count), rows)
+        except Exception as e:
+            logger.exception("Documents page worker error")
+            self.error.emit(self.request_id, str(e))
+
+
 class DictionarySearchWorker(QThread):
     """Worker for searching lemmas with pagination (non-blocking)."""
 
