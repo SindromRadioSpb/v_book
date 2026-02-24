@@ -151,6 +151,41 @@ _CURRENT_BG = QColor(210, 240, 210)
 _STALE_BG = QColor(255, 240, 200)
 
 
+def _normalize_status_token(raw_status: Any) -> str:
+    token = str(raw_status or "").strip().lower()
+    if token in {"ready", "missing", "stale", "generating", "failed", "error", "unknown"}:
+        return token
+    return "unknown"
+
+
+def _status_tooltip_text(raw_status: Any) -> str:
+    status = _normalize_status_token(raw_status)
+    if status == "ready":
+        return "Playable"
+    if status == "missing":
+        return "No audio asset found. Generate audio to enable playback."
+    if status == "stale":
+        return "Audio is stale after edits. Regenerate audio."
+    if status in {"generating"}:
+        return "Audio generation is in progress."
+    if status in {"failed", "error"}:
+        return "Audio generation failed. Regenerate audio."
+    return "Audio availability is unknown."
+
+
+def _status_unavailable_message(raw_status: Any) -> str:
+    status = _normalize_status_token(raw_status)
+    if status == "stale":
+        return "Audio is stale after edits. Please regenerate."
+    if status == "missing":
+        return "Audio not generated yet. Use Generate/Regenerate Audio."
+    if status == "generating":
+        return "Audio generation is in progress. Try again after completion."
+    if status in {"failed", "error"}:
+        return "Last audio generation failed. Regenerate audio."
+    return "Audio is unavailable for playback."
+
+
 class AudioQueueTableModel(QAbstractTableModel):
     """Table model backed by AudioPlayerService queue (payload list)."""
 
@@ -209,7 +244,12 @@ class AudioQueueTableModel(QAbstractTableModel):
                 if is_stale:
                     return "stale"
                 # Path("") serialises to "." which exists() — treat it as missing
-                return "ready" if path and path != "." and os.path.exists(str(path)) else "missing"
+                if path and path != "." and os.path.exists(str(path)):
+                    return "ready"
+                status_hint = _normalize_status_token(ctx.get("audio_status"))
+                if status_hint in {"generating", "failed", "error"}:
+                    return status_hint
+                return "missing"
             if col == _COL_PLAYS:
                 return str(ctx.get("play_count", "—"))
             if col == _COL_PROJECT:
@@ -238,6 +278,9 @@ class AudioQueueTableModel(QAbstractTableModel):
                 return ctx.get("snapshot_translation") or ctx.get("translation") or ""
             if col == _COL_SOURCE:
                 return ctx.get("snapshot_source_label") or ""
+            if col == _COL_STATUS:
+                status = self.data(index, Qt.ItemDataRole.DisplayRole)
+                return _status_tooltip_text(status)
             if col == _COL_PROJECT:
                 return ctx.get("snapshot_project_name") or ""
             if col == _COL_DOCUMENT:
@@ -355,6 +398,9 @@ class AudioPlaylistEntriesTableModel(QAbstractTableModel):
                     _PL_COL_DOCUMENT: "snapshot_document_name",
                 }[col]
                 return payload.get(key) or ""
+            if col == _PL_COL_STATUS:
+                status = self.data(index, Qt.ItemDataRole.DisplayRole)
+                return _status_tooltip_text(status)
             return None
 
         return None
@@ -497,6 +543,9 @@ class AudioHistoryTableModel(QAbstractTableModel):
                     _HIST_COL_DOCUMENT: "snapshot_document_name",
                 }[col]
                 return payload.get(key) or ""
+            if col == _HIST_COL_STATUS:
+                status = self.data(index, Qt.ItemDataRole.DisplayRole)
+                return _status_tooltip_text(status)
             if col == _HIST_COL_PLAYED_AT:
                 return payload.get("played_at") or ""
             return None
@@ -1532,6 +1581,9 @@ class AudioPlayerPanel(QWidget):
         self.playlists_list.itemSelectionChanged.connect(self._on_playlist_selection_changed)
         self.playlist_entries_table.customContextMenuRequested.connect(self._on_playlist_context_menu)
         self.playlist_entries_table.doubleClicked.connect(self._on_playlist_double_clicked)
+        self.queue_table.clicked.connect(self._on_queue_table_clicked)
+        self.playlist_entries_table.clicked.connect(self._on_playlist_table_clicked)
+        self.history_table.clicked.connect(self._on_history_table_clicked)
         self.playlist_entries_table.selectionModel().selectionChanged.connect(
             self._on_playlist_entries_selection_changed
         )
@@ -1920,8 +1972,7 @@ class AudioPlayerPanel(QWidget):
         self._update_playlist_action_state()
 
     def _on_playlist_entries_selection_changed(self, *_args) -> None:
-        self._update_playlist_action_state()
-        self._update_goto_source_state()
+        self._apply_action_policy()
 
     def _refresh_history_entries(self) -> None:
         db = self._get_db_manager()
@@ -2008,14 +2059,10 @@ class AudioPlayerPanel(QWidget):
 
     def _on_history_selection_changed(self, *_args) -> None:
         self._selected_history_row_count = len(self._selected_history_rows())
-        self._update_history_action_state()
-        self._update_goto_source_state()
+        self._apply_action_policy()
 
     def _update_history_action_state(self) -> None:
-        selected_rows = self._selected_history_rows()
-        has_selection = bool(selected_rows)
-        self.play_history_selected_btn.setEnabled(has_selection)
-        self.add_history_to_queue_btn.setEnabled(has_selection)
+        self._apply_action_policy()
 
     def _selected_playlist_entry_rows(self) -> List[int]:
         sel = self.playlist_entries_table.selectionModel()
@@ -2032,28 +2079,7 @@ class AudioPlayerPanel(QWidget):
         return ids
 
     def _update_playlist_action_state(self) -> None:
-        has_playlist = self._selected_playlist_id is not None
-        has_queue_selection = bool(self._selected_queue_rows())
-        entry_rows = self._selected_playlist_entry_rows()
-        has_entry_selection = bool(entry_rows)
-        single_entry_row = entry_rows[0] if len(entry_rows) == 1 else None
-        entry_count = self._playlist_entries_model.entry_count()
-
-        self.rename_playlist_btn.setEnabled(has_playlist)
-        self.delete_playlist_btn.setEnabled(has_playlist)
-        self.load_pl_btn.setEnabled(has_playlist)
-        self.add_playlist_to_queue_btn.setEnabled(has_playlist)
-        self.play_playlist_btn.setEnabled(has_playlist and entry_count > 0)
-        self.play_playlist_selected_btn.setEnabled(has_playlist and has_entry_selection)
-        self.add_queue_selected_to_playlist_btn.setEnabled(has_playlist and has_queue_selection)
-        self.refresh_playlist_entries_btn.setEnabled(has_playlist)
-        self.remove_playlist_entries_btn.setEnabled(has_playlist and has_entry_selection)
-        self.playlist_move_up_btn.setEnabled(
-            has_playlist and single_entry_row is not None and single_entry_row > 0
-        )
-        self.playlist_move_down_btn.setEnabled(
-            has_playlist and single_entry_row is not None and single_entry_row < (entry_count - 1)
-        )
+        self._apply_action_policy()
 
     def _on_new_playlist_clicked(self) -> None:
         name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
@@ -2555,11 +2581,16 @@ class AudioPlayerPanel(QWidget):
             return
         ready_paths, labels, contexts, _ = self._resolve_playlist_row_paths(rows)
         if not ready_paths:
-            QMessageBox.information(
-                self,
-                "Audio Missing",
-                "No ready audio found for selected playlist entries.",
-            )
+            status = "missing"
+            for row in rows:
+                payload = self._playlist_entries_model.row_payload(row)
+                if not payload:
+                    continue
+                candidate = self._payload_row_status(payload)
+                if candidate != "ready":
+                    status = candidate
+                    break
+            self._show_play_unavailable(status)
             return
         try:
             from app.services.audio_playback_service import AudioPlaybackService
@@ -2586,11 +2617,16 @@ class AudioPlayerPanel(QWidget):
             return
         ready_paths, labels, contexts, _ = self._resolve_history_row_paths(rows)
         if not ready_paths:
-            QMessageBox.information(
-                self,
-                "Audio Missing",
-                "No ready audio found for selected history rows.",
-            )
+            status = "missing"
+            for row in rows:
+                payload = self._history_model.row_payload(row)
+                if not payload:
+                    continue
+                candidate = self._payload_row_status(payload)
+                if candidate != "ready":
+                    status = candidate
+                    break
+            self._show_play_unavailable(status)
             return
         try:
             from app.services.audio_playback_service import AudioPlaybackService
@@ -2608,12 +2644,22 @@ class AudioPlayerPanel(QWidget):
         self._refresh_queue()
 
     def _on_play_history_selected_clicked(self) -> None:
+        info = self._build_selection_info("history")
+        state = self._compute_action_state(
+            "history",
+            info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+        )["history_play_selected"]
+        if not bool(state.get("enabled")):
+            self._show_status_message(str(state.get("reason") or "No playable rows selected."))
+            return
         rows = self._history_rows_for_play(selected_only=True)
         self._play_history_rows(rows)
 
     def _on_add_history_to_queue_clicked(self, rows: Optional[List[int]] = None) -> None:
         selected_rows = sorted(set(rows or self._selected_history_rows()))
         if not selected_rows:
+            self._show_status_message("Select one or more history rows.")
             return
         db = self._get_db_manager()
         if db is None:
@@ -2676,10 +2722,36 @@ class AudioPlayerPanel(QWidget):
             pass
 
     def _on_play_playlist_clicked(self) -> None:
+        info = self._build_selection_info("playlist")
+        state = self._compute_action_state(
+            "playlist",
+            info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+            has_playlist=self._selected_playlist_id is not None,
+            playlist_entry_count=self._playlist_entries_model.entry_count(),
+            playlist_any_ready=self._playlist_has_any_ready(),
+            queue_selection_count=len(self._selected_queue_rows()),
+        )["playlist_play_all"]
+        if not bool(state.get("enabled")):
+            self._show_status_message(str(state.get("reason") or "No playable rows in selected playlist."))
+            return
         rows = self._playlist_rows_for_play(selected_only=False)
         self._play_playlist_rows(rows)
 
     def _on_play_playlist_selected_clicked(self) -> None:
+        info = self._build_selection_info("playlist")
+        state = self._compute_action_state(
+            "playlist",
+            info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+            has_playlist=self._selected_playlist_id is not None,
+            playlist_entry_count=self._playlist_entries_model.entry_count(),
+            playlist_any_ready=self._playlist_has_any_ready(),
+            queue_selection_count=len(self._selected_queue_rows()),
+        )["playlist_play_selected"]
+        if not bool(state.get("enabled")):
+            self._show_status_message(str(state.get("reason") or "No playable rows selected."))
+            return
         rows = self._playlist_rows_for_play(selected_only=True)
         self._play_playlist_rows(rows)
 
@@ -2878,20 +2950,355 @@ class AudioPlayerPanel(QWidget):
             return "sentence"
         return raw
 
+    def _show_status_message(self, message: str, timeout_ms: int = 4500) -> None:
+        text = str(message or "").strip()
+        if not text:
+            return
+        status_bar = None
+        win = self.window()
+        if win is not None and hasattr(win, "statusBar"):
+            try:
+                status_bar = win.statusBar()
+            except Exception:
+                status_bar = None
+        if status_bar is not None:
+            try:
+                status_bar.showMessage(text, int(timeout_ms))
+                return
+            except Exception:
+                pass
+        logger.info("Audio Player: %s", text)
+
+    def _show_play_unavailable(self, raw_status: Any) -> None:
+        self._show_status_message(_status_unavailable_message(raw_status))
+
+    def _queue_row_status(self, row: int) -> str:
+        track = self._track_at_row(row) or {}
+        ctx = self._track_ctx_at_row(row)
+        if bool(ctx.get("is_stale")):
+            return "stale"
+        path_raw = track.get("path")
+        path = str(path_raw or "")
+        if path and path != "." and Path(path).exists():
+            return "ready"
+        hint = _normalize_status_token(ctx.get("audio_status"))
+        if hint in {"generating", "failed", "error"}:
+            return hint
+        return "missing"
+
+    @staticmethod
+    def _payload_row_status(payload: Dict[str, Any]) -> str:
+        resolved = str(payload.get("resolved_path") or "")
+        if resolved and resolved != "." and Path(resolved).exists():
+            return "ready"
+        return _normalize_status_token(payload.get("audio_status"))
+
+    def _build_selection_info(self, tab_key: str) -> Dict[str, Any]:
+        infos: List[Dict[str, Any]] = []
+        if tab_key == "queue":
+            rows = self._selected_queue_rows()
+            for row in rows:
+                ctx = self._track_ctx_at_row(row)
+                kind = self._normalize_queue_kind(str(ctx.get("kind") or ""))
+                status = self._queue_row_status(row)
+                infos.append(
+                    {
+                        "row": row,
+                        "kind": kind,
+                        "status": status,
+                        "has_source_payload": self._source_payload_from_context(ctx) is not None,
+                    }
+                )
+        elif tab_key == "playlist":
+            rows = self._selected_playlist_entry_rows()
+            for row in rows:
+                payload = self._playlist_entries_model.row_payload(row) or {}
+                kind = self._normalize_playlist_kind(str(payload.get("kind") or ""))
+                status = self._payload_row_status(payload)
+                infos.append(
+                    {
+                        "row": row,
+                        "kind": kind,
+                        "status": status,
+                        "has_source_payload": self._source_payload_from_context(payload) is not None,
+                    }
+                )
+        elif tab_key == "history":
+            rows = self._selected_history_rows()
+            for row in rows:
+                payload = self._history_model.row_payload(row) or {}
+                kind = self._normalize_playlist_kind(str(payload.get("kind") or ""))
+                status = self._payload_row_status(payload)
+                infos.append(
+                    {
+                        "row": row,
+                        "kind": kind,
+                        "status": status,
+                        "has_source_payload": self._source_payload_from_context(payload) is not None,
+                    }
+                )
+        else:
+            rows = []
+
+        count = len(infos)
+        single_info = infos[0] if count == 1 else None
+        return {
+            "rows": rows,
+            "infos": infos,
+            "count": count,
+            "has_selection": count > 0,
+            "single": count == 1,
+            "multi": count > 1,
+            "single_info": single_info,
+            "single_kind": single_info.get("kind") if single_info else None,
+            "single_status": single_info.get("status") if single_info else None,
+            "single_has_source_payload": bool(single_info.get("has_source_payload")) if single_info else False,
+            "any_ready": any(info.get("status") == "ready" for info in infos),
+            "any_stale": any(info.get("status") == "stale" for info in infos),
+            "any_missing": any(info.get("status") in {"missing", "failed", "error", "unknown"} for info in infos),
+        }
+
+    @staticmethod
+    def _state(enabled: bool, reason: str = "") -> Dict[str, Any]:
+        return {"enabled": bool(enabled), "reason": str(reason or "")}
+
+    def _compute_action_state(
+        self,
+        tab_key: str,
+        selection_info: Dict[str, Any],
+        *,
+        has_current_source: bool,
+        has_playlist: bool = False,
+        playlist_entry_count: int = 0,
+        playlist_any_ready: bool = False,
+        queue_selection_count: int = 0,
+    ) -> Dict[str, Dict[str, Any]]:
+        states: Dict[str, Dict[str, Any]] = {}
+        single_status = str(selection_info.get("single_status") or "")
+        single_kind = str(selection_info.get("single_kind") or "")
+
+        if selection_info.get("multi"):
+            states["go_to_source"] = self._state(False, "Select exactly one row to open source.")
+        elif selection_info.get("single"):
+            if selection_info.get("single_has_source_payload"):
+                states["go_to_source"] = self._state(True)
+            else:
+                states["go_to_source"] = self._state(False, "Source link is unavailable for selected row.")
+        else:
+            states["go_to_source"] = self._state(
+                has_current_source,
+                "" if has_current_source else "Select one row or start playback first.",
+            )
+
+        if tab_key == "queue":
+            has_selection = bool(selection_info.get("has_selection"))
+            single = bool(selection_info.get("single"))
+            states["queue_add_to_playlist"] = self._state(
+                has_selection,
+                "" if has_selection else "Select queue rows first.",
+            )
+            states["queue_play_single"] = self._state(
+                single and single_status == "ready",
+                "" if single and single_status == "ready" else _status_unavailable_message(single_status)
+                if single
+                else "Select exactly one row.",
+            )
+            states["queue_edit_translation"] = self._state(single, "" if single else "Select exactly one row.")
+            states["queue_clear_translation"] = self._state(
+                has_selection,
+                "" if has_selection else "Select one or more rows.",
+            )
+            states["queue_edit_pronunciation"] = self._state(
+                single and single_kind in {"lemma", "term"},
+                "" if single and single_kind in {"lemma", "term"} else "Available for one lemma/term row.",
+            )
+            states["queue_edit_sentence_niqqud"] = self._state(
+                single and single_kind == "sentence",
+                "" if single and single_kind == "sentence" else "Available for one sentence row.",
+            )
+
+        if tab_key == "playlist":
+            has_selection = bool(selection_info.get("has_selection"))
+            single = bool(selection_info.get("single"))
+            single_row = selection_info.get("single_info", {}).get("row") if single else None
+            states["playlist_rename"] = self._state(has_playlist, "" if has_playlist else "Select a playlist.")
+            states["playlist_delete"] = self._state(has_playlist, "" if has_playlist else "Select a playlist.")
+            states["playlist_load_to_queue"] = self._state(
+                has_playlist and playlist_entry_count > 0,
+                "" if has_playlist and playlist_entry_count > 0 else "Selected playlist is empty.",
+            )
+            states["playlist_add_to_queue"] = self._state(
+                has_playlist and playlist_entry_count > 0,
+                "" if has_playlist and playlist_entry_count > 0 else "Selected playlist is empty.",
+            )
+            states["playlist_play_all"] = self._state(
+                has_playlist and playlist_any_ready,
+                "" if has_playlist and playlist_any_ready else "No ready audio in selected playlist.",
+            )
+            states["playlist_play_selected"] = self._state(
+                has_playlist and has_selection and bool(selection_info.get("any_ready")),
+                ""
+                if has_playlist and has_selection and bool(selection_info.get("any_ready"))
+                else "Select at least one playable row.",
+            )
+            states["playlist_add_queue_selected"] = self._state(
+                has_playlist and queue_selection_count > 0,
+                "" if has_playlist and queue_selection_count > 0 else "Select queue rows first.",
+            )
+            states["playlist_refresh_entries"] = self._state(
+                has_playlist,
+                "" if has_playlist else "Select a playlist.",
+            )
+            states["playlist_remove_selected"] = self._state(
+                has_playlist and has_selection,
+                "" if has_playlist and has_selection else "Select one or more playlist rows.",
+            )
+            states["playlist_move_up"] = self._state(
+                has_playlist and single and int(single_row) > 0 if single_row is not None else False,
+                "Select one row that is not first.",
+            )
+            states["playlist_move_down"] = self._state(
+                has_playlist and single and int(single_row) < (playlist_entry_count - 1)
+                if single_row is not None
+                else False,
+                "Select one row that is not last.",
+            )
+
+        if tab_key == "history":
+            has_selection = bool(selection_info.get("has_selection"))
+            states["history_play_selected"] = self._state(
+                has_selection and bool(selection_info.get("any_ready")),
+                "" if has_selection and bool(selection_info.get("any_ready")) else "Select at least one playable row.",
+            )
+            states["history_add_to_queue"] = self._state(
+                has_selection,
+                "" if has_selection else "Select one or more history rows.",
+            )
+            states["history_refresh"] = self._state(True)
+
+        return states
+
+    def _is_playable_payload(self, payload: Optional[Dict[str, Any]]) -> bool:
+        if not payload:
+            return False
+        return self._payload_row_status(payload) == "ready"
+
+    def _playlist_has_any_ready(self) -> bool:
+        for row in range(self._playlist_entries_model.entry_count()):
+            payload = self._playlist_entries_model.row_payload(row)
+            if self._is_playable_payload(payload):
+                return True
+        return False
+
+    def _history_has_any_ready_selected(self) -> bool:
+        for row in self._selected_history_rows():
+            payload = self._history_model.row_payload(row)
+            if self._is_playable_payload(payload):
+                return True
+        return False
+
+    def _apply_action_state_to_button(self, button: QPushButton, state: Dict[str, Any]) -> None:
+        enabled = bool(state.get("enabled"))
+        reason = str(state.get("reason") or "")
+        button.setEnabled(enabled)
+        if reason and not enabled:
+            button.setToolTip(reason)
+
+    def _apply_action_state_to_menu_action(self, action, state: Dict[str, Any]) -> None:
+        enabled = bool(state.get("enabled"))
+        reason = str(state.get("reason") or "")
+        action.setEnabled(enabled)
+        if reason and not enabled:
+            try:
+                action.setToolTip(reason)
+                action.setStatusTip(reason)
+                action.setWhatsThis(reason)
+            except Exception:
+                pass
+
+    def _apply_action_policy(self) -> None:
+        queue_info = self._build_selection_info("queue")
+        playlist_info = self._build_selection_info("playlist")
+        history_info = self._build_selection_info("history")
+        has_current_source = self._source_payload_from_context(self._current_track_context()) is not None
+        has_playlist = self._selected_playlist_id is not None
+        playlist_entry_count = self._playlist_entries_model.entry_count()
+        queue_selection_count = int(queue_info.get("count") or 0)
+
+        queue_states = self._compute_action_state("queue", queue_info, has_current_source=has_current_source)
+        playlist_states = self._compute_action_state(
+            "playlist",
+            playlist_info,
+            has_current_source=has_current_source,
+            has_playlist=has_playlist,
+            playlist_entry_count=playlist_entry_count,
+            playlist_any_ready=self._playlist_has_any_ready(),
+            queue_selection_count=queue_selection_count,
+        )
+        history_states = self._compute_action_state(
+            "history",
+            history_info,
+            has_current_source=has_current_source,
+        )
+
+        self._apply_action_state_to_button(self.add_queue_to_playlist_btn, queue_states["queue_add_to_playlist"])
+
+        self._apply_action_state_to_button(self.rename_playlist_btn, playlist_states["playlist_rename"])
+        self._apply_action_state_to_button(self.delete_playlist_btn, playlist_states["playlist_delete"])
+        self._apply_action_state_to_button(self.load_pl_btn, playlist_states["playlist_load_to_queue"])
+        self._apply_action_state_to_button(self.add_playlist_to_queue_btn, playlist_states["playlist_add_to_queue"])
+        self._apply_action_state_to_button(self.play_playlist_btn, playlist_states["playlist_play_all"])
+        self._apply_action_state_to_button(self.play_playlist_selected_btn, playlist_states["playlist_play_selected"])
+        self._apply_action_state_to_button(
+            self.add_queue_selected_to_playlist_btn,
+            playlist_states["playlist_add_queue_selected"],
+        )
+        self._apply_action_state_to_button(
+            self.refresh_playlist_entries_btn,
+            playlist_states["playlist_refresh_entries"],
+        )
+        self._apply_action_state_to_button(
+            self.remove_playlist_entries_btn,
+            playlist_states["playlist_remove_selected"],
+        )
+        self._apply_action_state_to_button(self.playlist_move_up_btn, playlist_states["playlist_move_up"])
+        self._apply_action_state_to_button(self.playlist_move_down_btn, playlist_states["playlist_move_down"])
+
+        self._apply_action_state_to_button(
+            self.play_history_selected_btn,
+            history_states["history_play_selected"],
+        )
+        self._apply_action_state_to_button(
+            self.add_history_to_queue_btn,
+            history_states["history_add_to_queue"],
+        )
+        self._apply_action_state_to_button(self.refresh_history_btn, history_states["history_refresh"])
+
+        active_idx = self.tab_widget.currentIndex()
+        if active_idx == 0:
+            go_state = queue_states["go_to_source"]
+        elif active_idx == 1:
+            go_state = playlist_states["go_to_source"]
+        else:
+            go_state = history_states["go_to_source"]
+        self.goto_source_btn.setEnabled(bool(go_state.get("enabled")))
+        reason = str(go_state.get("reason") or "")
+        if reason and not bool(go_state.get("enabled")):
+            self.goto_source_btn.setToolTip(reason)
+        elif bool(go_state.get("enabled")):
+            self.goto_source_btn.setToolTip("Navigate to the source row in the table")
+
     def _on_queue_selection_changed(self, *_args) -> None:
         selected_rows = sorted({idx.row() for idx in self.queue_table.selectionModel().selectedRows()})
         self._selected_queue_row_count = len(selected_rows)
-        self.add_queue_to_playlist_btn.setEnabled(bool(selected_rows))
         if len(selected_rows) != 1:
             self._selected_source_payload = None
-            self._update_goto_source_state()
-            self._update_playlist_action_state()
+            self._apply_action_policy()
             return
         self._selected_source_payload = self._source_payload_from_context(
             self._queue_row_context(selected_rows[0])
         )
-        self._update_goto_source_state()
-        self._update_playlist_action_state()
+        self._apply_action_policy()
 
     def _source_payload_from_playlist_selection(self) -> Optional[Dict[str, Any]]:
         rows = self._selected_playlist_entry_rows()
@@ -2936,8 +3343,7 @@ class AudioPlayerPanel(QWidget):
         return (self._source_payload_from_context(self._current_track_context()), False)
 
     def _update_goto_source_state(self) -> None:
-        payload, blocked_multi = self._active_tab_source_payload()
-        self.goto_source_btn.setEnabled((not blocked_multi) and payload is not None)
+        self._apply_action_policy()
 
     def _on_now_playing_changed(self, payload: object) -> None:
         if not payload:
@@ -2986,8 +3392,10 @@ class AudioPlayerPanel(QWidget):
     def _on_goto_source_clicked(self) -> None:
         payload, blocked_multi = self._active_tab_source_payload()
         if blocked_multi:
+            self._show_status_message("Select exactly one row to open source.")
             return
         if payload is None:
+            self._show_status_message("Source link is unavailable for current selection.")
             return
         self.go_to_source_requested.emit(payload)
 
@@ -3441,8 +3849,13 @@ class AudioPlayerPanel(QWidget):
             return
 
         first_ctx = self._track_ctx_at_row(rows[0])
-        first_kind = self._normalize_queue_kind(str(first_ctx.get("kind") or ""))
         source_payload = self._source_payload_from_context(first_ctx) if len(rows) == 1 else None
+        queue_info = self._build_selection_info("queue")
+        queue_states = self._compute_action_state(
+            "queue",
+            queue_info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+        )
 
         translate_items = self._build_translate_items(rows)
         audio_items = self._build_audio_generation_items(rows)
@@ -3451,10 +3864,10 @@ class AudioPlayerPanel(QWidget):
         menu = QMenu(self)
 
         play_act = menu.addAction("Play from here")
-        play_act.setEnabled(len(rows) == 1)
+        self._apply_action_state_to_menu_action(play_act, queue_states["queue_play_single"])
 
         go_to_source_act = menu.addAction("Go to Source")
-        go_to_source_act.setEnabled(len(rows) == 1 and source_payload is not None)
+        self._apply_action_state_to_menu_action(go_to_source_act, queue_states["go_to_source"])
 
         remove_act = menu.addAction("Remove from Queue")
         menu.addSeparator()
@@ -3468,18 +3881,18 @@ class AudioPlayerPanel(QWidget):
         regen_audio_act = menu.addAction(f"Regenerate Audio Selected ({len(rows)})...")
         regen_audio_act.setEnabled(len(audio_items) > 0)
         add_to_playlist_act = menu.addAction(f"Add selected to Playlist ({len(rows)})...")
-        add_to_playlist_act.setEnabled(len(rows) > 0)
+        self._apply_action_state_to_menu_action(add_to_playlist_act, queue_states["queue_add_to_playlist"])
 
         edit_translation_act = menu.addAction("Edit Translation...")
-        edit_translation_act.setEnabled(len(rows) == 1)
+        self._apply_action_state_to_menu_action(edit_translation_act, queue_states["queue_edit_translation"])
         clear_translation_act = menu.addAction(f"Clear Translation ({len(rows)})...")
-        clear_translation_act.setEnabled(len(rows) > 0)
+        self._apply_action_state_to_menu_action(clear_translation_act, queue_states["queue_clear_translation"])
 
         edit_pron_act = menu.addAction("Mispronounced -> Edit Pronunciation...")
-        edit_pron_act.setEnabled(len(rows) == 1 and first_kind in {"lemma", "term"})
+        self._apply_action_state_to_menu_action(edit_pron_act, queue_states["queue_edit_pronunciation"])
 
         edit_sentence_act = menu.addAction("Edit Sentence Niqqud...")
-        edit_sentence_act.setEnabled(len(rows) == 1 and first_kind == "sentence")
+        self._apply_action_state_to_menu_action(edit_sentence_act, queue_states["queue_edit_sentence_niqqud"])
 
         menu.addSeparator()
         copy_heb_act = menu.addAction("Copy Hebrew")
@@ -3492,8 +3905,11 @@ class AudioPlayerPanel(QWidget):
 
         if action == play_act and rows:
             self._play_from_row(rows[0])
-        elif action == go_to_source_act and source_payload is not None:
-            self.go_to_source_requested.emit(source_payload)
+        elif action == go_to_source_act:
+            if source_payload is not None:
+                self.go_to_source_requested.emit(source_payload)
+            else:
+                self._show_status_message(str(queue_states["go_to_source"].get("reason") or "Source link unavailable."))
         elif action == remove_act:
             for r in reversed(rows):
                 self.player.remove_queue_index(r)
@@ -3525,27 +3941,45 @@ class AudioPlayerPanel(QWidget):
         if not rows:
             return
         source_payload = self._source_payload_from_playlist_selection() if len(rows) == 1 else None
+        playlist_info = self._build_selection_info("playlist")
+        playlist_states = self._compute_action_state(
+            "playlist",
+            playlist_info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+            has_playlist=self._selected_playlist_id is not None,
+            playlist_entry_count=self._playlist_entries_model.entry_count(),
+            playlist_any_ready=self._playlist_has_any_ready(),
+            queue_selection_count=len(self._selected_queue_rows()),
+        )
         menu = QMenu(self)
         play_selected_act = menu.addAction("Play selected")
+        self._apply_action_state_to_menu_action(play_selected_act, playlist_states["playlist_play_selected"])
         go_to_source_act = menu.addAction("Go to Source")
-        go_to_source_act.setEnabled(len(rows) == 1 and source_payload is not None)
+        self._apply_action_state_to_menu_action(go_to_source_act, playlist_states["go_to_source"])
         add_to_queue_act = menu.addAction("Add selected to Queue")
+        self._apply_action_state_to_menu_action(add_to_queue_act, playlist_states["playlist_remove_selected"])
         remove_act = menu.addAction("Remove selected from Playlist")
+        self._apply_action_state_to_menu_action(remove_act, playlist_states["playlist_remove_selected"])
         move_up_act = menu.addAction("Move up")
+        self._apply_action_state_to_menu_action(move_up_act, playlist_states["playlist_move_up"])
         move_down_act = menu.addAction("Move down")
+        self._apply_action_state_to_menu_action(move_down_act, playlist_states["playlist_move_down"])
         copy_hebrew_act = menu.addAction("Copy Hebrew")
         copy_niqqud_act = menu.addAction("Copy Niqqud")
         copy_translation_act = menu.addAction("Copy Translation")
-        move_up_act.setEnabled(len(rows) == 1 and rows[0] > 0)
-        move_down_act.setEnabled(len(rows) == 1 and rows[0] < (self._playlist_entries_model.entry_count() - 1))
 
         action = menu.exec(self.playlist_entries_table.viewport().mapToGlobal(pos))
         if action is None:
             return
         if action == play_selected_act:
             self._on_play_playlist_selected_clicked()
-        elif action == go_to_source_act and source_payload is not None:
-            self.go_to_source_requested.emit(source_payload)
+        elif action == go_to_source_act:
+            if source_payload is not None:
+                self.go_to_source_requested.emit(source_payload)
+            else:
+                self._show_status_message(
+                    str(playlist_states["go_to_source"].get("reason") or "Source link unavailable.")
+                )
         elif action == add_to_queue_act:
             self._on_add_playlist_to_queue_clicked(rows)
         elif action == remove_act:
@@ -3566,11 +4000,19 @@ class AudioPlayerPanel(QWidget):
         if not rows:
             return
         source_payload = self._source_payload_from_history_selection() if len(rows) == 1 else None
+        history_info = self._build_selection_info("history")
+        history_states = self._compute_action_state(
+            "history",
+            history_info,
+            has_current_source=self._source_payload_from_context(self._current_track_context()) is not None,
+        )
         menu = QMenu(self)
         play_selected_act = menu.addAction("Play selected")
+        self._apply_action_state_to_menu_action(play_selected_act, history_states["history_play_selected"])
         go_to_source_act = menu.addAction("Go to Source")
-        go_to_source_act.setEnabled(len(rows) == 1 and source_payload is not None)
+        self._apply_action_state_to_menu_action(go_to_source_act, history_states["go_to_source"])
         add_to_queue_act = menu.addAction("Add selected to Queue")
+        self._apply_action_state_to_menu_action(add_to_queue_act, history_states["history_add_to_queue"])
         copy_hebrew_act = menu.addAction("Copy Hebrew")
         copy_niqqud_act = menu.addAction("Copy Niqqud")
         copy_translation_act = menu.addAction("Copy Translation")
@@ -3579,8 +4021,11 @@ class AudioPlayerPanel(QWidget):
             return
         if action == play_selected_act:
             self._on_play_history_selected_clicked()
-        elif action == go_to_source_act and source_payload is not None:
-            self.go_to_source_requested.emit(source_payload)
+        elif action == go_to_source_act:
+            if source_payload is not None:
+                self.go_to_source_requested.emit(source_payload)
+            else:
+                self._show_status_message(str(history_states["go_to_source"].get("reason") or "Source link unavailable."))
         elif action == add_to_queue_act:
             self._on_add_history_to_queue_clicked(rows)
         elif action == copy_hebrew_act:
@@ -3593,8 +4038,24 @@ class AudioPlayerPanel(QWidget):
     def _on_playlist_double_clicked(self, index: QModelIndex) -> None:
         self._play_playlist_rows([index.row()])
 
+    def _on_playlist_table_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid() or index.column() != _PL_COL_STATUS:
+            return
+        payload = self._playlist_entries_model.row_payload(index.row()) or {}
+        status = self._payload_row_status(payload)
+        if status != "ready":
+            self._show_play_unavailable(status)
+
     def _on_playlist_play_cell_clicked(self, index: QModelIndex) -> None:
         self._play_playlist_rows([index.row()])
+
+    def _on_history_table_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid() or index.column() != _HIST_COL_STATUS:
+            return
+        payload = self._history_model.row_payload(index.row()) or {}
+        status = self._payload_row_status(payload)
+        if status != "ready":
+            self._show_play_unavailable(status)
 
     def _copy_playlist_cell(self, row: int, col: int) -> None:
         try:
@@ -4265,6 +4726,13 @@ class AudioPlayerPanel(QWidget):
     def _on_queue_row_double_clicked(self, index: QModelIndex) -> None:
         self._play_from_row(index.row())
 
+    def _on_queue_table_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid() or index.column() != _COL_STATUS:
+            return
+        status = self._queue_row_status(index.row())
+        if status != "ready":
+            self._show_play_unavailable(status)
+
     def _on_queue_play_cell_clicked(self, index: QModelIndex) -> None:
         """AudioPlayDelegate ▶ callback on Status column: jump to and play this row."""
         self._play_from_row(index.row())
@@ -4279,11 +4747,7 @@ class AudioPlayerPanel(QWidget):
             self._refresh_audio_paths_for_rows([row], clear_stale_if_ready=True)
             ctx = self._track_ctx_at_row(row)
             if bool(ctx.get("is_stale")):
-                QMessageBox.information(
-                    self,
-                    "Audio Stale",
-                    "Audio is stale for this row. Regenerate audio to play the latest pronunciation.",
-                )
+                self._show_play_unavailable("stale")
                 return
 
         track = self.player._tracks[row]  # noqa: SLF001
@@ -4293,11 +4757,7 @@ class AudioPlayerPanel(QWidget):
             track = self.player._tracks[row]  # noqa: SLF001
             path_ok = str(track.path) not in ("", ".") and Path(track.path).exists()
         if not path_ok:
-            QMessageBox.information(
-                self,
-                "Audio Missing",
-                "No ready audio found for this row. Use 'Regenerate Audio' first.",
-            )
+            self._show_play_unavailable(self._queue_row_status(row))
             return
 
         self.player._current_index = row - 1  # noqa: SLF001 — internal
@@ -4341,6 +4801,7 @@ class AudioPlayerPanel(QWidget):
         snapshot = self.player.queue_snapshot()
         self._queue_model.load(snapshot, self.player.current_index)
         self.tab_widget.setTabText(0, f"Queue ({len(snapshot)})")
+        self._apply_action_policy()
 
     def _refresh_display_contexts(self) -> None:
         """Batch-refresh Niqqud / Translation / Source for all queue tracks from DB.

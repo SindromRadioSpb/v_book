@@ -60,6 +60,30 @@ Last verified against code/tests: 2026-02-24
 19. In `Playlists`, select one row and click `Go to Source`; target source row is focused.
 20. In `Queue/Playlists/History`, select multiple rows; `Go to Source` is disabled.
 
+## Action policy table (PATCH-06 contract)
+
+`Queue` tab:
+- Selection `0`: `Go to Source` follows current playing row (if exists), `Add to Playlist` disabled.
+- Selection `1` + status `ready`: `Play from here` enabled, `Go to Source` enabled if source payload exists.
+- Selection `1` + status `missing/stale/generating/failed`: `Play from here` disabled in context menu; clicking status cell shows safe message.
+- Selection `>1`: `Go to Source` disabled.
+
+`Playlists` tab:
+- `Play` enabled only when selected playlist contains at least one `ready` row.
+- `Play Selected` enabled only when current selection contains at least one `ready` row.
+- `Go to Source` enabled only for single selected row with valid source payload.
+- `Move up/down` enabled only for single row and valid boundary.
+
+`History` tab:
+- `Play Selected` enabled only when selection contains at least one `ready` row.
+- `Add to Queue` enabled on non-empty selection.
+- `Go to Source` enabled only for single selected row with valid source payload.
+
+Shared rules:
+- Multi-select always disables `Go to Source`.
+- Missing/Stale/Generating/Failed never fail silently:
+  - status-cell click and explicit play attempts emit clear status-bar guidance.
+
 ## Automated evidence references
 
 - `tests/test_audio_player_playlists_playback.py`
@@ -77,6 +101,8 @@ Last verified against code/tests: 2026-02-24
 - `tests/test_audio_player_rate.py`
 - `tests/test_audio_player_repeat.py`
 - `tests/test_audio_player_history_panel.py`
+- `tests/test_audio_player_action_policy.py`
+- `tests/test_audio_player_user_safe_messages.py`
 
 ## Open premium backlog (next slice)
 
@@ -91,3 +117,4 @@ Last verified against code/tests: 2026-02-24
 - Queue and Playlist gear toggles persisted after restart.
 - Playlist `↻` refresh updating Niqqud/Translation/Source context.
 - History tab with DB rows and `Go to Source` from selected history row.
+- Missing/Stale status-cell click showing safe user message in status bar.

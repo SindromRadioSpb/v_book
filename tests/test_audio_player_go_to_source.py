@@ -238,18 +238,13 @@ def test_play_from_row_blocks_stale_without_fresh_audio(monkeypatch, qtbot, tmp_
     player._tracks[0].path = Path("")  # noqa: SLF001
     player._tracks[0].context["audio_status"] = "stale"  # noqa: SLF001
 
-    shown_titles: list[str] = []
-
-    def _fake_info(_parent, title, _msg):
-        shown_titles.append(str(title))
-        return 0
-
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", _fake_info)
+    shown_messages: list[str] = []
+    monkeypatch.setattr(panel, "_show_status_message", lambda msg, timeout_ms=4500: shown_messages.append(str(msg)))
 
     panel._play_from_row(0)
 
-    assert shown_titles
-    assert shown_titles[0] == "Audio Stale"
+    assert shown_messages
+    assert "stale" in shown_messages[0].lower()
 
 
 def test_queue_niqqudize_sentences_uses_sentence_dialog(monkeypatch, qtbot, tmp_path):

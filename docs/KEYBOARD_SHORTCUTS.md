@@ -50,6 +50,24 @@ Comprehensive keyboard shortcuts reference for HDLE Premium.
 - **Space**: Play/Pause current audio queue
 - **Esc**: Stop audio playback (when player focus/context is active)
 
+### Audio Player Panel (when Audio Player has focus)
+- **Space**: Play/Pause
+- **J**: Previous track
+- **K**: Next track
+- **+** or **=**: Increase playback speed by `0.1x`
+- **-**: Decrease playback speed by `0.1x`
+- **R**: Cycle repeat mode (`Off -> One -> All`)
+- **Esc**: Stop playback (keep queue)
+
+Scope rules:
+- Audio Player shortcuts are bound with widget scope (`WidgetWithChildrenShortcut`).
+- They are active only when focus is inside Audio Player panel.
+- They do not override typing in other workspaces/panels.
+
+Playlist Entries table:
+- **Enter / Space**: Play selected rows (only when selection has playable rows).
+- **Del / Backspace**: Remove selected rows from playlist.
+
 ---
 
 ## Command Palette Shortcuts
