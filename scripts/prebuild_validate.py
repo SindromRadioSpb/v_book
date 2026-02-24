@@ -15,10 +15,12 @@ Exit codes:
 """
 
 import argparse
+from datetime import datetime, timezone
 import logging
 import sqlite3
 import sys
 import tempfile
+from uuid import uuid4
 from pathlib import Path
 
 # Setup logging
@@ -27,6 +29,13 @@ logging.basicConfig(
     format="%(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _unique_export_project_name() -> str:
+    """Generate collision-proof project name for export/import validation."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    suffix = uuid4().hex[:8]
+    return f"__EXPORT_TEST__{ts}_{suffix}"
 
 
 def check_fts_presence(db_path: Path) -> bool:
@@ -161,6 +170,12 @@ def check_export_import(db_path: Path) -> bool:
     from app.services.project_exchange.dto import ExportOptions, ImportOptions
 
     temp_bundle = None
+    project_id = None
+    import_project_id = None
+    project_name = _unique_export_project_name()
+    library_id = None
+    db_service = None
+    project_service = None
 
     try:
         # Reset singleton
@@ -175,16 +190,23 @@ def check_export_import(db_path: Path) -> bool:
 
         # Create a test project
         logger.info("  Creating test project for export...")
+        logger.info(f"  Attempting project create: name={project_name}")
         with db_service.get_session() as session:
-            library = project_service.get_or_create_default_library(session)
-            project = project_service.create_project(
-                session,
-                name="__EXPORT_TEST__",
-                description="Test project for export",
-                library=library,
-            )
-            project_id = project.project_id
-            session.commit()
+            try:
+                library = project_service.get_or_create_default_library(session)
+                library_id = int(getattr(library, "library_id", 0) or 0)
+                logger.info(f"  Using library_id={library_id}")
+                project = project_service.create_project(
+                    session,
+                    name=project_name,
+                    description="Test project for export",
+                    library=library,
+                )
+                project_id = project.project_id
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
         logger.info(f"  Project created: ID={project_id}")
 
@@ -216,23 +238,39 @@ def check_export_import(db_path: Path) -> bool:
             logger.error(f"  Import failed: {import_report.error_message}")
             return False
 
-        logger.info(f"  Import successful: project ID={import_report.new_project_id}")
-
-        # Cleanup: delete both projects
-        logger.info("  Cleaning up test projects...")
-        with db_service.get_session() as session:
-            project_service.delete_project(session, project_id)
-            if import_report.new_project_id:
-                project_service.delete_project(session, import_report.new_project_id)
+        import_project_id = int(getattr(import_report, "new_project_id", 0) or 0)
+        logger.info(f"  Import successful: project ID={import_project_id or 'N/A'}")
 
         logger.info("[OK] Export/import roundtrip successful")
         return True
 
     except Exception as e:
         logger.exception(f"Export/import check failed: {e}")
+        logger.error(
+            "  Context: attempted project_name=%s, library_id=%s",
+            project_name,
+            library_id if library_id is not None else "unknown",
+        )
         return False
 
     finally:
+        # Cleanup test projects, even on failure.
+        if db_service and project_service and (project_id or import_project_id):
+            try:
+                logger.info("  Cleaning up test projects...")
+                with db_service.get_session() as session:
+                    try:
+                        if project_id:
+                            project_service.delete_project(session, int(project_id))
+                        if import_project_id and import_project_id != project_id:
+                            project_service.delete_project(session, int(import_project_id))
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+                        raise
+            except Exception as cleanup_exc:
+                logger.warning(f"  Cleanup warning: {cleanup_exc}")
+
         # Cleanup temp bundle
         if temp_bundle and temp_bundle.exists():
             try:
