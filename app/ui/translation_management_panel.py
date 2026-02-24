@@ -449,7 +449,7 @@ class TranslationManagementPanel(QWidget):
         self.scope_current_btn.clicked.connect(lambda: self.on_scope_changed("current_project"))
         scope_layout.addWidget(self.scope_current_btn)
 
-        self.scope_global_btn = QPushButton("Global")
+        self.scope_global_btn = QPushButton("All")
         self.scope_global_btn.setCheckable(True)
         self.scope_global_btn.clicked.connect(lambda: self.on_scope_changed("global"))
         scope_layout.addWidget(self.scope_global_btn)
@@ -769,7 +769,7 @@ class TranslationManagementPanel(QWidget):
         if self.scope_mode == "current_project" and self.project_id is not None:
             self.scope_status_label.setText(f"Filtered by: Current Project ({self.project_id})")
         else:
-            self.scope_status_label.setText("Filtered by: Global (All projects)")
+            self.scope_status_label.setText("Filtered by: All projects")
 
         self.update_projects_button_label()
         if reset_page:

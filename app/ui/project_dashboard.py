@@ -28,6 +28,7 @@ class ProjectDashboard(QWidget):
 
     project_selected = pyqtSignal(int)  # Emits project_id
     verification_requested = pyqtSignal()  # Emits when verification button clicked
+    projects_loaded = pyqtSignal(list)  # Emits list[dict] for sidebar search catalog
 
     def __init__(self):
         super().__init__()
@@ -152,6 +153,14 @@ class ProjectDashboard(QWidget):
                         self.status_label.setText(f"Total projects: {len(project_stats)}")
                 else:
                     self.status_label.setText("No projects. Click 'Create Project' to get started.")
+
+                # Emit project catalog for workspace sidebar search/recent section.
+                self.projects_loaded.emit(
+                    [
+                        {"project_id": int(p.project_id), "name": str(p.name)}
+                        for p in project_stats
+                    ]
+                )
 
         except Exception as e:
             logger.exception("Failed to load projects")

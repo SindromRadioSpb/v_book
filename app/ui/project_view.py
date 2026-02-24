@@ -125,6 +125,32 @@ class ProjectView(QWidget):
         """Handle back button."""
         self.back_to_dashboard.emit()
 
+    def focus_tab(self, tab_key: str) -> bool:
+        """Focus project tab by stable key.
+
+        Supported keys:
+        - documents
+        - sentences
+        - dictionary
+        - terms
+        - term_cards
+        - export
+        """
+        key = str(tab_key or "").strip().lower()
+        mapping = {
+            "documents": self.documents_view,
+            "sentences": self.sentences_view,
+            "dictionary": self.dictionary_view,
+            "terms": self.terms_view,
+            "term_cards": self.term_card_view,
+            "export": self.export_view,
+        }
+        target = mapping.get(key)
+        if target is None:
+            return False
+        self.tabs.setCurrentWidget(target)
+        return True
+
     def on_navigate_to_document(self, doc_id: int, sentence_id: int):
         """
         Navigate to a specific document from concordance results (M6).
