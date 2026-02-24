@@ -57,17 +57,30 @@ PrivilegesRequired=admin
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Components]
+Name: "core"; Description: "Core Application (required)"; Types: full compact custom; Flags: fixed; ExtraDiskSpaceRequired: 800000000
+Name: "localmodels"; Description: "Local Models (recommended)"; Types: full custom; ExtraDiskSpaceRequired: 1200000000
+Name: "baseline"; Description: "Hebrew Wikipedia Baseline (optional, large)"; Types: full custom; ExtraDiskSpaceRequired: 3000000000
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "openresources"; Description: "Open Resources Manager after installation"; Flags: unchecked
+Name: "runhealth"; Description: "Run Health Check after installation"; Flags: unchecked
 
 [Files]
 ; Application files (onedir mode - entire distribution folder)
 ; Path is relative to project root (one level up from installer folder)
-Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
 
 ; Seed database with reference corpus (Hebrew Wikipedia Baseline).
 ; Install only on first install, preserve user data on upgrades/uninstall.
-Source: "..\hdle_premium.db"; DestDir: "{localappdata}\HDLE"; DestName: "hdle.db"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "..\hdle_premium.db"; DestDir: "{localappdata}\HDLE"; DestName: "hdle.db"; Flags: onlyifdoesntexist uninsneveruninstall; Components: core
+
+; Optional local models package (if prepared externally before installer build).
+Source: "..\installer\resources\local_models\*"; DestDir: "{localappdata}\HDLE\models"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: localmodels
+
+; Optional baseline bundle package (if prepared externally before installer build).
+Source: "..\installer\resources\baseline\*.hdleproj"; DestDir: "{localappdata}\HDLE\datasets\baseline"; Flags: ignoreversion skipifsourcedoesntexist; Components: baseline
 
 ; NOTE: User data (database, logs, backups) is stored in:
 ; %LOCALAPPDATA%\HDLE\
@@ -83,6 +96,8 @@ Name: "{autodesktop}\HDLE Premium"; Filename: "{app}\HDLE_Premium.exe"; Tasks: d
 [Run]
 ; Offer to launch app after installation
 Filename: "{app}\HDLE_Premium.exe"; Description: "{cm:LaunchProgram,HDLE Premium}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\HDLE_Premium.exe"; Parameters: "--open-resources-manager"; Description: "Open Resources Manager"; Tasks: openresources; Flags: nowait postinstall skipifsilent
+Filename: "{app}\HDLE_Premium.exe"; Parameters: "--run-health-check"; Description: "Run Health Check"; Tasks: runhealth; Flags: nowait postinstall skipifsilent
 
 [Code]
 // Custom uninstall confirmation message

@@ -11,22 +11,12 @@ from typing import Dict, Iterable, Optional, Sequence
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
 
+from app.infra.resource_paths import ResourcePaths
 from app.infra.sa_models import AudioAsset
 
 
 def _get_app_dir() -> Path:
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            app_dir = Path(local) / "HDLE"
-        else:
-            app_dir = Path.home() / "AppData" / "Local" / "HDLE"
-    elif sys.platform == "darwin":
-        app_dir = Path.home() / "Library" / "Application Support" / "HDLE"
-    else:
-        app_dir = Path.home() / ".local" / "share" / "hdle"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir
+    return ResourcePaths.resolve_data_root(create=True)
 
 
 class AudioPlaybackService:

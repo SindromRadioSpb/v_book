@@ -2579,7 +2579,9 @@ class AudioPlayerPanel(QWidget):
             rel = Path(str(rel_path))
             if rel.is_absolute() or ".." in rel.parts:
                 return None
-            base = Path(os.environ.get("LOCALAPPDATA", "")) / "HDLE"
+            from app.infra.resource_paths import ResourcePaths
+
+            base = ResourcePaths.resolve_data_root(create=True)
             abs_path = base / rel
             if abs_path.exists():
                 return abs_path

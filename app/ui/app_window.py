@@ -43,7 +43,7 @@ _HEBREW_SHORTCUT_KEY_MAP: Dict[str, str] = {
 class AppWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self):
+    def __init__(self, *, startup_actions: Optional[List[str]] = None):
         super().__init__()
         self.setWindowTitle("HDLE Premium - Hebraic Dynamic Lexicon Engine")
         self.setMinimumSize(1200, 800)
@@ -63,6 +63,8 @@ class AppWindow(QMainWindow):
         self._pending_project_tab: Optional[str] = None
         self._workspace_history: List[str] = []
         self._badge_error_logged_at_ms: int = 0
+        self._startup_actions = [str(v or "").strip().lower() for v in (startup_actions or []) if str(v or "").strip()]
+        self._health_check_worker = None
 
         self.init_ui()
 
@@ -398,6 +400,7 @@ class AppWindow(QMainWindow):
         self._workspace_badges_timer.start()
         self._refresh_workspace_badges()
         self._validate_shortcut_conflicts()
+        QTimer.singleShot(0, self._run_startup_flows)
 
         logger.info("AppWindow initialized")
 
@@ -505,6 +508,33 @@ class AppWindow(QMainWindow):
             ud_due_count=ud_due_count,
         )
 
+    def _run_startup_flows(self) -> None:
+        """Handle first-run flow and optional command-line startup actions."""
+        self._maybe_show_first_run_wizard()
+        for action in self._startup_actions:
+            if action == "open_resources":
+                self.open_resources_manager()
+            elif action == "run_health_check":
+                self.open_system_health_check()
+
+    def _maybe_show_first_run_wizard(self) -> None:
+        import os
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        if self.settings.get_bool("setup/first_run_completed", False):
+            return
+        from app.ui.first_run_wizard import show_first_run_wizard
+
+        result = show_first_run_wizard(
+            parent=self,
+            open_resources_manager=self.open_resources_manager,
+            open_mt_settings=self.open_provider_settings,
+            open_audio_settings=self.open_audio_provider_settings,
+        )
+        if result == 0:
+            self._show_nav_status("First-run setup skipped. You can open it later from Tools.")
+
     def _collect_shortcut_conflicts(self) -> Dict[str, List[str]]:
         by_shortcut: Dict[str, List[str]] = {}
 
@@ -566,6 +596,15 @@ class AppWindow(QMainWindow):
         self._set_action_shortcuts(import_action, "Ctrl+Shift+I")
         import_action.triggered.connect(self.open_import_wizard)
         tools_menu.addAction(import_action)
+
+        resources_action = QAction("&Resources Manager...", self)
+        self._set_action_shortcuts(resources_action, "Ctrl+Alt+R")
+        resources_action.triggered.connect(self.open_resources_manager)
+        tools_menu.addAction(resources_action)
+
+        health_action = QAction("Run &Health Check...", self)
+        health_action.triggered.connect(self.open_system_health_check)
+        tools_menu.addAction(health_action)
 
         # Project Exchange (Export/Import bundles)
         tools_menu.addSeparator()
@@ -807,6 +846,54 @@ class AppWindow(QMainWindow):
 
         logger.info("Opening pronunciation bootstrap dialog")
         show_pronunciation_bootstrap_dialog(parent=self)
+
+    def open_resources_manager(self):
+        """Open resources manager dialog."""
+        from app.ui.resources_manager_dialog import show_resources_manager
+
+        logger.info("Opening resources manager dialog")
+        show_resources_manager(parent=self)
+
+    def open_system_health_check(self):
+        """Run unified health checks and show report."""
+        from app.ui.workers import UnifiedHealthCheckWorker
+        from PyQt6.QtWidgets import QMessageBox
+
+        if self._health_check_worker is not None:
+            self._show_nav_status("Health check is already running.")
+            return
+
+        logger.info("Running unified health check")
+        self._show_nav_status("Running health check...")
+        worker = UnifiedHealthCheckWorker()
+        self._health_check_worker = worker
+
+        def _clear() -> None:
+            self._health_check_worker = None
+
+        def _show_report(report: dict) -> None:
+            overall = str(report.get("overall") or "unknown")
+            lines = [f"Overall: {overall}"]
+            for row in report.get("items", []):
+                title = row.get("title", row.get("check_id", "check"))
+                status = row.get("status", "unknown")
+                message = row.get("message", "")
+                lines.append(f"[{status}] {title}: {message}")
+                remediation = row.get("remediation", "")
+                if remediation:
+                    lines.append(f"  remediation: {remediation}")
+            self._show_nav_status(f"Health check finished: {overall}")
+            QMessageBox.information(self, "Health Check", "\n".join(lines))
+
+        def _show_error(message: str) -> None:
+            self._show_nav_status("Health check failed.")
+            QMessageBox.warning(self, "Health Check", str(message))
+
+        worker.finished.connect(_show_report)
+        worker.error.connect(_show_error)
+        worker.finished.connect(lambda *_: _clear())
+        worker.error.connect(lambda *_: _clear())
+        worker.start()
 
     def open_help_center(self):
         """Open in-app help center dialog."""
@@ -1093,6 +1180,24 @@ class AppWindow(QMainWindow):
             category="Tools"
         ))
 
+        registry.register(ActionSpec(
+            action_id="tools.resources_manager",
+            title="Resources Manager",
+            keywords=["resources", "models", "datasets", "baseline", "install"],
+            shortcut="Ctrl+Alt+R",
+            callback=self.open_resources_manager,
+            category="Tools"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="tools.health_check",
+            title="Run Health Check",
+            keywords=["health", "check", "diagnostics", "bootstrap", "resources"],
+            shortcut="",
+            callback=self.open_system_health_check,
+            category="Tools"
+        ))
+
         # Premium category
         registry.register(ActionSpec(
             action_id="premium.tm",
@@ -1263,6 +1368,8 @@ class AppWindow(QMainWindow):
             "navigate.dashboard": self.back_to_dashboard,
             "tools.verification": self.open_verification,
             "tools.import_dictionary": self.open_import_wizard,
+            "tools.resources_manager": self.open_resources_manager,
+            "tools.health_check": self.open_system_health_check,
             "premium.tm": self.open_translation_management,
             "premium.coverage": self.open_coverage,
             "premium.audio_player": self.open_audio_workspace,

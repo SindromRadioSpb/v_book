@@ -3702,3 +3702,128 @@ class AudioQueuePopulateWorker(QThread):
             )
         except Exception as exc:
             logger.warning("_resolve_audio_assets: non-fatal exception: %s", exc, exc_info=True)
+
+
+class ResourceDownloadWorker(QThread):
+    """Background resource downloader with resume + checksum verification."""
+
+    progress = pyqtSignal(int, int)  # downloaded_bytes, total_bytes
+    stage_updated = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    CHUNK_SIZE = 1024 * 256
+
+    def __init__(
+        self,
+        *,
+        resource_id: str,
+        url: str,
+        dest_path: Path,
+        checksum: str = "",
+        timeout_seconds: float = 30.0,
+    ):
+        super().__init__()
+        self.resource_id = str(resource_id or "")
+        self.url = str(url or "").strip()
+        self.dest_path = Path(dest_path)
+        self.checksum = str(checksum or "").strip().lower()
+        self.timeout_seconds = float(timeout_seconds)
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def run(self):
+        import hashlib
+        import urllib.request
+
+        if not self.url:
+            self.error.emit("Download URL is not configured.")
+            return
+
+        try:
+            self.dest_path.parent.mkdir(parents=True, exist_ok=True)
+            part_path = self.dest_path.with_suffix(self.dest_path.suffix + ".part")
+            start_byte = part_path.stat().st_size if part_path.exists() else 0
+
+            self.stage_updated.emit("Starting download...")
+            headers = {"User-Agent": "HDLE-Premium/ResourceManager"}
+            if start_byte > 0:
+                headers["Range"] = f"bytes={start_byte}-"
+
+            request = urllib.request.Request(self.url, headers=headers)
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                content_length = int(response.headers.get("Content-Length", "0") or 0)
+                total = start_byte + content_length if content_length > 0 else 0
+                mode = "ab" if start_byte > 0 else "wb"
+                downloaded = start_byte
+
+                with open(part_path, mode) as out_file:
+                    while True:
+                        if self._cancel_requested:
+                            self.finished.emit(
+                                {
+                                    "ok": False,
+                                    "cancelled": True,
+                                    "resource_id": self.resource_id,
+                                    "path": str(part_path),
+                                }
+                            )
+                            return
+                        chunk = response.read(self.CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress.emit(downloaded, total)
+
+            self.stage_updated.emit("Verifying checksum...")
+            if self.checksum:
+                digest = hashlib.sha256()
+                with open(part_path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                actual = digest.hexdigest().lower()
+                if actual != self.checksum:
+                    try:
+                        part_path.unlink()
+                    except OSError:
+                        pass
+                    self.error.emit(
+                        f"Checksum mismatch for {self.resource_id}: expected {self.checksum}, got {actual}"
+                    )
+                    return
+
+            if self.dest_path.exists():
+                self.dest_path.unlink()
+            part_path.rename(self.dest_path)
+            self.finished.emit(
+                {
+                    "ok": True,
+                    "cancelled": False,
+                    "resource_id": self.resource_id,
+                    "path": str(self.dest_path),
+                }
+            )
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+class UnifiedHealthCheckWorker(QThread):
+    """Run full HealthCheckService off the UI thread."""
+
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            from app.services.health_check_service import HealthCheckService
+
+            report = HealthCheckService().run_all()
+            self.finished.emit(report)
+        except Exception as exc:
+            self.error.emit(str(exc))

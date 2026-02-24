@@ -23,11 +23,11 @@ Usage:
 import hashlib
 import json
 import logging
-import os
-import platform
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+
+from app.infra.resource_paths import ResourcePaths
 
 logger = logging.getLogger(__name__)
 
@@ -60,29 +60,7 @@ class ModelResourceManager:
         Returns:
             Path to models root directory
         """
-        system = platform.system()
-
-        if system == "Windows":
-            # Windows: %LOCALAPPDATA%\HDLE\models
-            local_app_data = os.getenv("LOCALAPPDATA")
-            if not local_app_data:
-                # Fallback to %USERPROFILE%\AppData\Local
-                user_profile = os.getenv("USERPROFILE", str(Path.home()))
-                local_app_data = str(Path(user_profile) / "AppData" / "Local")
-
-            models_root = Path(local_app_data) / "HDLE" / "models"
-        else:
-            # Linux/Mac: ~/.local/share/HDLE/models
-            xdg_data_home = os.getenv("XDG_DATA_HOME")
-            if xdg_data_home:
-                models_root = Path(xdg_data_home) / "HDLE" / "models"
-            else:
-                models_root = Path.home() / ".local" / "share" / "HDLE" / "models"
-
-        # Create directory if not exists
-        models_root.mkdir(parents=True, exist_ok=True)
-
-        return models_root
+        return ResourcePaths.build(create=True).models_root
 
     def model_dir(self, model_id: str, backend: str) -> Path:
         """

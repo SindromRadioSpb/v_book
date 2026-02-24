@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from app.infra.resource_paths import ResourcePaths
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,9 +76,45 @@ class PhonikudAdapter:
 
     @property
     def model_path_effective(self) -> str:
-        if self.model_path:
-            return self.model_path
-        return self._sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
+        resolved = self._resolve_model_path()
+        return resolved or ""
+
+    def _resolve_model_path(self) -> Optional[str]:
+        direct = self._expand_model_candidate(self.model_path)
+        if direct:
+            return direct
+        env_candidate = self._expand_model_candidate(os.getenv("PHONIKUD_MODEL_PATH") or "")
+        if env_candidate:
+            return env_candidate
+        settings_candidate = self._expand_model_candidate(self._load_settings_model_path())
+        if settings_candidate:
+            return settings_candidate
+        return self._discover_default_model_path()
+
+    @staticmethod
+    def _load_settings_model_path() -> str:
+        try:
+            from app.infra.settings import SettingsService
+
+            settings = SettingsService.get_instance()
+            return str(settings.get_string("pronunciation/phonikud/model_path", "") or "")
+        except Exception:
+            return ""
+
+    def _discover_default_model_path(self) -> Optional[str]:
+        try:
+            models_dir = ResourcePaths.build(create=False).models_root / "phonikud"
+        except Exception:
+            return None
+        if not models_dir.exists():
+            return None
+        preferred = sorted(models_dir.glob("*int8.onnx"))
+        if preferred:
+            return str(preferred[0])
+        regular = sorted(models_dir.glob("*.onnx"))
+        if regular:
+            return str(regular[0])
+        return None
 
     def model_path_safe(self) -> str:
         path_value = self.model_path_effective
@@ -100,6 +138,22 @@ class PhonikudAdapter:
         if not text:
             return ""
         return text.strip("\"'").rstrip(" .")
+
+    def _expand_model_candidate(self, value: str) -> Optional[str]:
+        cleaned = self._sanitize_model_path(value)
+        if not cleaned:
+            return None
+        path = Path(cleaned)
+        if path.is_file() and path.suffix.lower() == ".onnx":
+            return str(path)
+        if path.is_dir():
+            preferred = sorted(path.glob("*int8.onnx"))
+            if preferred:
+                return str(preferred[0])
+            regular = sorted(path.glob("*.onnx"))
+            if regular:
+                return str(regular[0])
+        return str(path)
 
     def _reset_module_cache(self) -> None:
         if self._module is None:
@@ -269,6 +323,12 @@ class PhonikudAdapter:
         else:
             status = PhonikudHealthStatus.ERROR.value
             details = self._read_module_details() or self._load_error or "Phonikud runtime unavailable"
+        if mode != PhonikudMode.REAL_INFERENCE.value:
+            try:
+                expected = ResourcePaths.build(create=False).models_root / "phonikud"
+                details = f"{details}. Expected model path: {expected}"
+            except Exception:
+                pass
 
         samples_payload = [
             {"input": text, "output": outputs.get(text, text)}

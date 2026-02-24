@@ -11,17 +11,13 @@ This script is the entry point for PyInstaller builds.
 import sys
 import shutil
 from pathlib import Path
-import os
+
+from app.infra.resource_paths import ResourcePaths
 
 
 def get_app_data_dir():
     """Get application data directory."""
-    if sys.platform == "win32":
-        # Production path on M: drive (as configured in app/main.py)
-        return Path(r"M:\V_book\HDLE")
-    else:
-        # Linux/Mac (not primary target)
-        return Path.home() / ".local" / "share" / "HDLE"
+    return ResourcePaths.resolve_data_root(create=True)
 
 
 def setup_first_run():
@@ -31,12 +27,8 @@ def setup_first_run():
     print("=" * 60)
 
     # Get application directory
-    app_data_dir = get_app_data_dir()
-
-    # Create directories
-    app_data_dir.mkdir(parents=True, exist_ok=True)
-    (app_data_dir / "logs").mkdir(exist_ok=True)
-    (app_data_dir / "backups").mkdir(exist_ok=True)
+    app_paths = ResourcePaths.build(create=True)
+    app_data_dir = app_paths.data_root
 
     print(f"Application directory: {app_data_dir}")
 
@@ -54,8 +46,8 @@ def setup_first_run():
             bundle_dir = Path(sys._MEIPASS)
             source_db = bundle_dir / "data" / "hdle_production_new.db"
         else:
-            # Running from source (development)
-            source_db = Path("M:/V_book/HDLE/hdle_production_new.db")
+            # Running from source
+            source_db = Path("hdle_premium.db").resolve()
 
         if source_db.exists():
             print(f"Copying Wikipedia baseline database...")

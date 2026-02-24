@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
+from app.infra.resource_paths import ResourcePaths
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
 from app.infra.translators.local_providers_setup import (
@@ -22,28 +23,11 @@ def get_app_dir() -> Path:
     r"""Get the application data directory.
 
     Default locations:
-    - Windows: %LOCALAPPDATA%\HDLE (or M:\V_book\HDLE if HDLE_DEV_MODE env var is set)
+    - Windows: %LOCALAPPDATA%\HDLE
     - macOS: ~/Library/Application Support/HDLE
     - Linux: ~/.local/share/hdle
     """
-    import os
-
-    if sys.platform == "win32":
-        # Check if running in development mode (M: drive exists and HDLE_DEV_MODE is set)
-        dev_path = Path(r"M:\V_book\HDLE")
-        if dev_path.parent.exists() and os.environ.get("HDLE_DEV_MODE") == "1":
-            # Development mode: use M: drive
-            app_dir = dev_path
-        else:
-            # Production mode: use %LOCALAPPDATA%
-            app_dir = Path(os.environ.get("LOCALAPPDATA")) / "HDLE"
-    elif sys.platform == "darwin":
-        app_dir = Path.home() / "Library" / "Application Support" / "HDLE"
-    else:  # Linux
-        app_dir = Path.home() / ".local" / "share" / "hdle"
-
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir
+    return ResourcePaths.resolve_data_root(create=True)
 
 
 def main():
@@ -55,11 +39,22 @@ def main():
         type=str,
         help="Path to database file (default: $LOCALAPPDATA/HDLE/hdle.db)",
     )
+    parser.add_argument(
+        "--open-resources-manager",
+        action="store_true",
+        help="Open Resources Manager on startup",
+    )
+    parser.add_argument(
+        "--run-health-check",
+        action="store_true",
+        help="Run unified health check on startup",
+    )
     args = parser.parse_args()
 
     # Setup directories
-    app_dir = get_app_dir()
-    log_dir = app_dir / "logs"
+    app_paths = ResourcePaths.build(create=True)
+    app_dir = app_paths.data_root
+    log_dir = app_paths.logs_root
 
     # Use custom database path if provided, otherwise use default
     if args.db_path:
@@ -107,7 +102,13 @@ def main():
         app.setApplicationName("HDLE_Premium")
 
         # Create and show main window
-        window = AppWindow()
+        startup_actions = []
+        if args.open_resources_manager:
+            startup_actions.append("open_resources")
+        if args.run_health_check:
+            startup_actions.append("run_health_check")
+
+        window = AppWindow(startup_actions=startup_actions)
         window.show()
 
         logger.info("Application window shown")

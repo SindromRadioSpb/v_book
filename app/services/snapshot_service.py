@@ -10,6 +10,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
 
+from app.infra.resource_paths import ResourcePaths
 from app.services.db_snapshot_base import DBSnapshotBase
 
 logger = logging.getLogger(__name__)
@@ -40,10 +41,7 @@ class SnapshotService(DBSnapshotBase):
             storage_dir: Where to store snapshots (default: %LOCALAPPDATA%/HDLE/snapshots/)
         """
         if storage_dir is None:
-            # Import here to avoid circular dependency
-            from app.main import get_app_dir
-
-            storage_dir = get_app_dir() / "snapshots"
+            storage_dir = ResourcePaths.resolve_data_root(create=True) / "snapshots"
 
         self.storage_dir = storage_dir
         self._ensure_directory(self.storage_dir)

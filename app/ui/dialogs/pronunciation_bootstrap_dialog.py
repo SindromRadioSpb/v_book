@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.infra.settings import SettingsService
+from app.infra.resource_paths import ResourcePaths
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.workers import PhonikudHealthCheckWorker, PronunciationBootstrapWorker
 
@@ -183,6 +184,9 @@ class PronunciationBootstrapDialog(QDialog):
         docs_btn = QPushButton("Open Docs")
         docs_btn.clicked.connect(self._open_docs)
         buttons.addWidget(docs_btn)
+        resources_btn = QPushButton("Open Resources")
+        resources_btn.clicked.connect(self._open_resources_manager)
+        buttons.addWidget(resources_btn)
         buttons.addStretch()
 
         self.run_btn = QPushButton("Run Bootstrap")
@@ -199,7 +203,8 @@ class PronunciationBootstrapDialog(QDialog):
         from PyQt6.QtWidgets import QFileDialog
 
         current = self.model_path_edit.text().strip()
-        start_dir = current or "J:/Models/phonikud"
+        default_dir = ResourcePaths.build(create=True).models_root / "phonikud"
+        start_dir = current or str(default_dir)
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Phonikud ONNX Model",
@@ -249,6 +254,11 @@ class PronunciationBootstrapDialog(QDialog):
             return
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(docs_path))):
             QMessageBox.information(self, "Docs", f"Open manually:\n{docs_path}")
+
+    def _open_resources_manager(self) -> None:
+        from app.ui.resources_manager_dialog import show_resources_manager
+
+        show_resources_manager(parent=self)
 
     def _run_health_check(self) -> None:
         if self._health_worker is not None:

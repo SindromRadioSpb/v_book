@@ -7,7 +7,6 @@ import html
 import logging
 import os
 import re
-import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -20,6 +19,7 @@ from app.infra.audio.audio_provider_config_manager import AudioProviderConfigMan
 from app.infra.audio import AudioGenerationRequest
 from app.infra.audio.local_providers_setup import register_default_audio_providers
 from app.infra.audio.providers_registry import AudioProvidersRegistry
+from app.infra.resource_paths import ResourcePaths
 from app.infra.sa_models import AudioAsset
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
@@ -32,19 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_app_dir() -> Path:
-    """Resolve app data directory (same contract as app.main.get_app_dir)."""
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            app_dir = Path(local) / "HDLE"
-        else:
-            app_dir = Path.home() / "AppData" / "Local" / "HDLE"
-    elif sys.platform == "darwin":
-        app_dir = Path.home() / "Library" / "Application Support" / "HDLE"
-    else:
-        app_dir = Path.home() / ".local" / "share" / "hdle"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir
+    """Resolve app data directory via deterministic resource contract."""
+    return ResourcePaths.resolve_data_root(create=True)
 
 
 def list_available_audio_providers() -> List[str]:

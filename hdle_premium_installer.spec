@@ -30,6 +30,8 @@ a = Analysis(
         (str(project_root / 'app' / 'infra' / 'migrations' / '*.sql'), 'app/infra/migrations/'),
         # dialogs.py РјРѕРґСѓР»СЊ (РєРѕРЅС„Р»РёРєС‚ РёРјРµРЅ СЃ dialogs/ РїР°РїРєРѕР№)
         (str(project_root / 'app' / 'ui' / 'dialogs.py'), 'app/ui/'),
+        # Resource manifest for Resources Manager / Health checks
+        (str(project_root / 'app' / 'resources' / '*.json'), 'app/resources/'),
     ],
     hiddenimports=[
         # PyQt6 core
@@ -110,9 +112,13 @@ a = Analysis(
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',
         'app.ui.dialogs.pronunciation_bootstrap_dialog',
+        'app.ui.resources_manager_dialog',
+        'app.ui.first_run_wizard',
         'app.ui.audio_provider_settings_dialog',
         'app.ui.delegates.audio_play_delegate',
         'app.ui.widgets.audio_player_panel',
+        'app.services.resources.resource_registry',
+        'app.services.health_check_service',
 
         # Internal playback
         'app.services.audio_player_service',

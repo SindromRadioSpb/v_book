@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.infra.settings import SettingsService
+from app.infra.resource_paths import ResourcePaths
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.workers import PhonikudHealthCheckWorker
 
@@ -254,7 +255,8 @@ class SentenceNiqqudBootstrapDialog(QDialog):
         from PyQt6.QtWidgets import QFileDialog
 
         current = self._model_path_edit.text().strip()
-        start_dir = current or "J:/Models/phonikud"
+        default_dir = ResourcePaths.build(create=True).models_root / "phonikud"
+        start_dir = current or str(default_dir)
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Phonikud ONNX Model",

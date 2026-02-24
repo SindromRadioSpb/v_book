@@ -1,0 +1,55 @@
+{
+  "manifest_version": "1.0",
+  "updated_at": "2026-02-24T00:00:00Z",
+  "resources": [
+    {
+      "id": "nikud_pronunciation_model",
+      "display_name": "Phonikud Pronunciation Model",
+      "version": "1.0",
+      "type": "model",
+      "required": true,
+      "payload_kind": "manual_import",
+      "download_url": "",
+      "size_bytes": 350000000,
+      "checksum": "",
+      "local_install_subdir": "models/phonikud",
+      "filenames": [
+        "phonikud-1.0.int8.onnx"
+      ],
+      "description": "Required for offline pronunciation bootstrap (lexical niqqud)."
+    },
+    {
+      "id": "sentence_niqqud_model",
+      "display_name": "Sentence Niqqud Model",
+      "version": "1.0",
+      "type": "model",
+      "required": true,
+      "payload_kind": "manual_import",
+      "download_url": "",
+      "size_bytes": 350000000,
+      "checksum": "",
+      "local_install_subdir": "models/phonikud",
+      "filenames": [
+        "phonikud-1.0.int8.onnx"
+      ],
+      "description": "Required for sentence niqqud bootstrap."
+    },
+    {
+      "id": "hewiki_baseline_processed_bundle",
+      "display_name": "Hebrew Wikipedia Baseline",
+      "version": "20260207",
+      "type": "dataset",
+      "required": false,
+      "payload_kind": "downloadable",
+      "download_url": "https://github.com/SindromRadioSpb/v_book/releases/download/v1.1.0/hewiki_ref_processed_v20260207.hdleproj",
+      "size_bytes": 2600000000,
+      "checksum": "",
+      "local_install_subdir": "datasets/baseline",
+      "filenames": [
+        "hewiki_ref_processed_v20260207.hdleproj"
+      ],
+      "description": "Optional processed reference project bundle."
+    }
+  ]
+}
+
