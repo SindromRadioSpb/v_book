@@ -61,6 +61,30 @@ def _build_specs(items: Iterable[Dict[str, Any]]) -> List[AudioItemSpec]:
     return specs
 
 
+def _refresh_audio_player_playlists(parent: Optional[QWidget], *, select_playlist_id: Optional[int] = None) -> None:
+    """Best-effort refresh for Audio Player playlists tab after external modifications."""
+    if parent is None:
+        return
+    try:
+        window = parent.window()
+    except Exception:
+        window = None
+    panel = getattr(window, "audio_player_panel", None) if window is not None else None
+    if panel is None:
+        return
+    try:
+        refresh_method = getattr(panel, "refresh_playlists_view", None)
+        if callable(refresh_method):
+            refresh_method(select_playlist_id=select_playlist_id)
+            return
+        fallback = getattr(panel, "_refresh_playlists", None)
+        if callable(fallback):
+            fallback(select_playlist_id=select_playlist_id)
+    except Exception:
+        # Non-fatal: external views should not fail if Audio Player is hidden/unavailable.
+        return
+
+
 def add_selected_items_to_playlist_dialog(
     *,
     parent: QWidget,
@@ -96,6 +120,16 @@ def add_selected_items_to_playlist_dialog(
         default_playlist_id=default_playlist_id,
         default_after_entry_id=default_after_entry_id,
     )
+    if hasattr(dialog, "playlist_created"):
+        try:
+            dialog.playlist_created.connect(  # type: ignore[attr-defined]
+                lambda playlist_id: _refresh_audio_player_playlists(
+                    parent,
+                    select_playlist_id=int(playlist_id) if playlist_id is not None else None,
+                )
+            )
+        except Exception:
+            pass
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return False
 
@@ -118,6 +152,8 @@ def add_selected_items_to_playlist_dialog(
     except Exception as exc:
         QMessageBox.warning(parent, "Playlists", f"Failed to add entries:\n{exc}")
         return False
+
+    _refresh_audio_player_playlists(parent, select_playlist_id=int(playlist_id))
 
     QMessageBox.information(
         parent,

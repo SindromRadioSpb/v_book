@@ -33,6 +33,7 @@ from PyQt6.QtGui import QAction
 from app.services.db_service import DBService
 from app.services.sentences_workspace_service import SentencesWorkspaceService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.infra.settings import SettingsService
 from app.domain.dto import SentenceDTO
@@ -536,6 +537,9 @@ class SentencesView(QWidget):
         play_action = menu.addAction(f"▶ Play Audio Selected ({n})")
         play_action.triggered.connect(self.on_play_audio)
 
+        playlist_action = menu.addAction(f"Add Selected to Playlist ({n})...")
+        playlist_action.triggered.connect(self.on_add_selected_to_playlist)
+
         bootstrap_action = menu.addAction(f"Pronunciation Bootstrap Selected ({n})...")
         bootstrap_action.triggered.connect(self.on_pronunciation_bootstrap)
 
@@ -942,6 +946,17 @@ class SentencesView(QWidget):
         if not items:
             return
         self._play_audio_items(items, play_mode="enqueue", start_immediately=True)
+
+    def on_add_selected_to_playlist(self):
+        """Open shared playlist dialog and add selected sentence rows."""
+        items = self._selected_audio_items()
+        if not items:
+            return
+        add_selected_items_to_playlist_dialog(
+            parent=self,
+            items=items,
+            db_manager=self.db_service,
+        )
 
     def on_audio_cell_play_clicked(self, index):
         """Handle in-cell play button click (AudioPlayDelegate callback)."""

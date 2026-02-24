@@ -675,6 +675,7 @@ class AddAllToQueueDialog(QDialog):
 
 class AddQueueToPlaylistDialog(QDialog):
     """Queue -> playlist picker with dedup preview and add mode."""
+    playlist_created = pyqtSignal(int)
 
     def __init__(
         self,
@@ -806,6 +807,10 @@ class AddQueueToPlaylistDialog(QDialog):
             QMessageBox.warning(self, "Playlists", f"Failed to create playlist:\n{exc}")
             return
         self._load_playlists(select_playlist_id=playlist_id)
+        try:
+            self.playlist_created.emit(int(playlist_id))
+        except Exception:
+            pass
 
     def selected_playlist_id(self) -> Optional[int]:
         item = self.playlists_list.currentItem()
@@ -1561,6 +1566,10 @@ class AudioPlayerPanel(QWidget):
         self.tab_widget.setTabText(1, f"Playlists ({len(playlists)})")
         self._on_playlist_selection_changed()
 
+    def refresh_playlists_view(self, *, select_playlist_id: Optional[int] = None) -> None:
+        """Public refresh hook for external views that modify playlists."""
+        self._refresh_playlists(select_playlist_id=select_playlist_id)
+
     def _on_playlist_selection_changed(self) -> None:
         current = self.playlists_list.currentItem()
         playlist_id = None
@@ -1859,6 +1868,14 @@ class AudioPlayerPanel(QWidget):
             default_playlist_id=self._selected_playlist_id,
             default_after_entry_id=after_entry_id,
         )
+        try:
+            dialog.playlist_created.connect(
+                lambda playlist_id: self.refresh_playlists_view(
+                    select_playlist_id=int(playlist_id) if playlist_id is not None else None
+                )
+            )
+        except Exception:
+            pass
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         playlist_id = dialog.selected_playlist_id()
