@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,6 +52,30 @@ def test_handle_embedded_python_compat_routes_known_script(monkeypatch):
 
     result = main._handle_embedded_python_compat(["HDLE_Premium.exe", "-c", snippet])
     assert result == 7
+
+
+def test_run_phonikud_subprocess_bridge_uses_identity_fallback_on_backend_error(monkeypatch):
+    class _BrokenPhonikud:
+        def __init__(self, _model_path: str):
+            raise RuntimeError("DLL load failed while importing onnxruntime_pybind11_state")
+
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", SimpleNamespace(Phonikud=_BrokenPhonikud))
+    monkeypatch.setitem(sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None))
+    monkeypatch.setattr(
+        main.sys,
+        "stdin",
+        io.StringIO(json.dumps({"model_path": "C:/models/phonikud.onnx", "texts": ["a", "b"]})),
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    monkeypatch.setattr(main.sys, "stdout", stdout)
+    monkeypatch.setattr(main.sys, "stderr", stderr)
+
+    result = main._run_phonikud_subprocess_bridge()
+    payload = json.loads(stdout.getvalue())
+    assert result == 0
+    assert payload["outputs"] == ["a", "b"]
+    assert "identity fallback" in stderr.getvalue().lower()
 
 
 def test_load_service_account_file_rejects_api_key_text(tmp_path: Path):

@@ -81,29 +81,49 @@ def _is_phonikud_subprocess_script(script: str) -> bool:
 
 def _run_phonikud_subprocess_bridge() -> int:
     try:
-        from phonikud_onnx import Phonikud
-    except Exception as exc:
-        print(f"phonikud_subprocess_bridge import error: {exc}", file=sys.stderr)
-        return 1
-
-    try:
         raw = sys.stdin.read() or "{}"
         data = json.loads(raw)
         model_path = str(data.get("model_path") or "")
-        texts = data.get("texts") or []
+        texts = [str(text or "") for text in (data.get("texts") or [])]
+    except Exception as exc:
+        print(f"phonikud_subprocess_bridge payload error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        try:
+            import phonikud as phonikud_shim
+
+            prepare_runtime_dll_paths = getattr(phonikud_shim, "prepare_runtime_dll_paths", None)
+            if callable(prepare_runtime_dll_paths):
+                prepare_runtime_dll_paths()
+            ensure_hf_home = getattr(phonikud_shim, "_ensure_hf_home", None)
+            if callable(ensure_hf_home):
+                ensure_hf_home()
+        except Exception:
+            pass
+
+        from phonikud_onnx import Phonikud
+
         model = Phonikud(model_path)
         outputs: list[str] = []
-        for text in texts:
-            normalized = str(text or "")
+        for normalized in texts:
             try:
                 rendered = str(model.add_diacritics(normalized) or "").strip()
             except Exception:
                 rendered = ""
             outputs.append(rendered or normalized)
+    except Exception as exc:
+        print(
+            f"phonikud_subprocess_bridge backend unavailable, identity fallback: {exc}",
+            file=sys.stderr,
+        )
+        outputs = texts
+
+    try:
         sys.stdout.write(json.dumps({"outputs": outputs}, ensure_ascii=False))
         return 0
     except Exception as exc:
-        print(f"phonikud_subprocess_bridge runtime error: {exc}", file=sys.stderr)
+        print(f"phonikud_subprocess_bridge emit error: {exc}", file=sys.stderr)
         return 1
 
 

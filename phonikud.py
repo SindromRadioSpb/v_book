@@ -13,6 +13,7 @@ It also exposes runtime diagnostics used by the premium UI gate:
 
 from __future__ import annotations
 
+import importlib
 from functools import lru_cache
 import json
 import os
@@ -29,6 +30,8 @@ MODE_ERROR = "error"
 _runtime_mode = MODE_FALLBACK
 _runtime_details = "No PHONIKUD_MODEL_PATH configured; fallback mode"
 _SUBPROCESS_TIMEOUT_SEC = 120
+_DLL_DIR_HANDLES: list[object] = []
+_DLL_DIR_KEYS: set[str] = set()
 
 
 def _normalize_input(text: str) -> str:
@@ -74,6 +77,58 @@ def _ensure_hf_home() -> None:
             return
         except Exception:
             continue
+
+
+def _register_dll_directory(path: Path) -> None:
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+    try:
+        resolved = str(path.resolve())
+    except Exception:
+        resolved = str(path)
+    key = resolved.lower()
+    if key in _DLL_DIR_KEYS:
+        return
+    if not Path(resolved).exists():
+        return
+    try:
+        handle = os.add_dll_directory(resolved)
+    except Exception:
+        return
+    _DLL_DIR_HANDLES.append(handle)
+    _DLL_DIR_KEYS.add(key)
+
+
+def prepare_runtime_dll_paths() -> None:
+    """Register likely ONNX runtime DLL folders for packaged Windows runs."""
+    candidates: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        meipass_root = Path(str(meipass))
+        candidates.append(meipass_root)
+        candidates.append(meipass_root / "onnxruntime" / "capi")
+
+    try:
+        exe_root = Path(sys.executable).resolve().parent
+        internal_root = exe_root / "_internal"
+        candidates.append(internal_root)
+        candidates.append(internal_root / "onnxruntime" / "capi")
+    except Exception:
+        pass
+
+    try:
+        spec = importlib.util.find_spec("onnxruntime")
+        origin = getattr(spec, "origin", None)
+        if origin:
+            package_root = Path(origin).resolve().parent
+            candidates.append(package_root)
+            candidates.append(package_root / "capi")
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        _register_dll_directory(candidate)
 
 
 def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
@@ -180,6 +235,7 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
     if target_kind == "onnx":
         try:
             _ensure_hf_home()
+            prepare_runtime_dll_paths()
             from phonikud_onnx import Phonikud as OnnxPhonikud
 
             model = OnnxPhonikud(str(target_path))
@@ -189,9 +245,20 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
         except Exception as exc:
             try:
                 # Probe isolated runtime to recover from in-process DLL init issues.
-                _ = _run_onnx_subprocess(target_path, ["\u05e9\u05dc\u05d5\u05dd"])
-                _runtime_mode = MODE_REAL
-                _runtime_details = f"ONNX subprocess backend active: {target_path.name}"
+                probe_inputs = ["\u05e9\u05dc\u05d5\u05dd"]
+                probe_outputs = _run_onnx_subprocess(target_path, probe_inputs)
+                changed = any(
+                    str(rendered or "").strip() != source
+                    for source, rendered in zip(probe_inputs, probe_outputs)
+                )
+                if changed:
+                    _runtime_mode = MODE_REAL
+                    _runtime_details = f"ONNX subprocess backend active: {target_path.name}"
+                else:
+                    _runtime_mode = MODE_FALLBACK
+                    _runtime_details = (
+                        f"ONNX subprocess probe returned identity output: {target_path.name}"
+                    )
                 return "onnx_subprocess", str(target_path), None
             except Exception as sub_exc:
                 _runtime_mode = MODE_ERROR
