@@ -80,6 +80,13 @@ def test_load_service_account_info_prefers_env_path(monkeypatch, tmp_path: Path)
     assert source == "env:HDLE_GCP_SA_JSON_PATH"
 
 
+def test_load_service_account_from_env_key_not_set(monkeypatch):
+    monkeypatch.delenv("HDLE_GCP_TRANSLATE_SA_JSON_PATH", raising=False)
+    data, source = main._load_service_account_from_env_key("HDLE_GCP_TRANSLATE_SA_JSON_PATH")
+    assert data is None
+    assert source == "not_set"
+
+
 def test_candidate_db_paths_default_then_active(monkeypatch, tmp_path: Path):
     default_db = (tmp_path / "default.db").resolve()
     active_db = (tmp_path / "active.db").resolve()

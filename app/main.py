@@ -275,18 +275,29 @@ def _load_service_account_file(path: Path) -> tuple[dict[str, Any] | None, str]:
     return data, "ok"
 
 
+def _load_service_account_from_env_key(env_key: str) -> tuple[dict[str, Any] | None, str]:
+    env_path = (os.environ.get(env_key) or "").strip()
+    if not env_path:
+        return None, "not_set"
+
+    candidate = Path(env_path).expanduser()
+    if not candidate.exists():
+        return None, f"{env_key} (path missing)"
+
+    sa, status = _load_service_account_file(candidate)
+    if sa:
+        return sa, f"env:{env_key}"
+    return None, f"env:{env_key} ({status})"
+
+
 def _load_service_account_info_from_env_or_paths(
     settings: SettingsService,
 ) -> tuple[dict[str, Any] | None, str]:
-    env_path = (os.environ.get("HDLE_GCP_SA_JSON_PATH") or "").strip()
-    if env_path:
-        candidate = Path(env_path).expanduser()
-        if candidate.exists():
-            sa, status = _load_service_account_file(candidate)
-            if sa:
-                return sa, "env:HDLE_GCP_SA_JSON_PATH"
-            return None, f"env:HDLE_GCP_SA_JSON_PATH ({status})"
-        return None, "env:HDLE_GCP_SA_JSON_PATH (path missing)"
+    sa_env, src_env = _load_service_account_from_env_key("HDLE_GCP_SA_JSON_PATH")
+    if sa_env is not None:
+        return sa_env, src_env
+    if src_env != "not_set":
+        return None, src_env
 
     try:
         from app.infra.translators.provider_config_manager import ProviderConfigManager
@@ -387,10 +398,30 @@ def _run_cloud_tests_self_check(
         "tests": {},
     }
 
-    sa_info, credential_source = _load_service_account_info_from_env_or_paths(settings)
-    payload["credential_source"] = credential_source
+    translate_sa, translate_source = _load_service_account_from_env_key(
+        "HDLE_GCP_TRANSLATE_SA_JSON_PATH"
+    )
+    tts_sa, tts_source = _load_service_account_from_env_key(
+        "HDLE_GCP_TTS_SA_JSON_PATH"
+    )
+    shared_sa, shared_source = _load_service_account_info_from_env_or_paths(settings)
 
-    if not sa_info:
+    if translate_sa is None:
+        translate_sa = shared_sa
+        if translate_source == "not_set":
+            translate_source = shared_source
+    if tts_sa is None:
+        tts_sa = shared_sa
+        if tts_source == "not_set":
+            tts_source = shared_source
+
+    payload["credential_sources"] = {
+        "translate": translate_source,
+        "tts": tts_source,
+        "shared": shared_source,
+    }
+
+    if not translate_sa or not tts_sa:
         attempts: list[dict[str, str]] = []
         for db_candidate in _candidate_db_paths_for_credentials(settings, db_path_arg):
             db_initialized = False
@@ -400,13 +431,17 @@ def _run_cloud_tests_self_check(
                 db_initialized = True
                 attempt["db_init"] = "ok"
 
-                sa_info, credential_source = _load_service_account_info_from_credential_store(settings)
+                store_sa, credential_source = _load_service_account_info_from_credential_store(settings)
                 attempt["credential_source"] = credential_source
-                if sa_info:
-                    payload["credential_source"] = credential_source
+                if store_sa:
+                    if translate_sa is None:
+                        translate_sa = store_sa
+                    if tts_sa is None:
+                        tts_sa = store_sa
                     payload["credential_db_path"] = str(db_candidate)
                     attempts.append(attempt)
-                    break
+                    if translate_sa and tts_sa:
+                        break
                 attempt["result"] = "no_credentials"
             except Exception as exc:
                 attempt["db_init"] = "error"
@@ -420,18 +455,22 @@ def _run_cloud_tests_self_check(
             attempts.append(attempt)
         payload["credential_db_attempts"] = attempts
 
-    if not sa_info:
+    if not translate_sa or not tts_sa:
         payload["ok"] = False
         payload["error"] = (
             "Google Cloud service account credentials not found. "
-            "Provide HDLE_GCP_SA_JSON_PATH pointing to Service Account JSON "
+            "Provide HDLE_GCP_SA_JSON_PATH (or provider-specific "
+            "HDLE_GCP_TRANSLATE_SA_JSON_PATH / HDLE_GCP_TTS_SA_JSON_PATH) "
+            "pointing to Service Account JSON "
             "(API keys are not supported for this cloud self-check) or configure CredentialStore."
         )
         return 1, payload
 
     payload["credential_meta"] = {
-        "project_id": _redact_value(str(sa_info.get("project_id", ""))),
-        "client_email": _redact_value(str(sa_info.get("client_email", ""))),
+        "translate_project_id": _redact_value(str(translate_sa.get("project_id", ""))),
+        "translate_client_email": _redact_value(str(translate_sa.get("client_email", ""))),
+        "tts_project_id": _redact_value(str(tts_sa.get("project_id", ""))),
+        "tts_client_email": _redact_value(str(tts_sa.get("client_email", ""))),
     }
 
     from app.infra.translators.base_provider import TranslationRequest
@@ -456,7 +495,6 @@ def _run_cloud_tests_self_check(
         def load_config(self, provider_id: str):
             return ProviderConfig(
                 provider_id=provider_id,
-                enabled=True,
                 auth=ProviderAuthConfig(
                     mode=ProviderAuthMode.SERVICE_ACCOUNT_JSON,
                     service_account_credential_id="self_check:gcp_sa",
@@ -485,31 +523,30 @@ def _run_cloud_tests_self_check(
     translate_ok = False
     try:
         tr_provider = GoogleCloudTranslateProvider(
-            config_manager=_InlineTranslateConfig(sa_info)
+            config_manager=_InlineTranslateConfig(translate_sa)
         )
-        if tr_provider.healthcheck():
-            tr_result = tr_provider.translate(
-                TranslationRequest(
-                    source_text="שלום",
-                    source_lang="he",
-                    target_lang="en",
-                    trace_id="self-check-cloud-translate",
-                )
+        health_ok = tr_provider.healthcheck()
+        tr_result = tr_provider.translate(
+            TranslationRequest(
+                source_text="שלום",
+                source_lang="he",
+                target_lang="en",
+                trace_id="self-check-cloud-translate",
             )
-            translate_ok = bool(getattr(tr_result, "is_success", False))
-            payload["tests"]["google_cloud_translate"] = {
-                "ok": translate_ok,
-                "error_kind": getattr(tr_result, "error_kind", None),
-                "error_message": getattr(tr_result, "error_message", ""),
-                "translated_preview": (
-                    str(getattr(tr_result, "translated_text", ""))[:48] if translate_ok else ""
-                ),
-            }
-        else:
-            payload["tests"]["google_cloud_translate"] = {
-                "ok": False,
-                "error_message": "Provider healthcheck failed.",
-            }
+        )
+        translate_ok = bool(getattr(tr_result, "is_success", False))
+        error_message = str(getattr(tr_result, "error_message", "") or "")
+        if (not translate_ok) and (not error_message) and (not health_ok):
+            error_message = "Provider healthcheck failed."
+        payload["tests"]["google_cloud_translate"] = {
+            "ok": translate_ok,
+            "health_ok": bool(health_ok),
+            "error_kind": getattr(tr_result, "error_kind", None),
+            "error_message": error_message,
+            "translated_preview": (
+                str(getattr(tr_result, "translated_text", ""))[:48] if translate_ok else ""
+            ),
+        }
     except Exception as exc:
         payload["tests"]["google_cloud_translate"] = {
             "ok": False,
@@ -518,7 +555,7 @@ def _run_cloud_tests_self_check(
 
     tts_ok = False
     try:
-        tts_provider = GoogleCloudTTSProvider(config_manager=_InlineAudioConfig(sa_info))
+        tts_provider = GoogleCloudTTSProvider(config_manager=_InlineAudioConfig(tts_sa))
         voices, err = tts_provider.list_voices(language_code="he-IL")
         tts_ok = err is None
         payload["tests"]["google_cloud_tts"] = {
