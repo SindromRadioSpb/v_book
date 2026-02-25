@@ -336,7 +336,13 @@ class ProjectService:
 
             # Delete project (CASCADE will handle all related data)
             session.delete(project)
-            session.commit()
+            from app.infra.db_retry import with_retry_on_locked
+
+            with_retry_on_locked(
+                session.commit,
+                max_retries=4,
+                rollback_callback=session.rollback,
+            )
 
             logger.info(
                 f"Deleted project '{project_name}': "

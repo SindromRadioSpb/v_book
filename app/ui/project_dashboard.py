@@ -11,14 +11,15 @@ from PyQt6.QtWidgets import (
     QLabel,
     QHeaderView,
     QMenu,
+    QProgressDialog,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
 from app.domain.dto import ProjectStats
 from app.ui.models_qt import ProjectListModel
 from app.ui.dialogs import CreateProjectDialog, show_error, show_info
+from app.ui.workers import ProjectDeleteWorker
 from app.services.project_service import ProjectService
-from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ class ProjectDashboard(QWidget):
     def __init__(self):
         super().__init__()
         self.project_service = ProjectService()
+        self._delete_worker: ProjectDeleteWorker | None = None
+        self._delete_progress: QProgressDialog | None = None
         self.init_ui()
         self.load_projects()
 
@@ -260,43 +263,80 @@ class ProjectDashboard(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Perform deletion
-        try:
-            with self.project_service.db_service.get_session() as session:
-                report = self.project_service.delete_project(session, project.project_id)
+        self._start_delete_worker(project.project_id)
 
-                if report.success:
-                    # Show success message
-                    show_info(
-                        self,
-                        "Project Deleted",
-                        f"Project '{report.project_name}' deleted successfully.\n\n"
-                        f"Removed:\n"
-                        f"- {report.corpora_deleted} corpora\n"
-                        f"- {report.documents_deleted} documents\n"
-                        f"- {report.sentences_deleted} sentences\n"
-                        f"- {report.lemmas_deleted} lemmas\n"
-                        f"- {report.ngrams_deleted} n-grams\n"
-                        f"- {report.term_cards_deleted} term cards",
-                    )
+    def _start_delete_worker(self, project_id: int) -> None:
+        if self._delete_worker and self._delete_worker.isRunning():
+            return
 
-                    # Refresh project list
-                    self.load_projects()
+        self.delete_btn.setEnabled(False)
+        self._delete_progress = QProgressDialog("Deleting project...", "", 0, 0, self)
+        self._delete_progress.setWindowTitle("Delete Project")
+        self._delete_progress.setCancelButton(None)
+        self._delete_progress.setModal(True)
+        self._delete_progress.setMinimumDuration(0)
+        self._delete_progress.show()
 
-                else:
-                    show_error(
-                        self,
-                        "Deletion Failed",
-                        f"Failed to delete project: {report.error_message}",
-                    )
+        worker = ProjectDeleteWorker(project_id=project_id)
+        self._delete_worker = worker
+        worker.status.connect(self._on_delete_status)
+        worker.finished.connect(self._on_delete_finished)
+        worker.error.connect(self._on_delete_error)
+        worker.start()
 
-        except Exception as e:
-            logger.exception("Failed to delete project")
-            show_error(
+    def _on_delete_status(self, message: str) -> None:
+        self.status_label.setText(message)
+        if self._delete_progress:
+            self._delete_progress.setLabelText(message)
+
+    def _on_delete_finished(self, report) -> None:
+        self._cleanup_delete_worker()
+
+        if report.success:
+            show_info(
                 self,
-                "Error",
-                f"An error occurred while deleting the project:\n\n{str(e)[:200]}",
+                "Project Deleted",
+                f"Project '{report.project_name}' deleted successfully.\n\n"
+                f"Removed:\n"
+                f"- {report.corpora_deleted} corpora\n"
+                f"- {report.documents_deleted} documents\n"
+                f"- {report.sentences_deleted} sentences\n"
+                f"- {report.lemmas_deleted} lemmas\n"
+                f"- {report.ngrams_deleted} n-grams\n"
+                f"- {report.term_cards_deleted} term cards",
             )
+            self.load_projects()
+            self.status_label.setText("Project deleted")
+            return
+
+        show_error(
+            self,
+            "Deletion Failed",
+            f"Failed to delete project: {report.error_message}",
+        )
+        self.status_label.setText("Delete failed")
+
+    def _on_delete_error(self, error_message: str) -> None:
+        self._cleanup_delete_worker()
+        logger.error("Delete worker failed: %s", error_message, exc_info=True)
+        show_error(
+            self,
+            "Error",
+            f"An error occurred while deleting the project:\n\n{error_message[:200]}",
+        )
+        self.status_label.setText("Delete failed")
+
+    def _cleanup_delete_worker(self) -> None:
+        if self._delete_progress:
+            self._delete_progress.close()
+            self._delete_progress.deleteLater()
+            self._delete_progress = None
+
+        if self._delete_worker:
+            self._delete_worker.deleteLater()
+            self._delete_worker = None
+
+        self.on_selection_changed()
 
     def eventFilter(self, obj, event):
         """Handle F2 key to start editing Name column."""
