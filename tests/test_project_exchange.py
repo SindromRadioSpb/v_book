@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from sqlalchemy.orm import Session as SASession
 
 from app.services.db_service import DBService
 from app.services.project_exchange import bundle_format
@@ -344,6 +345,58 @@ def test_export_creates_payload_schema_including_document_sentence(populated_pro
 
         finally:
             payload_conn.close()
+
+
+def test_pronunciation_sidecar_export_chunks_in_clause(populated_project, temp_db, monkeypatch):
+    """Regression: pronunciation sidecar export must chunk large IN-clause lookups."""
+    total_norms = 240
+
+    conn = sqlite3.connect(str(temp_db))
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        for i in range(total_norms):
+            lemma_id = 10_000 + i
+            norm = f"norm_{i:05d}"
+            conn.execute(
+                """
+                INSERT INTO lemma (lemma_id, project_id, lemma_text, pos, norm_text)
+                VALUES (?, 1, ?, 'NOUN', ?)
+                """,
+                (lemma_id, f"lemma_chunk_{i:05d}", norm),
+            )
+            conn.execute(
+                """
+                INSERT INTO pronunciation_entry (lang, src_norm, niqqud_text, source, is_override)
+                VALUES ('he', ?, ?, 'manual', 1)
+                """,
+                (norm, f"niqqud_{i:05d}"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    engine = ProjectExportEngine()
+    monkeypatch.setattr(engine, "_resolve_sqlite_max_variables", lambda session: 32)
+
+    original_execute = SASession.execute
+
+    def guarded_execute(self, statement, *args, **kwargs):
+        params = statement.compile().params
+        norms_param = params.get("src_norm_1")
+        if isinstance(norms_param, list):
+            assert len(norms_param) <= 31, "IN-clause chunk exceeded forced variable limit"
+        return original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(SASession, "execute", guarded_execute)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = Path(tmpdir) / "pronunciation_metadata.tsv"
+        exported = engine._export_pronunciation_metadata(populated_project, out_path)
+
+        assert exported == total_norms
+        content = out_path.read_text(encoding="utf-8").splitlines()
+        assert len(content) == total_norms + 1  # header + rows
+        assert content[0].startswith("lang\tsrc_norm\t")
 
 
 # ==============================================================================

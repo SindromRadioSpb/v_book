@@ -51,6 +51,8 @@ def _get_migrations_dir() -> Path:
 class ProjectExportEngine:
     """Handles export of projects to .hdleproj bundles."""
 
+    _SQLITE_FALLBACK_MAX_VARIABLES = 999
+
     def __init__(self):
         self.db_service = DBService.get_instance()
 
@@ -480,6 +482,37 @@ class ProjectExportEngine:
             pronunciation_metadata_count=pronunciation_metadata_count,
         )
 
+    def _resolve_sqlite_max_variables(self, session) -> int:
+        """Resolve SQLite bind-variable limit for the current session."""
+        from sqlalchemy import text
+
+        try:
+            max_var = session.execute(text("PRAGMA max_variable_number")).scalar()
+            if isinstance(max_var, int) and max_var > 0:
+                return max_var
+        except Exception:
+            # Older SQLite builds may not support this PRAGMA.
+            pass
+
+        try:
+            compile_opts = session.execute(text("PRAGMA compile_options")).scalars().all()
+            for opt in compile_opts:
+                if isinstance(opt, str) and opt.startswith("MAX_VARIABLE_NUMBER="):
+                    value = int(opt.split("=", 1)[1])
+                    if value > 0:
+                        return value
+        except Exception:
+            pass
+
+        return self._SQLITE_FALLBACK_MAX_VARIABLES
+
+    @staticmethod
+    def _chunk_norms(norms: list[str], chunk_size: int):
+        """Yield deterministic norm chunks for IN-clause queries."""
+        size = max(1, int(chunk_size))
+        for idx in range(0, len(norms), size):
+            yield norms[idx: idx + size]
+
     def _export_pronunciation_metadata(self, project_id: int, out_path: Path) -> int:
         """Export project-intersection pronunciation metadata sidecar."""
         from sqlalchemy import text
@@ -519,12 +552,27 @@ class ProjectExportEngine:
             if not norms:
                 return 0
 
-            rows = session.execute(
-                select(PronunciationEntry)
-                .where(PronunciationEntry.lang == src_lang)
-                .where(PronunciationEntry.src_norm.in_(sorted(norms)))
-                .order_by(PronunciationEntry.src_norm.asc())
-            ).scalars().all()
+            sorted_norms = sorted(norms)
+            max_variables = self._resolve_sqlite_max_variables(session)
+            # One bind parameter is consumed by `lang == src_lang`.
+            norm_chunk_size = max(1, max_variables - 1)
+            if len(sorted_norms) > norm_chunk_size:
+                logger.info(
+                    "Chunking pronunciation metadata export for project %s: %s norms, chunk_size=%s",
+                    project_id,
+                    len(sorted_norms),
+                    norm_chunk_size,
+                )
+
+            rows = []
+            for norm_chunk in self._chunk_norms(sorted_norms, norm_chunk_size):
+                chunk_rows = session.execute(
+                    select(PronunciationEntry)
+                    .where(PronunciationEntry.lang == src_lang)
+                    .where(PronunciationEntry.src_norm.in_(norm_chunk))
+                    .order_by(PronunciationEntry.src_norm.asc())
+                ).scalars().all()
+                rows.extend(chunk_rows)
             if not rows:
                 return 0
 
