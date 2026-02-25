@@ -144,11 +144,17 @@ class DictionaryService:
         }
 
         column_attr = sort_map.get(sort_column, LemmaProjectStat.freq_abs)
+        # Keep deterministic tie-break aligned with stats PK/index when sorting by
+        # stats columns to avoid temp sort plans on very large projects.
+        if sort_column in {"freq_abs", "doc_freq"}:
+            tie_breaker = LemmaProjectStat.lemma_id
+        else:
+            tie_breaker = Lemma.lemma_id
 
         if sort_direction == "asc":
-            stmt = stmt.order_by(column_attr.asc(), Lemma.lemma_id.asc())
+            stmt = stmt.order_by(column_attr.asc(), tie_breaker.asc())
         else:
-            stmt = stmt.order_by(column_attr.desc(), Lemma.lemma_id.asc())
+            stmt = stmt.order_by(column_attr.desc(), tie_breaker.asc())
 
         return stmt
 
