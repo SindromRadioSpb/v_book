@@ -1,15 +1,18 @@
 """Main application window."""
 import logging
+import subprocess
 from pathlib import Path
 from time import monotonic
 from typing import Dict, List, Optional, Set
 
-from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStackedWidget, QMenuBar
+from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStackedWidget, QMenuBar, QLabel
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 
+from app.infra.db_path_resolver import classify_db_profile
 from app.infra.settings import SettingsService
 from app.services.audio_player_service import AudioPlayerService
+from app.services.db_service import DBService
 from app.ui.workspace_manager import WorkspaceManager
 from app.ui.command_palette import ActionsRegistry, ActionSpec, CommandPaletteDialog
 from app.ui.project_dashboard import ProjectDashboard
@@ -67,6 +70,7 @@ class AppWindow(QMainWindow):
         self._health_check_worker = None
 
         self.init_ui()
+        self._refresh_active_db_indicator()
 
         # Restore window geometry
         self.settings.restore_window_geometry(self)
@@ -360,6 +364,8 @@ class AppWindow(QMainWindow):
 
         # Menu bar (now workspace exists)
         self.create_menu_bar()
+        self._db_indicator = QLabel("")
+        self.statusBar().addPermanentWidget(self._db_indicator)
 
         # Connect sidebar actions
         self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)
@@ -403,6 +409,23 @@ class AppWindow(QMainWindow):
         QTimer.singleShot(0, self._run_startup_flows)
 
         logger.info("AppWindow initialized")
+
+    def _get_active_db_path(self) -> Path:
+        db_service = DBService.get_instance()
+        return Path(db_service.db_manager.db_path).resolve()
+
+    def _refresh_active_db_indicator(self) -> None:
+        if not hasattr(self, "_db_indicator") or self._db_indicator is None:
+            return
+        try:
+            db_path = self._get_active_db_path()
+            profile = classify_db_profile(db_path, settings=self.settings)
+            self._db_indicator.setText(f"DB: {profile} ({db_path.name})")
+            self._db_indicator.setToolTip(str(db_path))
+        except Exception as exc:
+            logger.debug("Failed to refresh DB indicator: %s", exc)
+            self._db_indicator.setText("DB: unknown")
+            self._db_indicator.setToolTip("")
 
     def _init_audio_player_dock(self):
         """Initialize Now Playing dock."""
@@ -531,6 +554,7 @@ class AppWindow(QMainWindow):
             open_resources_manager=self.open_resources_manager,
             open_mt_settings=self.open_provider_settings,
             open_audio_settings=self.open_audio_provider_settings,
+            restart_with_db_path=self.restart_with_db_path,
         )
         if result == 0:
             self._show_nav_status("First-run setup skipped. You can open it later from Tools.")
@@ -601,6 +625,11 @@ class AppWindow(QMainWindow):
         self._set_action_shortcuts(resources_action, "Ctrl+Alt+R")
         resources_action.triggered.connect(self.open_resources_manager)
         tools_menu.addAction(resources_action)
+
+        switch_db_action = QAction("S&witch Database...", self)
+        self._set_action_shortcuts(switch_db_action, "Ctrl+Alt+D")
+        switch_db_action.triggered.connect(self.open_database_switch_dialog)
+        tools_menu.addAction(switch_db_action)
 
         health_action = QAction("Run &Health Check...", self)
         health_action.triggered.connect(self.open_system_health_check)
@@ -853,6 +882,36 @@ class AppWindow(QMainWindow):
 
         logger.info("Opening resources manager dialog")
         show_resources_manager(parent=self)
+
+    def restart_with_db_path(self, db_path: Path) -> bool:
+        from app.ui.database_switch_dialog import DatabaseSwitchDialog
+
+        command = DatabaseSwitchDialog.build_restart_command(Path(db_path))
+        try:
+            subprocess.Popen(command)
+        except Exception:
+            logger.exception("Failed to relaunch app with DB path: %s", db_path)
+            return False
+
+        self._show_nav_status("Restarting with selected database...")
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        return True
+
+    def open_database_switch_dialog(self):
+        """Open database profile switch dialog."""
+        from app.ui.database_switch_dialog import show_database_switch_dialog
+
+        logger.info("Opening database switch dialog")
+        result = show_database_switch_dialog(
+            current_db_path=self._get_active_db_path(),
+            parent=self,
+            restart_callback=self.restart_with_db_path,
+        )
+        if result == 0:
+            self._show_nav_status("Database switch cancelled.")
 
     def open_system_health_check(self):
         """Run unified health checks and show report."""
@@ -1190,6 +1249,15 @@ class AppWindow(QMainWindow):
         ))
 
         registry.register(ActionSpec(
+            action_id="tools.switch_database",
+            title="Switch Database",
+            keywords=["database", "db", "profile", "restart", "baseline"],
+            shortcut="Ctrl+Alt+D",
+            callback=self.open_database_switch_dialog,
+            category="Tools"
+        ))
+
+        registry.register(ActionSpec(
             action_id="tools.health_check",
             title="Run Health Check",
             keywords=["health", "check", "diagnostics", "bootstrap", "resources"],
@@ -1369,6 +1437,7 @@ class AppWindow(QMainWindow):
             "tools.verification": self.open_verification,
             "tools.import_dictionary": self.open_import_wizard,
             "tools.resources_manager": self.open_resources_manager,
+            "tools.switch_database": self.open_database_switch_dialog,
             "tools.health_check": self.open_system_health_check,
             "premium.tm": self.open_translation_management,
             "premium.coverage": self.open_coverage,

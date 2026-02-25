@@ -112,6 +112,7 @@ a = Analysis(
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',
         'app.ui.dialogs.pronunciation_bootstrap_dialog',
+        'app.ui.database_switch_dialog',
         'app.ui.resources_manager_dialog',
         'app.ui.first_run_wizard',
         'app.ui.audio_provider_settings_dialog',
