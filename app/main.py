@@ -13,7 +13,7 @@ from typing import Any
 
 from PyQt6.QtWidgets import QApplication
 
-from app.infra.db_path_resolver import resolve_db_path
+from app.infra.db_path_resolver import get_default_db_path, resolve_db_path
 from app.infra.resource_paths import ResourcePaths
 from app.infra.settings import SettingsService
 from app.infra.util.logging import setup_logging
@@ -28,6 +28,14 @@ from app.infra.translators.local_providers_setup import (
 from app.ui.app_window import AppWindow
 
 logger = logging.getLogger(__name__)
+
+_PHONIKUD_SUBPROCESS_SENTINELS = (
+    "phonikud_onnx",
+    "Phonikud",
+    "add_diacritics",
+    "json.loads",
+    "outputs",
+)
 
 
 def get_app_dir() -> Path:
@@ -61,6 +69,51 @@ def _emit_self_check(payload: dict[str, Any], out_path: str | None = None) -> No
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(text_payload + "\n", encoding="utf-8")
     print(text_payload)
+
+
+def _is_phonikud_subprocess_script(script: str) -> bool:
+    snippet = (script or "").strip()
+    if not snippet:
+        return False
+    lowered = snippet.lower()
+    return all(token.lower() in lowered for token in _PHONIKUD_SUBPROCESS_SENTINELS)
+
+
+def _run_phonikud_subprocess_bridge() -> int:
+    try:
+        from phonikud_onnx import Phonikud
+    except Exception as exc:
+        print(f"phonikud_subprocess_bridge import error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        raw = sys.stdin.read() or "{}"
+        data = json.loads(raw)
+        model_path = str(data.get("model_path") or "")
+        texts = data.get("texts") or []
+        model = Phonikud(model_path)
+        outputs: list[str] = []
+        for text in texts:
+            normalized = str(text or "")
+            try:
+                rendered = str(model.add_diacritics(normalized) or "").strip()
+            except Exception:
+                rendered = ""
+            outputs.append(rendered or normalized)
+        sys.stdout.write(json.dumps({"outputs": outputs}, ensure_ascii=False))
+        return 0
+    except Exception as exc:
+        print(f"phonikud_subprocess_bridge runtime error: {exc}", file=sys.stderr)
+        return 1
+
+
+def _handle_embedded_python_compat(argv: list[str]) -> int | None:
+    if len(argv) < 3 or argv[1] != "-c":
+        return None
+    inline_script = argv[2]
+    if _is_phonikud_subprocess_script(inline_script):
+        return _run_phonikud_subprocess_bridge()
+    return None
 
 
 def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, Any]]:
@@ -207,15 +260,72 @@ def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -
         return 1, payload
 
 
-def _load_service_account_info(settings: SettingsService) -> tuple[dict[str, Any] | None, str]:
+def _load_service_account_file(path: Path) -> tuple[dict[str, Any] | None, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return None, f"invalid_json:{exc}"
+
+    if not isinstance(data, dict):
+        return None, "invalid_json:not_object"
+    if str(data.get("type") or "").strip() != "service_account":
+        return None, "invalid_json:not_service_account"
+    if not str(data.get("project_id") or "").strip():
+        return None, "invalid_json:missing_project_id"
+    return data, "ok"
+
+
+def _load_service_account_info_from_env_or_paths(
+    settings: SettingsService,
+) -> tuple[dict[str, Any] | None, str]:
     env_path = (os.environ.get("HDLE_GCP_SA_JSON_PATH") or "").strip()
     if env_path:
         candidate = Path(env_path).expanduser()
         if candidate.exists():
-            sa = json.loads(candidate.read_text(encoding="utf-8"))
-            return sa, "env:HDLE_GCP_SA_JSON_PATH"
+            sa, status = _load_service_account_file(candidate)
+            if sa:
+                return sa, "env:HDLE_GCP_SA_JSON_PATH"
+            return None, f"env:HDLE_GCP_SA_JSON_PATH ({status})"
         return None, "env:HDLE_GCP_SA_JSON_PATH (path missing)"
 
+    try:
+        from app.infra.translators.provider_config_manager import ProviderConfigManager
+
+        mt_cfg = ProviderConfigManager(settings=settings)
+        mt_provider_cfg = mt_cfg.load_config("google_cloud_translate")
+        mt_path = str(mt_provider_cfg.auth.service_account_path or "").strip()
+        if mt_path:
+            candidate = Path(mt_path).expanduser()
+            if candidate.exists():
+                sa, status = _load_service_account_file(candidate)
+                if sa:
+                    return sa, "settings_path:google_cloud_translate"
+                return None, f"settings_path:google_cloud_translate ({status})"
+    except Exception:
+        pass
+
+    try:
+        from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
+
+        audio_cfg = AudioProviderConfigManager(settings=settings)
+        tts_cfg = audio_cfg.load_config("google_cloud_tts")
+        tts_path = str(tts_cfg.service_account_path or "").strip()
+        if tts_path:
+            candidate = Path(tts_path).expanduser()
+            if candidate.exists():
+                sa, status = _load_service_account_file(candidate)
+                if sa:
+                    return sa, "settings_path:google_cloud_tts"
+                return None, f"settings_path:google_cloud_tts ({status})"
+    except Exception:
+        pass
+
+    return None, "none"
+
+
+def _load_service_account_info_from_credential_store(
+    settings: SettingsService,
+) -> tuple[dict[str, Any] | None, str]:
     try:
         from app.infra.translators.provider_config_manager import ProviderConfigManager
 
@@ -225,7 +335,9 @@ def _load_service_account_info(settings: SettingsService) -> tuple[dict[str, Any
         if cred_id:
             raw = mt_cfg.get_credential(cred_id)
             if raw:
-                return json.loads(raw), "credential_store:google_cloud_translate"
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data, "credential_store:google_cloud_translate"
     except Exception:
         pass
 
@@ -234,13 +346,35 @@ def _load_service_account_info(settings: SettingsService) -> tuple[dict[str, Any
 
         audio_cfg = AudioProviderConfigManager(settings=settings)
         tts_cfg = audio_cfg.load_config("google_cloud_tts")
-        sa = audio_cfg.get_service_account_info(tts_cfg)
-        if sa:
-            return sa, "credential_store:google_cloud_tts"
+        cred_id = tts_cfg.service_account_credential_id
+        if cred_id:
+            raw = audio_cfg.get_credential(cred_id)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data, "credential_store:google_cloud_tts"
     except Exception:
         pass
 
     return None, "none"
+
+
+def _candidate_db_paths_for_credentials(
+    settings: SettingsService,
+    db_path_arg: str | None,
+) -> list[Path]:
+    candidates: list[Path] = []
+    if db_path_arg:
+        resolved = resolve_db_path(db_path_arg, settings=settings).path
+        candidates.append(Path(resolved).resolve())
+    else:
+        default_db = get_default_db_path(settings=settings)
+        candidates.append(Path(default_db).resolve())
+        active_db = resolve_db_path(None, settings=settings).path
+        active_db = Path(active_db).resolve()
+        if active_db not in candidates:
+            candidates.append(active_db)
+    return candidates
 
 
 def _run_cloud_tests_self_check(
@@ -253,141 +387,153 @@ def _run_cloud_tests_self_check(
         "tests": {},
     }
 
-    db_initialized = False
+    sa_info, credential_source = _load_service_account_info_from_env_or_paths(settings)
+    payload["credential_source"] = credential_source
+
+    if not sa_info:
+        attempts: list[dict[str, str]] = []
+        for db_candidate in _candidate_db_paths_for_credentials(settings, db_path_arg):
+            db_initialized = False
+            attempt: dict[str, str] = {"db_path": str(db_candidate)}
+            try:
+                DBService.initialize(db_candidate)
+                db_initialized = True
+                attempt["db_init"] = "ok"
+
+                sa_info, credential_source = _load_service_account_info_from_credential_store(settings)
+                attempt["credential_source"] = credential_source
+                if sa_info:
+                    payload["credential_source"] = credential_source
+                    payload["credential_db_path"] = str(db_candidate)
+                    attempts.append(attempt)
+                    break
+                attempt["result"] = "no_credentials"
+            except Exception as exc:
+                attempt["db_init"] = "error"
+                attempt["error"] = str(exc)
+            finally:
+                if db_initialized:
+                    try:
+                        DBService.shutdown()
+                    except Exception:
+                        pass
+            attempts.append(attempt)
+        payload["credential_db_attempts"] = attempts
+
+    if not sa_info:
+        payload["ok"] = False
+        payload["error"] = (
+            "Google Cloud service account credentials not found. "
+            "Provide HDLE_GCP_SA_JSON_PATH pointing to Service Account JSON "
+            "(API keys are not supported for this cloud self-check) or configure CredentialStore."
+        )
+        return 1, payload
+
+    payload["credential_meta"] = {
+        "project_id": _redact_value(str(sa_info.get("project_id", ""))),
+        "client_email": _redact_value(str(sa_info.get("client_email", ""))),
+    }
+
+    from app.infra.translators.base_provider import TranslationRequest
+    from app.infra.translators.provider_config import (
+        ProviderAuthConfig,
+        ProviderAuthMode,
+        ProviderConfig,
+    )
+    from app.infra.translators.providers.google_cloud_translate_provider import (
+        GoogleCloudTranslateProvider,
+    )
+    from app.infra.audio.audio_provider_config import (
+        AudioProviderAuthMode,
+        AudioProviderConfig,
+    )
+    from app.infra.audio.providers.google_cloud_tts_provider import GoogleCloudTTSProvider
+
+    class _InlineTranslateConfig:
+        def __init__(self, inline_sa: dict[str, Any]):
+            self._inline_sa = inline_sa
+
+        def load_config(self, provider_id: str):
+            return ProviderConfig(
+                provider_id=provider_id,
+                enabled=True,
+                auth=ProviderAuthConfig(
+                    mode=ProviderAuthMode.SERVICE_ACCOUNT_JSON,
+                    service_account_credential_id="self_check:gcp_sa",
+                ),
+            )
+
+        def get_credential(self, credential_id: str):
+            return json.dumps(self._inline_sa)
+
+    class _InlineAudioConfig:
+        def __init__(self, inline_sa: dict[str, Any]):
+            self._inline_sa = inline_sa
+
+        def load_config(self, provider_id: str):
+            return AudioProviderConfig(
+                provider_id=provider_id,
+                enabled=True,
+                auth_mode=AudioProviderAuthMode.SERVICE_ACCOUNT_JSON,
+                timeout_seconds=10.0,
+                retry_max_attempts=1,
+            )
+
+        def get_service_account_info(self, cfg):
+            return self._inline_sa
+
+    translate_ok = False
     try:
-        resolved_db = resolve_db_path(db_path_arg, settings=settings)
-        db_path = Path(resolved_db.path).resolve()
-        payload["credential_db_path"] = str(db_path)
-        payload["credential_db_source"] = resolved_db.source
-        try:
-            DBService.initialize(db_path)
-            db_initialized = True
-        except Exception as exc:
-            payload["credential_db_init_error"] = str(exc)
-
-        sa_info, credential_source = _load_service_account_info(settings)
-        payload["credential_source"] = credential_source
-
-        if not sa_info:
-            payload["ok"] = False
-            payload["error"] = (
-                "Google Cloud service account credentials not found. "
-                "Provide HDLE_GCP_SA_JSON_PATH or configure CredentialStore."
+        tr_provider = GoogleCloudTranslateProvider(
+            config_manager=_InlineTranslateConfig(sa_info)
+        )
+        if tr_provider.healthcheck():
+            tr_result = tr_provider.translate(
+                TranslationRequest(
+                    source_text="שלום",
+                    source_lang="he",
+                    target_lang="en",
+                    trace_id="self-check-cloud-translate",
+                )
             )
-            return 1, payload
-
-        payload["credential_meta"] = {
-            "project_id": _redact_value(str(sa_info.get("project_id", ""))),
-            "client_email": _redact_value(str(sa_info.get("client_email", ""))),
-        }
-
-        from app.infra.translators.base_provider import TranslationRequest
-        from app.infra.translators.provider_config import (
-            ProviderAuthConfig,
-            ProviderAuthMode,
-            ProviderConfig,
-        )
-        from app.infra.translators.providers.google_cloud_translate_provider import (
-            GoogleCloudTranslateProvider,
-        )
-        from app.infra.audio.audio_provider_config import (
-            AudioProviderAuthMode,
-            AudioProviderConfig,
-        )
-        from app.infra.audio.providers.google_cloud_tts_provider import GoogleCloudTTSProvider
-
-        class _InlineTranslateConfig:
-            def __init__(self, inline_sa: dict[str, Any]):
-                self._inline_sa = inline_sa
-
-            def load_config(self, provider_id: str):
-                return ProviderConfig(
-                    provider_id=provider_id,
-                    enabled=True,
-                    auth=ProviderAuthConfig(
-                        mode=ProviderAuthMode.SERVICE_ACCOUNT_JSON,
-                        service_account_credential_id="self_check:gcp_sa",
-                    ),
-                )
-
-            def get_credential(self, credential_id: str):
-                return json.dumps(self._inline_sa)
-
-        class _InlineAudioConfig:
-            def __init__(self, inline_sa: dict[str, Any]):
-                self._inline_sa = inline_sa
-
-            def load_config(self, provider_id: str):
-                return AudioProviderConfig(
-                    provider_id=provider_id,
-                    enabled=True,
-                    auth_mode=AudioProviderAuthMode.SERVICE_ACCOUNT_JSON,
-                    timeout_seconds=10.0,
-                    retry_max_attempts=1,
-                )
-
-            def get_service_account_info(self, cfg):
-                return self._inline_sa
-
-        translate_ok = False
-        try:
-            tr_provider = GoogleCloudTranslateProvider(
-                config_manager=_InlineTranslateConfig(sa_info)
-            )
-            if tr_provider.healthcheck():
-                tr_result = tr_provider.translate(
-                    TranslationRequest(
-                        source_text="שלום",
-                        source_lang="he",
-                        target_lang="en",
-                        trace_id="self-check-cloud-translate",
-                    )
-                )
-                translate_ok = bool(getattr(tr_result, "is_success", False))
-                payload["tests"]["google_cloud_translate"] = {
-                    "ok": translate_ok,
-                    "error_kind": getattr(tr_result, "error_kind", None),
-                    "error_message": getattr(tr_result, "error_message", ""),
-                    "translated_preview": (
-                        str(getattr(tr_result, "translated_text", ""))[:48] if translate_ok else ""
-                    ),
-                }
-            else:
-                payload["tests"]["google_cloud_translate"] = {
-                    "ok": False,
-                    "error_message": "Provider healthcheck failed.",
-                }
-        except Exception as exc:
+            translate_ok = bool(getattr(tr_result, "is_success", False))
+            payload["tests"]["google_cloud_translate"] = {
+                "ok": translate_ok,
+                "error_kind": getattr(tr_result, "error_kind", None),
+                "error_message": getattr(tr_result, "error_message", ""),
+                "translated_preview": (
+                    str(getattr(tr_result, "translated_text", ""))[:48] if translate_ok else ""
+                ),
+            }
+        else:
             payload["tests"]["google_cloud_translate"] = {
                 "ok": False,
-                "error_message": str(exc),
+                "error_message": "Provider healthcheck failed.",
             }
+    except Exception as exc:
+        payload["tests"]["google_cloud_translate"] = {
+            "ok": False,
+            "error_message": str(exc),
+        }
 
-        tts_ok = False
-        try:
-            tts_provider = GoogleCloudTTSProvider(config_manager=_InlineAudioConfig(sa_info))
-            voices, err = tts_provider.list_voices(language_code="he-IL")
-            tts_ok = err is None
-            payload["tests"]["google_cloud_tts"] = {
-                "ok": tts_ok,
-                "error_message": err or "",
-                "voices_count": len(voices or []),
-            }
-        except Exception as exc:
-            payload["tests"]["google_cloud_tts"] = {
-                "ok": False,
-                "error_message": str(exc),
-            }
+    tts_ok = False
+    try:
+        tts_provider = GoogleCloudTTSProvider(config_manager=_InlineAudioConfig(sa_info))
+        voices, err = tts_provider.list_voices(language_code="he-IL")
+        tts_ok = err is None
+        payload["tests"]["google_cloud_tts"] = {
+            "ok": tts_ok,
+            "error_message": err or "",
+            "voices_count": len(voices or []),
+        }
+    except Exception as exc:
+        payload["tests"]["google_cloud_tts"] = {
+            "ok": False,
+            "error_message": str(exc),
+        }
 
-        payload["ok"] = bool(translate_ok and tts_ok)
-        return (0 if payload["ok"] else 1), payload
-    finally:
-        if db_initialized:
-            try:
-                DBService.shutdown()
-            except Exception:
-                pass
-
+    payload["ok"] = bool(translate_ok and tts_ok)
+    return (0 if payload["ok"] else 1), payload
 
 def run_self_check(mode: str, *, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
     settings = SettingsService.get_instance()
@@ -409,6 +555,10 @@ def run_self_check(mode: str, *, db_path_arg: str | None) -> tuple[int, dict[str
 
 def main():
     """Main application entry point."""
+    compat_exit = _handle_embedded_python_compat(sys.argv)
+    if compat_exit is not None:
+        return compat_exit
+
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="HDLE Premium - Terminology Extraction Tool")
     parser.add_argument(
@@ -527,3 +677,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
