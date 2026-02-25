@@ -106,3 +106,63 @@ Expected:
 - prebuild validate includes `CHECK 0: Required Local Modules` and reports `phonikud: IMPORT OK`,
 - targeted pytest suite passes,
 - no repeated modal spam for transient DB busy windows.
+
+## Performance Smoke (Hewiki)
+
+Performance contract source:
+
+- `docs/PERFORMANCE_SLO.md`
+
+SLO budgets (hewiki-scale, warm-up 1 + runs 5):
+
+- Dictionary first page: `p50 <= 0.20s`, `p95 <= 0.50s`
+- Dictionary count: `p50 <= 0.50s`, `p95 <= 1.50s`
+- Document picker open (empty): `p50 <= 0.10s`, `p95 <= 0.30s`
+- Document picker search: `p50 <= 0.60s`, `p95 <= 1.50s`
+- Export cancel acknowledgement: `p95 <= 1.0s`
+
+Measurement commands:
+
+```powershell
+cd J:\Project_Vibe\V_book
+python scripts/perf_harness.py --db-path "M:\V_book\HDLE_Processing\hewiki_gpu_processing.db" --runs 5 --warmup 1 --out perf_hewiki.json
+python scripts/perf_harness.py --db-path "J:\Project_Vibe\V_book\hdle_premium.db" --runs 5 --warmup 1 --out perf_dev.json
+```
+
+Query plan audit:
+
+```powershell
+python scripts/query_plan_audit.py --db-path "M:\V_book\HDLE_Processing\hewiki_gpu_processing.db" --out docs/PERF_QUERY_PLANS_HEWIKI.md
+```
+
+Smoke expectations:
+
+- Dictionary first page/count remain within SLO budgets (or deviations are documented with environment notes).
+- Document picker open/search remain responsive and non-blocking.
+- Export cancellation remains responsive and does not leave UI blocked.
+
+## Prebuild Profiles
+
+Default profile (strict, write checks enabled):
+
+```powershell
+python scripts/prebuild_validate.py --db-path "J:\Project_Vibe\V_book\hdle_premium.db"
+```
+
+Readonly reference profile (huge DB pipeline, write checks skipped):
+
+```powershell
+python scripts/prebuild_validate.py --profile reference-ro --db-path "M:\V_book\HDLE_Processing\hewiki_gpu_processing.db" --skip-quick-check
+```
+
+Expected for `reference-ro`:
+
+- write checks (`Project Lifecycle`, `Export/Import`) are reported as `SKIPPED`,
+- final status is `PASS_WITH_SKIPS`,
+- exit code is success.
+
+## Environment Limitations (Known)
+
+- Readonly hewiki DB cannot execute write probes in prebuild; use `--profile reference-ro`.
+- In this environment, `python -m pytest -q` may fail in capture teardown; use
+  targeted/regression suites for release evidence and record this constraint.
