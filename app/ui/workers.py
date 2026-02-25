@@ -876,10 +876,108 @@ class DocumentsPageWorker(QThread):
             self.error.emit(self.request_id, str(e))
 
 
+class ProjectDocumentsPageWorker(QThread):
+    """Worker for project-scoped document picker queries (search + paging)."""
+
+    page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
+    error = pyqtSignal(int, str)              # request_id, message
+    status = pyqtSignal(int, str)             # request_id, status text
+
+    def __init__(
+        self,
+        *,
+        request_id: int,
+        project_id: int,
+        search_query: Optional[str],
+        page_size: int,
+        page_index: int,
+    ):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.project_id = int(project_id)
+        self.search_query = (search_query or "").strip() or None
+        self.page_size = max(1, int(page_size))
+        self.page_index = max(1, int(page_index))
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.document_service import DocumentService
+
+            self.status.emit(self.request_id, "Loading documents...")
+            db_service = DBService.get_instance()
+            doc_service = DocumentService()
+
+            with db_service.get_session() as session:
+                if self._cancelled:
+                    return
+
+                total_count = doc_service.get_project_documents_total_count(
+                    session,
+                    self.project_id,
+                    search_query=self.search_query,
+                )
+
+                if self._cancelled:
+                    return
+
+                offset = (self.page_index - 1) * self.page_size
+                sort_by = "file_name" if self.search_query else "doc_id"
+                sort_dir = "asc" if self.search_query else "desc"
+                rows = doc_service.fetch_project_documents_page(
+                    session,
+                    self.project_id,
+                    search_query=self.search_query,
+                    sort_by=sort_by,
+                    sort_dir=sort_dir,
+                    limit=self.page_size,
+                    offset=offset,
+                )
+
+                if self._cancelled:
+                    return
+                self.page_loaded.emit(self.request_id, int(total_count), rows)
+        except Exception as e:
+            logger.exception("Project documents page worker error")
+            self.error.emit(self.request_id, str(e))
+
+
+class ProjectDeleteWorker(QThread):
+    """Background worker for project deletion to keep UI responsive."""
+
+    status = pyqtSignal(str)
+    finished = pyqtSignal(object)  # DeleteReport
+    error = pyqtSignal(str)
+
+    def __init__(self, project_id: int):
+        super().__init__()
+        self.project_id = int(project_id)
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.project_service import ProjectService
+
+            self.status.emit("Deleting project...")
+            db = DBService.get_instance()
+            service = ProjectService()
+            with db.get_session() as session:
+                report = service.delete_project(session, self.project_id)
+            self.finished.emit(report)
+        except Exception as e:
+            logger.exception("Project deletion failed")
+            self.error.emit(str(e))
+
+
 class DictionarySearchWorker(QThread):
     """Worker for searching lemmas with pagination (non-blocking)."""
 
-    results_ready = pyqtSignal(list, int)  # (rows: List[Tuple[Lemma, LemmaProjectStat]], total_count: int)
+    results_ready = pyqtSignal(list)  # rows: List[Tuple[Lemma, LemmaProjectStat]]
+    count_ready = pyqtSignal(int)     # total_count
     error = pyqtSignal(str)
 
     def __init__(
@@ -927,7 +1025,9 @@ class DictionarySearchWorker(QThread):
                 if self._cancelled:
                     return
 
-                # Get total count
+                self.results_ready.emit(rows)
+
+                # Get total count in the second stage to keep first-page UX responsive.
                 total_count = dict_service.count_lemmas(
                     session,
                     project_id=self.project_id,
@@ -935,7 +1035,7 @@ class DictionarySearchWorker(QThread):
                 )
 
                 if not self._cancelled:
-                    self.results_ready.emit(rows, total_count)
+                    self.count_ready.emit(total_count)
 
         except Exception as e:
             logger.exception("Dictionary search error")

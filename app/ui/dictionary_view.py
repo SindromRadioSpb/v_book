@@ -1,4 +1,4 @@
-"""Dictionary view - lemmas and MWE list."""
+﻿"""Dictionary view - lemmas and MWE list."""
 import logging
 from typing import List, Optional
 
@@ -72,6 +72,8 @@ class DictionaryView(QWidget):
         self._translation_request_seq = 0
         self._active_translation_seq = 0
         self._pending_translation_lemmas: Optional[List[LemmaStats]] = None
+        self.sort_column = str(self.settings.get_string("dictionary_view/sort_column", "freq_abs") or "freq_abs")
+        self.sort_direction = str(self.settings.get_string("dictionary_view/sort_direction", "desc") or "desc")
 
         self.init_ui()
         self.perform_search()
@@ -147,13 +149,13 @@ class DictionaryView(QWidget):
         pagination_layout = QHBoxLayout()
 
         # First/Prev buttons
-        self.first_btn = QPushButton("«")
+        self.first_btn = QPushButton("В«")
         self.first_btn.setToolTip("First page")
         self.first_btn.setMaximumWidth(40)
         self.first_btn.clicked.connect(self.on_first_page)
         pagination_layout.addWidget(self.first_btn)
 
-        self.prev_btn = QPushButton("‹")
+        self.prev_btn = QPushButton("вЂ№")
         self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
         self.prev_btn.setMaximumWidth(40)
         self.prev_btn.clicked.connect(self.on_prev_page)
@@ -173,13 +175,13 @@ class DictionaryView(QWidget):
         pagination_layout.addWidget(self.page_count_label)
 
         # Next/Last buttons
-        self.next_btn = QPushButton("›")
+        self.next_btn = QPushButton("вЂє")
         self.next_btn.setToolTip("Next page (Ctrl+Right)")
         self.next_btn.setMaximumWidth(40)
         self.next_btn.clicked.connect(self.on_next_page)
         pagination_layout.addWidget(self.next_btn)
 
-        self.last_btn = QPushButton("»")
+        self.last_btn = QPushButton("В»")
         self.last_btn.setToolTip("Last page")
         self.last_btn.setMaximumWidth(40)
         self.last_btn.clicked.connect(self.on_last_page)
@@ -188,7 +190,7 @@ class DictionaryView(QWidget):
         pagination_layout.addSpacing(20)
 
         # Range label
-        self.range_label = QLabel("Showing 0–0 of 0")
+        self.range_label = QLabel("Showing 0вЂ“0 of 0")
         pagination_layout.addWidget(self.range_label)
 
         pagination_layout.addSpacing(20)
@@ -227,7 +229,11 @@ class DictionaryView(QWidget):
         self.lemma_table.setEditTriggers(
             QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
         )
-        self.lemma_table.setSortingEnabled(True)
+        self.lemma_table.setSortingEnabled(False)
+        header = self.lemma_table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_header_sort_clicked)
 
         # Install event filter for Enter key editing and keyboard shortcuts
         self.lemma_table.installEventFilter(self)
@@ -275,6 +281,41 @@ class DictionaryView(QWidget):
         layout.addWidget(self.status_label)
 
         self.setLayout(layout)
+        self._apply_sort_indicator()
+
+    _SORT_COLUMN_BY_SECTION = {
+        1: "lemma_text",
+        2: "pos",
+        3: "freq_abs",
+        4: "doc_freq",
+    }
+    _SORT_SECTION_BY_COLUMN = {value: key for key, value in _SORT_COLUMN_BY_SECTION.items()}
+
+    def _apply_sort_indicator(self) -> None:
+        section = self._SORT_SECTION_BY_COLUMN.get(self.sort_column, 3)
+        order = (
+            Qt.SortOrder.AscendingOrder
+            if str(self.sort_direction).lower() == "asc"
+            else Qt.SortOrder.DescendingOrder
+        )
+        self.lemma_table.horizontalHeader().setSortIndicator(section, order)
+
+    def on_header_sort_clicked(self, section: int) -> None:
+        sort_column = self._SORT_COLUMN_BY_SECTION.get(int(section))
+        if not sort_column:
+            return
+
+        if self.sort_column == sort_column:
+            self.sort_direction = "asc" if self.sort_direction == "desc" else "desc"
+        else:
+            self.sort_column = sort_column
+            self.sort_direction = "asc" if sort_column in {"lemma_text", "pos"} else "desc"
+
+        self.settings.set_value("dictionary_view/sort_column", self.sort_column)
+        self.settings.set_value("dictionary_view/sort_direction", self.sort_direction)
+        self.current_page = 1
+        self._apply_sort_indicator()
+        self.perform_search()
 
     def build_filters(self) -> dict:
         """Build filters dict for search."""
@@ -305,6 +346,7 @@ class DictionaryView(QWidget):
         filters = self.build_filters()
         self._search_request_seq += 1
         request_seq = self._search_request_seq
+        self.total_count = 0
 
         # Create and start worker
         self.search_worker = DictionarySearchWorker(
@@ -312,11 +354,16 @@ class DictionaryView(QWidget):
             filters=filters,
             limit=self.page_size,
             offset=self.current_offset,
+            sort_column=self.sort_column,
+            sort_direction=self.sort_direction,
         )
         self._active_search_seq = request_seq
 
         self.search_worker.results_ready.connect(
-            lambda rows, total_count, seq=request_seq: self.on_search_results(rows, total_count, seq)
+            lambda rows, seq=request_seq: self.on_search_results(rows, seq)
+        )
+        self.search_worker.count_ready.connect(
+            lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
         )
         self.search_worker.error.connect(
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
@@ -340,14 +387,15 @@ class DictionaryView(QWidget):
             self._search_retry_pending = False
             QTimer.singleShot(0, self.perform_search)
 
-    def on_search_results(self, rows: list, total_count: int, request_seq: Optional[int] = None):
-        """Handle search results from worker."""
+    def on_search_results(self, rows: list, request_seq: Optional[int] = None):
+        """Handle page rows from worker (count arrives asynchronously)."""
         if request_seq is not None and request_seq != self._active_search_seq:
-            logger.debug(f"Ignoring stale dictionary search results: seq={request_seq}, active={self._active_search_seq}")
+            logger.debug(
+                "Ignoring stale dictionary search results: seq=%s, active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
             return
-
-        # Update total count
-        self.total_count = total_count
 
         # Convert rows (Lemma, LemmaProjectStat tuples) to LemmaStats DTOs
         lemmas = []
@@ -367,24 +415,57 @@ class DictionaryView(QWidget):
             )
             lemmas.append(lemma_dto)
 
-        self._apply_study_overlays(lemmas)
-
-        # Update model
+        # Show base rows first for fast first-page UX.
         self.lemma_model.update_lemmas(lemmas)
-
-        # Update status
-        if total_count == 0:
+        if not lemmas:
             self.status_label.setText("No lemmas found")
         else:
             start = self.current_offset + 1
-            end = min(self.current_offset + len(lemmas), total_count)
-            self.status_label.setText(f"Showing {start}–{end} of {total_count:,} lemmas")
+            end = self.current_offset + len(lemmas)
+            self.status_label.setText(f"Loaded {start}–{end} lemmas (counting total...)")
 
-        # Update pagination controls
         self.update_pagination_controls()
 
-        # Start translation worker
+        # Stage 2: expensive overlays after first paint.
+        QTimer.singleShot(
+            0,
+            lambda seq=request_seq, payload=lemmas: self._apply_study_overlays_stage2(payload, seq),
+        )
+
+        # Start translation worker.
         self.start_translation_worker(lemmas)
+
+    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+        """Handle deferred total-count result from worker."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale dictionary count: seq=%s, active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
+        self.total_count = int(total_count or 0)
+        if self.total_count == 0:
+            self.status_label.setText("No lemmas found")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + len(self.lemma_model.lemmas), self.total_count)
+            self.status_label.setText(f"Showing {start}–{end} of {self.total_count:,} lemmas")
+        self.update_pagination_controls()
+
+    def _apply_study_overlays_stage2(self, lemmas: List[LemmaStats], request_seq: Optional[int]) -> None:
+        """Attach overlay metadata without delaying initial table render."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            return
+        if not lemmas:
+            return
+        self._apply_study_overlays(lemmas)
+        if request_seq is not None and request_seq != self._active_search_seq:
+            return
+        top = self.lemma_model.index(0, 0)
+        bottom = self.lemma_model.index(len(lemmas) - 1, self.lemma_model.columnCount() - 1)
+        self.lemma_model.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
 
     def _apply_study_overlays(self, lemmas: List[LemmaStats]) -> None:
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
@@ -544,11 +625,11 @@ class DictionaryView(QWidget):
 
         # Update range label
         if self.total_count == 0:
-            self.range_label.setText("Showing 0–0 of 0")
+            self.range_label.setText("Showing 0вЂ“0 of 0")
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
-            self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
+            self.range_label.setText(f"Showing {start}вЂ“{end} of {self.total_count:,}")
 
         # Task 15: Add "All (N)" page size option if safe
         self._update_page_size_combo()
@@ -701,7 +782,7 @@ class DictionaryView(QWidget):
                 if existing:
                     # Update existing
                     existing.translation = translation_value
-                    existing.status = "approved"  # User edit → approved
+                    existing.status = "approved"  # User edit в†’ approved
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
                 else:
@@ -714,7 +795,7 @@ class DictionaryView(QWidget):
                         src_text=lemma.lemma_text,
                         src_norm=normalized.norm,
                         translation=translation_value,
-                        status="approved",  # User edit → approved
+                        status="approved",  # User edit в†’ approved
                         origin="user_edit",
                         source_ref="dictionary_view_inline_edit",
                         lemma_id=lemma.lemma_id,  # Link to source for is_noise sync
@@ -737,7 +818,15 @@ class DictionaryView(QWidget):
                     )
                     session.commit()
 
-                with_retry_on_locked(save_and_propagate, max_retries=3)
+                def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
+                    self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
+
+                with_retry_on_locked(
+                    save_and_propagate,
+                    max_retries=4,
+                    rollback_callback=session.rollback,
+                    retry_callback=_on_retry,
+                )
 
                 # Update status in model to "approved"
                 lemma.status = "approved"
@@ -1043,11 +1132,11 @@ class DictionaryView(QWidget):
         # Check if multiple rows selected
         if len(selected_rows) > 1:
             # Bulk operations
-            mark_valid_bulk_action = QAction(f"✓ Mark Selected as Valid ({len(selected_rows)} rows)", self)
+            mark_valid_bulk_action = QAction(f"вњ“ Mark Selected as Valid ({len(selected_rows)} rows)", self)
             mark_valid_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(False))
             menu.addAction(mark_valid_bulk_action)
 
-            mark_noise_bulk_action = QAction(f"✗ Mark Selected as Noise ({len(selected_rows)} rows)", self)
+            mark_noise_bulk_action = QAction(f"вњ— Mark Selected as Noise ({len(selected_rows)} rows)", self)
             mark_noise_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(True))
             menu.addAction(mark_noise_bulk_action)
         else:
@@ -1055,11 +1144,11 @@ class DictionaryView(QWidget):
             current_is_noise = lemma.is_noise == 1 if lemma.is_noise is not None else False
 
             if current_is_noise:
-                mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
+                mark_valid_action = QAction("вњ“ Mark as Valid (remove from noise)", self)
                 mark_valid_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, False))
                 menu.addAction(mark_valid_action)
             else:
-                mark_noise_action = QAction("✗ Mark as Noise", self)
+                mark_noise_action = QAction("вњ— Mark as Noise", self)
                 mark_noise_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, True))
                 menu.addAction(mark_noise_action)
 
@@ -1694,3 +1783,4 @@ class DictionaryView(QWidget):
         """Refresh lemma data from database."""
         logger.info("Refreshing dictionary view")
         self.perform_search()
+

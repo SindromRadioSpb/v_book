@@ -45,12 +45,36 @@ class DictionaryService:
         Returns:
             List of (Lemma, LemmaProjectStat) tuples for current page
         """
-        stmt = select(Lemma, LemmaProjectStat).join(
-            LemmaProjectStat,
-            Lemma.lemma_id == LemmaProjectStat.lemma_id
-        ).where(
-            Lemma.project_id == project_id
-        )
+        # For frequency-based sorts, start from lemma_project_stat to keep planner
+        # aligned with project+freq indexes on very large corpora.
+        if sort_column in {"freq_abs", "doc_freq"}:
+            stmt = (
+                select(Lemma, LemmaProjectStat)
+                .select_from(LemmaProjectStat)
+                .join(
+                    Lemma,
+                    (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+                    & (Lemma.project_id == LemmaProjectStat.project_id),
+                )
+                .where(
+                    LemmaProjectStat.project_id == project_id,
+                    Lemma.project_id == project_id,
+                )
+            )
+        else:
+            stmt = (
+                select(Lemma, LemmaProjectStat)
+                .select_from(Lemma)
+                .join(
+                    LemmaProjectStat,
+                    (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+                    & (Lemma.project_id == LemmaProjectStat.project_id),
+                )
+                .where(
+                    Lemma.project_id == project_id,
+                    LemmaProjectStat.project_id == project_id,
+                )
+            )
 
         # Apply filters
         stmt = self._apply_filters(stmt, filters)
@@ -80,12 +104,9 @@ class DictionaryService:
         Returns:
             Total count of matching lemmas
         """
-        stmt = select(func.count()).select_from(Lemma).join(
-            LemmaProjectStat,
-            Lemma.lemma_id == LemmaProjectStat.lemma_id
-        ).where(
-            Lemma.project_id == project_id
-        )
+        # Count from lemma table only (filters apply to lemma fields); this avoids
+        # an unnecessary join on every search refresh for large projects.
+        stmt = select(func.count(Lemma.lemma_id)).where(Lemma.project_id == project_id)
 
         # Apply same filters as search
         stmt = self._apply_filters(stmt, filters)
@@ -125,9 +146,9 @@ class DictionaryService:
         column_attr = sort_map.get(sort_column, LemmaProjectStat.freq_abs)
 
         if sort_direction == "asc":
-            stmt = stmt.order_by(column_attr.asc())
+            stmt = stmt.order_by(column_attr.asc(), Lemma.lemma_id.asc())
         else:
-            stmt = stmt.order_by(column_attr.desc())
+            stmt = stmt.order_by(column_attr.desc(), Lemma.lemma_id.asc())
 
         return stmt
 
@@ -153,9 +174,11 @@ class DictionaryService:
         """
         stmt = select(func.count(Lemma.lemma_id.distinct())).select_from(Lemma).join(
             LemmaProjectStat,
-            Lemma.lemma_id == LemmaProjectStat.lemma_id
+            (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+            & (Lemma.project_id == LemmaProjectStat.project_id)
         ).where(
-            Lemma.project_id == project_id
+            Lemma.project_id == project_id,
+            LemmaProjectStat.project_id == project_id,
         )
 
         # Apply standard filters (pos, hide_noise, search)
@@ -203,9 +226,11 @@ class DictionaryService:
         """
         stmt = select(Lemma.lemma_id).join(
             LemmaProjectStat,
-            Lemma.lemma_id == LemmaProjectStat.lemma_id
+            (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+            & (Lemma.project_id == LemmaProjectStat.project_id)
         ).where(
-            Lemma.project_id == project_id
+            Lemma.project_id == project_id,
+            LemmaProjectStat.project_id == project_id,
         )
 
         # Apply standard filters (pos, hide_noise, search)
