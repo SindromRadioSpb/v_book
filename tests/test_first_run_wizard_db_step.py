@@ -1,0 +1,60 @@
+"""Tests for first-run wizard database selection step."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+from app.infra.db_path_resolver import SETTINGS_KEY_ACTIVE_DB_PATH, get_supported_schema_version
+from app.infra.settings import SettingsService
+from app.ui.first_run_wizard import FirstRunWizardDialog
+
+
+def _write_manifest(path: Path) -> None:
+    payload = {
+        "manifest_version": "1.0",
+        "resources": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _create_db(path: Path, schema_version: int) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
+            (str(schema_version),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def test_first_run_wizard_db_step_saves_selected_path(qtbot, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.sync()
+
+    manifest_path = tmp_path / "resource_manifest.json"
+    _write_manifest(manifest_path)
+    settings.set_value("resources/manifest_path", str(manifest_path))
+    settings.set_value("resources/data_root", str(tmp_path / "hdle_data"))
+    settings.sync()
+
+    schema_version = get_supported_schema_version()
+    selected_db = _create_db(tmp_path / "selected.db", schema_version)
+
+    dialog = FirstRunWizardDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    dialog.db_browse_radio.setChecked(True)
+    dialog.db_path_edit.setText(str(selected_db))
+
+    assert dialog._apply_database_selection() is True
+    assert settings.get_string(SETTINGS_KEY_ACTIVE_DB_PATH, "") == str(selected_db.resolve())
