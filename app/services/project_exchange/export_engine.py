@@ -34,6 +34,10 @@ from app.infra.sa_models import Lemma, PronunciationEntry, TermCluster, TMEntry,
 logger = logging.getLogger(__name__)
 
 
+class ExportCancelled(RuntimeError):
+    """Raised when export is cancelled by the user."""
+
+
 def _get_migrations_dir() -> Path:
     """Get migrations directory path (works in both dev and PyInstaller).
 
@@ -62,6 +66,7 @@ class ProjectExportEngine:
         out_path: Path,
         options: ExportOptions = ExportOptions(),
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ExportReport:
         """Export a project to a .hdleproj bundle.
 
@@ -84,6 +89,7 @@ class ProjectExportEngine:
             # Preflight checks
             logger.info(f"Starting export of project {project_id} to {out_path}")
             self._preflight_checks(project_id, out_path)
+            self._check_cancelled(cancel_check)
 
             # Create temp directory
             temp_dir = Path(tempfile.mkdtemp(prefix="hdle_export_"))
@@ -95,14 +101,19 @@ class ProjectExportEngine:
 
             payload_path = temp_dir / "payload.sqlite"
             table_counts = self._create_payload(
-                project_id, payload_path, options, progress_callback
+                project_id, payload_path, options, progress_callback, cancel_check
             )
+            self._check_cancelled(cancel_check)
 
             pronunciation_count = 0
             extra_files: dict[str, Path] = {}
             if options.include_pronunciation_metadata:
                 pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
-                pronunciation_count = self._export_pronunciation_metadata(project_id, pron_path)
+                pronunciation_count = self._export_pronunciation_metadata(
+                    project_id,
+                    pron_path,
+                    cancel_check=cancel_check,
+                )
                 if pronunciation_count > 0:
                     extra_files[PRONUNCIATION_METADATA_FILENAME] = pron_path
 
@@ -116,6 +127,7 @@ class ProjectExportEngine:
             # Create bundle
             if progress_callback:
                 progress_callback("Creating bundle...", 95, 100)
+            self._check_cancelled(cancel_check)
 
             bundle_format.create_bundle(payload_path, manifest, out_path, extra_files=extra_files)
 
@@ -132,6 +144,14 @@ class ProjectExportEngine:
                 elapsed_seconds=elapsed,
             )
 
+        except ExportCancelled:
+            elapsed = time.time() - start_time
+            logger.info("Export cancelled by user after %.1fs", elapsed)
+            return ExportReport(
+                success=False,
+                elapsed_seconds=elapsed,
+                error_message="Export cancelled by user.",
+            )
         except Exception as e:
             elapsed = time.time() - start_time
             logger.exception(f"Export failed after {elapsed:.1f}s")
@@ -149,6 +169,11 @@ class ProjectExportEngine:
                     logger.debug(f"Cleaned up temp dir: {temp_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
+
+    @staticmethod
+    def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
+        if cancel_check and bool(cancel_check()):
+            raise ExportCancelled("Export cancelled by user.")
 
     def _preflight_checks(self, project_id: int, out_path: Path) -> None:
         """Run preflight validation checks.
@@ -195,6 +220,7 @@ class ProjectExportEngine:
         payload_path: Path,
         options: ExportOptions,
         progress_callback: Optional[Callable[[str, int, int], None]],
+        cancel_check: Optional[Callable[[], bool]],
     ) -> dict[str, int]:
         """Create payload.sqlite with project data.
 
@@ -212,14 +238,21 @@ class ProjectExportEngine:
         # Create empty payload DB with schema
         payload_conn = sqlite3.connect(str(payload_path))
         payload_conn.execute("PRAGMA foreign_keys = ON")
+        if cancel_check:
+            payload_conn.set_progress_handler(
+                lambda: 1 if bool(cancel_check()) else 0,
+                2000,
+            )
 
         try:
+            self._check_cancelled(cancel_check)
             # Apply migrations to create schema
             migrations_dir = _get_migrations_dir()
             migration_files = sorted(migrations_dir.glob("*.sql"))
 
             logger.info(f"Applying {len(migration_files)} migrations to payload")
             for mig_file in migration_files:
+                self._check_cancelled(cancel_check)
                 with open(mig_file, "r", encoding="utf-8") as f:
                     payload_conn.executescript(f.read())
 
@@ -239,6 +272,7 @@ class ProjectExportEngine:
             export_order = [t for t in TABLE_INSERT_ORDER if not options.include_snapshots and t != "project_snapshot" or options.include_snapshots]
 
             for i, table_name in enumerate(export_order):
+                self._check_cancelled(cancel_check)
                 if progress_callback:
                     progress_callback(
                         f"Exporting {table_name}...",
@@ -246,11 +280,17 @@ class ProjectExportEngine:
                         100,
                     )
 
-                count = self._export_table(payload_conn, table_name, project_id)
+                count = self._export_table(
+                    payload_conn,
+                    table_name,
+                    project_id,
+                    cancel_check=cancel_check,
+                )
                 table_counts[table_name] = count
                 logger.debug(f"Exported {count} rows from {table_name}")
 
             # Drop FTS5 virtual tables (will be rebuilt on import)
+            self._check_cancelled(cancel_check)
             logger.info("Dropping FTS5 virtual tables from payload")
             payload_conn.execute("DROP TABLE IF EXISTS sentence_fts")
             payload_conn.execute("DROP TABLE IF EXISTS term_fts")
@@ -266,11 +306,22 @@ class ProjectExportEngine:
 
             logger.info(f"Payload created: {sum(table_counts.values())} total rows")
             return table_counts
-
+        except sqlite3.OperationalError as exc:
+            if cancel_check and bool(cancel_check()) and "interrupted" in str(exc).lower():
+                raise ExportCancelled("Export cancelled by user.") from exc
+            raise
         finally:
+            payload_conn.set_progress_handler(None, 0)
             payload_conn.close()
 
-    def _export_table(self, payload_conn: sqlite3.Connection, table_name: str, project_id: int) -> int:
+    def _export_table(
+        self,
+        payload_conn: sqlite3.Connection,
+        table_name: str,
+        project_id: int,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> int:
         """Export a single table from host to payload.
 
         Args:
@@ -421,6 +472,7 @@ class ProjectExportEngine:
             return 0
 
         try:
+            self._check_cancelled(cancel_check)
             cursor = payload_conn.execute(query, (project_id,))
             rowcount = cursor.rowcount
             logger.debug(f"  Exported {rowcount} rows from {table_name}")
@@ -428,6 +480,10 @@ class ProjectExportEngine:
         except sqlite3.IntegrityError as e:
             logger.error(f"FK constraint failed while exporting table {table_name}")
             logger.error(f"Query: {query[:200]}...")
+            raise
+        except sqlite3.OperationalError as exc:
+            if cancel_check and bool(cancel_check()) and "interrupted" in str(exc).lower():
+                raise ExportCancelled("Export cancelled by user.") from exc
             raise
 
     def _build_manifest(
@@ -513,10 +569,17 @@ class ProjectExportEngine:
         for idx in range(0, len(norms), size):
             yield norms[idx: idx + size]
 
-    def _export_pronunciation_metadata(self, project_id: int, out_path: Path) -> int:
+    def _export_pronunciation_metadata(
+        self,
+        project_id: int,
+        out_path: Path,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> int:
         """Export project-intersection pronunciation metadata sidecar."""
         from sqlalchemy import text
 
+        self._check_cancelled(cancel_check)
         with self.db_service.get_session() as session:
             row = session.execute(
                 text("SELECT src_lang FROM dict_project WHERE project_id = :project_id"),
@@ -566,6 +629,7 @@ class ProjectExportEngine:
 
             rows = []
             for norm_chunk in self._chunk_norms(sorted_norms, norm_chunk_size):
+                self._check_cancelled(cancel_check)
                 chunk_rows = session.execute(
                     select(PronunciationEntry)
                     .where(PronunciationEntry.lang == src_lang)

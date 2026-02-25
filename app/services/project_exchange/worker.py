@@ -42,6 +42,7 @@ class ProjectExportWorker(QThread):
                 out_path=self.out_path,
                 options=self.options,
                 progress_callback=self._on_progress,
+                cancel_check=lambda: bool(self._cancelled),
             )
 
             if report.success:

@@ -110,11 +110,13 @@ class ExportProgressDialog(QDialog):
             self.copy_report_button.setVisible(True)
             self.close_button.setVisible(True)
         else:
-            self.stage_label.setText("Export failed")
+            error_text_raw = report.error_message or "Export failed"
+            is_cancelled = "cancel" in error_text_raw.lower()
+            self.stage_label.setText("Export cancelled" if is_cancelled else "Export failed")
             self.progress_bar.setValue(0)
 
             # Show error
-            error_text = f"Error: {report.error_message}"
+            error_text = f"Error: {error_text_raw}"
             self.details_text.setPlainText(error_text)
             self.details_text.setVisible(True)
 

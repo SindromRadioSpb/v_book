@@ -156,6 +156,22 @@ def test_manifest_roundtrip():
     assert manifest2.table_counts == manifest.table_counts
 
 
+def test_export_cancel_returns_cancelled_report(populated_project, tmp_path):
+    """Cancel check should stop export quickly with a friendly report."""
+    engine = ProjectExportEngine()
+    out_path = tmp_path / "cancelled_export.hdleproj"
+    report = engine.export_project(
+        project_id=populated_project,
+        out_path=out_path,
+        options=ExportOptions(),
+        cancel_check=lambda: True,
+    )
+
+    assert report.success is False
+    assert "cancel" in (report.error_message or "").lower()
+    assert not out_path.exists()
+
+
 def test_export_creates_valid_bundle(populated_project, temp_db):
     """Test export creates a bundle with correct structure."""
     with tempfile.TemporaryDirectory() as tmpdir:
