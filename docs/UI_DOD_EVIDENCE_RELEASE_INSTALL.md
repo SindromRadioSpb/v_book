@@ -38,6 +38,12 @@ This evidence covers:
 17. Install with optional installer components (`Local Models`, `Baseline`) when available in installer payload and verify files are placed under `%LOCALAPPDATA%\HDLE`.
 18. Uninstall app and verify user data folder preservation policy works as documented.
 
+### DB Selection smoke matrix
+
+- `DBSEL-01`: First-run wizard -> choose `Use Hebrew Wikipedia Baseline (processed)` -> finish -> restart -> selected baseline DB is active.
+- `DBSEL-02`: `Tools -> Switch Database...` -> choose `Default DB (AppData)` -> `Switch & Restart` -> default DB is active.
+- `DBSEL-03`: `Tools -> Switch Database...` -> choose invalid/missing path -> clear non-crashing error -> no switch applied.
+
 ## Non-functional checks
 
 - No hardcoded dev path (`M:\...`) is used in runtime resource resolution.
@@ -65,3 +71,6 @@ Expected:
 - Screenshot: Resources Manager with status table.
 - Screenshot: Health Check report with remediation.
 - Screenshot: Baseline import completion message.
+- Screenshot: First-run wizard DB step (default/existing/baseline options).
+- Screenshot: Switch Database dialog with current DB metadata + restart CTA.
+- Screenshot: DBSEL-03 invalid path warning (single error, app alive).

@@ -68,6 +68,7 @@ Resource-related entrypoints:
 
 - `Tools -> Resources Manager...`
 - `Tools -> Run Health Check...`
+- `Tools -> Switch Database...`
 
 What Resources Manager provides:
 
@@ -80,5 +81,11 @@ What Resources Manager provides:
 First-run wizard:
 
 - appears when `setup/first_run_completed` is not set;
-- guides through data-root selection, local model readiness, baseline option, and health summary;
+- guides through data-root selection, working DB selection, local model readiness, baseline option, and health summary;
 - skip is allowed; setup remains accessible from Tools.
+
+Working DB selection:
+
+- startup precedence: `--db-path` -> `HDLE_DB_PATH` -> `app/active_db_path` -> default `%LOCALAPPDATA%\HDLE\hdle.db`;
+- switch dialog supports default DB, existing DB file, and local baseline quick-pick when available;
+- switching DB requires restart.

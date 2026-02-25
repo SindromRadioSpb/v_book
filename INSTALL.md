@@ -38,12 +38,39 @@ The installer writes binaries to `Program Files` and keeps mutable data under `%
 On first run, HDLE opens setup wizard (unless already completed):
 
 1. Choose data folder.
-2. Check local models (pronunciation + sentence niqqud).
-3. Optional baseline bundle decision.
-4. Optional cloud provider setup.
-5. Run Health Check summary.
+2. Choose working database profile (default / existing / baseline when available).
+3. Check local models (pronunciation + sentence niqqud).
+4. Optional baseline bundle decision.
+5. Optional cloud provider setup.
+6. Run Health Check summary.
 
 You can skip and configure later.
+
+## Working database selection
+
+Database path precedence on startup:
+
+1. CLI `--db-path`
+2. Env `HDLE_DB_PATH` (if file exists)
+3. Settings `app/active_db_path` (if file exists)
+4. Default `%LOCALAPPDATA%\HDLE\hdle.db`
+
+Switch later any time:
+
+- `Tools -> Switch Database...`
+
+The dialog supports:
+
+- default AppData DB,
+- browse existing DB file,
+- quick-pick for local Hebrew Wikipedia processed baseline DB (when available),
+- `Switch & Restart`.
+
+Reference dev baseline path (internal only):
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+
+For release/end-user setups, prefer installer baseline component or Resources Manager flow.
 
 ## Resources Manager
 
@@ -85,6 +112,7 @@ Checks include:
 python -m app.main --open-resources-manager
 python -m app.main --run-health-check
 python -m app.main --db-path "J:\Project_Vibe\V_book\hdle_premium.db"
+$env:HDLE_DB_PATH="C:\Data\hdle_custom.db"; python -m app.main
 ```
 
 ## Troubleshooting
