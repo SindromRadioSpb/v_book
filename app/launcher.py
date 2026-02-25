@@ -1,7 +1,6 @@
 """HDLE Premium Launcher
 
 Handles first-time setup:
-- Copies Wikipedia baseline database to user data directory
 - Initializes application directories
 - Launches main application
 
@@ -9,9 +8,8 @@ This script is the entry point for PyInstaller builds.
 """
 
 import sys
-import shutil
-from pathlib import Path
 
+from app.infra.db_path_resolver import get_default_db_path
 from app.infra.resource_paths import ResourcePaths
 
 
@@ -32,38 +30,17 @@ def setup_first_run():
 
     print(f"Application directory: {app_data_dir}")
 
-    # Check if database already exists
-    db_path = app_data_dir / "hdle.db"
+    # Check if default DB already exists
+    db_path = get_default_db_path()
 
     if db_path.exists():
         size_mb = db_path.stat().st_size / (1024 * 1024)
-        print(f"Existing database found: {size_mb:.1f} MB")
-        print("Skipping database copy (already initialized)")
+        print(f"Existing default database found: {size_mb:.1f} MB")
+        print("Default database profile is ready")
     else:
-        # Copy database from installation directory
-        if getattr(sys, 'frozen', False):
-            # Running from PyInstaller bundle
-            bundle_dir = Path(sys._MEIPASS)
-            source_db = bundle_dir / "data" / "hdle_production_new.db"
-        else:
-            # Running from source
-            source_db = Path("hdle_premium.db").resolve()
-
-        if source_db.exists():
-            print(f"Copying Wikipedia baseline database...")
-            print(f"Source: {source_db}")
-            print(f"Target: {db_path}")
-
-            # Copy database
-            shutil.copy2(source_db, db_path)
-
-            size_mb = db_path.stat().st_size / (1024 * 1024)
-            print(f"Database copied successfully: {size_mb:.1f} MB")
-            print()
-            print("Hebrew Wikipedia Baseline (387k documents) ready!")
-        else:
-            print(f"[WARNING] Source database not found: {source_db}")
-            print("Application will start with empty database")
+        print("Default database is not present yet.")
+        print("A clean default DB will be created on first application startup.")
+        print("You can switch to an existing/baseline DB from Setup Wizard or Tools menu.")
 
     print("=" * 60)
     print()

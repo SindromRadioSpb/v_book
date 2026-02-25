@@ -6,7 +6,9 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
+from app.infra.db_path_resolver import resolve_db_path
 from app.infra.resource_paths import ResourcePaths
+from app.infra.settings import SettingsService
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
 from app.infra.translators.local_providers_setup import (
@@ -51,17 +53,20 @@ def main():
     )
     args = parser.parse_args()
 
+    settings = SettingsService.get_instance()
+
     # Setup directories
-    app_paths = ResourcePaths.build(create=True)
+    app_paths = ResourcePaths.build(settings=settings, create=True)
     app_dir = app_paths.data_root
     log_dir = app_paths.logs_root
 
-    # Use custom database path if provided, otherwise use default
-    if args.db_path:
-        db_path = Path(args.db_path).resolve()
-        logger.info(f"Using custom database path: {db_path}")
-    else:
-        db_path = app_dir / "hdle.db"
+    # Resolve database path with deterministic precedence:
+    # CLI --db-path > ENV HDLE_DB_PATH (existing file) > settings > default.
+    resolved_db = resolve_db_path(
+        args.db_path,
+        settings=settings,
+    )
+    db_path = Path(resolved_db.path).resolve()
 
     # Setup logging
     setup_logging(log_dir, level=logging.INFO)
@@ -69,6 +74,7 @@ def main():
     logger.info("HDLE Premium starting")
     logger.info(f"App directory: {app_dir}")
     logger.info(f"Database: {db_path}")
+    logger.info(f"Database source: {resolved_db.source}")
     logger.info("=" * 60)
 
     try:
