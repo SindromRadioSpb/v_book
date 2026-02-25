@@ -911,7 +911,15 @@ class TermsView(QWidget):
                     )
                     session.commit()
 
-                with_retry_on_locked(save_and_propagate, max_retries=3)
+                def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
+                    self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
+
+                with_retry_on_locked(
+                    save_and_propagate,
+                    max_retries=4,
+                    rollback_callback=session.rollback,
+                    retry_callback=_on_retry,
+                )
 
                 # Update status in model to "approved"
                 cluster.translation_status = "approved"

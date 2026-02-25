@@ -1,132 +1,182 @@
-"""Database retry utilities for handling transient SQLite errors."""
+"""Database retry utilities for handling transient SQLite lock windows."""
+
 import logging
 import time
 from functools import wraps
-from typing import Callable, TypeVar, Any
+from typing import Any, Callable, Optional, Sequence, TypeVar
 
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
+
+# Retry delays produce 5 attempts total: first try + 4 retries.
+DEFAULT_BACKOFF_SCHEDULE: tuple[float, ...] = (0.2, 0.5, 1.0, 2.0)
+
+
+def _is_locked_operational_error(exc: OperationalError) -> bool:
+    msg = str(exc).lower()
+    return (
+        "database is locked" in msg
+        or "database table is locked" in msg
+        or "sqlite_busy" in msg
+        or "database is busy" in msg
+    )
+
+
+def _rollback_from_callable(
+    func: Callable[..., Any],
+    rollback_callback: Optional[Callable[[], None]],
+) -> None:
+    rollback_fn = rollback_callback
+    if rollback_fn is None:
+        bound_obj = getattr(func, "__self__", None)
+        candidate = getattr(bound_obj, "rollback", None) if bound_obj is not None else None
+        if callable(candidate):
+            rollback_fn = candidate
+
+    if rollback_fn is None:
+        return
+
+    try:
+        rollback_fn()
+    except Exception:
+        logger.warning("Rollback after database lock failed", exc_info=True)
+
+
+def _build_backoff_schedule(
+    *,
+    retries: int,
+    backoff_schedule: Optional[Sequence[float]],
+    initial_delay: Optional[float],
+    backoff_factor: float,
+    max_delay: float,
+) -> tuple[float, ...]:
+    if backoff_schedule is not None:
+        values = tuple(float(v) for v in backoff_schedule if float(v) >= 0.0)
+        if values:
+            return values
+
+    if initial_delay is None:
+        return DEFAULT_BACKOFF_SCHEDULE
+
+    delay = max(0.0, float(initial_delay))
+    factor = max(1.0, float(backoff_factor))
+    cap = max(0.0, float(max_delay))
+    values = []
+    for _ in range(max(1, retries)):
+        values.append(min(delay, cap))
+        delay = min(delay * factor, cap)
+    return tuple(values) if values else DEFAULT_BACKOFF_SCHEDULE
 
 
 def retry_on_db_locked(
-    max_retries: int = 3,
-    initial_delay: float = 0.1,
+    max_retries: int = 4,
+    backoff_schedule: Optional[Sequence[float]] = None,
+    initial_delay: Optional[float] = None,
     backoff_factor: float = 2.0,
-    max_delay: float = 2.0
+    max_delay: float = 2.0,
 ) -> Callable:
-    """Decorator to retry database operations on 'database is locked' errors.
+    """Decorator: retry function on transient SQLite lock errors.
 
     Args:
-        max_retries: Maximum number of retry attempts (default: 3)
-        initial_delay: Initial delay in seconds before first retry (default: 0.1)
-        backoff_factor: Multiplier for delay between retries (default: 2.0)
-        max_delay: Maximum delay between retries in seconds (default: 2.0)
-
-    Usage:
-        @retry_on_db_locked(max_retries=3)
-        def my_db_operation(session):
-            # ... database operations ...
-            session.commit()
+        max_retries: Number of retries after initial attempt.
+        backoff_schedule: Delay schedule in seconds (last value repeats).
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
-            last_exception = None
-            delay = initial_delay
-
-            for attempt in range(max_retries + 1):  # +1 for initial attempt
-                try:
-                    return func(*args, **kwargs)
-                except OperationalError as e:
-                    # Check if it's a 'database is locked' error
-                    if 'database is locked' in str(e).lower():
-                        last_exception = e
-
-                        if attempt < max_retries:
-                            # Log retry attempt
-                            logger.warning(
-                                f"{func.__name__}: Database locked, retry {attempt + 1}/{max_retries} "
-                                f"after {delay:.2f}s delay"
-                            )
-
-                            # Sleep before retry
-                            time.sleep(delay)
-
-                            # Increase delay for next retry (exponential backoff)
-                            delay = min(delay * backoff_factor, max_delay)
-                        else:
-                            # Max retries exceeded
-                            logger.error(
-                                f"{func.__name__}: Database locked after {max_retries} retries, giving up"
-                            )
-                            raise
-                    else:
-                        # Different OperationalError, don't retry
-                        raise
-                except Exception:
-                    # Other exceptions, don't retry
-                    raise
-
-            # Should never reach here, but just in case
-            if last_exception:
-                raise last_exception
-            raise RuntimeError(f"{func.__name__}: Unexpected retry loop exit")
+            rollback_cb = None
+            if args:
+                candidate = getattr(args[0], "rollback", None)
+                if callable(candidate):
+                    rollback_cb = candidate
+            schedule = _build_backoff_schedule(
+                retries=max(0, int(max_retries)),
+                backoff_schedule=backoff_schedule,
+                initial_delay=initial_delay,
+                backoff_factor=backoff_factor,
+                max_delay=max_delay,
+            )
+            return with_retry_on_locked(
+                func,
+                *args,
+                max_retries=max_retries,
+                backoff_schedule=schedule,
+                rollback_callback=rollback_cb,
+                **kwargs,
+            )
 
         return wrapper
+
     return decorator
 
 
 def with_retry_on_locked(
     func: Callable[..., T],
     *args: Any,
-    max_retries: int = 3,
-    **kwargs: Any
+    max_retries: int = 4,
+    backoff_schedule: Optional[Sequence[float]] = None,
+    initial_delay: Optional[float] = None,
+    backoff_factor: float = 2.0,
+    max_delay: float = 2.0,
+    rollback_callback: Optional[Callable[[], None]] = None,
+    retry_callback: Optional[Callable[[int, int, float, str], None]] = None,
+    **kwargs: Any,
 ) -> T:
-    """Execute a function with retry on database locked errors.
-
-    Non-decorator version for use in contexts where decorators aren't convenient.
+    """Execute function with retry/backoff for transient SQLite lock windows.
 
     Args:
-        func: Function to execute
-        *args: Positional arguments for func
-        max_retries: Maximum number of retry attempts
-        **kwargs: Keyword arguments for func
-
-    Returns:
-        Result of func(*args, **kwargs)
-
-    Usage:
-        result = with_retry_on_locked(session.commit, max_retries=3)
+        func: Function to execute.
+        max_retries: Number of retries after initial attempt.
+        backoff_schedule: Delay schedule in seconds (last value repeats).
+        rollback_callback: Optional callback invoked after lock errors.
+        retry_callback: Optional callback(attempt, total_attempts, delay, error).
     """
-    delay = 0.1
-    backoff_factor = 2.0
-    max_delay = 2.0
-    last_exception = None
 
-    for attempt in range(max_retries + 1):
+    retries = max(0, int(max_retries))
+    total_attempts = retries + 1
+    schedule = _build_backoff_schedule(
+        retries=retries,
+        backoff_schedule=backoff_schedule,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        max_delay=max_delay,
+    )
+
+    last_exception: Optional[OperationalError] = None
+
+    for attempt_idx in range(total_attempts):
         try:
             return func(*args, **kwargs)
-        except OperationalError as e:
-            if 'database is locked' in str(e).lower():
-                last_exception = e
-
-                if attempt < max_retries:
-                    logger.warning(
-                        f"Database locked, retry {attempt + 1}/{max_retries} "
-                        f"after {delay:.2f}s delay"
-                    )
-                    time.sleep(delay)
-                    delay = min(delay * backoff_factor, max_delay)
-                else:
-                    logger.error(f"Database locked after {max_retries} retries")
-                    raise
-            else:
+        except OperationalError as exc:
+            if not _is_locked_operational_error(exc):
                 raise
-        except Exception:
-            raise
+
+            last_exception = exc
+            _rollback_from_callable(func, rollback_callback)
+
+            if attempt_idx >= retries:
+                logger.error("Database lock persisted after %s attempt(s)", total_attempts)
+                raise
+
+            delay = schedule[min(attempt_idx, len(schedule) - 1)]
+            attempt_no = attempt_idx + 1
+            logger.warning(
+                "Database busy, retrying %s/%s after %.2fs",
+                attempt_no,
+                total_attempts,
+                delay,
+            )
+            if retry_callback:
+                try:
+                    retry_callback(attempt_no, total_attempts, delay, str(exc))
+                except Exception:
+                    logger.debug("Retry callback failed", exc_info=True)
+
+            time.sleep(delay)
 
     if last_exception:
         raise last_exception

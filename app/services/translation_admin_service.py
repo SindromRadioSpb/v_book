@@ -29,6 +29,7 @@ from app.infra.sa_models import (
 )
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.db_retry import with_retry_on_locked
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
 
@@ -604,7 +605,11 @@ class TranslationAdminService:
         session.flush()
         TMGlobalService().upsert_and_link(session, entry)
 
-        session.commit()
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
 
         logger.info(f"TM entry {tm_id} status: {old_status} → {status}")
 
@@ -669,7 +674,11 @@ class TranslationAdminService:
         for entry in entries:
             TMGlobalService().upsert_and_link(session, entry)
 
-        session.commit()
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
 
         logger.info(f"Bulk set status {status} for {count} entries")
         return count
@@ -753,7 +762,11 @@ class TranslationAdminService:
             force_global_update=(not bool((entry.translation or "").strip())),
         )
 
-        session.commit()
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
 
         logger.info(f"Reverted TM entry {tm_id} to version {version}")
 
@@ -799,7 +812,11 @@ class TranslationAdminService:
             force_global_update=(not bool((translation or "").strip())),
         )
 
-        session.commit()
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
 
         logger.info(f"Updated translation for TM entry {tm_id}")
 
@@ -873,7 +890,11 @@ class TranslationAdminService:
         for entry in entries:
             TMGlobalService().upsert_and_link(session, entry)
 
-        session.commit()
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
 
         action = "noise" if is_noise else "valid"
         logger.info(f"Marked {count} TM entries as {action}")

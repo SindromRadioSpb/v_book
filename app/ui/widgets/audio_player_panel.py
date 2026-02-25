@@ -4636,7 +4636,11 @@ class AudioPlayerPanel(QWidget):
                 session.commit()
 
             try:
-                with_retry_on_locked(_flush_and_propagate, max_retries=3)
+                with_retry_on_locked(
+                    _flush_and_propagate,
+                    max_retries=4,
+                    rollback_callback=session.rollback,
+                )
             except Exception as exc:
                 logger.error("Failed to save translation from audio queue: %s", exc, exc_info=True)
                 QMessageBox.warning(self, "Edit Translation", f"Failed to save translation:\n{exc}")

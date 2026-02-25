@@ -1064,7 +1064,13 @@ class TermExtractionService:
             raise ValueError(f"Project {project_id} not found")
 
         project.general_corpus_id = reference_project_id
-        session.commit()
+        from app.infra.db_retry import with_retry_on_locked
+
+        with_retry_on_locked(
+            session.commit,
+            max_retries=4,
+            rollback_callback=session.rollback,
+        )
         logger.info(f"Set reference project for {project_id}: {reference_project_id}")
 
     def get_reference_project(self, session: Session, project_id: int) -> Optional[int]:

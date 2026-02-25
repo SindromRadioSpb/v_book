@@ -293,7 +293,11 @@ class SentencePronunciationBootstrapService:
                                 )
                             except Exception:
                                 pass
-                        with_retry_on_locked(session.commit, max_retries=3)
+                        with_retry_on_locked(
+                            session.commit,
+                            max_retries=4,
+                            rollback_callback=session.rollback,
+                        )
                     result.failed += len(sub_chunk)
                     result.processed += len(sub_chunk)
                     if row_callback:
@@ -388,7 +392,11 @@ class SentencePronunciationBootstrapService:
             # ── Commit chunk ───────────────────────────────────────────────────
             if mode != "dry_run" and not result.cancelled:
                 try:
-                    with_retry_on_locked(session.commit, max_retries=3)
+                    with_retry_on_locked(
+                        session.commit,
+                        max_retries=4,
+                        rollback_callback=session.rollback,
+                    )
                 except Exception as exc:
                     logger.error("Chunk commit failed: %s", exc)
                     session.rollback()

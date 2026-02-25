@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -24,15 +23,14 @@ class DatabaseManager:
             connect_args={"check_same_thread": False},
         )
 
-        # Enable WAL mode, foreign keys, and busy timeout
-        @event.listens_for(Engine, "connect")
+        # Enable SQLite safety PRAGMAs for every new connection.
+        @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(dbapi_conn, connection_record):
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
-            # Wait up to 5 seconds if database is locked before raising error
-            # This helps reduce "database is locked" errors during concurrent operations
-            cursor.execute("PRAGMA busy_timeout=5000")
+            # Keep write-lock windows survivable across workers and UI actions.
+            cursor.execute("PRAGMA busy_timeout=15000")
             cursor.close()
 
         self.SessionLocal = sessionmaker(
