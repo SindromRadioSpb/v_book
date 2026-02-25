@@ -74,3 +74,35 @@ Expected:
 - Screenshot: First-run wizard DB step (default/existing/baseline options).
 - Screenshot: Switch Database dialog with current DB metadata + restart CTA.
 - Screenshot: DBSEL-03 invalid path warning (single error, app alive).
+
+## Hewiki Large-DB smoke (installer)
+
+Target DB for manual smoke and profiling:
+
+- `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
+
+### Smoke cases
+
+1. `PHON-01`: run prebuild validate gate and confirm required local module check includes `phonikud` and passes import.
+2. `PHON-02`: start installed app, open `Tools -> Run Health Check...`, verify pronunciation and sentence niqqud checks do not fail with `No module named phonikud`.
+3. `DICT-01`: open huge project (`project_id=1`) and Dictionary view, verify first page appears quickly and status updates from loading to populated rows (no endless searching state).
+4. `DICT-02`: open a small project and Dictionary view, verify first page loads without multi-second stall.
+5. `SENT-01`: open Sentences, click `Select...` for document filter, verify picker opens without freezing and does not preload a 387k-row combo list.
+6. `SENT-02`: in picker search by title fragment, by numeric ID, and by tag; verify paged results and keyboard navigation (`Up/Down`, `Enter`, `Esc`) work.
+7. `EXP-01`: export small project and cancel during `project_snapshot`; verify cancel transitions quickly, temp files are cleaned, and UI becomes responsive.
+8. `LOCK-01`: after cancel, execute save/update actions (TM inline edit and reference-corpus update path) and verify no poisoned session behavior; user sees retry status and final friendly error only if retries are exhausted.
+9. `DEL-01`: delete small projects from dashboard while huge project exists; verify deletion succeeds and dashboard refreshes deterministically.
+
+### Regression commands for this smoke pack
+
+```powershell
+python scripts/prebuild_validate.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db"
+python -m pytest tests/test_phonikud_import_available.py tests/test_sqlite_busy_retry.py tests/test_dictionary_pagination_flow.py tests/test_document_picker_flow.py tests/test_project_delete_flow.py -q
+python -m pytest tests/test_project_exchange.py -k "cancel_returns_cancelled_report" -q
+```
+
+Expected:
+
+- prebuild validate includes `CHECK 0: Required Local Modules` and reports `phonikud: IMPORT OK`,
+- targeted pytest suite passes,
+- no repeated modal spam for transient DB busy windows.

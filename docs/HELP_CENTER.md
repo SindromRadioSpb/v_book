@@ -62,6 +62,24 @@ Sentence rows can be added to User Dictionaries directly from Sentences view:
 
 The flow uses the same dialog and worker path as Lemma/Term add operations.
 
+## Sentences Document Picker (Large Projects)
+
+For large projects, Sentences uses a searchable document picker instead of loading all documents into a single dropdown.
+
+- Entry point: `Sentences -> Document -> Select...`
+- Supports:
+  - title search,
+  - numeric document ID search,
+  - tag search,
+  - server-side paging.
+- Quick actions:
+  - `Select` to apply document filter,
+  - `All Documents` to clear document scope.
+- Keyboard:
+  - `Up/Down` navigate rows,
+  - `Enter` apply selected row,
+  - `Esc` close dialog.
+
 ## Resources and First-Run Setup
 
 Resource-related entrypoints:
@@ -89,3 +107,14 @@ Working DB selection:
 - startup precedence: `--db-path` -> `HDLE_DB_PATH` -> `app/active_db_path` -> default `%LOCALAPPDATA%\HDLE\hdle.db`;
 - switch dialog supports default DB, existing DB file, and local baseline quick-pick when available;
 - switching DB requires restart.
+
+## Database Busy Handling
+
+Write operations use retry/backoff for transient SQLite lock windows.
+
+- During retry, UI shows inline status (`Database is busy, retrying ...`) instead of modal spam.
+- If retries are exhausted, operation fails with a single user-facing error and safe rollback.
+- Recommended recovery if busy persists:
+  - wait for long-running operation to finish,
+  - cancel active export/import/batch tasks,
+  - retry the action.
