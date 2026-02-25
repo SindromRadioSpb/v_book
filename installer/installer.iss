@@ -72,10 +72,6 @@ Name: "runhealth"; Description: "Run Health Check after installation"; Flags: un
 ; Path is relative to project root (one level up from installer folder)
 Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
 
-; Seed database with reference corpus (Hebrew Wikipedia Baseline).
-; Install only on first install, preserve user data on upgrades/uninstall.
-Source: "..\hdle_premium.db"; DestDir: "{localappdata}\HDLE"; DestName: "hdle.db"; Flags: onlyifdoesntexist uninsneveruninstall; Components: core
-
 ; Optional local models package (if prepared externally before installer build).
 Source: "..\installer\resources\local_models\*"; DestDir: "{localappdata}\HDLE\models"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: localmodels
 
