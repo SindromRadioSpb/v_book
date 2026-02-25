@@ -10,12 +10,13 @@ Usage:
     python scripts/prebuild_validate.py [--db-path PATH]
 
 Exit codes:
-    0 - All checks passed
-    1 - One or more checks failed
+    0 - PASS or PASS_WITH_SKIPS
+    1 - FAIL
 """
 
 import argparse
 from datetime import datetime, timezone
+from dataclasses import dataclass
 import importlib
 import logging
 import sqlite3
@@ -30,6 +31,24 @@ logging.basicConfig(
     format="%(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+PROFILE_DEFAULT = "default"
+PROFILE_REFERENCE_RO = "reference-ro"
+
+CHECK_PASSED = "PASSED"
+CHECK_FAILED = "FAILED"
+CHECK_SKIPPED = "SKIPPED"
+
+FINAL_PASS = "PASS"
+FINAL_PASS_WITH_SKIPS = "PASS_WITH_SKIPS"
+FINAL_FAIL = "FAIL"
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    name: str
+    status: str
+    details: str = ""
 
 
 def _unique_export_project_name() -> str:
@@ -346,6 +365,92 @@ def check_database_integrity(db_path: Path) -> bool:
         return False
 
 
+def _status_from_bool(ok: bool) -> str:
+    return CHECK_PASSED if ok else CHECK_FAILED
+
+
+def _compute_final_status(results: list[CheckResult]) -> str:
+    if any(r.status == CHECK_FAILED for r in results):
+        return FINAL_FAIL
+    if any(r.status == CHECK_SKIPPED for r in results):
+        return FINAL_PASS_WITH_SKIPS
+    return FINAL_PASS
+
+
+def run_prebuild_validation(
+    db_path: Path,
+    *,
+    profile: str = PROFILE_DEFAULT,
+    skip_export_import: bool = False,
+    skip_quick_check: bool = False,
+) -> tuple[str, list[CheckResult]]:
+    """Run validation checks and return final status + per-check results."""
+    results: list[CheckResult] = []
+
+    results.append(
+        CheckResult(
+            name="Required Local Modules",
+            status=_status_from_bool(check_required_local_modules()),
+        )
+    )
+    results.append(
+        CheckResult(
+            name="FTS Presence",
+            status=_status_from_bool(check_fts_presence(db_path)),
+        )
+    )
+
+    if profile == PROFILE_REFERENCE_RO:
+        results.append(
+            CheckResult(
+                name="Project Lifecycle",
+                status=CHECK_SKIPPED,
+                details="Skipped in reference-ro profile (write check).",
+            )
+        )
+        if not skip_export_import:
+            results.append(
+                CheckResult(
+                    name="Export/Import",
+                    status=CHECK_SKIPPED,
+                    details="Skipped in reference-ro profile (write check).",
+                )
+            )
+    else:
+        results.append(
+            CheckResult(
+                name="Project Lifecycle",
+                status=_status_from_bool(check_project_lifecycle(db_path)),
+            )
+        )
+        if not skip_export_import:
+            results.append(
+                CheckResult(
+                    name="Export/Import",
+                    status=_status_from_bool(check_export_import(db_path)),
+                )
+            )
+
+    if skip_quick_check:
+        results.append(
+            CheckResult(
+                name="Database Integrity",
+                status=CHECK_SKIPPED,
+                details="Skipped by --skip-quick-check.",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                name="Database Integrity",
+                status=_status_from_bool(check_database_integrity(db_path)),
+            )
+        )
+
+    final_status = _compute_final_status(results)
+    return final_status, results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Prebuild validation for HDLE Premium"
@@ -361,6 +466,17 @@ def main():
         action="store_true",
         help="Skip export/import check (faster)",
     )
+    parser.add_argument(
+        "--profile",
+        choices=[PROFILE_DEFAULT, PROFILE_REFERENCE_RO],
+        default=PROFILE_DEFAULT,
+        help="Validation profile: default or reference-ro (readonly huge DB)",
+    )
+    parser.add_argument(
+        "--skip-quick-check",
+        action="store_true",
+        help="Skip PRAGMA quick_check (useful for very large DB pipelines)",
+    )
     args = parser.parse_args()
 
     db_path = args.db_path
@@ -373,40 +489,49 @@ def main():
     logger.info("=" * 70)
     logger.info(f"Database: {db_path}")
     logger.info(f"Size: {db_path.stat().st_size / 1024 / 1024:.1f} MB")
+    logger.info(f"Profile: {args.profile}")
     logger.info("")
 
-    results = {}
-
-    # Run checks
-    results["Required Local Modules"] = check_required_local_modules()
-    results["FTS Presence"] = check_fts_presence(db_path)
-    results["Project Lifecycle"] = check_project_lifecycle(db_path)
-
-    if not args.skip_export_import:
-        results["Export/Import"] = check_export_import(db_path)
-
-    results["Database Integrity"] = check_database_integrity(db_path)
+    final_status, results = run_prebuild_validation(
+        db_path,
+        profile=args.profile,
+        skip_export_import=bool(args.skip_export_import),
+        skip_quick_check=bool(args.skip_quick_check),
+    )
 
     # Summary
     logger.info("\n" + "=" * 70)
     logger.info("SUMMARY")
     logger.info("=" * 70)
 
-    all_passed = True
-    for check_name, passed in results.items():
-        status = "[OK] PASSED" if passed else "[!!] FAILED"
-        logger.info(f"  {check_name:.<40} {status}")
-        if not passed:
-            all_passed = False
+    for result in results:
+        if result.status == CHECK_PASSED:
+            prefix = "[OK]"
+        elif result.status == CHECK_SKIPPED:
+            prefix = "[--]"
+        else:
+            prefix = "[!!]"
+
+        line = f"  {result.name:.<40} {prefix} {result.status}"
+        if result.details:
+            line = f"{line} ({result.details})"
+        logger.info(line)
 
     logger.info("=" * 70)
 
-    if all_passed:
+    if final_status == FINAL_PASS:
         logger.info("\n[OK] ALL CHECKS PASSED - Ready for build")
         sys.exit(0)
-    else:
+    if final_status == FINAL_PASS_WITH_SKIPS:
+        logger.info("\n[OK] PASS_WITH_SKIPS - Read-only profile checks completed")
+        sys.exit(0)
+
+    if final_status == FINAL_FAIL:
         logger.error("\n[!!] SOME CHECKS FAILED - Fix issues before build")
         sys.exit(1)
+
+    logger.error(f"\n[!!] Unknown final status: {final_status}")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
