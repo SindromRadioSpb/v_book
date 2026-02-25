@@ -1,0 +1,47 @@
+"""Regression checks for performance index migration."""
+
+from __future__ import annotations
+
+import sqlite3
+import tempfile
+from pathlib import Path
+
+
+def _apply_all_migrations(db_path: Path) -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        migrations = sorted(Path("app/infra/migrations").glob("*.sql"))
+        for sql_file in migrations:
+            sql = sql_file.read_text(encoding="utf-8")
+            conn.executescript(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_perf_indexes_present_after_migrations():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = Path(tmp.name)
+
+    try:
+        _apply_all_migrations(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            idx_rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+            index_names = {row[0] for row in idx_rows}
+
+            assert "idx_lemma_proj_doc_freq" in index_names
+            assert "idx_doc_corpus_file_name" in index_names
+
+            schema_version = conn.execute(
+                "SELECT value FROM schema_meta WHERE key='schema_version'"
+            ).fetchone()
+            assert schema_version is not None
+            assert str(schema_version[0]) == "26"
+        finally:
+            conn.close()
+    finally:
+        db_path.unlink(missing_ok=True)
