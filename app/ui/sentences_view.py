@@ -34,6 +34,7 @@ from PyQt6.QtGui import QAction
 from app.services.db_service import DBService
 from app.services.sentences_workspace_service import SentencesWorkspaceService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.ui.dialogs.document_picker_dialog import DocumentPickerDialog
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
@@ -129,7 +130,6 @@ class SentencesView(QWidget):
         self._current_dtos: List[SentenceDTO] = []
 
         self._init_ui()
-        self._load_doc_list()
         self._reload()
 
     # ------------------------------------------------------------------
@@ -154,11 +154,13 @@ class SentencesView(QWidget):
         # --- Filter row ---
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("Document:"))
-        self.doc_combo = QComboBox()
-        self.doc_combo.setMinimumWidth(200)
-        self.doc_combo.addItem("All Documents", None)
-        self.doc_combo.currentIndexChanged.connect(self._on_doc_filter_changed)
-        filter_row.addWidget(self.doc_combo)
+        self.doc_filter_label = QLabel("All Documents")
+        self.doc_filter_label.setMinimumWidth(260)
+        self.doc_filter_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        filter_row.addWidget(self.doc_filter_label)
+        self.doc_picker_btn = QPushButton("Select...")
+        self.doc_picker_btn.clicked.connect(self._on_pick_document)
+        filter_row.addWidget(self.doc_picker_btn)
 
         filter_row.addWidget(QLabel("Search:"))
         self.text_search_edit = QLineEdit()
@@ -306,35 +308,12 @@ class SentencesView(QWidget):
     # Data loading
     # ------------------------------------------------------------------
 
-    def _load_doc_list(self):
-        """Populate document filter combo from DB (short sync read)."""
-        try:
-            from sqlalchemy import select
-            from app.infra.sa_models import SourceDocument, SourceCorpus
-            with self.db_service.get_session() as session:
-                stmt = (
-                    select(SourceDocument.doc_id, SourceDocument.file_name)
-                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                    .where(SourceCorpus.project_id == self.project_id)
-                    .order_by(SourceDocument.file_name.asc())
-                )
-                docs = session.execute(stmt).all()
-            self.doc_combo.blockSignals(True)
-            self.doc_combo.clear()
-            self.doc_combo.addItem("All Documents", None)
-            for doc_id, file_name in docs:
-                self.doc_combo.addItem(file_name, doc_id)
-            self.doc_combo.blockSignals(False)
-        except Exception as e:
-            logger.warning(f"Failed to load document list: {e}")
-
     def _reload(self):
         """Launch background load worker."""
         if self._load_worker and self._load_worker.isRunning():
             return  # Debounce: skip if already running
 
         self._text_search = self.text_search_edit.text().strip() or None
-        self._doc_filter = self.doc_combo.currentData()
 
         self.status_label.setText("Loading...")
         self._load_worker = _SentencesLoadWorker(
@@ -490,7 +469,18 @@ class SentencesView(QWidget):
         self.current_page = 1
         self._filter_timer.start()
 
-    def _on_doc_filter_changed(self):
+    def _on_pick_document(self):
+        dialog = DocumentPickerDialog(
+            project_id=self.project_id,
+            selected_doc_id=self._doc_filter,
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        doc_id, doc_name = dialog.selected_document()
+        self._doc_filter = doc_id
+        self.doc_filter_label.setText(doc_name or "All Documents")
         self.current_page = 1
         self._reload()
 
@@ -498,7 +488,8 @@ class SentencesView(QWidget):
         self.text_search_edit.blockSignals(True)
         self.text_search_edit.clear()
         self.text_search_edit.blockSignals(False)
-        self.doc_combo.setCurrentIndex(0)
+        self._doc_filter = None
+        self.doc_filter_label.setText("All Documents")
         self.current_page = 1
         self._reload()
 
@@ -815,7 +806,15 @@ class SentencesView(QWidget):
                 force_global_update=(value == ""),
             )
 
-        with_retry_on_locked(_flush_and_propagate, max_retries=3)
+        def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
+            self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
+
+        with_retry_on_locked(
+            _flush_and_propagate,
+            max_retries=4,
+            rollback_callback=session.rollback,
+            retry_callback=_on_retry,
+        )
 
     def on_pronunciation_bootstrap(self):
         """Run pronunciation bootstrap for selected (or all) sentences."""

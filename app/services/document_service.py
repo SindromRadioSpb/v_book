@@ -11,10 +11,10 @@ import re
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import SourceDocument
+from app.infra.sa_models import SourceCorpus, SourceDocument
 from app.domain.dto import DocumentDTO
 from app.infra.security import sanitize_for_log
 
@@ -121,6 +121,85 @@ def validate_topic(topic: Optional[str]) -> Optional[str]:
 
 class DocumentService:
     """CRUD + query service for SourceDocument with metadata support."""
+
+    def build_project_documents_query(
+        self,
+        project_id: int,
+        *,
+        search_query: Optional[str] = None,
+        sort_by: str = "doc_id",
+        sort_dir: str = "desc",
+    ):
+        """Build project-scoped query for document picker (search + sort, no pagination)."""
+        stmt = (
+            select(SourceDocument)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == int(project_id))
+        )
+
+        query = (search_query or "").strip()
+        if query:
+            like_q = f"%{query}%"
+            predicates = [
+                SourceDocument.file_name.ilike(like_q),
+                SourceDocument.tag.ilike(like_q),
+            ]
+            if query.isdigit():
+                predicates.append(SourceDocument.doc_id == int(query))
+            stmt = stmt.where(or_(*predicates))
+
+        stmt = self._apply_documents_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+        return stmt
+
+    def get_project_documents_total_count(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        search_query: Optional[str] = None,
+    ) -> int:
+        """Return project-scoped count for document picker search."""
+        stmt = (
+            select(func.count(SourceDocument.doc_id))
+            .select_from(SourceDocument)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == int(project_id))
+        )
+
+        query = (search_query or "").strip()
+        if query:
+            like_q = f"%{query}%"
+            predicates = [
+                SourceDocument.file_name.ilike(like_q),
+                SourceDocument.tag.ilike(like_q),
+            ]
+            if query.isdigit():
+                predicates.append(SourceDocument.doc_id == int(query))
+            stmt = stmt.where(or_(*predicates))
+
+        return int(session.execute(stmt).scalar() or 0)
+
+    def fetch_project_documents_page(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        search_query: Optional[str] = None,
+        sort_by: str = "doc_id",
+        sort_dir: str = "desc",
+        limit: int = 25,
+        offset: int = 0,
+    ) -> List[DocumentDTO]:
+        """Return one project-scoped page for document picker."""
+        stmt = self.build_project_documents_query(
+            project_id,
+            search_query=search_query,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+        stmt = stmt.limit(max(1, int(limit))).offset(max(0, int(offset)))
+        docs = session.execute(stmt).scalars().all()
+        return [self._to_dto(d) for d in docs]
 
     def build_documents_query(
         self,
