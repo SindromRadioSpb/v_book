@@ -92,6 +92,8 @@ a = Analysis(
         'app.services.pronunciation_bootstrap_service',
         'app.services.pronunciation_import_export_service',
         'app.infra.pronunciation.phonikud_adapter',
+        'phonikud',
+        'phonikud_onnx',
         'app.services.audio_usage_tracker',
 
         # Project Exchange (Task 9) - РќРћР’РћР•

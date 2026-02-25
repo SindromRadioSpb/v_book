@@ -16,6 +16,7 @@ Exit codes:
 
 import argparse
 from datetime import datetime, timezone
+import importlib
 import logging
 import sqlite3
 import sys
@@ -36,6 +37,35 @@ def _unique_export_project_name() -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     suffix = uuid4().hex[:8]
     return f"__EXPORT_TEST__{ts}_{suffix}"
+
+
+def check_required_local_modules() -> bool:
+    """Check that required local runtime modules are importable."""
+    logger.info("=" * 70)
+    logger.info("CHECK 0: Required Local Modules")
+    logger.info("=" * 70)
+
+    required_modules = ["phonikud"]
+    all_ok = True
+
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    for module_name in required_modules:
+        try:
+            importlib.import_module(module_name)
+            logger.info(f"  {module_name}: IMPORT OK")
+        except Exception as exc:
+            all_ok = False
+            logger.error(f"  {module_name}: IMPORT FAILED ({exc})")
+
+    if all_ok:
+        logger.info("[OK] Required local modules import successfully")
+    else:
+        logger.error("[!!] Required local module import checks failed")
+
+    return all_ok
 
 
 def check_fts_presence(db_path: Path) -> bool:
@@ -348,6 +378,7 @@ def main():
     results = {}
 
     # Run checks
+    results["Required Local Modules"] = check_required_local_modules()
     results["FTS Presence"] = check_fts_presence(db_path)
     results["Project Lifecycle"] = check_project_lifecycle(db_path)
 
