@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QTableView, QLabel, QSpinBox,
     QComboBox, QLineEdit, QProgressBar, QCheckBox, QMenu, QMessageBox
 )
-from PyQt6.QtCore import Qt, QModelIndex
+from PyQt6.QtCore import Qt, QModelIndex, QTimer
 from PyQt6.QtGui import QAction
 
 from app.infra.settings import SettingsService
@@ -62,6 +62,13 @@ class TermsView(QWidget):
         self.page_size = self.settings.get_int("terms_view/page_size", 100)
         self.total_count = 0
         self.search_worker = None  # Track worker for cancellation
+        self._search_request_seq = 0
+        self._active_search_seq = 0
+        self._search_retry_pending = False
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self.perform_search)
 
         self.init_ui()
         self.perform_search()
@@ -427,14 +434,20 @@ class TermsView(QWidget):
     def on_search_changed(self, text: str):
         """Handle search text change - reset to page 1 and search."""
         self.current_page = 1
-        self.perform_search()
+        self._search_timer.start()
 
     def perform_search(self):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
-            self.search_worker.quit()
-            self.search_worker.wait(1000)
+            self.search_worker.cancel()
+            if not self.search_worker.wait(100):
+                self._search_retry_pending = True
+                return
+
+        self._search_retry_pending = False
+        self._search_request_seq += 1
+        request_seq = self._search_request_seq
 
         # Build filters
         filters = self.build_filters()
@@ -446,16 +459,42 @@ class TermsView(QWidget):
             limit=self.page_size,
             offset=self.current_offset,
         )
+        self._active_search_seq = request_seq
 
-        self.search_worker.results_ready.connect(self.on_search_results)
-        self.search_worker.error.connect(self.on_search_error)
+        self.search_worker.results_ready.connect(
+            lambda clusters, total_count, seq=request_seq: self.on_search_results(clusters, total_count, seq)
+        )
+        self.search_worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
+        )
+        self.search_worker.finished.connect(
+            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(worker, seq)
+        )
         self.search_worker.start()
 
         # Update status
         self.status_label.setText("Searching...")
 
-    def on_search_results(self, clusters: list, total_count: int):
+    def _on_search_worker_finished(self, worker, request_seq: int) -> None:
+        if worker is self.search_worker:
+            self.search_worker = None
+
+        worker.deleteLater()
+
+        if self._search_retry_pending:
+            self._search_retry_pending = False
+            QTimer.singleShot(0, self.perform_search)
+
+    def on_search_results(self, clusters: list, total_count: int, request_seq: Optional[int] = None):
         """Handle search results from worker."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale terms search results: seq=%s active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
         # Update total count
         self.total_count = total_count
 
@@ -484,11 +523,6 @@ class TermsView(QWidget):
 
         # Start translation worker
         self.start_translation_worker(clusters)
-
-        # Clean up worker
-        if self.search_worker:
-            self.search_worker.deleteLater()
-            self.search_worker = None
 
     def _apply_study_overlays(self, clusters: list) -> None:
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
@@ -567,16 +601,19 @@ class TermsView(QWidget):
                 cluster.pronunciation_confidence = row_pron.get("pronunciation_confidence")
                 cluster.pronunciation_qc = row_pron.get("pronunciation_qc")
 
-    def on_search_error(self, error_msg: str):
+    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale terms search error: seq=%s active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
         logger.error(f"Search error: {error_msg}")
         show_error(self, "Search Error", f"Failed to search term clusters: {error_msg}")
         self.status_label.setText("Search failed")
-
-        # Clean up worker
-        if self.search_worker:
-            self.search_worker.deleteLater()
-            self.search_worker = None
 
     def on_first_page(self):
         """Navigate to first page."""
