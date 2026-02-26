@@ -172,3 +172,43 @@ def test_shim_marks_fallback_when_subprocess_probe_returns_identity(monkeypatch,
     assert out == "\u05e9\u05dc\u05d5\u05dd"
     assert shim.get_runtime_mode() == "fallback"
     assert "identity output" in shim.get_runtime_details().lower()
+
+
+def test_shim_prefers_subprocess_backend_in_frozen_windows_runtime(monkeypatch, tmp_path):
+    onnx_file = tmp_path / "phonikud-1.0.int8.onnx"
+    onnx_file.write_text("int8", encoding="utf-8")
+
+    class _ShouldNotBeCalled:
+        def __init__(self, _model_path_value: str):
+            raise AssertionError("in-process ONNX loader must not run in frozen Windows mode")
+
+    fake_module = types.SimpleNamespace(Phonikud=_ShouldNotBeCalled)
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", fake_module)
+    monkeypatch.setenv("PHONIKUD_MODEL_PATH", str(onnx_file))
+
+    shim = _reload_shim()
+    shim.reset_runtime_cache()
+
+    def _fake_run(*_args, **kwargs):
+        payload = json.loads(kwargs.get("input") or "{}")
+        texts = payload.get("texts") or []
+        stdout = json.dumps({"outputs": [f"{text}_sub" for text in texts]}, ensure_ascii=True)
+        return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(shim, "_should_prefer_subprocess_for_onnx", lambda: True)
+    monkeypatch.setattr(shim.subprocess, "run", _fake_run)
+    out = shim.add_niqqud("\u05e9\u05dc\u05d5\u05dd")
+
+    assert out.endswith("_sub")
+    assert shim.get_runtime_mode() == "real_inference"
+    assert "frozen_windows" in shim.get_runtime_details().lower()
+
+
+def test_subprocess_preference_respects_env_override(monkeypatch):
+    shim = _reload_shim()
+
+    monkeypatch.setenv("PHONIKUD_FORCE_SUBPROCESS", "0")
+    assert shim._should_prefer_subprocess_for_onnx() is False
+
+    monkeypatch.setenv("PHONIKUD_FORCE_SUBPROCESS", "1")
+    assert shim._should_prefer_subprocess_for_onnx() is True

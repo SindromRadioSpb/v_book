@@ -107,15 +107,12 @@ def _prepare_onnxruntime_dll_paths_for_bridge() -> None:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         meipass_root = Path(str(meipass))
-        candidates.append(meipass_root)
         candidates.append(meipass_root / "onnxruntime" / "capi")
-        candidates.append(meipass_root / "_internal")
         candidates.append(meipass_root / "_internal" / "onnxruntime" / "capi")
 
     try:
         exe_root = Path(sys.executable).resolve().parent
-        candidates.append(exe_root)
-        candidates.append(exe_root / "_internal")
+        candidates.append(exe_root / "onnxruntime" / "capi")
         candidates.append(exe_root / "_internal" / "onnxruntime" / "capi")
     except Exception:
         pass
@@ -125,7 +122,6 @@ def _prepare_onnxruntime_dll_paths_for_bridge() -> None:
         origin = getattr(spec, "origin", None)
         if origin:
             package_root = Path(origin).resolve().parent
-            candidates.append(package_root)
             candidates.append(package_root / "capi")
     except Exception:
         pass
@@ -189,8 +185,26 @@ def _run_phonikud_subprocess_bridge() -> int:
                 rendered = ""
             outputs.append(rendered or normalized)
     except Exception as exc:
+        diag_parts: list[str] = []
+        try:
+            spec = importlib.util.find_spec("onnxruntime")
+            origin = getattr(spec, "origin", None)
+            diag_parts.append(f"onnxruntime_origin={origin}")
+            if origin:
+                package_root = Path(origin).resolve().parent
+                capi_dir = package_root / "capi"
+                pybind_file = capi_dir / "onnxruntime_pybind11_state.pyd"
+                runtime_dll = capi_dir / "onnxruntime.dll"
+                shared_dll = capi_dir / "onnxruntime_providers_shared.dll"
+                diag_parts.append(f"capi_dir_exists={capi_dir.exists()}")
+                diag_parts.append(f"pybind_exists={pybind_file.exists()}")
+                diag_parts.append(f"onnxruntime_dll_exists={runtime_dll.exists()}")
+                diag_parts.append(f"providers_shared_exists={shared_dll.exists()}")
+        except Exception as diag_exc:
+            diag_parts.append(f"diag_error={diag_exc}")
+        diag_suffix = f" [{' ; '.join(diag_parts)}]" if diag_parts else ""
         print(
-            f"phonikud_subprocess_bridge backend unavailable, identity fallback: {exc}",
+            f"phonikud_subprocess_bridge backend unavailable, identity fallback: {exc}{diag_suffix}",
             file=sys.stderr,
         )
         outputs = texts
@@ -239,6 +253,24 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
             "error": phonikud_error,
         }
 
+    try:
+        ort_module = importlib.import_module("onnxruntime")
+        ort_origin = str(getattr(ort_module, "__file__", "") or "")
+        capi_dir = Path(ort_origin).resolve().parent / "capi" if ort_origin else None
+        payload["checks"]["onnxruntime_import"] = {
+            "ok": True,
+            "module": getattr(ort_module, "__name__", "onnxruntime"),
+            "origin": ort_origin,
+            "capi_dir_exists": bool(capi_dir and capi_dir.exists()),
+            "pybind_exists": bool(capi_dir and (capi_dir / "onnxruntime_pybind11_state.pyd").exists()),
+            "runtime_dll_exists": bool(capi_dir and (capi_dir / "onnxruntime.dll").exists()),
+        }
+    except Exception as exc:
+        payload["checks"]["onnxruntime_import"] = {
+            "ok": False,
+            "error": str(exc),
+        }
+
     payload["checks"]["resource_paths"] = {
         "data_root": str(paths.data_root),
         "models_root": str(paths.models_root),
@@ -281,7 +313,7 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
         )
     payload["checks"]["required_resources"] = required_resources
 
-    ok = bool(payload["checks"]["phonikud_import"]["ok"])
+    ok = bool(payload["checks"]["phonikud_import"]["ok"] and payload["checks"]["onnxruntime_import"]["ok"])
     return (0 if ok else 1), payload
 
 
@@ -702,20 +734,6 @@ def main():
     if compat_exit is not None:
         return compat_exit
 
-    # Import heavy Qt/UI modules only for normal app startup.
-    # Keep subprocess bridge startup lean to avoid DLL side effects.
-    from PyQt6.QtWidgets import QApplication
-    from app.infra.db_path_resolver import resolve_db_path
-    from app.infra.resource_paths import ResourcePaths
-    from app.infra.settings import SettingsService
-    from app.infra.util.logging import setup_logging
-    from app.services.db_service import DBService
-    from app.infra.translators.local_providers_setup import (
-        register_google_translate,
-        register_google_cloud_translate,
-    )
-    from app.ui.app_window import AppWindow
-
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="HDLE Premium - Terminology Extraction Tool")
     parser.add_argument(
@@ -750,6 +768,19 @@ def main():
         exit_code, payload = run_self_check(args.self_check, db_path_arg=args.db_path)
         _emit_self_check(payload, out_path=args.self_check_out)
         return exit_code
+
+    # Import heavy Qt/UI modules only for normal app startup.
+    # Keep self-check and subprocess bridge paths independent from GUI imports.
+    from PyQt6.QtWidgets import QApplication
+    from app.infra.resource_paths import ResourcePaths
+    from app.infra.settings import SettingsService
+    from app.infra.util.logging import setup_logging
+    from app.services.db_service import DBService
+    from app.infra.translators.local_providers_setup import (
+        register_google_translate,
+        register_google_cloud_translate,
+    )
+    from app.ui.app_window import AppWindow
 
     settings = SettingsService.get_instance()
 

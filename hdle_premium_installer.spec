@@ -94,6 +94,7 @@ a = Analysis(
         'app.infra.pronunciation.phonikud_adapter',
         'phonikud',
         'phonikud_onnx',
+        'onnxruntime.capi.onnxruntime_pybind11_state',
         'app.services.audio_usage_tracker',
 
         # Project Exchange (Task 9) - РќРћР’РћР•
@@ -153,6 +154,9 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
+    module_collection_mode={
+        'onnxruntime': 'py',
+    },
     noarchive=False,
 )
 

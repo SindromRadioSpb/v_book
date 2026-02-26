@@ -106,13 +106,12 @@ def prepare_runtime_dll_paths() -> None:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         meipass_root = Path(str(meipass))
-        candidates.append(meipass_root)
         candidates.append(meipass_root / "onnxruntime" / "capi")
 
     try:
         exe_root = Path(sys.executable).resolve().parent
         internal_root = exe_root / "_internal"
-        candidates.append(internal_root)
+        candidates.append(exe_root / "onnxruntime" / "capi")
         candidates.append(internal_root / "onnxruntime" / "capi")
     except Exception:
         pass
@@ -122,7 +121,6 @@ def prepare_runtime_dll_paths() -> None:
         origin = getattr(spec, "origin", None)
         if origin:
             package_root = Path(origin).resolve().parent
-            candidates.append(package_root)
             candidates.append(package_root / "capi")
     except Exception:
         pass
@@ -180,6 +178,45 @@ def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
     return [str(item or "") for item in outputs]
 
 
+def _should_prefer_subprocess_for_onnx() -> bool:
+    """Prefer isolated ONNX runtime for frozen Windows builds."""
+    forced = (os.getenv("PHONIKUD_FORCE_SUBPROCESS") or "").strip().lower()
+    if forced in {"0", "false", "off", "no"}:
+        return False
+    if forced in {"1", "true", "on", "yes"}:
+        return True
+    return os.name == "nt" and bool(getattr(sys, "frozen", False))
+
+
+def _activate_onnx_subprocess_backend(
+    target_path: Path,
+    *,
+    reason: str = "",
+) -> Optional[Tuple[str, object, Optional[object]]]:
+    global _runtime_mode, _runtime_details
+    try:
+        probe_inputs = ["\u05e9\u05dc\u05d5\u05dd"]
+        probe_outputs = _run_onnx_subprocess(target_path, probe_inputs)
+        changed = any(
+            str(rendered or "").strip() != source
+            for source, rendered in zip(probe_inputs, probe_outputs)
+        )
+        if changed:
+            _runtime_mode = MODE_REAL
+            reason_suffix = f" ({reason})" if reason else ""
+            _runtime_details = f"ONNX subprocess backend active{reason_suffix}: {target_path.name}"
+        else:
+            _runtime_mode = MODE_FALLBACK
+            _runtime_details = (
+                f"ONNX subprocess probe returned identity output: {target_path.name}"
+            )
+        return "onnx_subprocess", str(target_path), None
+    except Exception as sub_exc:
+        _runtime_mode = MODE_ERROR
+        _runtime_details = f"Subprocess backend failed: {sub_exc}"
+        return None
+
+
 def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
     """Resolve configured model target as ('onnx'|'torch', path) or (None, None)."""
     raw = _sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
@@ -233,6 +270,8 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
         return None
 
     if target_kind == "onnx":
+        if _should_prefer_subprocess_for_onnx():
+            return _activate_onnx_subprocess_backend(target_path, reason="frozen_windows")
         try:
             _ensure_hf_home()
             prepare_runtime_dll_paths()
@@ -243,29 +282,15 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
             _runtime_details = f"ONNX model loaded: {target_path.name}"
             return "onnx", model, None
         except Exception as exc:
-            try:
-                # Probe isolated runtime to recover from in-process DLL init issues.
-                probe_inputs = ["\u05e9\u05dc\u05d5\u05dd"]
-                probe_outputs = _run_onnx_subprocess(target_path, probe_inputs)
-                changed = any(
-                    str(rendered or "").strip() != source
-                    for source, rendered in zip(probe_inputs, probe_outputs)
-                )
-                if changed:
-                    _runtime_mode = MODE_REAL
-                    _runtime_details = f"ONNX subprocess backend active: {target_path.name}"
-                else:
-                    _runtime_mode = MODE_FALLBACK
-                    _runtime_details = (
-                        f"ONNX subprocess probe returned identity output: {target_path.name}"
-                    )
-                return "onnx_subprocess", str(target_path), None
-            except Exception as sub_exc:
-                _runtime_mode = MODE_ERROR
-                _runtime_details = (
-                    f"Failed to load ONNX model: {exc}; subprocess fallback failed: {sub_exc}"
-                )
-                return None
+            activated = _activate_onnx_subprocess_backend(
+                target_path,
+                reason="recover_from_inprocess_failure",
+            )
+            if activated is not None:
+                return activated
+            _runtime_mode = MODE_ERROR
+            _runtime_details = f"Failed to load ONNX model: {exc}; {_runtime_details}"
+            return None
 
     try:
         from transformers import AutoTokenizer

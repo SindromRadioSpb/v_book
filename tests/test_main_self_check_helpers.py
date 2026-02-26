@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import builtins
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -177,3 +178,28 @@ def test_candidate_db_paths_cli_override(monkeypatch, tmp_path: Path):
 
     result = main._candidate_db_paths_for_credentials(_DummySettings(), "ignored.db")
     assert result == [cli_db]
+
+
+def test_main_self_check_path_skips_heavy_ui_imports(monkeypatch):
+    original_import = builtins.__import__
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "app.ui.app_window":
+            raise AssertionError("UI module import must not run for --self-check")
+        return original_import(name, globals, locals, fromlist, level)
+
+    captured = {}
+
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    monkeypatch.setattr(main.sys, "argv", ["prog", "--self-check", "import"])
+    monkeypatch.setattr(main, "run_self_check", lambda mode, db_path_arg=None: (0, {"mode": mode, "ok": True}))
+    monkeypatch.setattr(
+        main,
+        "_emit_self_check",
+        lambda payload, out_path=None: captured.update({"payload": payload, "out_path": out_path}),
+    )
+
+    exit_code = main.main()
+    assert exit_code == 0
+    assert captured["payload"]["mode"] == "import"
+    assert captured["payload"]["ok"] is True
