@@ -11,10 +11,10 @@ All operations are transactional.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_, and_, update, case
+from sqlalchemy import select, func, or_, and_, update, case, text
 
 from app.infra.sa_models import (
     AudioAsset,
@@ -22,6 +22,7 @@ from app.infra.sa_models import (
     TMEntry,
     TMEntryHistory,
     Lemma,
+    DictProject,
     TermCluster,
     Ngram,
     StudyProgress,
@@ -383,6 +384,193 @@ class TranslationAdminService:
             stmt = stmt.where(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
         count = session.execute(stmt).scalar()
         return int(count or 0)
+
+    def materialize_project_lemmas_to_tm(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        chunk_size: int = 10000,
+        source_ref: str = "lemma_materialize_full",
+        dry_run: bool = False,
+        progress_cb: Optional[Callable[[Dict[str, int]], None]] = None,
+    ) -> Dict[str, int]:
+        """Create missing lemma-scoped tm_entry rows for the given project.
+
+        This creates one tm_entry anchor per lemma (where missing by lemma_id)
+        so Translation Management can browse full lemma scope of the project.
+        """
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be > 0")
+
+        project = session.execute(
+            select(DictProject).where(DictProject.project_id == project_id)
+        ).scalar_one_or_none()
+        if project is None:
+            raise ValueError(f"Project not found: {project_id}")
+
+        src_lang = (project.src_lang or "he").strip() or "he"
+        tgt_lang = (project.tgt_lang or "ru").strip() or "ru"
+
+        total_lemmas = int(
+            session.execute(
+                select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
+            ).scalar()
+            or 0
+        )
+        initial_tm_lemmas = int(
+            session.execute(
+                select(func.count())
+                .select_from(TMEntry)
+                .where(TMEntry.project_id == project_id, TMEntry.kind == "lemma")
+            ).scalar()
+            or 0
+        )
+        initial_missing = int(
+            session.execute(
+                select(func.count())
+                .select_from(Lemma)
+                .where(
+                    Lemma.project_id == project_id,
+                    ~select(TMEntry.tm_id)
+                    .where(
+                        TMEntry.project_id == Lemma.project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.lemma_id == Lemma.lemma_id,
+                    )
+                    .exists(),
+                )
+            ).scalar()
+            or 0
+        )
+
+        stats: Dict[str, int] = {
+            "project_id": int(project_id),
+            "total_lemmas": total_lemmas,
+            "initial_tm_lemmas": initial_tm_lemmas,
+            "initial_missing_lemma_links": initial_missing,
+            "attempted": 0,
+            "inserted": 0,
+            "processed_chunks": 0,
+            "final_tm_lemmas": initial_tm_lemmas,
+            "final_missing_lemma_links": initial_missing,
+        }
+        if dry_run or initial_missing <= 0:
+            return stats
+
+        from datetime import timezone
+
+        last_lemma_id = 0
+        while True:
+            chunk_rows = session.execute(
+                select(
+                    Lemma.lemma_id,
+                    Lemma.lemma_text,
+                    Lemma.is_noise,
+                    Lemma.noise_reason,
+                    func.coalesce(func.nullif(func.trim(Lemma.norm_text), ""), Lemma.lemma_text).label("src_norm"),
+                ).where(
+                    Lemma.project_id == project_id,
+                    Lemma.lemma_id > last_lemma_id,
+                    ~select(TMEntry.tm_id)
+                    .where(
+                        TMEntry.project_id == Lemma.project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.lemma_id == Lemma.lemma_id,
+                    )
+                    .exists(),
+                )
+                .order_by(Lemma.lemma_id.asc())
+                .limit(chunk_size)
+            ).all()
+
+            if not chunk_rows:
+                break
+
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            payload = []
+            for lemma_id, lemma_text, is_noise, noise_reason, src_norm in chunk_rows:
+                payload.append(
+                    {
+                        "project_id": int(project_id),
+                        "kind": "lemma",
+                        "src_lang": src_lang,
+                        "tgt_lang": tgt_lang,
+                        "src_text": str(lemma_text or ""),
+                        "src_norm": str(src_norm or lemma_text or ""),
+                        "translation": "",
+                        "status": "draft",
+                        "origin": "import",
+                        "source_ref": source_ref,
+                        "created_at": now_iso,
+                        "updated_at": now_iso,
+                        "is_noise": int(is_noise or 0),
+                        "noise_reason": noise_reason,
+                        "lemma_id": int(lemma_id),
+                    }
+                )
+
+            session.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO tm_entry (
+                        project_id, kind, src_lang, tgt_lang, src_text, src_norm,
+                        translation, status, origin, source_ref,
+                        created_at, updated_at, is_noise, noise_reason, lemma_id
+                    )
+                    VALUES (
+                        :project_id, :kind, :src_lang, :tgt_lang, :src_text, :src_norm,
+                        :translation, :status, :origin, :source_ref,
+                        :created_at, :updated_at, :is_noise, :noise_reason, :lemma_id
+                    )
+                    """
+                ),
+                payload,
+            )
+            session.commit()
+
+            stats["processed_chunks"] += 1
+            stats["attempted"] += len(payload)
+            last_lemma_id = int(chunk_rows[-1][0])
+
+            if progress_cb:
+                progress_cb(
+                    {
+                        "processed_chunks": stats["processed_chunks"],
+                        "attempted": stats["attempted"],
+                        "inserted": stats["attempted"],
+                        "last_lemma_id": last_lemma_id,
+                        "initial_missing_lemma_links": initial_missing,
+                    }
+                )
+
+        stats["final_tm_lemmas"] = int(
+            session.execute(
+                select(func.count())
+                .select_from(TMEntry)
+                .where(TMEntry.project_id == project_id, TMEntry.kind == "lemma")
+            ).scalar()
+            or 0
+        )
+        stats["final_missing_lemma_links"] = int(
+            session.execute(
+                select(func.count())
+                .select_from(Lemma)
+                .where(
+                    Lemma.project_id == project_id,
+                    ~select(TMEntry.tm_id)
+                    .where(
+                        TMEntry.project_id == Lemma.project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.lemma_id == Lemma.lemma_id,
+                    )
+                    .exists(),
+                )
+            ).scalar()
+            or 0
+        )
+        stats["inserted"] = max(0, stats["final_tm_lemmas"] - initial_tm_lemmas)
+        return stats
 
     def count_tm_ids_for_translation(
         self,
