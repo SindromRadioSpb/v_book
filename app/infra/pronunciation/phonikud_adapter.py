@@ -101,11 +101,24 @@ class PhonikudAdapter:
         except Exception:
             return ""
 
-    def _discover_default_model_path(self) -> Optional[str]:
+    @staticmethod
+    def _resolve_models_root() -> Optional[Path]:
         try:
-            models_dir = ResourcePaths.build(create=False).models_root / "phonikud"
+            from app.infra.settings import SettingsService
+
+            settings = SettingsService.get_instance()
+            return ResourcePaths.build(settings=settings, create=False).models_root
         except Exception:
+            try:
+                return ResourcePaths.build(create=False).models_root
+            except Exception:
+                return None
+
+    def _discover_default_model_path(self) -> Optional[str]:
+        models_root = self._resolve_models_root()
+        if models_root is None:
             return None
+        models_dir = models_root / "phonikud"
         if not models_dir.exists():
             return None
         preferred = sorted(models_dir.glob("*int8.onnx"))
@@ -324,11 +337,9 @@ class PhonikudAdapter:
             status = PhonikudHealthStatus.ERROR.value
             details = self._read_module_details() or self._load_error or "Phonikud runtime unavailable"
         if mode != PhonikudMode.REAL_INFERENCE.value:
-            try:
-                expected = ResourcePaths.build(create=False).models_root / "phonikud"
-                details = f"{details}. Expected model path: {expected}"
-            except Exception:
-                pass
+            expected_root = self._resolve_models_root()
+            if expected_root is not None:
+                details = f"{details}. Expected model path: {expected_root / 'phonikud'}"
 
         samples_payload = [
             {"input": text, "output": outputs.get(text, text)}

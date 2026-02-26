@@ -78,6 +78,43 @@ def test_run_phonikud_subprocess_bridge_uses_identity_fallback_on_backend_error(
     assert "identity fallback" in stderr.getvalue().lower()
 
 
+def test_run_phonikud_subprocess_bridge_reads_utf8_buffer_and_emits_ascii_safe_json(monkeypatch):
+    class _FakePhonikud:
+        def __init__(self, _model_path: str):
+            pass
+
+        def add_diacritics(self, text: str) -> str:
+            return "\u05e9\u05b8\u05c1\u05dc\u05d5\u05b9\u05dd" if text == "\u05e9\u05dc\u05d5\u05dd" else text
+
+    class _FakeStdin:
+        def __init__(self, payload_bytes: bytes):
+            self.buffer = io.BytesIO(payload_bytes)
+
+        def read(self) -> str:
+            return ""
+
+    monkeypatch.setitem(sys.modules, "phonikud_onnx", SimpleNamespace(Phonikud=_FakePhonikud))
+    monkeypatch.setitem(sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None))
+    payload = json.dumps(
+        {"model_path": "C:/models/phonikud.onnx", "texts": ["\u05e9\u05dc\u05d5\u05dd"]},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    monkeypatch.setattr(main.sys, "stdin", _FakeStdin(payload))
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    monkeypatch.setattr(main.sys, "stdout", stdout)
+    monkeypatch.setattr(main.sys, "stderr", stderr)
+
+    result = main._run_phonikud_subprocess_bridge()
+    rendered_json = stdout.getvalue()
+    parsed = json.loads(rendered_json)
+
+    assert result == 0
+    assert parsed["outputs"][0] == "\u05e9\u05b8\u05c1\u05dc\u05d5\u05b9\u05dd"
+    assert "\\u05" in rendered_json
+    assert stderr.getvalue() == ""
+
+
 def test_load_service_account_file_rejects_api_key_text(tmp_path: Path):
     path = tmp_path / "api_key.txt"
     path.write_text("AIza-not-a-service-account-json", encoding="utf-8")

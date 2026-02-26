@@ -146,3 +146,39 @@ def test_phonikud_adapter_prefers_batch_callable(monkeypatch):
     assert outputs["b"] == "b_batch"
     assert calls["batch"] == 1
     assert calls["single"] == 0
+
+
+def test_phonikud_adapter_discovers_default_model_in_resolved_models_root(tmp_path, monkeypatch):
+    models_root = tmp_path / "models"
+    phonikud_dir = models_root / "phonikud"
+    phonikud_dir.mkdir(parents=True, exist_ok=True)
+    regular = phonikud_dir / "phonikud-1.0.onnx"
+    regular.write_text("x", encoding="utf-8")
+    preferred = phonikud_dir / "phonikud-1.0.int8.onnx"
+    preferred.write_text("x", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path="", enabled=True)
+    monkeypatch.setattr(adapter, "_resolve_models_root", lambda: models_root)
+
+    assert adapter._discover_default_model_path() == str(preferred)
+
+
+def test_phonikud_adapter_fallback_details_include_resolved_models_root(monkeypatch, tmp_path):
+    class _FakeModule:
+        @staticmethod
+        def add_niqqud(text: str) -> str:
+            return text
+
+        @staticmethod
+        def get_runtime_mode() -> str:
+            return "fallback"
+
+    monkeypatch.setattr(importlib, "import_module", lambda _name: _FakeModule)
+    adapter = PhonikudAdapter(model_path="", enabled=True)
+    models_root = tmp_path / "custom_root" / "models"
+    monkeypatch.setattr(adapter, "_resolve_models_root", lambda: models_root)
+
+    report = adapter.health_check(["sample"])
+
+    assert report.status == "fallback"
+    assert f"Expected model path: {models_root / 'phonikud'}" in report.details

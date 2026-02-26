@@ -1,4 +1,6 @@
 """HDLE Premium - Main entry point."""
+from __future__ import annotations
+
 import sys
 import json
 import time
@@ -11,22 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtWidgets import QApplication
-
-from app.infra.db_path_resolver import get_default_db_path, resolve_db_path
-from app.infra.resource_paths import ResourcePaths
-from app.infra.settings import SettingsService
-from app.infra.util.logging import setup_logging
-from app.services.db_service import DBService
-from app.services.health_check_service import HealthCheckService
-from app.services.resources import ResourceRegistry
-from app.infra.translators.local_providers_setup import (
-    initialize_local_providers,
-    register_google_translate,
-    register_google_cloud_translate,
-)
-from app.ui.app_window import AppWindow
-
 logger = logging.getLogger(__name__)
 
 _PHONIKUD_SUBPROCESS_SENTINELS = (
@@ -36,6 +22,20 @@ _PHONIKUD_SUBPROCESS_SENTINELS = (
     "json.loads",
     "outputs",
 )
+_BRIDGE_DLL_HANDLES: list[Any] = []
+_BRIDGE_DLL_KEYS: set[str] = set()
+
+
+def resolve_db_path(cli_db_path: str | None, *, settings=None):
+    from app.infra.db_path_resolver import resolve_db_path as _resolve_db_path_impl
+
+    return _resolve_db_path_impl(cli_db_path, settings=settings)
+
+
+def get_default_db_path(*, settings=None) -> Path:
+    from app.infra.db_path_resolver import get_default_db_path as _get_default_db_path_impl
+
+    return _get_default_db_path_impl(settings=settings)
 
 
 def get_app_dir() -> Path:
@@ -46,6 +46,8 @@ def get_app_dir() -> Path:
     - macOS: ~/Library/Application Support/HDLE
     - Linux: ~/.local/share/hdle
     """
+    from app.infra.resource_paths import ResourcePaths
+
     return ResourcePaths.resolve_data_root(create=True)
 
 
@@ -79,9 +81,82 @@ def _is_phonikud_subprocess_script(script: str) -> bool:
     return all(token.lower() in lowered for token in _PHONIKUD_SUBPROCESS_SENTINELS)
 
 
+def _register_bridge_dll_directory(path: Path) -> None:
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+    try:
+        resolved = str(path.resolve())
+    except Exception:
+        resolved = str(path)
+    key = resolved.lower()
+    if key in _BRIDGE_DLL_KEYS:
+        return
+    if not Path(resolved).exists():
+        return
+    try:
+        handle = os.add_dll_directory(resolved)
+    except Exception:
+        return
+    _BRIDGE_DLL_HANDLES.append(handle)
+    _BRIDGE_DLL_KEYS.add(key)
+
+
+def _prepare_onnxruntime_dll_paths_for_bridge() -> None:
+    candidates: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        meipass_root = Path(str(meipass))
+        candidates.append(meipass_root)
+        candidates.append(meipass_root / "onnxruntime" / "capi")
+        candidates.append(meipass_root / "_internal")
+        candidates.append(meipass_root / "_internal" / "onnxruntime" / "capi")
+
+    try:
+        exe_root = Path(sys.executable).resolve().parent
+        candidates.append(exe_root)
+        candidates.append(exe_root / "_internal")
+        candidates.append(exe_root / "_internal" / "onnxruntime" / "capi")
+    except Exception:
+        pass
+
+    try:
+        spec = importlib.util.find_spec("onnxruntime")
+        origin = getattr(spec, "origin", None)
+        if origin:
+            package_root = Path(origin).resolve().parent
+            candidates.append(package_root)
+            candidates.append(package_root / "capi")
+    except Exception:
+        pass
+
+    existing_path = os.environ.get("PATH", "")
+    normalized_path = existing_path.lower()
+    prefix_parts: list[str] = []
+    for candidate in candidates:
+        try:
+            resolved = str(candidate.resolve())
+        except Exception:
+            resolved = str(candidate)
+        if not Path(resolved).exists():
+            continue
+        _register_bridge_dll_directory(Path(resolved))
+        if resolved.lower() not in normalized_path and resolved not in prefix_parts:
+            prefix_parts.append(resolved)
+    if prefix_parts:
+        os.environ["PATH"] = ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+
+
 def _run_phonikud_subprocess_bridge() -> int:
     try:
-        raw = sys.stdin.read() or "{}"
+        raw_bytes = b""
+        stdin_buffer = getattr(sys.stdin, "buffer", None)
+        if stdin_buffer is not None and hasattr(stdin_buffer, "read"):
+            raw_bytes = stdin_buffer.read() or b""
+        if raw_bytes:
+            raw = raw_bytes.decode("utf-8", errors="replace")
+        else:
+            raw = sys.stdin.read() or "{}"
         data = json.loads(raw)
         model_path = str(data.get("model_path") or "")
         texts = [str(text or "") for text in (data.get("texts") or [])]
@@ -91,6 +166,7 @@ def _run_phonikud_subprocess_bridge() -> int:
 
     try:
         try:
+            _prepare_onnxruntime_dll_paths_for_bridge()
             import phonikud as phonikud_shim
 
             prepare_runtime_dll_paths = getattr(phonikud_shim, "prepare_runtime_dll_paths", None)
@@ -99,8 +175,8 @@ def _run_phonikud_subprocess_bridge() -> int:
             ensure_hf_home = getattr(phonikud_shim, "_ensure_hf_home", None)
             if callable(ensure_hf_home):
                 ensure_hf_home()
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"phonikud_subprocess_bridge bootstrap warning: {exc}", file=sys.stderr)
 
         from phonikud_onnx import Phonikud
 
@@ -120,7 +196,8 @@ def _run_phonikud_subprocess_bridge() -> int:
         outputs = texts
 
     try:
-        sys.stdout.write(json.dumps({"outputs": outputs}, ensure_ascii=False))
+        # Use ASCII-safe JSON to avoid code-page issues across spawned runtimes.
+        sys.stdout.write(json.dumps({"outputs": outputs}, ensure_ascii=True))
         return 0
     except Exception as exc:
         print(f"phonikud_subprocess_bridge emit error: {exc}", file=sys.stderr)
@@ -137,6 +214,9 @@ def _handle_embedded_python_compat(argv: list[str]) -> int | None:
 
 
 def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, Any]]:
+    from app.infra.resource_paths import ResourcePaths
+    from app.services.resources import ResourceRegistry
+
     paths = ResourcePaths.build(settings=settings, create=True)
     payload: dict[str, Any] = {
         "mode": "import",
@@ -237,6 +317,8 @@ def _run_db_open_self_check(settings: SettingsService, db_path_arg: str | None) 
 
 
 def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
+    from app.services.health_check_service import HealthCheckService
+
     resolved_db = resolve_db_path(db_path_arg, settings=settings)
     db_path = Path(resolved_db.path).resolve()
     payload: dict[str, Any] = {
@@ -412,6 +494,8 @@ def _run_cloud_tests_self_check(
     settings: SettingsService,
     db_path_arg: str | None,
 ) -> tuple[int, dict[str, Any]]:
+    from app.services.db_service import DBService
+
     payload: dict[str, Any] = {
         "mode": "cloud_tests",
         "timestamp_utc": _utc_now_iso(),
@@ -593,6 +677,8 @@ def _run_cloud_tests_self_check(
     return (0 if payload["ok"] else 1), payload
 
 def run_self_check(mode: str, *, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
+    from app.infra.settings import SettingsService
+
     settings = SettingsService.get_instance()
     if mode == "import":
         return _run_import_self_check(settings)
@@ -615,6 +701,20 @@ def main():
     compat_exit = _handle_embedded_python_compat(sys.argv)
     if compat_exit is not None:
         return compat_exit
+
+    # Import heavy Qt/UI modules only for normal app startup.
+    # Keep subprocess bridge startup lean to avoid DLL side effects.
+    from PyQt6.QtWidgets import QApplication
+    from app.infra.db_path_resolver import resolve_db_path
+    from app.infra.resource_paths import ResourcePaths
+    from app.infra.settings import SettingsService
+    from app.infra.util.logging import setup_logging
+    from app.services.db_service import DBService
+    from app.infra.translators.local_providers_setup import (
+        register_google_translate,
+        register_google_cloud_translate,
+    )
+    from app.ui.app_window import AppWindow
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="HDLE Premium - Terminology Extraction Tool")

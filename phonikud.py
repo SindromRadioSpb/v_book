@@ -155,13 +155,13 @@ def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
         " except Exception:\n"
         "  rendered=''\n"
         " outs.append(rendered or t)\n"
-        "sys.stdout.write(json.dumps({'outputs': outs}, ensure_ascii=False))\n"
+        "sys.stdout.write(json.dumps({'outputs': outs}, ensure_ascii=True))\n"
     )
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     proc = subprocess.run(
         [sys.executable, "-c", code],
-        input=json.dumps(payload, ensure_ascii=False),
+        input=json.dumps(payload, ensure_ascii=True),
         capture_output=True,
         text=True,
         encoding="utf-8",
