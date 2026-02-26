@@ -1161,6 +1161,41 @@ class UserDictionaryService:
                     item_pron = pronunciation_map.get((lang_key, canonical_norm), {}) or {}
                 pronunciation_by_item[item.item_id] = item_pron
 
+            # Sentence-origin rows use sentence_pronunciation overlay (keyed by sentence_id).
+            sentence_ids_by_item: Dict[int, int] = {}
+            for item in source_items:
+                origin_type = str(item.origin_entity_type or "").strip().lower()
+                if origin_type not in {"sentence", "sentences"}:
+                    continue
+                try:
+                    sentence_id = int(item.origin_entity_id)
+                except (TypeError, ValueError):
+                    continue
+                if sentence_id <= 0:
+                    continue
+                sentence_ids_by_item[item.item_id] = sentence_id
+            if sentence_ids_by_item:
+                try:
+                    from app.services.sentence_pronunciation_service import SentencePronunciationService
+
+                    sentence_overlay = SentencePronunciationService().bulk_get_niqqud(
+                        session=session,
+                        sentence_ids=sorted(set(sentence_ids_by_item.values())),
+                    )
+                except Exception as exc:
+                    logger.debug("Sentence pronunciation overlay lookup failed: %s", exc)
+                    sentence_overlay = {}
+                for item_id, sentence_id in sentence_ids_by_item.items():
+                    overlay = sentence_overlay.get(sentence_id)
+                    if overlay is None or not (overlay.niqqud_text or "").strip():
+                        continue
+                    pronunciation_by_item[item_id] = {
+                        "pronunciation_text": overlay.niqqud_text,
+                        "pronunciation_source": f"sentence:{overlay.source}",
+                        "pronunciation_confidence": overlay.confidence,
+                        "pronunciation_qc": overlay.qc_status,
+                    }
+
         items = []
         now_dt = datetime.now(timezone.utc)
         for item, tm_global, _progress, origin_project_name in rows:

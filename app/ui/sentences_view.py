@@ -119,6 +119,7 @@ class SentencesView(QWidget):
         self._batch_translate_worker = None
         self._batch_audio_worker = None
         self._user_dict_add_worker = None
+        self._user_dict_target_dictionary_id: Optional[int] = None
 
         # Debounce timer for search
         self._filter_timer = QTimer()
@@ -1045,14 +1046,41 @@ class SentencesView(QWidget):
             chunk_size=500,
         )
         self._user_dict_add_worker = worker
+        self._user_dict_target_dictionary_id = int(dictionary_id)
         worker.progress.connect(lambda done, total: progress.setValue(done))
         worker.finished.connect(lambda result: self._on_user_dict_add_finished(result, progress))
         worker.error.connect(lambda err: self._on_user_dict_add_error(err, progress))
         progress.canceled.connect(worker.cancel)
         worker.start()
 
+    def _find_linked_user_dictionaries_view(self):
+        """Find sibling UserDictionariesView from parent widget chain (if present)."""
+        parent = self.parentWidget()
+        while parent is not None:
+            linked = getattr(parent, "user_dictionaries_view", None)
+            if linked is not None:
+                return linked
+            parent = parent.parentWidget()
+        return None
+
+    def _refresh_after_user_dictionary_add(self) -> None:
+        """Refresh sentence rows and linked user-dictionaries panel after external changes."""
+        self.status_label.setText("Refreshing data...")
+        self._reload()
+
+        linked = self._find_linked_user_dictionaries_view()
+        if linked is None:
+            return
+        try:
+            load_dictionaries = getattr(linked, "load_dictionaries", None)
+            if callable(load_dictionaries):
+                load_dictionaries()
+        except Exception as exc:
+            logger.debug("Linked user dictionaries refresh skipped: %s", exc)
+
     def _on_user_dict_add_finished(self, result, progress_dialog):
         progress_dialog.close()
+        self._refresh_after_user_dictionary_add()
         show_info(
             self,
             "Add Complete",
@@ -1060,10 +1088,14 @@ class SentencesView(QWidget):
             f"Skipped: {result.get('skipped', 0)}\n"
             f"Failed: {result.get('failed', 0)}",
         )
+        self._user_dict_target_dictionary_id = None
+        self._user_dict_add_worker = None
 
     def _on_user_dict_add_error(self, error_message: str, progress_dialog):
         progress_dialog.close()
         show_error(self, "Add Failed", f"Failed to add rows:\n{error_message}")
+        self._user_dict_target_dictionary_id = None
+        self._user_dict_add_worker = None
 
     def on_audio_cell_play_clicked(self, index):
         """Handle in-cell play button click (AudioPlayDelegate callback)."""

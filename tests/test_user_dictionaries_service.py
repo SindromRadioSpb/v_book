@@ -13,10 +13,13 @@ from sqlalchemy.orm import Session
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import (
     AudioAsset,
+    DocumentSentence,
     DictProject,
     Lemma,
     Library,
     PronunciationEntry,
+    SentencePronunciation,
+    SourceCorpus,
     SourceDocument,
     StudyProgress,
     TMEntry,
@@ -36,7 +39,10 @@ def user_dict_engine():
     try:
         Library.__table__.create(engine, checkfirst=True)
         DictProject.__table__.create(engine, checkfirst=True)
+        SourceCorpus.__table__.create(engine, checkfirst=True)
         SourceDocument.__table__.create(engine, checkfirst=True)
+        DocumentSentence.__table__.create(engine, checkfirst=True)
+        SentencePronunciation.__table__.create(engine, checkfirst=True)
         Lemma.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
         TMGlobal.__table__.create(engine, checkfirst=True)
@@ -464,6 +470,92 @@ def test_query_items_pronunciation_overlay_handles_whitespace_norm_key(user_dict
 
         assert total == 1
         assert rows[0].pronunciation_text == "תֶּרְם"
+
+
+def test_query_items_sentence_origin_uses_sentence_pronunciation_overlay(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        library = Library(name="Sentence Overlay Lib")
+        session.add(library)
+        session.flush()
+        project = DictProject(library_id=library.library_id, name="Sentence Overlay Project")
+        session.add(project)
+        session.flush()
+        corpus = SourceCorpus(project_id=project.project_id, name="Sentence Overlay Corpus")
+        session.add(corpus)
+        session.flush()
+        document = SourceDocument(
+            corpus_id=corpus.corpus_id,
+            file_path="C:/tmp/sentence_overlay.txt",
+            file_name="sentence_overlay.txt",
+            file_ext=".txt",
+            file_size_bytes=123,
+            sha256="sentence-overlay-doc-sha",
+            status="processed",
+        )
+        session.add(document)
+        session.flush()
+        sentence = DocumentSentence(doc_id=document.doc_id, sent_index=0, text="שלום עולם")
+        session.add(sentence)
+        session.flush()
+
+        src_norm = normalize_for_tm("he", "שלום עולם", "surface").norm
+        dictionary_id = _create_dictionary(session, service, "Deck Sentence Pron Overlay")
+        service.bulk_add_items(
+            session,
+            dictionary_id=dictionary_id,
+            items=[
+                {
+                    "kind": "surface",
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "src_text": "שלום עולם",
+                    "src_norm": src_norm,
+                    "origin_project_id": project.project_id,
+                    "origin_entity_type": "sentence",
+                    "origin_entity_id": str(sentence.sentence_id),
+                    "origin_doc_id": document.doc_id,
+                }
+            ],
+            include_noise=True,
+        )
+
+        # Lexical pronunciation exists; sentence overlay must win for sentence-origin rows.
+        session.add(
+            PronunciationEntry(
+                lang="he",
+                src_norm=src_norm,
+                niqqud_text="שָלוֹם",
+                source="manual",
+                is_override=1,
+            )
+        )
+        session.add(
+            SentencePronunciation(
+                sentence_id=sentence.sentence_id,
+                lang="he",
+                src_hash="sentence-overlay-hash",
+                niqqud_text="שָׁלוֹם עוֹלָם",
+                source="manual",
+                confidence=0.91,
+                qc_status="ok",
+            )
+        )
+        session.commit()
+
+        rows, total = service.query_items(
+            session,
+            dictionary_id=dictionary_id,
+            filters={"hide_noise": True},
+            limit=100,
+            offset=0,
+        )
+
+        assert total == 1
+        assert rows[0].pronunciation_text == "שָׁלוֹם עוֹלָם"
+        assert rows[0].pronunciation_source == "sentence:manual"
+        assert rows[0].pronunciation_qc == "ok"
+        assert rows[0].pronunciation_confidence == pytest.approx(0.91)
 
 
 def test_update_item_translation_updates_tm_global_and_tm_entry(user_dict_engine):

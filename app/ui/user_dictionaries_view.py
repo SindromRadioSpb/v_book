@@ -455,6 +455,10 @@ class UserDictionariesView(QWidget):
         self.pronunciation_bootstrap_btn.clicked.connect(self.on_pronunciation_bootstrap_selected)
         self.pronunciation_bootstrap_btn.setEnabled(False)
         actions_row.addWidget(self.pronunciation_bootstrap_btn)
+        self.niqqud_selected_btn = QPushButton("Niqqud Selected...")
+        self.niqqud_selected_btn.clicked.connect(self.on_sentence_niqqud_bootstrap_selected)
+        self.niqqud_selected_btn.setEnabled(False)
+        actions_row.addWidget(self.niqqud_selected_btn)
         self.mark_due_btn = QPushButton("Mark Due Now")
         self.mark_due_btn.clicked.connect(self.set_selected_due_now)
         self.mark_due_btn.setEnabled(False)
@@ -949,6 +953,7 @@ class UserDictionariesView(QWidget):
         self.generate_audio_btn.setEnabled(count > 0)
         self.play_audio_btn.setEnabled(count > 0)
         self.pronunciation_bootstrap_btn.setEnabled(count > 0)
+        self.niqqud_selected_btn.setEnabled(count > 0)
         self.mark_due_btn.setEnabled(count > 0)
 
     def _update_study_summary(self):
@@ -1006,6 +1011,9 @@ class UserDictionariesView(QWidget):
         bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({count} rows)...", self)
         bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
         menu.addAction(bootstrap_pron_action)
+        niqqud_action = QAction("Niqqud Selected - Sentence Niqqud Bootstrap", self)
+        niqqud_action.triggered.connect(self.on_sentence_niqqud_bootstrap_selected)
+        menu.addAction(niqqud_action)
         menu.addSeparator()
 
         mark_noise_action = QAction(f"Mark Selected as Noise ({count} rows)", self)
@@ -1056,12 +1064,14 @@ class UserDictionariesView(QWidget):
             self.load_items()
 
     def _selected_pronunciation_items(self) -> List[Dict[str, str]]:
-        """Build pronunciation payloads from selected user-dictionary rows."""
+        """Build pronunciation payloads from selected lexical rows only (lemma/term)."""
         selected_rows = self.items_table.selectionModel().selectedRows()
         payloads: List[Dict[str, str]] = []
         for index in sorted(selected_rows, key=lambda idx: idx.row()):
             item = self.items_model.get_item(index.row())
             if not item:
+                continue
+            if item.kind not in {"lemma", "term_cluster"}:
                 continue
             src_norm = normalize_for_tm(item.src_lang, item.src_text, "surface").norm
             src_norm = (src_norm or "").strip() or (item.src_norm or "").strip()
@@ -1084,18 +1094,73 @@ class UserDictionariesView(QWidget):
             )
         return payloads
 
+    def _selected_sentence_ids_for_niqqud(self) -> tuple[List[int], str]:
+        """Return (sentence_ids, lang) from selected rows that originate from Sentences."""
+        selected_rows = self.items_table.selectionModel().selectedRows()
+        sentence_ids: List[int] = []
+        lang = "he"
+        for index in sorted(selected_rows, key=lambda idx: idx.row()):
+            item = self.items_model.get_item(index.row())
+            if not item:
+                continue
+            origin_type = str(item.origin_entity_type or "").strip().lower()
+            if origin_type not in {"sentence", "sentences"}:
+                continue
+            try:
+                sentence_id = int(item.origin_entity_id)
+            except (TypeError, ValueError):
+                continue
+            if sentence_id <= 0:
+                continue
+            sentence_ids.append(sentence_id)
+            item_lang = str(item.src_lang or "").strip()
+            if item_lang:
+                lang = item_lang
+        return sorted(set(sentence_ids)), lang
+
     def on_pronunciation_bootstrap_selected(self):
-        """Open pronunciation bootstrap dialog with selected rows scope."""
+        """Open lexical pronunciation bootstrap (lemmas/terms only)."""
         from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
 
         selected_items = self._selected_pronunciation_items()
-        changed = False
         if not selected_items:
-            changed = show_pronunciation_bootstrap_dialog(parent=self)
-        else:
-            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            QMessageBox.information(
+                self,
+                "Pronunciation Bootstrap",
+                "Select lemma/term rows first.\n"
+                "For sentence rows, use 'Niqqud Selected - Sentence Niqqud Bootstrap'.",
+            )
+            return
+
+        changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
         if changed:
             self.load_items()
+
+    def on_sentence_niqqud_bootstrap_selected(self):
+        """Run sentence niqqud bootstrap for selected sentence-origin rows."""
+        sentence_ids, lang = self._selected_sentence_ids_for_niqqud()
+        if not sentence_ids:
+            QMessageBox.information(
+                self,
+                "Sentence Niqqud Bootstrap",
+                "No sentence-origin rows selected.\n"
+                "Select rows added from Sentences first.",
+            )
+            return
+
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+
+        changed = show_sentence_niqqud_bootstrap_dialog(
+            self,
+            selected_ids=sentence_ids,
+            page_ids=sentence_ids,
+            all_ids=sentence_ids,
+            lang=lang or "he",
+        )
+        if changed:
+            self.load_items()
+            if self._view_mode == "review":
+                self.load_review_queue(reset_index=False)
 
     def on_translation_edited(self, top_left, bottom_right, roles):
         if top_left.column() != 2:

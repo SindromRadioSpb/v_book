@@ -23,6 +23,10 @@ class FakeAction:
         self.text = text
         self.parent = parent
         self.triggered = DummySignal()
+        self.enabled = True
+
+    def setEnabled(self, enabled):
+        self.enabled = bool(enabled)
 
 
 class FakeMenu:
@@ -87,6 +91,7 @@ def _build_view(selected_count: int):
         "playlist_called": 0,
         "edit_pron_called": 0,
         "bootstrap_called": 0,
+        "niqqud_called": 0,
         "noise_flags": [],
         "suspended_flags": [],
         "due_called": 0,
@@ -97,6 +102,7 @@ def _build_view(selected_count: int):
     view.on_add_selected_to_playlist = lambda: state.__setitem__("playlist_called", state["playlist_called"] + 1)
     view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
     view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
+    view.on_sentence_niqqud_bootstrap_selected = lambda: state.__setitem__("niqqud_called", state["niqqud_called"] + 1)
     view.set_selected_noise_status = lambda flag: state["noise_flags"].append(flag)
     view.set_selected_suspension = lambda flag: state["suspended_flags"].append(flag)
     view.set_selected_due_now = lambda: state.__setitem__("due_called", state["due_called"] + 1)
@@ -112,13 +118,14 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
 
     assert FakeMenu.last is not None
     actions = [action.text for action in FakeMenu.last.actions]
-    assert len(actions) == 11
+    assert len(actions) == 12
     assert actions[0] == "Translate Selected (3 rows)..."
     assert actions[1] == "Generate Audio Selected (3 rows)..."
     assert actions[2] == "Play Audio Selected (3 rows)"
     assert "Add Selected to Playlist (3 rows)..." in actions
     assert "Mispronounced -> Add Pronunciation..." in actions
     assert "Pronunciation Bootstrap Selected (3 rows)..." in actions
+    assert "Niqqud Selected - Sentence Niqqud Bootstrap" in actions
     assert "Mark Selected as Noise (3 rows)" in actions
     assert "Mark Selected as Valid (3 rows)" in actions
     assert "Mark Selected as Due now (3 rows)" in actions
@@ -131,6 +138,7 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (3 rows)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (3 rows)...").triggered.emit()
+    next(a for a in FakeMenu.last.actions if a.text == "Niqqud Selected - Sentence Niqqud Bootstrap").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Noise (3 rows)").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Valid (3 rows)").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Due now (3 rows)").triggered.emit()
@@ -143,6 +151,7 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     assert state["playlist_called"] == 1
     assert state["edit_pron_called"] == 1
     assert state["bootstrap_called"] == 1
+    assert state["niqqud_called"] == 1
     assert state["noise_flags"] == [True, False]
     assert state["due_called"] == 1
     assert state["suspended_flags"] == [True, False]
@@ -185,3 +194,33 @@ def test_user_dict_edit_pronunciation_uses_surface_norm(monkeypatch):
     UserDictionariesView.on_edit_pronunciation_selected(view)
 
     assert captured["src_norm"] == normalize_for_tm("he", "הפרק הזמן", "surface").norm
+
+def test_user_dict_selected_pronunciation_items_skip_sentence_rows():
+    view = UserDictionariesView.__new__(UserDictionariesView)
+    view.items_table = FakeTable(3)
+    rows = [
+        SimpleNamespace(src_lang="he", src_text="alpha", src_norm="alpha", kind="lemma"),
+        SimpleNamespace(src_lang="he", src_text="beta", src_norm="beta", kind="surface"),
+        SimpleNamespace(src_lang="he", src_text="gamma", src_norm="gamma", kind="term_cluster"),
+    ]
+    view.items_model = SimpleNamespace(get_item=lambda idx: rows[idx])
+
+    items = UserDictionariesView._selected_pronunciation_items(view)
+    source_groups = [item["source_group"] for item in items]
+    assert source_groups == ["lemmas", "terms"]
+
+
+def test_user_dict_selected_sentence_ids_for_niqqud_uses_sentence_origin():
+    view = UserDictionariesView.__new__(UserDictionariesView)
+    view.items_table = FakeTable(4)
+    rows = [
+        SimpleNamespace(origin_entity_type="sentence", origin_entity_id="200", src_lang="he"),
+        SimpleNamespace(origin_entity_type="lemma", origin_entity_id="2", src_lang="he"),
+        SimpleNamespace(origin_entity_type="sentences", origin_entity_id="201", src_lang="he"),
+        SimpleNamespace(origin_entity_type="sentence", origin_entity_id="bad", src_lang="he"),
+    ]
+    view.items_model = SimpleNamespace(get_item=lambda idx: rows[idx])
+
+    sentence_ids, lang = UserDictionariesView._selected_sentence_ids_for_niqqud(view)
+    assert sentence_ids == [200, 201]
+    assert lang == "he"
