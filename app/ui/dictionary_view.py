@@ -149,13 +149,13 @@ class DictionaryView(QWidget):
         pagination_layout = QHBoxLayout()
 
         # First/Prev buttons
-        self.first_btn = QPushButton("В«")
+        self.first_btn = QPushButton("<<")
         self.first_btn.setToolTip("First page")
         self.first_btn.setMaximumWidth(40)
         self.first_btn.clicked.connect(self.on_first_page)
         pagination_layout.addWidget(self.first_btn)
 
-        self.prev_btn = QPushButton("вЂ№")
+        self.prev_btn = QPushButton("<")
         self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
         self.prev_btn.setMaximumWidth(40)
         self.prev_btn.clicked.connect(self.on_prev_page)
@@ -175,13 +175,13 @@ class DictionaryView(QWidget):
         pagination_layout.addWidget(self.page_count_label)
 
         # Next/Last buttons
-        self.next_btn = QPushButton("вЂє")
+        self.next_btn = QPushButton(">")
         self.next_btn.setToolTip("Next page (Ctrl+Right)")
         self.next_btn.setMaximumWidth(40)
         self.next_btn.clicked.connect(self.on_next_page)
         pagination_layout.addWidget(self.next_btn)
 
-        self.last_btn = QPushButton("В»")
+        self.last_btn = QPushButton(">>")
         self.last_btn.setToolTip("Last page")
         self.last_btn.setMaximumWidth(40)
         self.last_btn.clicked.connect(self.on_last_page)
@@ -190,7 +190,7 @@ class DictionaryView(QWidget):
         pagination_layout.addSpacing(20)
 
         # Range label
-        self.range_label = QLabel("Showing 0вЂ“0 of 0")
+        self.range_label = QLabel("Showing 0-0 of 0")
         pagination_layout.addWidget(self.range_label)
 
         pagination_layout.addSpacing(20)
@@ -422,7 +422,7 @@ class DictionaryView(QWidget):
         else:
             start = self.current_offset + 1
             end = self.current_offset + len(lemmas)
-            self.status_label.setText(f"Loaded {start}–{end} lemmas (counting total...)")
+            self.status_label.setText(f"Loaded {start}-{end} lemmas (counting total...)")
 
         self.update_pagination_controls()
 
@@ -451,7 +451,7 @@ class DictionaryView(QWidget):
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + len(self.lemma_model.lemmas), self.total_count)
-            self.status_label.setText(f"Showing {start}–{end} of {self.total_count:,} lemmas")
+            self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} lemmas")
         self.update_pagination_controls()
 
     def _apply_study_overlays_stage2(self, lemmas: List[LemmaStats], request_seq: Optional[int]) -> None:
@@ -625,11 +625,11 @@ class DictionaryView(QWidget):
 
         # Update range label
         if self.total_count == 0:
-            self.range_label.setText("Showing 0вЂ“0 of 0")
+            self.range_label.setText("Showing 0-0 of 0")
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
-            self.range_label.setText(f"Showing {start}вЂ“{end} of {self.total_count:,}")
+            self.range_label.setText(f"Showing {start}-{end} of {self.total_count:,}")
 
         # Task 15: Add "All (N)" page size option if safe
         self._update_page_size_combo()
@@ -782,7 +782,7 @@ class DictionaryView(QWidget):
                 if existing:
                     # Update existing
                     existing.translation = translation_value
-                    existing.status = "approved"  # User edit в†’ approved
+                    existing.status = "approved"  # User edit -> approved
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
                 else:
@@ -795,7 +795,7 @@ class DictionaryView(QWidget):
                         src_text=lemma.lemma_text,
                         src_norm=normalized.norm,
                         translation=translation_value,
-                        status="approved",  # User edit в†’ approved
+                        status="approved",  # User edit -> approved
                         origin="user_edit",
                         source_ref="dictionary_view_inline_edit",
                         lemma_id=lemma.lemma_id,  # Link to source for is_noise sync
@@ -1132,11 +1132,11 @@ class DictionaryView(QWidget):
         # Check if multiple rows selected
         if len(selected_rows) > 1:
             # Bulk operations
-            mark_valid_bulk_action = QAction(f"вњ“ Mark Selected as Valid ({len(selected_rows)} rows)", self)
+            mark_valid_bulk_action = QAction(f"[OK] Mark Selected as Valid ({len(selected_rows)} rows)", self)
             mark_valid_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(False))
             menu.addAction(mark_valid_bulk_action)
 
-            mark_noise_bulk_action = QAction(f"вњ— Mark Selected as Noise ({len(selected_rows)} rows)", self)
+            mark_noise_bulk_action = QAction(f"[X] Mark Selected as Noise ({len(selected_rows)} rows)", self)
             mark_noise_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(True))
             menu.addAction(mark_noise_bulk_action)
         else:
@@ -1144,11 +1144,11 @@ class DictionaryView(QWidget):
             current_is_noise = lemma.is_noise == 1 if lemma.is_noise is not None else False
 
             if current_is_noise:
-                mark_valid_action = QAction("вњ“ Mark as Valid (remove from noise)", self)
+                mark_valid_action = QAction("[OK] Mark as Valid (remove from noise)", self)
                 mark_valid_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, False))
                 menu.addAction(mark_valid_action)
             else:
-                mark_noise_action = QAction("вњ— Mark as Noise", self)
+                mark_noise_action = QAction("[X] Mark as Noise", self)
                 mark_noise_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, True))
                 menu.addAction(mark_noise_action)
 

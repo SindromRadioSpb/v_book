@@ -389,6 +389,7 @@ class TranslationManagementPanel(QWidget):
         # State: sorting
         self.sort_column = self.settings.get_string("tm_panel/sort_column", "updated_at")
         self.sort_direction = self.settings.get_string("tm_panel/sort_direction", "desc")
+        self._project_lemma_total_cache = {}
 
         # Column index to DB column mapping
         self.COLUMN_TO_DB = {
@@ -660,7 +661,7 @@ class TranslationManagementPanel(QWidget):
         table_layout.addLayout(pagination_layout)
 
         # Results count
-        self.results_label = QLabel("Results: 0")
+        self.results_label = QLabel("TM entries: 0")
         self.results_label.setStyleSheet("color: #666; font-size: 11px;")
         table_layout.addWidget(self.results_label)
 
@@ -833,7 +834,64 @@ class TranslationManagementPanel(QWidget):
         but the TM Panel UI doesn't auto-refresh when changes occur in other tabs.
         """
         logger.info("User requested manual refresh")
+        self._project_lemma_total_cache.clear()
         self.perform_search()
+
+    def _is_project_scope(self) -> bool:
+        """Return True when panel is scoped to one opened project."""
+        return self.project_id is not None and self.scope_mode == "current_project"
+
+    def _is_project_lemma_coverage_scope(self) -> bool:
+        """Return True when results can be interpreted as lemma coverage."""
+        if not self._is_project_scope():
+            return False
+        if self.status_combo.currentText() != "All" or self.origin_combo.currentText() != "All":
+            return False
+        if self.search_edit.text().strip() or self.source_ref_edit.text().strip():
+            return False
+        return bool(self.selected_kinds and len(self.selected_kinds) == 1 and self.selected_kinds[0] == "lemma")
+
+    def _count_project_lemmas_cached(self) -> Optional[int]:
+        """Count project lemmas once per (project_id, hide_noise) pair."""
+        if self.project_id is None:
+            return None
+        hide_noise = self.hide_noise_checkbox.isChecked()
+        cache_key = (int(self.project_id), bool(hide_noise))
+        if cache_key in self._project_lemma_total_cache:
+            return self._project_lemma_total_cache[cache_key]
+        try:
+            from app.services.translation_admin_service import TranslationAdminService
+
+            db_service = DBService.get_instance()
+            service = TranslationAdminService()
+            with db_service.get_session() as session:
+                total = service.count_project_lemmas(
+                    session,
+                    project_id=int(self.project_id),
+                    hide_noise=hide_noise,
+                )
+            total = int(total)
+            self._project_lemma_total_cache[cache_key] = total
+            return total
+        except Exception as e:
+            logger.warning(f"Failed to count project lemmas for TM context: {e}")
+            return None
+
+    def _build_results_label(self, page_count: int, total_count: int) -> str:
+        """Build results label with optional project lemma context."""
+        label = f"TM entries: {page_count} of {total_count}"
+        if not self._is_project_scope():
+            return label
+        dictionary_lemmas = self._count_project_lemmas_cached()
+        if dictionary_lemmas is None:
+            return label
+        label = label + f" | Dictionary lemmas: {dictionary_lemmas:,}"
+        if dictionary_lemmas <= 0:
+            return label
+        if self._is_project_lemma_coverage_scope():
+            coverage_pct = (float(total_count) / float(dictionary_lemmas)) * 100.0
+            label = label + f" | Coverage: {coverage_pct:.3f}%"
+        return label
 
     def on_select_projects(self):
         """Open project selection dialog."""
@@ -1067,7 +1125,7 @@ class TranslationManagementPanel(QWidget):
         """Handle search results."""
         self.total_count = total_count
         self.model.update_entries(entries, total_count)
-        self.results_label.setText(f"Results: {len(entries)} of {total_count}")
+        self.results_label.setText(self._build_results_label(len(entries), total_count))
         self.status_label.setText("Ready")
         self.update_pagination_controls()
         self.on_selection_changed()

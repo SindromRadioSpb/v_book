@@ -367,6 +367,23 @@ class TranslationAdminService:
         count = session.execute(stmt).scalar()
         return count or 0
 
+    def count_project_lemmas(
+        self,
+        session: Session,
+        project_id: int,
+        hide_noise: bool = True,
+    ) -> int:
+        """Count dictionary lemmas for a project.
+
+        This is used by TM UI to show context for lemma-kind results:
+        TM lemma entries vs total dictionary lemmas in the same project.
+        """
+        stmt = select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
+        if hide_noise:
+            stmt = stmt.where(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
+        count = session.execute(stmt).scalar()
+        return int(count or 0)
+
     def count_tm_ids_for_translation(
         self,
         session: Session,

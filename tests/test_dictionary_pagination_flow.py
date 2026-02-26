@@ -135,3 +135,27 @@ def test_dictionary_request_id_ignores_stale(monkeypatch, qtbot):
 
     view.on_search_count_ready(99, request_seq=2)
     assert view.total_count == 99
+
+
+def test_dictionary_pagination_labels_are_ascii_safe(monkeypatch, qtbot):
+    monkeypatch.setattr(DictionaryView, "perform_search", lambda self: None)
+    monkeypatch.setattr("app.ui.dictionary_view.QTimer.singleShot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.ui.dictionary_view.DBService.get_instance",
+        lambda: SimpleNamespace(),
+    )
+
+    view = DictionaryView(project_id=1)
+    qtbot.addWidget(view)
+
+    assert view.first_btn.text() == "<<"
+    assert view.prev_btn.text() == "<"
+    assert view.next_btn.text() == ">"
+    assert view.last_btn.text() == ">>"
+    assert view.range_label.text() == "Showing 0-0 of 0"
+
+    view.total_count = 120
+    view.page_size = 25
+    view.current_page = 2
+    view.update_pagination_controls()
+    assert view.range_label.text() == "Showing 26-50 of 120"
