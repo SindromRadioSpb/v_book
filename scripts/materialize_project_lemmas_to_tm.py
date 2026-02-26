@@ -91,7 +91,9 @@ def main() -> int:
                 f"chunks={stats['processed_chunks']:,}"
             )
     except Exception as exc:
-        print(f"[FAIL] materialization failed: {exc}")
+        msg = f"{type(exc).__name__}: {exc}"
+        msg = msg.encode("ascii", "backslashreplace").decode("ascii")
+        print(f"[FAIL] materialization failed: {msg}")
         return 1
     finally:
         engine.dispose()
@@ -101,4 +103,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
