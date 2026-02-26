@@ -269,3 +269,195 @@ def test_import_self_check_reports_helper_failure(monkeypatch):
     assert exit_code == 1
     assert check["ok"] is False
     assert "DLL initialization routine failed" in check["error"]
+
+
+def test_acquire_app_instance_lock_uses_expected_lockfile(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    class _FakeLock:
+        def __init__(self, lock_path, timeout_seconds):
+            captured["lock_path"] = lock_path
+            captured["timeout_seconds"] = timeout_seconds
+
+        def __enter__(self):
+            captured["entered"] = True
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    import app.infra.process_lock as process_lock_module
+
+    monkeypatch.setattr(process_lock_module, "ProcessLock", _FakeLock)
+
+    lock, error = main._acquire_app_instance_lock(tmp_path, timeout_seconds=7)
+    assert error == ""
+    assert lock is not None
+    assert captured["entered"] is True
+    assert captured["timeout_seconds"] == 7
+    assert captured["lock_path"] == (tmp_path.resolve() / "app_instance.lock")
+
+
+def test_acquire_app_instance_lock_returns_error_when_busy(monkeypatch, tmp_path: Path):
+    class _BusyLock:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            raise RuntimeError("app already running")
+
+        def __exit__(self, *_args):
+            return None
+
+    import app.infra.process_lock as process_lock_module
+
+    monkeypatch.setattr(process_lock_module, "ProcessLock", _BusyLock)
+
+    lock, error = main._acquire_app_instance_lock(tmp_path)
+    assert lock is None
+    assert "already running" in error
+
+
+def test_health_self_check_retries_probe_on_timeout(monkeypatch, tmp_path: Path):
+    class _Item:
+        def __init__(self, item_id: str, status: str = "ok"):
+            self.item_id = item_id
+            self.status = status
+
+        def to_dict(self):
+            return {
+                "id": self.item_id,
+                "name": self.item_id,
+                "status": self.status,
+                "message": "",
+                "remediation": "",
+            }
+
+    class _FakeHealthCheckService:
+        def __init__(self, settings=None):
+            self.settings = settings
+
+        def _check_required_resources(self):
+            return [_Item("required_resources")]
+
+        def _check_pronunciation_bootstrap(self):
+            return _Item("pronunciation_bootstrap")
+
+        def _check_sentence_niqqud_bootstrap(self):
+            return _Item("sentence_niqqud_bootstrap")
+
+        def _check_cloud_providers(self):
+            return [_Item("cloud_provider", status="optional")]
+
+        def _check_baseline_reference(self):
+            return _Item("baseline_reference")
+
+    import app.services.health_check_service as health_module
+
+    monkeypatch.setattr(health_module, "HealthCheckService", _FakeHealthCheckService)
+    monkeypatch.setattr(main.os, "name", "nt")
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "resolve_db_path",
+        lambda _arg, settings=None: SimpleNamespace(path=str(tmp_path / "health.db"), source="CLI"),
+    )
+
+    calls: list[int] = []
+
+    def _fake_probe_helper(**kwargs):
+        calls.append(int(kwargs["timeout_ms"]))
+        if len(calls) == 1:
+            return 1, {
+                "ok": False,
+                "stage": "import",
+                "mode": "probe",
+                "error": "command timed out after 5 seconds",
+                "timed_out": True,
+            }
+        return 0, {
+            "ok": True,
+            "stage": "infer",
+            "mode": "probe",
+            "error": "",
+        }
+
+    monkeypatch.setattr(main, "_run_frozen_onnx_probe_helper", _fake_probe_helper)
+
+    exit_code, payload = main._run_health_self_check(_DummySettings(), None)
+
+    assert exit_code == 0
+    assert calls == [main._FROZEN_ONNX_PROBE_TIMEOUT_MS, main._FROZEN_ONNX_PROBE_RETRY_TIMEOUT_MS]
+    assert payload["onnx_probe"]["ok"] is True
+    assert payload["onnx_probe"]["retry_attempted"] is True
+    assert payload["onnx_probe"]["retry_reason"] == "timeout"
+    item = next(item for item in payload["report"]["items"] if item["id"] == "frozen_onnx_probe")
+    assert item["status"] == "ok"
+
+
+def test_health_self_check_does_not_retry_probe_on_non_timeout(monkeypatch, tmp_path: Path):
+    class _Item:
+        def __init__(self, item_id: str, status: str = "ok"):
+            self.item_id = item_id
+            self.status = status
+
+        def to_dict(self):
+            return {
+                "id": self.item_id,
+                "name": self.item_id,
+                "status": self.status,
+                "message": "",
+                "remediation": "",
+            }
+
+    class _FakeHealthCheckService:
+        def __init__(self, settings=None):
+            self.settings = settings
+
+        def _check_required_resources(self):
+            return [_Item("required_resources")]
+
+        def _check_pronunciation_bootstrap(self):
+            return _Item("pronunciation_bootstrap")
+
+        def _check_sentence_niqqud_bootstrap(self):
+            return _Item("sentence_niqqud_bootstrap")
+
+        def _check_cloud_providers(self):
+            return [_Item("cloud_provider", status="optional")]
+
+        def _check_baseline_reference(self):
+            return _Item("baseline_reference")
+
+    import app.services.health_check_service as health_module
+
+    monkeypatch.setattr(health_module, "HealthCheckService", _FakeHealthCheckService)
+    monkeypatch.setattr(main.os, "name", "nt")
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "resolve_db_path",
+        lambda _arg, settings=None: SimpleNamespace(path=str(tmp_path / "health.db"), source="CLI"),
+    )
+
+    calls: list[int] = []
+
+    def _fake_probe_helper(**kwargs):
+        calls.append(int(kwargs["timeout_ms"]))
+        return 1, {
+            "ok": False,
+            "stage": "import",
+            "mode": "probe",
+            "error": "DLL load failed",
+        }
+
+    monkeypatch.setattr(main, "_run_frozen_onnx_probe_helper", _fake_probe_helper)
+
+    exit_code, payload = main._run_health_self_check(_DummySettings(), None)
+
+    assert exit_code == 0
+    assert calls == [main._FROZEN_ONNX_PROBE_TIMEOUT_MS]
+    assert payload["onnx_probe"]["ok"] is False
+    assert payload["onnx_probe"]["retry_attempted"] is False
+    item = next(item for item in payload["report"]["items"] if item["id"] == "frozen_onnx_probe")
+    assert item["status"] == "error"

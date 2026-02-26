@@ -26,6 +26,9 @@ _PHONIKUD_SUBPROCESS_SENTINELS = (
 _BRIDGE_DLL_HANDLES: list[Any] = []
 _BRIDGE_DLL_KEYS: set[str] = set()
 _ONNX_PROBE_EXE_NAME = "HDLE_ONNX_Probe.exe"
+_APP_INSTANCE_LOCK_NAME = "app_instance.lock"
+_FROZEN_ONNX_PROBE_TIMEOUT_MS = 3000
+_FROZEN_ONNX_PROBE_RETRY_TIMEOUT_MS = 8000
 
 
 def resolve_db_path(cli_db_path: str | None, *, settings=None):
@@ -162,6 +165,38 @@ def _resolve_frozen_onnx_probe_executable() -> Path | None:
     return None
 
 
+def _acquire_app_instance_lock(
+    app_data_root: Path,
+    *,
+    timeout_seconds: int = 1,
+) -> tuple[Any | None, str]:
+    from app.infra.process_lock import ProcessLock
+
+    lock_path = Path(app_data_root).resolve() / _APP_INSTANCE_LOCK_NAME
+    lock = ProcessLock(lock_path, timeout_seconds=timeout_seconds)
+    try:
+        lock.__enter__()
+        return lock, ""
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _release_app_instance_lock(lock: Any | None) -> None:
+    if lock is None:
+        return
+    try:
+        lock.__exit__(None, None, None)
+    except Exception as exc:
+        logger.warning("Failed to release app instance lock: %s", exc)
+
+
+def _is_probe_timeout_payload(payload: dict[str, Any]) -> bool:
+    if bool(payload.get("timed_out", False)):
+        return True
+    text = str(payload.get("error") or "").lower()
+    return "timed out" in text or "timeout" in text
+
+
 def _run_frozen_onnx_probe_helper(
     *,
     mode: str,
@@ -199,6 +234,17 @@ def _run_frozen_onnx_probe_helper(
             errors="replace",
             timeout=max(3, int(timeout_ms / 1000) + 2),
         )
+    except subprocess.TimeoutExpired as exc:
+        return 1, {
+            "ok": False,
+            "stage": "import",
+            "mode": mode,
+            "error": str(exc),
+            "helper_path": str(helper_path),
+            "exit_code": 1,
+            "timed_out": True,
+            "timeout_ms": int(timeout_ms),
+        }
     except Exception as exc:
         return 1, {
             "ok": False,
@@ -207,6 +253,7 @@ def _run_frozen_onnx_probe_helper(
             "error": str(exc),
             "helper_path": str(helper_path),
             "exit_code": 1,
+            "timeout_ms": int(timeout_ms),
         }
 
     try:
@@ -223,6 +270,7 @@ def _run_frozen_onnx_probe_helper(
 
     payload["helper_path"] = str(helper_path)
     payload["exit_code"] = int(proc.returncode)
+    payload["timeout_ms"] = int(timeout_ms)
     if proc.returncode != 0 and not str(payload.get("error") or "").strip():
         payload["error"] = (proc.stderr or proc.stdout or "").strip() or f"Helper exited with code {proc.returncode}"
 
@@ -344,7 +392,7 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
         helper_code, helper_payload = _run_frozen_onnx_probe_helper(
             mode="import",
             model_path=model_path,
-            timeout_ms=3000,
+            timeout_ms=_FROZEN_ONNX_PROBE_TIMEOUT_MS,
         )
         payload["checks"]["onnxruntime_import"] = {
             "ok": helper_code == 0 and bool(helper_payload.get("ok", False)),
@@ -480,9 +528,27 @@ def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -
             probe_code, probe_payload = _run_frozen_onnx_probe_helper(
                 mode="probe",
                 model_path=model_path,
-                timeout_ms=3000,
+                timeout_ms=_FROZEN_ONNX_PROBE_TIMEOUT_MS,
             )
+            probe_payload["retry_attempted"] = False
+            onnx_probe_attempts = [probe_payload]
+            if probe_code != 0 and _is_probe_timeout_payload(probe_payload):
+                retry_code, retry_payload = _run_frozen_onnx_probe_helper(
+                    mode="probe",
+                    model_path=model_path,
+                    timeout_ms=_FROZEN_ONNX_PROBE_RETRY_TIMEOUT_MS,
+                )
+                retry_payload["retry_attempted"] = True
+                retry_payload["retry_reason"] = "timeout"
+                retry_payload["retry_from_timeout_ms"] = _FROZEN_ONNX_PROBE_TIMEOUT_MS
+                retry_payload["retry_timeout_ms"] = _FROZEN_ONNX_PROBE_RETRY_TIMEOUT_MS
+                probe_code = retry_code
+                probe_payload = retry_payload
+                onnx_probe_attempts.append(retry_payload)
+            elif probe_code == 0:
+                probe_payload["retry_attempted"] = False
             payload["onnx_probe"] = probe_payload
+            payload["onnx_probe_attempts"] = onnx_probe_attempts
             probe_ok = probe_code == 0 and bool(probe_payload.get("ok", False))
             probe_error = str(probe_payload.get("error") or "").strip()
             items.append(
@@ -931,7 +997,14 @@ def main():
     logger.info(f"Database source: {resolved_db.source}")
     logger.info("=" * 60)
 
+    app_lock = None
     try:
+        app_lock, lock_error = _acquire_app_instance_lock(app_dir, timeout_seconds=1)
+        if app_lock is None:
+            logger.error("Application instance lock acquisition failed: %s", lock_error)
+            print("Another HDLE Premium instance is already running.", file=sys.stderr)
+            return 2
+
         # Initialize database
         DBService.initialize(db_path)
         logger.info("Database initialized")
@@ -986,6 +1059,8 @@ def main():
         logger.exception("Fatal error")
         print(f"Fatal error: {e}", file=sys.stderr)
         return 1
+    finally:
+        _release_app_instance_lock(app_lock)
 
 
 if __name__ == "__main__":
