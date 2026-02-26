@@ -166,3 +166,31 @@ Expected for `reference-ro`:
 - Readonly hewiki DB cannot execute write probes in prebuild; use `--profile reference-ro`.
 - In this environment, `python -m pytest -q` may fail in capture teardown; use
   targeted/regression suites for release evidence and record this constraint.
+
+## Frozen ONNX Health Gate
+
+Authoritative contract:
+
+- `docs/VERIFY_FROZEN_ONNX.md`
+
+Release smoke must include console ONNX probe before installer verification:
+
+```powershell
+Start-Process "J:\Project_Vibe\V_book\dist\HDLE_Premium\HDLE_ONNX_Probe.exe" -ArgumentList "--out `"J:\Project_Vibe\V_book\build\verify\probe_dist.json`"" -Wait
+Start-Process "J:\Project_Vibe\V_book\dist\HDLE_Premium\HDLE_Premium.exe" -ArgumentList "--self-check import --self-check-out `"J:\Project_Vibe\V_book\build\verify\import_dist.json`"" -Wait
+Start-Process "J:\Project_Vibe\V_book\dist\HDLE_Premium\HDLE_Premium.exe" -ArgumentList "--self-check health --db-path `"M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`" --self-check-out `"J:\Project_Vibe\V_book\build\verify\health_dist.json`"" -Wait
+```
+
+Expected:
+
+- Probe returns `ok=true`, `stage=infer`, `has_niqqud=true`.
+- `--self-check import` passes `checks.onnxruntime_import.ok=true`.
+- `--self-check health` reports pronunciation/sentence bootstrap checks as `ok` (not fallback warn).
+
+Fail-fast pre-build gate (run before long rebuild):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prebuild_fast_gates.ps1 -DbPath "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db"
+```
+
+`rebuild.ps1` now runs the same fast gates automatically before PyInstaller unless `-SkipFastGates` is explicitly passed.
