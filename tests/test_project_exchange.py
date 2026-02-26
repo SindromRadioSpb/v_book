@@ -505,8 +505,137 @@ def test_import_name_conflict_rename(populated_project, temp_db):
         assert import_report.success
 
         # Check name was changed
-        assert import_report.new_project_name != "Test Project"
-        assert "imported" in import_report.new_project_name.lower()
+    assert import_report.new_project_name != "Test Project"
+    assert "imported" in import_report.new_project_name.lower()
+
+
+def test_export_filters_orphan_lemma_doc_stat_rows(populated_project, temp_db):
+    """Export must skip orphan lemma_doc_stat rows to keep payload importable."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        # Valid row (lemma_id=1 exists in fixture).
+        conn.execute(
+            """
+            INSERT INTO lemma_doc_stat (project_id, doc_id, lemma_id, freq_abs, sample_sentence_id)
+            VALUES (1, 1, 1, 2, 1)
+            """
+        )
+        # Orphan row (lemma_id does not exist) must be filtered out by export.
+        conn.execute(
+            """
+            INSERT INTO lemma_doc_stat (project_id, doc_id, lemma_id, freq_abs, sample_sentence_id)
+            VALUES (1, 1, 999999, 1, 1)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.close()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "orphan_filter_bundle.hdleproj"
+
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        extract_dir = Path(tmpdir) / "extract"
+        _manifest, payload_path = bundle_format.read_bundle(bundle_path, extract_dir)
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            count = payload_conn.execute("SELECT COUNT(*) FROM lemma_doc_stat").fetchone()[0]
+            max_lemma = payload_conn.execute("SELECT MAX(lemma_id) FROM lemma_doc_stat").fetchone()[0]
+            assert count == 1
+            assert max_lemma == 1
+        finally:
+            payload_conn.close()
+
+
+def test_export_import_roundtrip_preserves_tm_global_link(populated_project, temp_db):
+    """tm_global rows referenced by project TM entries must roundtrip with remapped IDs."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        conn.execute(
+            """
+            INSERT INTO tm_global (
+                tm_global_id, src_lang, tgt_lang, kind, src_norm, src_text,
+                translation, status, origin, confidence, is_noise, noise_reason,
+                notes, source_tm_id, created_at, updated_at
+            )
+            VALUES (
+                2001, 'he', 'ru', 'lemma', 'lemma_1', 'lemma_1',
+                'перевод', 'approved', 'import', NULL, 0, NULL,
+                'seed', NULL, '2026-02-26T00:00:00Z', '2026-02-26T00:00:00Z'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO tm_entry (
+                tm_id, project_id, kind, src_lang, tgt_lang, src_text, src_norm,
+                translation, translation_norm, pos, domain, notes, status, confidence,
+                origin, source_ref, created_at, updated_at, approved_at, approved_by,
+                is_noise, noise_reason, norm_text, lemma_id, cluster_id, ngram_id, tm_global_id
+            )
+            VALUES (
+                3001, 1, 'lemma', 'he', 'ru', 'lemma_1', 'lemma_1',
+                'перевод', NULL, NULL, NULL, NULL, 'approved', NULL,
+                'import', 'test_tm_global_roundtrip', '2026-02-26T00:00:00Z',
+                '2026-02-26T00:00:00Z', NULL, NULL, 0, NULL, 'lemma_1', 1, NULL, NULL, 2001
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "tm_global_bundle.hdleproj"
+
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+        assert export_report.manifest.table_counts.get("tm_global", 0) >= 1
+
+        import_engine = ProjectImportEngine()
+        import_report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Test Project (TM Global Imported)"),
+        )
+        assert import_report.success
+        assert import_report.new_project_id is not None
+        assert import_report.table_counts.get("tm_global", 0) >= 1
+
+        conn = sqlite3.connect(str(temp_db))
+        try:
+            row = conn.execute(
+                """
+                SELECT te.project_id, te.lemma_id, l.project_id, te.tm_global_id, tg.tm_global_id
+                FROM tm_entry te
+                LEFT JOIN lemma l ON l.lemma_id = te.lemma_id
+                LEFT JOIN tm_global tg ON tg.tm_global_id = te.tm_global_id
+                WHERE te.project_id = ? AND te.source_ref = 'test_tm_global_roundtrip'
+                """,
+                (import_report.new_project_id,),
+            ).fetchone()
+            assert row is not None
+            imported_project_id, imported_lemma_id, lemma_project_id, imported_global_id, resolved_global_id = row
+            assert imported_project_id == import_report.new_project_id
+            assert imported_lemma_id is not None
+            assert lemma_project_id == import_report.new_project_id
+            assert imported_global_id is not None
+            assert resolved_global_id == imported_global_id
+        finally:
+            conn.close()
 
 
 # More integration tests would go here (FTS5 population, self-ref handling, etc.)

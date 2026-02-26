@@ -75,14 +75,14 @@ def main():
     )
 
     if report.success:
-        print(f"\n✓ Export successful!")
+        print("\n[OK] Export successful!")
         print(f"  Bundle: {report.bundle_path}")
         print(f"  Size: {report.bundle_path.stat().st_size / 1024 / 1024:.1f} MB")
         print(f"  Time: {report.elapsed_seconds:.1f}s")
         print(f"  Total rows: {sum(report.manifest.table_counts.values()):,}")
         return 0
     else:
-        print(f"\n✗ Export failed: {report.error_message}", file=sys.stderr)
+        print(f"\n[FAIL] Export failed: {report.error_message}", file=sys.stderr)
         return 1
 
 

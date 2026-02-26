@@ -56,6 +56,8 @@ class ProjectImportEngine:
         start_time = time.time()
         temp_dir = None
         warnings = []
+        host_conn = None
+        payload_conn = None
 
         try:
             # Extract and validate bundle
@@ -103,9 +105,6 @@ class ProjectImportEngine:
                 progress_callback,
             )
 
-            host_conn.close()
-            payload_conn.close()
-
             pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
             if pron_path.exists():
                 self._import_pronunciation_metadata(pron_path, warnings)
@@ -136,6 +135,16 @@ class ProjectImportEngine:
             )
 
         finally:
+            if payload_conn is not None:
+                try:
+                    payload_conn.close()
+                except Exception:
+                    pass
+            if host_conn is not None:
+                try:
+                    host_conn.close()
+                except Exception:
+                    pass
             # Cleanup temp directory
             if temp_dir and temp_dir.exists():
                 try:
@@ -326,6 +335,7 @@ class ProjectImportEngine:
 
         table_counts = {}
         new_project_id = None
+        tm_global_id_map: dict[int, int] = {}
 
         try:
             total_tables = len(TABLE_INSERT_ORDER)
@@ -335,6 +345,15 @@ class ProjectImportEngine:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
+                if table_name == "tm_global":
+                    count, tm_global_id_map = self._import_tm_global_table(
+                        host_conn,
+                        payload_conn,
+                    )
+                    table_counts[table_name] = count
+                    logger.debug(f"Imported {count} rows into {table_name}")
+                    continue
+
                 count = self._import_table(
                     host_conn,
                     payload_conn,
@@ -342,6 +361,7 @@ class ProjectImportEngine:
                     offsets,
                     final_project_name if table_name == "dict_project" else None,
                     warnings,
+                    tm_global_id_map,
                 )
                 table_counts[table_name] = count
                 logger.debug(f"Imported {count} rows into {table_name}")
@@ -371,6 +391,77 @@ class ProjectImportEngine:
             logger.error(f"Transaction rolled back due to error: {e}")
             raise
 
+    def _import_tm_global_table(
+        self,
+        host_conn: sqlite3.Connection,
+        payload_conn: sqlite3.Connection,
+    ) -> tuple[int, dict[int, int]]:
+        """Merge payload tm_global rows into host by natural key and build ID map."""
+        try:
+            cursor = payload_conn.execute("SELECT * FROM tm_global")
+            rows = cursor.fetchall()
+            col_names = [desc[0] for desc in cursor.description]
+        except sqlite3.OperationalError:
+            return 0, {}
+
+        if not rows:
+            return 0, {}
+
+        row_dicts = [dict(zip(col_names, row)) for row in rows]
+        id_map: dict[int, int] = {}
+
+        for row in row_dicts:
+            payload_id = int(row["tm_global_id"])
+            natural_key = (
+                row["src_lang"],
+                row["tgt_lang"],
+                row["kind"],
+                row["src_norm"],
+            )
+            existing = host_conn.execute(
+                """
+                SELECT tm_global_id
+                FROM tm_global
+                WHERE src_lang = ? AND tgt_lang = ? AND kind = ? AND src_norm = ?
+                """,
+                natural_key,
+            ).fetchone()
+            if existing:
+                id_map[payload_id] = int(existing[0])
+                continue
+
+            host_conn.execute(
+                """
+                INSERT INTO tm_global (
+                    src_lang, tgt_lang, kind, src_norm, src_text, translation,
+                    status, origin, confidence, is_noise, noise_reason, notes,
+                    source_tm_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.get("src_lang"),
+                    row.get("tgt_lang"),
+                    row.get("kind"),
+                    row.get("src_norm"),
+                    row.get("src_text"),
+                    row.get("translation"),
+                    row.get("status"),
+                    row.get("origin"),
+                    row.get("confidence"),
+                    row.get("is_noise"),
+                    row.get("noise_reason"),
+                    row.get("notes"),
+                    row.get("source_tm_id"),
+                    row.get("created_at"),
+                    row.get("updated_at"),
+                ),
+            )
+            new_id = host_conn.execute("SELECT last_insert_rowid()").fetchone()
+            id_map[payload_id] = int(new_id[0]) if new_id else payload_id
+
+        return len(row_dicts), id_map
+
     def _import_table(
         self,
         host_conn: sqlite3.Connection,
@@ -379,6 +470,7 @@ class ProjectImportEngine:
         offsets: dict[str, int],
         override_name: Optional[str],
         warnings: list[str],
+        tm_global_id_map: Optional[dict[int, int]] = None,
     ) -> int:
         """Import a single table with ID remapping.
 
@@ -414,7 +506,12 @@ class ProjectImportEngine:
         remapped_rows = []
         for row in rows:
             remapped_row = self._remap_row(
-                table_name, col_names, row, offsets, override_name
+                table_name,
+                col_names,
+                row,
+                offsets,
+                override_name,
+                tm_global_id_map=tm_global_id_map,
             )
             remapped_rows.append(remapped_row)
 
@@ -442,6 +539,7 @@ class ProjectImportEngine:
         row: tuple,
         offsets: dict[str, int],
         override_name: Optional[str],
+        tm_global_id_map: Optional[dict[int, int]] = None,
     ) -> tuple:
         """Remap a single row's PK and FK values.
 
@@ -481,6 +579,16 @@ class ProjectImportEngine:
             # Set to NULL during insert, will be fixed in post-processing
             if table_name == "dict_project" and fk_col == "general_corpus_id":
                 row_dict[fk_col] = None
+                continue
+
+            # tm_global has a natural key unique constraint; remap via precomputed payload->host map.
+            if table_name == "tm_entry" and fk_col == "tm_global_id":
+                if value is None:
+                    continue
+                mapped = None
+                if tm_global_id_map is not None:
+                    mapped = tm_global_id_map.get(int(value))
+                row_dict[fk_col] = mapped
                 continue
 
             # Remap

@@ -48,6 +48,7 @@ TABLE_INSERT_ORDER = [
     "term_cluster_member",
     "term_card",
     "translation_memory",
+    "tm_global",
     "tm_entry",
     "tm_entry_history",
     "tm_alias",
@@ -183,10 +184,18 @@ TABLE_SCHEMA = {
             "ngram_id": "ngram",        # Nullable
         },
     },
+    "tm_global": {
+        "pk": "tm_global_id",
+        "fks": {},
+    },
     "tm_entry": {
         "pk": "tm_id",
         "fks": {
             "project_id": "dict_project",  # Nullable (global TM)
+            "lemma_id": "lemma",           # Nullable
+            "cluster_id": "term_cluster",  # Nullable
+            "ngram_id": "ngram",           # Nullable
+            "tm_global_id": "tm_global",   # Nullable
         },
     },
     "tm_entry_history": {
@@ -256,6 +265,6 @@ NULLABLE_FK_COLUMNS = {
     "term_cluster": {"pinned_example_sent_id"},
     "term_card": {"lemma_id", "ngram_id", "pinned_sentence_id"},
     "translation_memory": {"lemma_id", "ngram_id"},
-    "tm_entry": {"project_id"},
+    "tm_entry": {"project_id", "lemma_id", "cluster_id", "ngram_id", "tm_global_id"},
     "dict_source": {"project_id"},
 }

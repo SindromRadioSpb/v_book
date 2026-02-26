@@ -81,20 +81,20 @@ def main():
     )
 
     if report.success:
-        print(f"\n✓ Import successful!")
+        print("\n[OK] Import successful!")
         print(f"  New Project ID: {report.new_project_id}")
         print(f"  Project Name: {report.new_project_name}")
         print(f"  Time: {report.elapsed_seconds:.1f}s")
         print(f"  Total rows: {sum(report.table_counts.values()):,}")
 
         if report.warnings:
-            print(f"\n  Warnings:")
+            print("\n  Warnings:")
             for warning in report.warnings:
-                print(f"    • {warning}")
+                print(f"    - {warning}")
 
         return 0
     else:
-        print(f"\n✗ Import failed: {report.error_message}", file=sys.stderr)
+        print(f"\n[FAIL] Import failed: {report.error_message}", file=sys.stderr)
         return 1
 
 

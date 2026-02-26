@@ -384,19 +384,75 @@ class ProjectExportEngine:
             """,
             "lemma_doc_stat": f"""
                 INSERT OR REPLACE INTO lemma_doc_stat
-                SELECT * FROM host.lemma_doc_stat WHERE project_id = ?
+                SELECT s.* FROM host.lemma_doc_stat s
+                JOIN host.lemma l ON l.lemma_id = s.lemma_id AND l.project_id = s.project_id
+                JOIN host.source_document d ON d.doc_id = s.doc_id
+                JOIN host.source_corpus c ON c.corpus_id = d.corpus_id AND c.project_id = s.project_id
+                WHERE s.project_id = ?
+                  AND (
+                    s.sample_sentence_id IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM host.document_sentence ds
+                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
+                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
+                        WHERE ds.sentence_id = s.sample_sentence_id
+                          AND sc.project_id = s.project_id
+                    )
+                  )
             """,
             "lemma_project_stat": f"""
                 INSERT OR REPLACE INTO lemma_project_stat
-                SELECT * FROM host.lemma_project_stat WHERE project_id = ?
+                SELECT s.* FROM host.lemma_project_stat s
+                JOIN host.lemma l ON l.lemma_id = s.lemma_id AND l.project_id = s.project_id
+                WHERE s.project_id = ?
+                  AND (
+                    s.sample_sentence_id IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM host.document_sentence ds
+                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
+                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
+                        WHERE ds.sentence_id = s.sample_sentence_id
+                          AND sc.project_id = s.project_id
+                    )
+                  )
             """,
             "ngram_doc_stat": f"""
                 INSERT OR REPLACE INTO ngram_doc_stat
-                SELECT * FROM host.ngram_doc_stat WHERE project_id = ?
+                SELECT s.* FROM host.ngram_doc_stat s
+                JOIN host.ngram n ON n.ngram_id = s.ngram_id AND n.project_id = s.project_id
+                JOIN host.source_document d ON d.doc_id = s.doc_id
+                JOIN host.source_corpus c ON c.corpus_id = d.corpus_id AND c.project_id = s.project_id
+                WHERE s.project_id = ?
+                  AND (
+                    s.sample_sentence_id IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM host.document_sentence ds
+                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
+                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
+                        WHERE ds.sentence_id = s.sample_sentence_id
+                          AND sc.project_id = s.project_id
+                    )
+                  )
             """,
             "ngram_project_stat": f"""
                 INSERT OR REPLACE INTO ngram_project_stat
-                SELECT * FROM host.ngram_project_stat WHERE project_id = ?
+                SELECT s.* FROM host.ngram_project_stat s
+                JOIN host.ngram n ON n.ngram_id = s.ngram_id AND n.project_id = s.project_id
+                WHERE s.project_id = ?
+                  AND (
+                    s.sample_sentence_id IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM host.document_sentence ds
+                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
+                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
+                        WHERE ds.sentence_id = s.sample_sentence_id
+                          AND sc.project_id = s.project_id
+                    )
+                  )
             """,
             "term_cluster": f"""
                 INSERT OR REPLACE INTO term_cluster
@@ -415,6 +471,17 @@ class ProjectExportEngine:
             "translation_memory": f"""
                 INSERT OR REPLACE INTO translation_memory
                 SELECT * FROM host.translation_memory WHERE project_id = ?
+            """,
+            "tm_global": f"""
+                INSERT OR REPLACE INTO tm_global
+                SELECT tg.*
+                FROM host.tm_global tg
+                WHERE tg.tm_global_id IN (
+                    SELECT DISTINCT te.tm_global_id
+                    FROM host.tm_entry te
+                    WHERE te.project_id = ?
+                      AND te.tm_global_id IS NOT NULL
+                )
             """,
             "tm_entry": f"""
                 INSERT OR REPLACE INTO tm_entry
@@ -470,6 +537,14 @@ class ProjectExportEngine:
         if not query:
             logger.warning(f"No export query for table {table_name}, skipping")
             return 0
+
+        if table_name == "tm_global":
+            table_exists = payload_conn.execute(
+                "SELECT 1 FROM host.sqlite_master WHERE type='table' AND name='tm_global'"
+            ).fetchone()
+            if not table_exists:
+                logger.debug("Host table tm_global not found, skipping export")
+                return 0
 
         try:
             self._check_cancelled(cancel_check)
