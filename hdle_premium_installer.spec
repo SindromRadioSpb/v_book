@@ -160,7 +160,38 @@ a = Analysis(
     noarchive=False,
 )
 
+probe_a = Analysis(
+    [str(project_root / 'app' / 'tools' / 'onnx_probe.py')],
+    pathex=[str(project_root)],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'phonikud_onnx',
+        'onnxruntime',
+        'onnxruntime.capi.onnxruntime_pybind11_state',
+        'app.infra.resource_paths',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'stanza_resources',
+        'tkinter',
+        'matplotlib',
+        'PIL',
+        'numpy.distutils',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    module_collection_mode={
+        'onnxruntime': 'py',
+    },
+    noarchive=False,
+)
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+probe_pyz = PYZ(probe_a.pure, probe_a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -183,11 +214,36 @@ exe = EXE(
     icon=None,  # TODO: Р”РѕР±Р°РІРёС‚СЊ РёРєРѕРЅРєСѓ РµСЃР»Рё РґРѕСЃС‚СѓРїРЅР°
 )
 
+onnx_probe_exe = EXE(
+    probe_pyz,
+    probe_a.scripts,
+    [],
+    exclude_binaries=True,
+    name='HDLE_ONNX_Probe',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)
+
 coll = COLLECT(
     exe,
+    onnx_probe_exe,
     a.binaries,
+    probe_a.binaries,
     a.zipfiles,
+    probe_a.zipfiles,
     a.datas,
+    probe_a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

@@ -30,6 +30,7 @@ MODE_ERROR = "error"
 _runtime_mode = MODE_FALLBACK
 _runtime_details = "No PHONIKUD_MODEL_PATH configured; fallback mode"
 _SUBPROCESS_TIMEOUT_SEC = 120
+_ONNX_PROBE_EXE_NAME = "HDLE_ONNX_Probe.exe"
 _DLL_DIR_HANDLES: list[object] = []
 _DLL_DIR_KEYS: set[str] = set()
 
@@ -129,8 +130,71 @@ def prepare_runtime_dll_paths() -> None:
         _register_dll_directory(candidate)
 
 
-def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
-    """Run ONNX inference in isolated process to avoid in-process DLL conflicts."""
+def _is_frozen_windows_runtime() -> bool:
+    return os.name == "nt" and bool(getattr(sys, "frozen", False))
+
+
+def _resolve_frozen_onnx_probe_executable() -> Optional[Path]:
+    if not _is_frozen_windows_runtime():
+        return None
+    try:
+        exe_root = Path(sys.executable).resolve().parent
+    except Exception:
+        return None
+    candidates = (
+        exe_root / _ONNX_PROBE_EXE_NAME,
+        exe_root / "_internal" / _ONNX_PROBE_EXE_NAME,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _run_onnx_infer_via_helper(helper_path: Path, model_path: Path, texts: list[str]) -> list[str]:
+    payload = {
+        "texts": [str(text or "") for text in (texts or [])],
+    }
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(
+        [
+            str(helper_path),
+            "--mode",
+            "infer",
+            "--model-path",
+            str(model_path),
+            "--timeout-ms",
+            str(_SUBPROCESS_TIMEOUT_SEC * 1000),
+        ],
+        input=json.dumps(payload, ensure_ascii=True),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=_SUBPROCESS_TIMEOUT_SEC,
+        env=env,
+    )
+    parsed: dict = {}
+    try:
+        parsed = json.loads(proc.stdout or "{}")
+    except Exception:
+        parsed = {}
+    if proc.returncode != 0:
+        stage = str(parsed.get("stage") or "")
+        probe_error = str(parsed.get("error") or "")
+        details = str(parsed.get("details") or "")
+        stderr = (proc.stderr or "").strip()
+        message_parts = [part for part in (probe_error, details, stderr) if part]
+        if stage:
+            message_parts.insert(0, f"stage={stage}")
+        message = " | ".join(message_parts) if message_parts else f"exit_code={proc.returncode}"
+        raise RuntimeError(f"ONNX helper failed: {message}")
+    outputs = parsed.get("outputs") or []
+    return [str(item or "") for item in outputs]
+
+
+def _run_onnx_infer_via_python_subprocess(model_path: Path, texts: list[str]) -> list[str]:
     payload = {
         "model_path": str(model_path),
         "texts": [str(text or "") for text in (texts or [])],
@@ -176,6 +240,19 @@ def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
         raise RuntimeError(f"Subprocess returned invalid JSON: {exc}") from exc
     outputs = parsed.get("outputs") or []
     return [str(item or "") for item in outputs]
+
+
+def _run_onnx_subprocess(model_path: Path, texts: list[str]) -> list[str]:
+    """Run ONNX inference in isolated process to avoid in-process DLL conflicts."""
+    normalized = [str(text or "") for text in (texts or [])]
+    if not normalized:
+        return []
+    helper_path = _resolve_frozen_onnx_probe_executable()
+    if _is_frozen_windows_runtime():
+        if helper_path is None:
+            raise RuntimeError(f"Frozen ONNX helper not found: {_ONNX_PROBE_EXE_NAME}")
+        return _run_onnx_infer_via_helper(helper_path, model_path, normalized)
+    return _run_onnx_infer_via_python_subprocess(model_path, normalized)
 
 
 def _should_prefer_subprocess_for_onnx() -> bool:

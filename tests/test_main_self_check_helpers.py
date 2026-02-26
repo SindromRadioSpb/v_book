@@ -4,6 +4,7 @@ import io
 import json
 import sys
 import builtins
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -203,3 +204,68 @@ def test_main_self_check_path_skips_heavy_ui_imports(monkeypatch):
     assert exit_code == 0
     assert captured["payload"]["mode"] == "import"
     assert captured["payload"]["ok"] is True
+
+
+def test_import_self_check_uses_frozen_onnx_helper(monkeypatch):
+    real_import = importlib.import_module
+    imported = []
+
+    def _fake_import(name: str):
+        imported.append(name)
+        if name == "phonikud":
+            return SimpleNamespace(__name__="phonikud", __version__="test")
+        if name == "onnxruntime":
+            raise AssertionError("Frozen import self-check must use helper instead of in-process onnxruntime import")
+        return real_import(name)
+
+    monkeypatch.setattr(main.importlib, "import_module", _fake_import)
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "_run_frozen_onnx_probe_helper",
+        lambda **_kwargs: (
+            0,
+            {
+                "ok": True,
+                "stage": "import",
+                "error": "",
+                "helper_path": "C:/HDLE_ONNX_Probe.exe",
+                "onnxruntime_origin": "C:/onnxruntime/__init__.py",
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    exit_code, payload = main._run_import_self_check(_DummySettings())
+    check = payload["checks"]["onnxruntime_import"]
+
+    assert exit_code == 0
+    assert check["ok"] is True
+    assert check["helper_path"] == "C:/HDLE_ONNX_Probe.exe"
+    assert "onnxruntime" in check["origin"].lower()
+    assert "onnxruntime" not in imported
+
+
+def test_import_self_check_reports_helper_failure(monkeypatch):
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "_run_frozen_onnx_probe_helper",
+        lambda **_kwargs: (
+            1,
+            {
+                "ok": False,
+                "stage": "import",
+                "error": "DLL initialization routine failed",
+                "helper_path": "C:/HDLE_ONNX_Probe.exe",
+                "exit_code": 1,
+            },
+        ),
+    )
+
+    exit_code, payload = main._run_import_self_check(_DummySettings())
+    check = payload["checks"]["onnxruntime_import"]
+
+    assert exit_code == 1
+    assert check["ok"] is False
+    assert "DLL initialization routine failed" in check["error"]

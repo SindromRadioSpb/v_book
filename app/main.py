@@ -9,6 +9,7 @@ import logging
 import argparse
 import importlib
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ _PHONIKUD_SUBPROCESS_SENTINELS = (
 )
 _BRIDGE_DLL_HANDLES: list[Any] = []
 _BRIDGE_DLL_KEYS: set[str] = set()
+_ONNX_PROBE_EXE_NAME = "HDLE_ONNX_Probe.exe"
 
 
 def resolve_db_path(cli_db_path: str | None, *, settings=None):
@@ -143,6 +145,90 @@ def _prepare_onnxruntime_dll_paths_for_bridge() -> None:
         os.environ["PATH"] = ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
 
 
+def _resolve_frozen_onnx_probe_executable() -> Path | None:
+    if not (os.name == "nt" and bool(getattr(sys, "frozen", False))):
+        return None
+    try:
+        exe_root = Path(sys.executable).resolve().parent
+    except Exception:
+        return None
+    candidates = (
+        exe_root / _ONNX_PROBE_EXE_NAME,
+        exe_root / "_internal" / _ONNX_PROBE_EXE_NAME,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _run_frozen_onnx_probe_helper(
+    *,
+    mode: str,
+    model_path: str = "",
+    timeout_ms: int = 3000,
+) -> tuple[int, dict[str, Any]]:
+    helper_path = _resolve_frozen_onnx_probe_executable()
+    if helper_path is None:
+        return 1, {
+            "ok": False,
+            "stage": "import",
+            "mode": mode,
+            "error": f"Frozen ONNX helper not found: {_ONNX_PROBE_EXE_NAME}",
+            "helper_path": "",
+            "exit_code": 1,
+        }
+
+    cmd = [
+        str(helper_path),
+        "--mode",
+        mode,
+        "--timeout-ms",
+        str(int(timeout_ms)),
+    ]
+    cleaned_model_path = str(model_path or "").strip()
+    if cleaned_model_path:
+        cmd.extend(["--model-path", cleaned_model_path])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(3, int(timeout_ms / 1000) + 2),
+        )
+    except Exception as exc:
+        return 1, {
+            "ok": False,
+            "stage": "import",
+            "mode": mode,
+            "error": str(exc),
+            "helper_path": str(helper_path),
+            "exit_code": 1,
+        }
+
+    try:
+        payload = json.loads(proc.stdout or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception as exc:
+        payload = {
+            "ok": False,
+            "stage": "import",
+            "mode": mode,
+            "error": f"Helper returned invalid JSON: {exc}",
+        }
+
+    payload["helper_path"] = str(helper_path)
+    payload["exit_code"] = int(proc.returncode)
+    if proc.returncode != 0 and not str(payload.get("error") or "").strip():
+        payload["error"] = (proc.stderr or proc.stdout or "").strip() or f"Helper exited with code {proc.returncode}"
+
+    return proc.returncode, payload
+
+
 def _run_phonikud_subprocess_bridge() -> int:
     try:
         raw_bytes = b""
@@ -253,23 +339,40 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
             "error": phonikud_error,
         }
 
-    try:
-        ort_module = importlib.import_module("onnxruntime")
-        ort_origin = str(getattr(ort_module, "__file__", "") or "")
-        capi_dir = Path(ort_origin).resolve().parent / "capi" if ort_origin else None
+    if os.name == "nt" and bool(getattr(sys, "frozen", False)):
+        model_path = settings.get_string("pronunciation/phonikud/model_path", "")
+        helper_code, helper_payload = _run_frozen_onnx_probe_helper(
+            mode="import",
+            model_path=model_path,
+            timeout_ms=3000,
+        )
         payload["checks"]["onnxruntime_import"] = {
-            "ok": True,
-            "module": getattr(ort_module, "__name__", "onnxruntime"),
-            "origin": ort_origin,
-            "capi_dir_exists": bool(capi_dir and capi_dir.exists()),
-            "pybind_exists": bool(capi_dir and (capi_dir / "onnxruntime_pybind11_state.pyd").exists()),
-            "runtime_dll_exists": bool(capi_dir and (capi_dir / "onnxruntime.dll").exists()),
+            "ok": helper_code == 0 and bool(helper_payload.get("ok", False)),
+            "module": "onnxruntime",
+            "origin": str(helper_payload.get("onnxruntime_origin") or ""),
+            "stage": str(helper_payload.get("stage") or ""),
+            "error": str(helper_payload.get("error") or ""),
+            "helper_path": str(helper_payload.get("helper_path") or ""),
+            "helper_exit_code": int(helper_payload.get("exit_code") or 0),
         }
-    except Exception as exc:
-        payload["checks"]["onnxruntime_import"] = {
-            "ok": False,
-            "error": str(exc),
-        }
+    else:
+        try:
+            ort_module = importlib.import_module("onnxruntime")
+            ort_origin = str(getattr(ort_module, "__file__", "") or "")
+            capi_dir = Path(ort_origin).resolve().parent / "capi" if ort_origin else None
+            payload["checks"]["onnxruntime_import"] = {
+                "ok": True,
+                "module": getattr(ort_module, "__name__", "onnxruntime"),
+                "origin": ort_origin,
+                "capi_dir_exists": bool(capi_dir and capi_dir.exists()),
+                "pybind_exists": bool(capi_dir and (capi_dir / "onnxruntime_pybind11_state.pyd").exists()),
+                "runtime_dll_exists": bool(capi_dir and (capi_dir / "onnxruntime.dll").exists()),
+            }
+        except Exception as exc:
+            payload["checks"]["onnxruntime_import"] = {
+                "ok": False,
+                "error": str(exc),
+            }
 
     payload["checks"]["resource_paths"] = {
         "data_root": str(paths.data_root),
@@ -371,6 +474,28 @@ def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -
 
         baseline_item = service._check_baseline_reference().to_dict()
         items.append(baseline_item)
+
+        if os.name == "nt" and bool(getattr(sys, "frozen", False)):
+            model_path = settings.get_string("pronunciation/phonikud/model_path", "")
+            probe_code, probe_payload = _run_frozen_onnx_probe_helper(
+                mode="probe",
+                model_path=model_path,
+                timeout_ms=3000,
+            )
+            payload["onnx_probe"] = probe_payload
+            probe_ok = probe_code == 0 and bool(probe_payload.get("ok", False))
+            probe_error = str(probe_payload.get("error") or "").strip()
+            items.append(
+                {
+                    "id": "frozen_onnx_probe",
+                    "name": "Frozen ONNX Probe",
+                    "status": "ok" if probe_ok else "error",
+                    "message": "ONNX helper probe passed" if probe_ok else (probe_error or "ONNX helper probe failed"),
+                    "remediation": "Reinstall runtime dependencies and verify HDLE_ONNX_Probe.exe packaging."
+                    if not probe_ok
+                    else "",
+                }
+            )
 
         status_rank = {"ok": 0, "optional": 0, "warn": 1, "error": 2}
         overall = "ok"
