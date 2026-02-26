@@ -1,6 +1,11 @@
 # HDLE Premium - Robust Build Script
 # Production-grade rebuild with fail-fast checks and AV-resilient output
 
+param(
+    [switch]$SkipFastGates = $false,
+    [string]$ReferenceDbPath = ""
+)
+
 $ErrorActionPreference = "Stop"
 
 # --- PRECONDITIONS CHECK ---
@@ -82,6 +87,26 @@ if (Test-Path .\dist)  {
 
 # Create logs directory
 New-Item -ItemType Directory -Force -Path "build\logs" | Out-Null
+
+# --- FAST PRE-BUILD GATES ---
+if (-not $SkipFastGates) {
+    Write-Host "`nRunning fast pre-build gates..." -ForegroundColor Cyan
+    $fastGateLog = "build\logs\prebuild_fast_gates_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+    if ($ReferenceDbPath) {
+        cmd /c "powershell -ExecutionPolicy Bypass -File .\scripts\prebuild_fast_gates.ps1 -DbPath `"$ReferenceDbPath`" > `"$fastGateLog`" 2>&1"
+    } else {
+        cmd /c "powershell -ExecutionPolicy Bypass -File .\scripts\prebuild_fast_gates.ps1 > `"$fastGateLog`" 2>&1"
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n[FAIL] Fast pre-build gates failed!" -ForegroundColor Red
+        Write-Host "See log: $fastGateLog" -ForegroundColor Yellow
+        Write-Host "`nLast 30 lines of gate log:" -ForegroundColor Yellow
+        Get-Content $fastGateLog -Tail 30 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+        exit 1
+    }
+    Write-Host "[OK] Fast pre-build gates passed - log: $fastGateLog" -ForegroundColor Green
+}
 
 # --- PYINSTALLER BUILD ---
 Write-Host "`nBuilding with PyInstaller..." -ForegroundColor Cyan
