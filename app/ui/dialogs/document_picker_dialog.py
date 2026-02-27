@@ -76,7 +76,9 @@ class DocumentPickerDialog(QDialog):
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search by title, document ID, or tag...")
+        self.search_edit.setPlaceholderText(
+            "Search title/document ID, tag exact, or tag:<text> for partial tag search..."
+        )
         self.search_edit.textChanged.connect(lambda _text: self._search_timer.start())
         search_row.addWidget(self.search_edit)
         root.addLayout(search_row)

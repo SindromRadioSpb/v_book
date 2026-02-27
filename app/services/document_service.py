@@ -11,7 +11,7 @@ import re
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, exists, union, false
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import SourceCorpus, SourceDocument
@@ -44,6 +44,7 @@ _SORT_ALLOWLIST: Dict[str, Any] = {
 _MAX_TAG_LEN = 200
 _MAX_TOPIC_LEN = 500
 _MAX_URL_LEN = 2000
+_TAG_SEARCH_PREFIX = "tag:"
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +123,93 @@ def validate_topic(topic: Optional[str]) -> Optional[str]:
 class DocumentService:
     """CRUD + query service for SourceDocument with metadata support."""
 
+    @staticmethod
+    def _project_scope_exists(project_id: int):
+        """Return EXISTS predicate that constrains SourceDocument rows to project scope."""
+        return exists(
+            select(1)
+            .select_from(SourceCorpus)
+            .where(
+                SourceCorpus.corpus_id == SourceDocument.corpus_id,
+                SourceCorpus.project_id == int(project_id),
+            )
+        )
+
+    def _build_project_picker_doc_ids_subquery(
+        self,
+        project_id: int,
+        *,
+        search_query: str,
+    ):
+        """Build deduplicated doc-id subquery for picker search.
+
+        Fast path avoids `OR ... tag LIKE ...` because it regresses to long scans on
+        huge datasets. Default behavior:
+        - file_name contains search,
+        - doc_id exact match for numeric queries,
+        - tag exact match via `idx_doc_tag` index.
+
+        Optional explicit mode: `tag:<text>` enables legacy tag contains search.
+        """
+        project_id = int(project_id)
+        query = (search_query or "").strip()
+        if not query:
+            return None
+
+        if query.lower().startswith(_TAG_SEARCH_PREFIX):
+            tag_term = query[len(_TAG_SEARCH_PREFIX):].strip()
+            if not tag_term:
+                return (
+                    select(SourceDocument.doc_id)
+                    .where(false())
+                    .subquery("project_doc_match_ids")
+                )
+            tag_like = f"%{tag_term}%"
+            return (
+                select(SourceDocument.doc_id)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.tag.is_not(None),
+                    SourceDocument.tag.like(tag_like),
+                )
+                .subquery("project_doc_match_ids")
+            )
+
+        like_q = f"%{query}%"
+        project_scope_exists = self._project_scope_exists(project_id)
+
+        selectors = [
+            select(SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(
+                SourceCorpus.project_id == project_id,
+                SourceDocument.file_name.like(like_q),
+            )
+        ]
+
+        tag_candidates = {query}
+        lower_query = query.lower()
+        if lower_query != query:
+            tag_candidates.add(lower_query)
+        for tag_value in sorted(tag_candidates):
+            selectors.append(
+                select(SourceDocument.doc_id).where(
+                    SourceDocument.tag == tag_value,
+                    project_scope_exists,
+                )
+            )
+
+        if query.isdigit():
+            selectors.append(
+                select(SourceDocument.doc_id).where(
+                    SourceDocument.doc_id == int(query),
+                    project_scope_exists,
+                )
+            )
+
+        return union(*selectors).subquery("project_doc_match_ids")
+
     def build_project_documents_query(
         self,
         project_id: int,
@@ -131,22 +219,22 @@ class DocumentService:
         sort_dir: str = "desc",
     ):
         """Build project-scoped query for document picker (search + sort, no pagination)."""
-        stmt = (
-            select(SourceDocument)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == int(project_id))
-        )
-
         query = (search_query or "").strip()
         if query:
-            like_q = f"%{query}%"
-            predicates = [
-                SourceDocument.file_name.ilike(like_q),
-                SourceDocument.tag.ilike(like_q),
-            ]
-            if query.isdigit():
-                predicates.append(SourceDocument.doc_id == int(query))
-            stmt = stmt.where(or_(*predicates))
+            doc_ids_subquery = self._build_project_picker_doc_ids_subquery(
+                project_id,
+                search_query=query,
+            )
+            stmt = select(SourceDocument).join(
+                doc_ids_subquery,
+                SourceDocument.doc_id == doc_ids_subquery.c.doc_id,
+            )
+        else:
+            stmt = (
+                select(SourceDocument)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(SourceCorpus.project_id == int(project_id))
+            )
 
         stmt = self._apply_documents_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
         return stmt
@@ -159,23 +247,20 @@ class DocumentService:
         search_query: Optional[str] = None,
     ) -> int:
         """Return project-scoped count for document picker search."""
-        stmt = (
-            select(func.count(SourceDocument.doc_id))
-            .select_from(SourceDocument)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == int(project_id))
-        )
-
         query = (search_query or "").strip()
         if query:
-            like_q = f"%{query}%"
-            predicates = [
-                SourceDocument.file_name.ilike(like_q),
-                SourceDocument.tag.ilike(like_q),
-            ]
-            if query.isdigit():
-                predicates.append(SourceDocument.doc_id == int(query))
-            stmt = stmt.where(or_(*predicates))
+            doc_ids_subquery = self._build_project_picker_doc_ids_subquery(
+                project_id,
+                search_query=query,
+            )
+            stmt = select(func.count()).select_from(doc_ids_subquery)
+        else:
+            stmt = (
+                select(func.count(SourceDocument.doc_id))
+                .select_from(SourceDocument)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(SourceCorpus.project_id == int(project_id))
+            )
 
         return int(session.execute(stmt).scalar() or 0)
 

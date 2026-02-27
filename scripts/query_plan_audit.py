@@ -132,15 +132,30 @@ LIMIT 50 OFFSET 0
                 "Document picker page (text search)",
                 "picker_page_search",
                 """
+WITH project_doc_match_ids AS (
+  SELECT d.doc_id
+  FROM source_document AS d
+  JOIN source_corpus AS c ON d.corpus_id = c.corpus_id
+  WHERE c.project_id = ?
+    AND d.file_name LIKE ?
+  UNION
+  SELECT d.doc_id
+  FROM source_document AS d
+  WHERE d.tag = ?
+    AND EXISTS (
+      SELECT 1
+      FROM source_corpus AS c
+      WHERE c.corpus_id = d.corpus_id
+        AND c.project_id = ?
+    )
+)
 SELECT d.doc_id, d.file_name, d.tag
 FROM source_document AS d
-JOIN source_corpus AS c ON d.corpus_id = c.corpus_id
-WHERE c.project_id = ?
-  AND (lower(d.file_name) LIKE lower(?) OR lower(d.tag) LIKE lower(?))
+JOIN project_doc_match_ids AS ids ON ids.doc_id = d.doc_id
 ORDER BY d.file_name ASC, d.doc_id ASC
 LIMIT 50 OFFSET 0
 """,
-                (project_id, search_pattern, search_pattern),
+                (project_id, search_pattern, args.search_term, project_id),
             ),
         ]
 
@@ -219,8 +234,9 @@ LIMIT 50 OFFSET 0
             )
         if query_temp_btree.get("picker_page_search"):
             report_lines.append(
-                "- Document picker text search uses temporary sort due flexible text predicate; "
-                "this is expected for contains-style matching."
+                "- Document picker text search may still use temporary sort for final ordering, "
+                "but the split matcher path (title contains + indexed exact tag match) "
+                "removes the slow `OR lower(...) LIKE` branch."
             )
         report_lines.append("")
 

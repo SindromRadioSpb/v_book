@@ -84,6 +84,75 @@ def test_document_picker_search_paged(doc_picker_engine):
     assert all("tag_a" in (dto.tag or "") for dto in page)
 
 
+def test_document_picker_tag_prefix_contains_mode(doc_picker_engine):
+    svc = DocumentService()
+    with Session(doc_picker_engine) as session:
+        project_id = _seed_project_docs(session, count=40)
+        docs = (
+            session.query(SourceDocument)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .filter(SourceCorpus.project_id == project_id)
+            .order_by(SourceDocument.doc_id.asc())
+            .limit(3)
+            .all()
+        )
+        docs[0].tag = "wiki_alpha"
+        docs[1].tag = "alpha_wiki_beta"
+        docs[2].tag = "other"
+        session.commit()
+
+        total = svc.get_project_documents_total_count(session, project_id, search_query="tag:wiki")
+        page = svc.fetch_project_documents_page(
+            session,
+            project_id,
+            search_query="tag:wiki",
+            sort_by="file_name",
+            sort_dir="asc",
+            limit=25,
+            offset=0,
+        )
+
+    assert total == 2
+    assert len(page) == 2
+    assert all("wiki" in (dto.tag or "") for dto in page)
+
+
+def test_document_picker_search_dedupes_filename_and_tag_match(doc_picker_engine):
+    svc = DocumentService()
+    with Session(doc_picker_engine) as session:
+        project_id = _seed_project_docs(session, count=30)
+        docs = (
+            session.query(SourceDocument)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .filter(SourceCorpus.project_id == project_id)
+            .order_by(SourceDocument.doc_id.asc())
+            .limit(3)
+            .all()
+        )
+        docs[0].file_name = "wiki_primary_doc"
+        docs[0].tag = "wiki"
+        docs[1].file_name = "wiki_secondary_doc"
+        docs[1].tag = "other"
+        docs[2].file_name = "control_doc"
+        docs[2].tag = "other"
+        session.commit()
+
+        total = svc.get_project_documents_total_count(session, project_id, search_query="wiki")
+        page = svc.fetch_project_documents_page(
+            session,
+            project_id,
+            search_query="wiki",
+            sort_by="file_name",
+            sort_dir="asc",
+            limit=25,
+            offset=0,
+        )
+
+    assert total == 2
+    assert len(page) == 2
+    assert [dto.file_name for dto in page] == ["wiki_primary_doc", "wiki_secondary_doc"]
+
+
 def test_sentences_view_applies_selected_document_filter(monkeypatch, qtbot):
     calls = []
 
