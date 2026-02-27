@@ -101,6 +101,7 @@ class ProjectImportWorker(QThread):
                 bundle_path=self.bundle_path,
                 options=self.options,
                 progress_callback=self._on_progress,
+                cancel_check=lambda: bool(self._cancelled),
             )
 
             if report.success:

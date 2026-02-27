@@ -28,6 +28,10 @@ from app.services.pronunciation_import_export_service import PronunciationImport
 logger = logging.getLogger(__name__)
 
 
+class ImportCancelledError(Exception):
+    """Raised when project import is cancelled by user request."""
+
+
 class ProjectImportEngine:
     """Handles import of .hdleproj bundles with ID remapping."""
 
@@ -39,6 +43,7 @@ class ProjectImportEngine:
         bundle_path: Path,
         options: ImportOptions = ImportOptions(),
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ImportReport:
         """Import a project from a .hdleproj bundle.
 
@@ -60,6 +65,8 @@ class ProjectImportEngine:
         payload_conn = None
 
         try:
+            self._check_cancelled(cancel_check)
+
             # Extract and validate bundle
             logger.info(f"Starting import from {bundle_path}")
             if progress_callback:
@@ -67,12 +74,14 @@ class ProjectImportEngine:
 
             temp_dir = Path(tempfile.mkdtemp(prefix="hdle_import_"))
             manifest, payload_path = bundle_format.read_bundle(bundle_path, temp_dir)
+            self._check_cancelled(cancel_check)
 
             # Preflight checks
             if progress_callback:
                 progress_callback("Checking compatibility...", 5, 100)
 
             self._preflight_checks(manifest)
+            self._check_cancelled(cancel_check)
 
             # Handle name conflict
             final_project_name = self._resolve_project_name(
@@ -90,7 +99,7 @@ class ProjectImportEngine:
             payload_conn = sqlite3.connect(str(payload_path))
             payload_conn.execute("PRAGMA foreign_keys = ON")
 
-            offsets = self._compute_offsets(host_conn, payload_conn)
+            offsets = self._compute_offsets(host_conn, payload_conn, cancel_check=cancel_check)
 
             # Transactional import
             if progress_callback:
@@ -103,11 +112,17 @@ class ProjectImportEngine:
                 final_project_name,
                 warnings,
                 progress_callback,
+                cancel_check=cancel_check,
             )
+            self._check_cancelled(cancel_check)
 
             pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
             if pron_path.exists():
-                self._import_pronunciation_metadata(pron_path, warnings)
+                self._import_pronunciation_metadata(
+                    pron_path,
+                    warnings,
+                    cancel_check=cancel_check,
+                )
 
             elapsed = time.time() - start_time
             logger.info(f"Import completed in {elapsed:.1f}s, new project ID: {new_project_id}")
@@ -124,6 +139,15 @@ class ProjectImportEngine:
                 elapsed_seconds=elapsed,
             )
 
+        except ImportCancelledError:
+            elapsed = time.time() - start_time
+            logger.info(f"Import cancelled after {elapsed:.1f}s")
+            return ImportReport(
+                success=False,
+                elapsed_seconds=elapsed,
+                error_message="Import cancelled by user",
+                warnings=warnings,
+            )
         except Exception as e:
             elapsed = time.time() - start_time
             logger.exception(f"Import failed after {elapsed:.1f}s")
@@ -153,17 +177,31 @@ class ProjectImportEngine:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
 
-    def _import_pronunciation_metadata(self, pron_path: Path, warnings: list[str]) -> None:
+    @staticmethod
+    def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
+        if cancel_check and bool(cancel_check()):
+            raise ImportCancelledError("Import cancelled by user")
+
+    def _import_pronunciation_metadata(
+        self,
+        pron_path: Path,
+        warnings: list[str],
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> None:
         """Import optional pronunciation metadata sidecar."""
+        self._check_cancelled(cancel_check)
         service = PronunciationImportExportService()
         try:
             with self.db_service.get_session() as session:
+                self._check_cancelled(cancel_check)
                 result = service.import_file(
                     session,
                     in_path=pron_path,
                     delimiter="\t",
                     allow_auto_overwrite=False,
                 )
+                self._check_cancelled(cancel_check)
                 session.commit()
             warnings.append(
                 "Pronunciation metadata imported: "
@@ -244,7 +282,11 @@ class ProjectImportEngine:
         return original_name
 
     def _compute_offsets(
-        self, host_conn: sqlite3.Connection, payload_conn: sqlite3.Connection
+        self,
+        host_conn: sqlite3.Connection,
+        payload_conn: sqlite3.Connection,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> dict[str, int]:
         """Compute ID offsets for each table.
 
@@ -258,6 +300,7 @@ class ProjectImportEngine:
         offsets = {}
 
         for table_name in TABLE_INSERT_ORDER:
+            self._check_cancelled(cancel_check)
             schema = TABLE_SCHEMA.get(table_name)
             if not schema or schema["pk"] is None:
                 # Composite PK table, no offset needed
@@ -309,8 +352,10 @@ class ProjectImportEngine:
         final_project_name: str,
         warnings: list[str],
         progress_callback: Optional[Callable[[str, int, int], None]],
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> tuple[int, dict[str, int]]:
-        """Import all tables in transaction.
+        """Import all tables with bounded write-lock windows.
 
         Args:
             host_conn: Host DB connection
@@ -319,98 +364,203 @@ class ProjectImportEngine:
             final_project_name: Final project name
             warnings: List to append warnings to
             progress_callback: Progress callback
+            cancel_check: Optional cancellation callback
 
         Returns:
             Tuple of (new_project_id, table_counts)
 
         Raises:
-            Exception: On import failure (transaction will be rolled back)
+            Exception: On import failure/cancellation
         """
-        host_conn.execute("BEGIN IMMEDIATE")
-
-        # CRITICAL: Ensure FTS tables exist in host DB before importing
-        # INSERT triggers on document_sentence/term_search reference sentence_fts/term_fts
-        ensure_fts_tables(host_conn, schema="main", rebuild=False)
-        logger.info("Ensured FTS tables exist in host DB")
-
         table_counts = {}
         new_project_id = None
         tm_global_id_map: dict[int, int] = {}
+        inserted_tm_global_ids: list[int] = []
+        inserted_library_ids: list[int] = []
 
         try:
+            self._check_cancelled(cancel_check)
+
+            # Keep FTS initialization in a short dedicated write transaction.
+            host_conn.execute("BEGIN IMMEDIATE")
+            try:
+                ensure_fts_tables(host_conn, schema="main", rebuild=False)
+                host_conn.commit()
+            except Exception:
+                host_conn.rollback()
+                raise
+            logger.info("Ensured FTS tables exist in host DB")
+
             total_tables = len(TABLE_INSERT_ORDER)
 
             for i, table_name in enumerate(TABLE_INSERT_ORDER):
+                self._check_cancelled(cancel_check)
+
                 if progress_callback:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
-                if table_name == "tm_global":
-                    count, tm_global_id_map = self._import_tm_global_table(
-                        host_conn,
-                        payload_conn,
-                    )
-                    table_counts[table_name] = count
-                    logger.debug(f"Imported {count} rows into {table_name}")
-                    continue
+                host_conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if table_name == "tm_global":
+                        count, tm_global_id_map, new_tm_global_ids = self._import_tm_global_table(
+                            host_conn,
+                            payload_conn,
+                            cancel_check=cancel_check,
+                        )
+                        if new_tm_global_ids:
+                            inserted_tm_global_ids.extend(new_tm_global_ids)
+                        table_counts[table_name] = count
+                        logger.debug(f"Imported {count} rows into {table_name}")
+                    else:
+                        inserted_pk_values = inserted_library_ids if table_name == "library" else None
+                        count = self._import_table(
+                            host_conn,
+                            payload_conn,
+                            table_name,
+                            offsets,
+                            final_project_name if table_name == "dict_project" else None,
+                            warnings,
+                            tm_global_id_map,
+                            cancel_check=cancel_check,
+                            inserted_pk_values=inserted_pk_values,
+                        )
+                        table_counts[table_name] = count
+                        logger.debug(f"Imported {count} rows into {table_name}")
 
-                count = self._import_table(
-                    host_conn,
-                    payload_conn,
-                    table_name,
-                    offsets,
-                    final_project_name if table_name == "dict_project" else None,
-                    warnings,
-                    tm_global_id_map,
-                )
-                table_counts[table_name] = count
-                logger.debug(f"Imported {count} rows into {table_name}")
+                        # Capture new project ID
+                        if table_name == "dict_project" and count > 0:
+                            result = host_conn.execute(
+                                "SELECT project_id FROM dict_project WHERE name = ?",
+                                (final_project_name,),
+                            ).fetchone()
+                            if result:
+                                new_project_id = result[0]
 
-                # Capture new project ID
-                if table_name == "dict_project" and count > 0:
-                    result = host_conn.execute(
-                        "SELECT project_id FROM dict_project WHERE name = ?",
-                        (final_project_name,),
-                    ).fetchone()
-                    if result:
-                        new_project_id = result[0]
+                    host_conn.commit()
+                except Exception:
+                    host_conn.rollback()
+                    raise
 
             # Fix self-referencing FK on dict_project.general_corpus_id
             if new_project_id:
-                self._fix_general_corpus_self_ref(
-                    host_conn, payload_conn, offsets, new_project_id, warnings
-                )
+                host_conn.execute("BEGIN IMMEDIATE")
+                try:
+                    self._fix_general_corpus_self_ref(
+                        host_conn, payload_conn, offsets, new_project_id, warnings
+                    )
+                    host_conn.commit()
+                except Exception:
+                    host_conn.rollback()
+                    raise
 
-            host_conn.commit()
-            logger.info("Transaction committed successfully")
+            logger.info("Import committed successfully")
 
             return new_project_id, table_counts
 
-        except Exception as e:
-            host_conn.rollback()
-            logger.error(f"Transaction rolled back due to error: {e}")
+        except ImportCancelledError:
+            self._cleanup_partial_import(
+                host_conn,
+                new_project_id=new_project_id,
+                inserted_library_ids=inserted_library_ids,
+                inserted_tm_global_ids=inserted_tm_global_ids,
+            )
             raise
+        except Exception as e:
+            logger.error(f"Import failed; running cleanup of partial inserts: {e}")
+            self._cleanup_partial_import(
+                host_conn,
+                new_project_id=new_project_id,
+                inserted_library_ids=inserted_library_ids,
+                inserted_tm_global_ids=inserted_tm_global_ids,
+            )
+            raise
+
+    def _cleanup_partial_import(
+        self,
+        host_conn: sqlite3.Connection,
+        *,
+        new_project_id: Optional[int],
+        inserted_library_ids: list[int],
+        inserted_tm_global_ids: list[int],
+    ) -> None:
+        """Best-effort cleanup for partially imported rows after cancel/failure."""
+        if (
+            new_project_id is None
+            and not inserted_library_ids
+            and not inserted_tm_global_ids
+        ):
+            return
+
+        try:
+            host_conn.execute("BEGIN IMMEDIATE")
+
+            if new_project_id is not None:
+                host_conn.execute(
+                    "DELETE FROM dict_project WHERE project_id = ?",
+                    (int(new_project_id),),
+                )
+
+            # Remove newly inserted global TM rows that are now unreferenced.
+            for tm_global_id in sorted(set(inserted_tm_global_ids)):
+                host_conn.execute(
+                    """
+                    DELETE FROM tm_global
+                    WHERE tm_global_id = ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM tm_entry WHERE tm_entry.tm_global_id = tm_global.tm_global_id
+                      )
+                    """,
+                    (int(tm_global_id),),
+                )
+
+            # Remove orphan libraries introduced by this import.
+            for library_id in sorted(set(inserted_library_ids)):
+                host_conn.execute(
+                    """
+                    DELETE FROM library
+                    WHERE library_id = ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM dict_project WHERE dict_project.library_id = library.library_id
+                      )
+                    """,
+                    (int(library_id),),
+                )
+
+            host_conn.commit()
+            logger.info("Cleaned up partial import rows")
+        except Exception as cleanup_exc:
+            try:
+                host_conn.rollback()
+            except Exception:
+                pass
+            logger.warning("Failed to cleanup partial import rows: %s", cleanup_exc)
 
     def _import_tm_global_table(
         self,
         host_conn: sqlite3.Connection,
         payload_conn: sqlite3.Connection,
-    ) -> tuple[int, dict[int, int]]:
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> tuple[int, dict[int, int], list[int]]:
         """Merge payload tm_global rows into host by natural key and build ID map."""
         try:
             cursor = payload_conn.execute("SELECT * FROM tm_global")
             rows = cursor.fetchall()
             col_names = [desc[0] for desc in cursor.description]
         except sqlite3.OperationalError:
-            return 0, {}
+            return 0, {}, []
 
         if not rows:
-            return 0, {}
+            return 0, {}, []
 
         row_dicts = [dict(zip(col_names, row)) for row in rows]
         id_map: dict[int, int] = {}
+        inserted_ids: list[int] = []
 
-        for row in row_dicts:
+        for idx, row in enumerate(row_dicts):
+            if idx % 64 == 0:
+                self._check_cancelled(cancel_check)
             payload_id = int(row["tm_global_id"])
             natural_key = (
                 row["src_lang"],
@@ -458,9 +608,11 @@ class ProjectImportEngine:
                 ),
             )
             new_id = host_conn.execute("SELECT last_insert_rowid()").fetchone()
-            id_map[payload_id] = int(new_id[0]) if new_id else payload_id
+            mapped_id = int(new_id[0]) if new_id else payload_id
+            id_map[payload_id] = mapped_id
+            inserted_ids.append(mapped_id)
 
-        return len(row_dicts), id_map
+        return len(row_dicts), id_map, inserted_ids
 
     def _import_table(
         self,
@@ -471,6 +623,9 @@ class ProjectImportEngine:
         override_name: Optional[str],
         warnings: list[str],
         tm_global_id_map: Optional[dict[int, int]] = None,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        inserted_pk_values: Optional[list[int]] = None,
     ) -> int:
         """Import a single table with ID remapping.
 
@@ -485,6 +640,7 @@ class ProjectImportEngine:
         Returns:
             Number of rows imported
         """
+        self._check_cancelled(cancel_check)
         schema = TABLE_SCHEMA.get(table_name)
         if not schema:
             logger.warning(f"No schema for table {table_name}, skipping")
@@ -504,7 +660,9 @@ class ProjectImportEngine:
 
         # Remap IDs and insert
         remapped_rows = []
-        for row in rows:
+        for idx, row in enumerate(rows):
+            if idx % 256 == 0:
+                self._check_cancelled(cancel_check)
             remapped_row = self._remap_row(
                 table_name,
                 col_names,
@@ -515,12 +673,22 @@ class ProjectImportEngine:
             )
             remapped_rows.append(remapped_row)
 
+        if inserted_pk_values is not None:
+            pk_col = schema.get("pk")
+            if pk_col and pk_col in col_names:
+                pk_idx = col_names.index(pk_col)
+                for remapped_row in remapped_rows:
+                    pk_value = remapped_row[pk_idx]
+                    if pk_value is not None:
+                        inserted_pk_values.append(int(pk_value))
+
         # Chunked insert (200 rows per batch)
         placeholders = ",".join(["?"] * len(col_names))
         insert_sql = f"INSERT INTO {table_name} ({','.join(col_names)}) VALUES ({placeholders})"
 
         chunk_size = 200
         for i in range(0, len(remapped_rows), chunk_size):
+            self._check_cancelled(cancel_check)
             chunk = remapped_rows[i:i+chunk_size]
             try:
                 host_conn.executemany(insert_sql, chunk)

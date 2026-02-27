@@ -172,6 +172,80 @@ def test_export_cancel_returns_cancelled_report(populated_project, tmp_path):
     assert not out_path.exists()
 
 
+def test_import_cancel_returns_cancelled_report(populated_project, temp_db):
+    """Cancel check should stop import quickly with a friendly report."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "cancelled_import_bundle.hdleproj"
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Cancelled Import"),
+            cancel_check=lambda: True,
+        )
+
+    assert report.success is False
+    assert "cancel" in (report.error_message or "").lower()
+
+
+def test_import_cancel_after_partial_commit_cleans_rows(populated_project, temp_db, monkeypatch):
+    """If cancel happens after early committed tables, cleanup must remove partial rows."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "partial_cancel_import_bundle.hdleproj"
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        cancel_state = {"value": False}
+        call_counter = {"count": 0}
+        original_import_table = import_engine._import_table
+
+        def wrapped_import_table(*args, **kwargs):
+            result = original_import_table(*args, **kwargs)
+            call_counter["count"] += 1
+            # library + dict_project are first two tables in insertion order.
+            if call_counter["count"] >= 2:
+                cancel_state["value"] = True
+            return result
+
+        monkeypatch.setattr(import_engine, "_import_table", wrapped_import_table)
+
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Cancelled Import Partial"),
+            cancel_check=lambda: bool(cancel_state["value"]),
+        )
+
+    assert report.success is False
+    assert "cancel" in (report.error_message or "").lower()
+
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        project_count = conn.execute(
+            "SELECT COUNT(*) FROM dict_project WHERE name = ?",
+            ("Cancelled Import Partial",),
+        ).fetchone()[0]
+        library_count = conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert project_count == 0
+    # Fixture creates exactly one library row; partial-import cleanup must not leak extra rows.
+    assert library_count == 1
+
+
 def test_export_creates_valid_bundle(populated_project, temp_db):
     """Test export creates a bundle with correct structure."""
     with tempfile.TemporaryDirectory() as tmpdir:
