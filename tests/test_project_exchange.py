@@ -249,6 +249,20 @@ def test_import_cancel_after_partial_commit_cleans_rows(populated_project, temp_
 
 def test_import_routes_write_phases_through_write_gate(populated_project, temp_db, monkeypatch):
     """Import should execute transactional write phases via shared write gate."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        # Force lemma batching during import.
+        next_lemma_id = conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        conn.executemany(
+            "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
+            [(next_lemma_id + i, f"lemma_batch_{i:05d}") for i in range(1200)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setenv("HDLE_IMPORT_LEMMA_BATCH_SIZE", "500")
+
     with tempfile.TemporaryDirectory() as tmpdir:
         bundle_path = Path(tmpdir) / "write_gate_import_bundle.hdleproj"
         export_engine = ProjectExportEngine()
@@ -281,6 +295,75 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
     assert "import.ensure_fts" in operations
     assert any(op.startswith("import.table.") for op in operations)
     assert "import.fix_general_corpus_self_ref" in operations
+    lemma_ops = [op for op in operations if op == "import.table.lemma"]
+    assert len(lemma_ops) >= 3
+
+
+def test_import_cancel_during_lemma_batch_cleans_rows(populated_project, temp_db, monkeypatch):
+    """Cancel during lemma batching should return cancelled report and cleanup imported rows."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        next_lemma_id = conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        conn.executemany(
+            "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
+            [(next_lemma_id + i, f"lemma_cancel_{i:05d}") for i in range(1200)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setenv("HDLE_IMPORT_LEMMA_BATCH_SIZE", "500")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "lemma_cancel_bundle.hdleproj"
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        cancel_state = {"value": False}
+        lemma_batches = {"count": 0}
+
+        def fake_run_serialized_db_write(operation, callback, **_kwargs):
+            result = callback()
+            if operation == "import.table.lemma":
+                lemma_batches["count"] += 1
+                if lemma_batches["count"] == 1:
+                    cancel_state["value"] = True
+            return result
+
+        monkeypatch.setattr(
+            import_engine_module,
+            "run_serialized_db_write",
+            fake_run_serialized_db_write,
+        )
+
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Cancelled During Lemma Batches"),
+            cancel_check=lambda: bool(cancel_state["value"]),
+        )
+
+    assert report.success is False
+    assert "cancel" in (report.error_message or "").lower()
+    assert lemma_batches["count"] >= 1
+
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        project_count = conn.execute(
+            "SELECT COUNT(*) FROM dict_project WHERE name = ?",
+            ("Cancelled During Lemma Batches",),
+        ).fetchone()[0]
+        library_count = conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert project_count == 0
+    assert library_count == 1
 
 
 def test_export_creates_valid_bundle(populated_project, temp_db):
