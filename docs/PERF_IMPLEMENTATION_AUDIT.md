@@ -73,9 +73,9 @@ Observed p95 against `docs/PERFORMANCE_SLO.md` budgets:
 3. No system-level write serialization policy (many direct commits across UI/service paths), so lock behavior depends on ad-hoc retries.
 
 ### Top 3 recommendations
-1. **P0**: Make import cancelable and reduce lock window (cancel checks + commit/savepoint boundaries).
-2. **P0**: Fix document picker search path to hit SLO (index-friendly predicate/order strategy; preserve deterministic pagination).
-3. **P0/P1**: Introduce explicit read/write DB separation policy (at least separate read engine; then dual-DB architecture processing-ro + user-rw).
+1. **P0-02 first**: Fix document picker search path to hit SLO (confirmed `p95` breach in daily navigation path).
+2. **P0-01 second**: Make import cancelable and reduce lock window (systemic lock contention source).
+3. **P0-03 third**: Add write contention baseline policy only after import lock window is bounded.
 
 ---
 
@@ -156,23 +156,7 @@ Status legend: `IMPLEMENTED` / `PARTIAL` / `MISSING` / `UNKNOWN`
 ## D) Prioritized patch roadmap (incremental, regression-safe)
 
 ### P0 - Remove lock/cancel/SLO-critical blockers
-#### PATCH P0-01: Import cancelability + bounded lock windows
-- Scope:
-  - add `cancel_check` from UI worker to import engine,
-  - check cancel at table/chunk boundaries,
-  - replace monolithic transaction with safe phase boundaries/savepoints where possible.
-- Target files:
-  - `app/services/project_exchange/worker.py`
-  - `app/services/project_exchange/import_engine.py`
-  - `tests/test_project_exchange.py` (new cancel+latency cases)
-- Tests:
-  - `test_import_cancel_returns_cancelled_report`
-  - `test_import_cancel_ack_p95_under_1s` (controlled fixture)
-  - existing `tests/test_project_exchange.py`
-- DoD:
-  - cancel is acknowledged quickly,
-  - no partial corruption on cancellation,
-  - rollback path verified.
+Execution order inside P0 is strict: `P0-02 -> P0-01 -> P0-03`.
 
 #### PATCH P0-02: Picker search SLO recovery
 - Scope:
@@ -188,6 +172,29 @@ Status legend: `IMPLEMENTED` / `PARTIAL` / `MISSING` / `UNKNOWN`
 - DoD:
   - SLO restored on hewiki benchmark profile,
   - pagination correctness unchanged.
+- Stop-gate before next patch:
+  - `picker_page_search p95 <= 1.50s` in `scripts/perf_harness.py` run on hewiki profile.
+
+#### PATCH P0-01: Import cancelability + bounded lock windows
+- Scope:
+  - add `cancel_check` from UI worker to import engine,
+  - check cancel at table/chunk boundaries,
+  - replace monolithic transaction with safe phase boundaries/savepoints where possible.
+- Target files:
+  - `app/services/project_exchange/worker.py`
+  - `app/services/project_exchange/import_engine.py`
+  - `tests/test_project_exchange.py` (new cancel+latency cases)
+- Tests:
+  - `test_import_cancel_returns_cancelled_report`
+  - `test_import_cancel_ack_p95_under_1s` (controlled fixture)
+  - integration scenario: `import + save translation` under overlap
+  - existing `tests/test_project_exchange.py`
+- DoD:
+  - cancel is acknowledged quickly,
+  - no partial corruption on cancellation,
+  - rollback path verified.
+- Stop-gate before next patch:
+  - cancel acknowledgement within budget and no long lock windows in `import + save translation` integration path.
 
 #### PATCH P0-03: Write contention policy baseline
 - Scope:
@@ -201,8 +208,12 @@ Status legend: `IMPLEMENTED` / `PARTIAL` / `MISSING` / `UNKNOWN`
 - DoD:
   - deterministic write ordering for enrolled flows,
   - lower lock error incidence under synthetic contention.
+- Stop-gate for P0 completion:
+  - measurable reduction in terminal `SQLITE_BUSY` failures and predictable UX under concurrent write load.
 
 ### P1 - Latency and UX resilience improvements
+`Perf gate` remains `P1` and can be pulled earlier inside P1 if SLO lock-in is required before broader infra changes.
+
 #### PATCH P1-01: Uniform anti-stale + staged first paint
 - Scope:
   - bring Sentences and User Dictionaries onto request_id anti-stale pattern,
