@@ -22,6 +22,7 @@ from app.services.project_exchange.dto import (
     ExportOptions,
     ImportOptions,
 )
+from app.services.project_exchange import import_engine as import_engine_module
 from app.services.project_exchange.export_engine import ProjectExportEngine
 from app.services.project_exchange.import_engine import ProjectImportEngine
 
@@ -244,6 +245,42 @@ def test_import_cancel_after_partial_commit_cleans_rows(populated_project, temp_
     assert project_count == 0
     # Fixture creates exactly one library row; partial-import cleanup must not leak extra rows.
     assert library_count == 1
+
+
+def test_import_routes_write_phases_through_write_gate(populated_project, temp_db, monkeypatch):
+    """Import should execute transactional write phases via shared write gate."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "write_gate_import_bundle.hdleproj"
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        operations: list[str] = []
+
+        def fake_run_serialized_db_write(operation, callback, **_kwargs):
+            operations.append(str(operation))
+            return callback()
+
+        monkeypatch.setattr(
+            import_engine_module,
+            "run_serialized_db_write",
+            fake_run_serialized_db_write,
+        )
+
+        import_engine = ProjectImportEngine()
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Write Gate Import"),
+        )
+
+    assert report.success
+    assert "import.ensure_fts" in operations
+    assert any(op.startswith("import.table.") for op in operations)
+    assert "import.fix_general_corpus_self_ref" in operations
 
 
 def test_export_creates_valid_bundle(populated_project, temp_db):

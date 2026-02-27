@@ -31,6 +31,7 @@ from app.infra.sa_models import (
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.db_retry import with_retry_on_locked
+from app.infra.write_gate import serialized_db_write
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
 
@@ -52,6 +53,26 @@ class TranslationAdminService:
         "source_ref": TMEntry.source_ref,
         "updated_at": TMEntry.updated_at,
     }
+
+    @staticmethod
+    def _commit_serialized_write(
+        session: Session,
+        *,
+        operation: str,
+        mutate_callback: Callable[[], None],
+    ) -> None:
+        """Apply mutation and commit through shared write gate."""
+        with serialized_db_write(operation):
+            try:
+                mutate_callback()
+                with_retry_on_locked(
+                    session.commit,
+                    max_retries=4,
+                    rollback_callback=session.rollback,
+                )
+            except Exception:
+                session.rollback()
+                raise
 
     @staticmethod
     def _canonical_match_clause():
@@ -185,8 +206,8 @@ class TranslationAdminService:
             filters: Optional filters:
                 - kind: str (lemma|ngram|term_cluster|surface)
                 - status: str (draft|approved|rejected|deprecated)
-                - scope: str (project|global) — DEPRECATED, use project_ids instead
-                - project_id: int (only for scope=project) — DEPRECATED
+                - scope: str (project|global) - DEPRECATED, use project_ids instead
+                - project_id: int (only for scope=project) - DEPRECATED
                 - project_ids: List[int] (multi-project filter, -1 = global/None)
                 - src_lang: str
                 - tgt_lang: str
@@ -782,8 +803,6 @@ class TranslationAdminService:
         if not entry:
             raise ValueError(f"TM entry not found: {tm_id}")
 
-        # Create history entry
-        # Map status to change_kind (status uses -ed suffix, change_kind doesn't)
         change_kind_map = {
             "approved": "approve",
             "rejected": "reject",
@@ -791,32 +810,30 @@ class TranslationAdminService:
             "draft": "edit",
         }
         change_kind = change_kind_map.get(status, "edit")
-        self._create_history_entry(session, entry, change_kind=change_kind)
-
-        # Update status
         old_status = entry.status
-        entry.status = status
-        entry.updated_at = datetime.now()
 
-        if status == "approved":
-            entry.approved_at = datetime.now()
-            entry.approved_by = approved_by or "ui"
-        elif status in ("rejected", "deprecated"):
-            # Clear approval info for rejected/deprecated
-            entry.approved_at = None
-            entry.approved_by = None
+        def _mutate() -> None:
+            self._create_history_entry(session, entry, change_kind=change_kind)
+            entry.status = status
+            entry.updated_at = datetime.now()
 
-        # PATCH-19-02: Upsert tm_global and link
-        session.flush()
-        TMGlobalService().upsert_and_link(session, entry)
+            if status == "approved":
+                entry.approved_at = datetime.now()
+                entry.approved_by = approved_by or "ui"
+            elif status in ("rejected", "deprecated"):
+                entry.approved_at = None
+                entry.approved_by = None
 
-        with_retry_on_locked(
-            session.commit,
-            max_retries=4,
-            rollback_callback=session.rollback,
+            session.flush()
+            TMGlobalService().upsert_and_link(session, entry)
+
+        self._commit_serialized_write(
+            session,
+            operation="tm.set_status",
+            mutate_callback=_mutate,
         )
 
-        logger.info(f"TM entry {tm_id} status: {old_status} → {status}")
+        logger.info("TM entry %s status: %s -> %s", tm_id, old_status, status)
 
     def bulk_set_status(
         self,
@@ -842,12 +859,10 @@ class TranslationAdminService:
         if status not in ("approved", "rejected", "deprecated", "draft"):
             raise ValueError(f"Invalid status: {status}")
 
-        # Get all entries
         stmt = select(TMEntry).where(TMEntry.tm_id.in_(tm_ids))
         entries = session.execute(stmt).scalars().all()
 
         count = 0
-        # Map status to change_kind
         change_kind_map = {
             "approved": "approve",
             "rejected": "reject",
@@ -856,36 +871,33 @@ class TranslationAdminService:
         }
         change_kind = change_kind_map.get(status, "edit")
 
-        for entry in entries:
-            # Create history
-            self._create_history_entry(session, entry, change_kind=change_kind)
+        def _mutate() -> None:
+            nonlocal count
+            for entry in entries:
+                self._create_history_entry(session, entry, change_kind=change_kind)
+                entry.status = status
+                entry.updated_at = datetime.now()
 
-            # Update
-            entry.status = status
-            entry.updated_at = datetime.now()
+                if status == "approved":
+                    entry.approved_at = datetime.now()
+                    entry.approved_by = approved_by or "ui"
+                elif status in ("rejected", "deprecated"):
+                    entry.approved_at = None
+                    entry.approved_by = None
 
-            if status == "approved":
-                entry.approved_at = datetime.now()
-                entry.approved_by = approved_by or "ui"
-            elif status in ("rejected", "deprecated"):
-                # Clear approval info for rejected/deprecated
-                entry.approved_at = None
-                entry.approved_by = None
+                count += 1
 
-            count += 1
+            session.flush()
+            for entry in entries:
+                TMGlobalService().upsert_and_link(session, entry)
 
-        # PATCH-19-02: Upsert tm_global and link for all entries
-        session.flush()
-        for entry in entries:
-            TMGlobalService().upsert_and_link(session, entry)
-
-        with_retry_on_locked(
-            session.commit,
-            max_retries=4,
-            rollback_callback=session.rollback,
+        self._commit_serialized_write(
+            session,
+            operation="tm.bulk_set_status",
+            mutate_callback=_mutate,
         )
 
-        logger.info(f"Bulk set status {status} for {count} entries")
+        logger.info("Bulk set status %s for %s entries", status, count)
         return count
 
     def get_history(self, session: Session, tm_id: int) -> List[TMHistoryDTO]:
@@ -925,14 +937,12 @@ class TranslationAdminService:
         Raises:
             ValueError: If entry or version not found
         """
-        # Get current entry
         stmt = select(TMEntry).where(TMEntry.tm_id == tm_id)
         entry = session.execute(stmt).scalar()
 
         if not entry:
             raise ValueError(f"TM entry not found: {tm_id}")
 
-        # Get target version
         stmt = select(TMEntryHistory).where(
             and_(
                 TMEntryHistory.tm_id == tm_id,
@@ -944,36 +954,34 @@ class TranslationAdminService:
         if not target_version:
             raise ValueError(f"Version {version} not found for TM entry {tm_id}")
 
-        # Create history entry for current state before reverting
-        self._create_history_entry(session, entry, change_kind="revert")
+        def _mutate() -> None:
+            self._create_history_entry(session, entry, change_kind="revert")
 
-        # Revert
-        entry.translation = target_version.translation
-        entry.notes = target_version.notes
-        entry.status = target_version.status
-        entry.origin = "user_edit"  # P2 FIX: Use allowed origin (history tracks revert via change_kind)
-        entry.updated_at = datetime.now()
+            entry.translation = target_version.translation
+            entry.notes = target_version.notes
+            entry.status = target_version.status
+            entry.origin = "user_edit"
+            entry.updated_at = datetime.now()
 
-        if entry.status == "approved":
-            entry.approved_at = datetime.now()
-            if approved_by:
-                entry.approved_by = approved_by
+            if entry.status == "approved":
+                entry.approved_at = datetime.now()
+                if approved_by:
+                    entry.approved_by = approved_by
 
-        # PATCH-19-02: Upsert tm_global and link
-        session.flush()
-        TMGlobalService().upsert_and_link(
+            session.flush()
+            TMGlobalService().upsert_and_link(
+                session,
+                entry,
+                force_global_update=(not bool((entry.translation or "").strip())),
+            )
+
+        self._commit_serialized_write(
             session,
-            entry,
-            force_global_update=(not bool((entry.translation or "").strip())),
+            operation="tm.revert",
+            mutate_callback=_mutate,
         )
 
-        with_retry_on_locked(
-            session.commit,
-            max_retries=4,
-            rollback_callback=session.rollback,
-        )
-
-        logger.info(f"Reverted TM entry {tm_id} to version {version}")
+        logger.info("Reverted TM entry %s to version %s", tm_id, version)
 
     def update_translation(
         self,
@@ -999,31 +1007,28 @@ class TranslationAdminService:
         if not entry:
             raise ValueError(f"TM entry not found: {tm_id}")
 
-        # Create history entry
-        self._create_history_entry(session, entry, change_kind="edit")
+        def _mutate() -> None:
+            self._create_history_entry(session, entry, change_kind="edit")
+            entry.translation = translation
+            if notes is not None:
+                entry.notes = notes
+            entry.origin = "user_edit"
+            entry.updated_at = datetime.now()
 
-        # Update
-        entry.translation = translation
-        if notes is not None:
-            entry.notes = notes
-        entry.origin = "user_edit"
-        entry.updated_at = datetime.now()
+            session.flush()
+            TMGlobalService().upsert_and_link(
+                session,
+                entry,
+                force_global_update=(not bool((translation or "").strip())),
+            )
 
-        # PATCH-19-02: Upsert tm_global and link
-        session.flush()
-        TMGlobalService().upsert_and_link(
+        self._commit_serialized_write(
             session,
-            entry,
-            force_global_update=(not bool((translation or "").strip())),
+            operation="tm.update_translation",
+            mutate_callback=_mutate,
         )
 
-        with_retry_on_locked(
-            session.commit,
-            max_retries=4,
-            rollback_callback=session.rollback,
-        )
-
-        logger.info(f"Updated translation for TM entry {tm_id}")
+        logger.info("Updated translation for TM entry %s", tm_id)
 
     def set_noise_status_bulk(
         self,
@@ -1048,61 +1053,55 @@ class TranslationAdminService:
 
         noise_value = 1 if is_noise else 0
 
-        stmt = (
-            select(TMEntry)
-            .where(TMEntry.tm_id.in_(tm_ids))
-        )
+        stmt = select(TMEntry).where(TMEntry.tm_id.in_(tm_ids))
         entries = session.execute(stmt).scalars().all()
 
         count = 0
-        # Track source IDs for bidirectional sync
-        lemma_ids_to_update = set()
-        cluster_ids_to_update = set()
 
-        for entry in entries:
-            entry.is_noise = noise_value
-            entry.noise_reason = noise_reason if is_noise else None
-            entry.updated_at = datetime.now()
-            count += 1
+        def _mutate() -> None:
+            nonlocal count
+            lemma_ids_to_update: set[int] = set()
+            cluster_ids_to_update: set[int] = set()
 
-            # Collect source IDs for bidirectional sync
-            if entry.kind == 'lemma' and entry.lemma_id:
-                lemma_ids_to_update.add(entry.lemma_id)
-            elif entry.kind == 'term_cluster' and entry.cluster_id:
-                cluster_ids_to_update.add(entry.cluster_id)
+            for entry in entries:
+                entry.is_noise = noise_value
+                entry.noise_reason = noise_reason if is_noise else None
+                entry.updated_at = datetime.now()
+                count += 1
 
-        # Bidirectional sync: Update source tables to maintain Single Source of Truth
-        if lemma_ids_to_update:
-            from app.infra.sa_models import Lemma
-            session.execute(
-                update(Lemma)
-                .where(Lemma.lemma_id.in_(lemma_ids_to_update))
-                .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
-            )
-            logger.info(f"Synced is_noise to {len(lemma_ids_to_update)} lemmas")
+                if entry.kind == "lemma" and entry.lemma_id:
+                    lemma_ids_to_update.add(entry.lemma_id)
+                elif entry.kind == "term_cluster" and entry.cluster_id:
+                    cluster_ids_to_update.add(entry.cluster_id)
 
-        if cluster_ids_to_update:
-            from app.infra.sa_models import TermCluster
-            session.execute(
-                update(TermCluster)
-                .where(TermCluster.cluster_id.in_(cluster_ids_to_update))
-                .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
-            )
-            logger.info(f"Synced is_noise to {len(cluster_ids_to_update)} term clusters")
+            if lemma_ids_to_update:
+                session.execute(
+                    update(Lemma)
+                    .where(Lemma.lemma_id.in_(lemma_ids_to_update))
+                    .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+                )
+                logger.info("Synced is_noise to %s lemmas", len(lemma_ids_to_update))
 
-        # PATCH-19-02: Upsert tm_global and link for all entries
-        session.flush()
-        for entry in entries:
-            TMGlobalService().upsert_and_link(session, entry)
+            if cluster_ids_to_update:
+                session.execute(
+                    update(TermCluster)
+                    .where(TermCluster.cluster_id.in_(cluster_ids_to_update))
+                    .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+                )
+                logger.info("Synced is_noise to %s term clusters", len(cluster_ids_to_update))
 
-        with_retry_on_locked(
-            session.commit,
-            max_retries=4,
-            rollback_callback=session.rollback,
+            session.flush()
+            for entry in entries:
+                TMGlobalService().upsert_and_link(session, entry)
+
+        self._commit_serialized_write(
+            session,
+            operation="tm.bulk_set_noise",
+            mutate_callback=_mutate,
         )
 
         action = "noise" if is_noise else "valid"
-        logger.info(f"Marked {count} TM entries as {action}")
+        logger.info("Marked %s TM entries as %s", count, action)
 
         return count
 
@@ -1321,3 +1320,4 @@ class TranslationAdminService:
         )
         session.add(history)
         session.flush()
+

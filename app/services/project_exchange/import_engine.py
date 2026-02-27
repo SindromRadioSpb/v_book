@@ -23,6 +23,7 @@ from app.services.project_exchange.dto import (
     ImportReport,
 )
 from app.infra.fts_manager import ensure_fts_tables
+from app.infra.write_gate import run_serialized_db_write
 from app.services.pronunciation_import_export_service import PronunciationImportExportService
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,31 @@ class ProjectImportEngine:
         if cancel_check and bool(cancel_check()):
             raise ImportCancelledError("Import cancelled by user")
 
+    @staticmethod
+    def _run_serialized_write_tx(
+        host_conn: sqlite3.Connection,
+        *,
+        operation: str,
+        action: Callable[[], None],
+    ) -> None:
+        """Execute a write transaction through the shared process-local write gate."""
+
+        def _run_tx() -> None:
+            host_conn.execute("BEGIN IMMEDIATE")
+            try:
+                action()
+                host_conn.commit()
+            except Exception:
+                host_conn.rollback()
+                raise
+
+        run_serialized_db_write(
+            operation,
+            _run_tx,
+            warn_wait_ms=250.0,
+            warn_hold_ms=2500.0,
+        )
+
     def _import_pronunciation_metadata(
         self,
         pron_path: Path,
@@ -193,16 +219,25 @@ class ProjectImportEngine:
         self._check_cancelled(cancel_check)
         service = PronunciationImportExportService()
         try:
-            with self.db_service.get_session() as session:
-                self._check_cancelled(cancel_check)
-                result = service.import_file(
-                    session,
-                    in_path=pron_path,
-                    delimiter="\t",
-                    allow_auto_overwrite=False,
-                )
-                self._check_cancelled(cancel_check)
-                session.commit()
+            def _import_metadata() -> dict:
+                with self.db_service.get_session() as session:
+                    self._check_cancelled(cancel_check)
+                    result_local = service.import_file(
+                        session,
+                        in_path=pron_path,
+                        delimiter="\t",
+                        allow_auto_overwrite=False,
+                    )
+                    self._check_cancelled(cancel_check)
+                    session.commit()
+                    return result_local
+
+            result = run_serialized_db_write(
+                "import.pronunciation_metadata",
+                _import_metadata,
+                warn_wait_ms=250.0,
+                warn_hold_ms=2500.0,
+            )
             warnings.append(
                 "Pronunciation metadata imported: "
                 f"processed={result.get('processed', 0)}, "
@@ -382,13 +417,14 @@ class ProjectImportEngine:
             self._check_cancelled(cancel_check)
 
             # Keep FTS initialization in a short dedicated write transaction.
-            host_conn.execute("BEGIN IMMEDIATE")
-            try:
+            def _ensure_fts() -> None:
                 ensure_fts_tables(host_conn, schema="main", rebuild=False)
-                host_conn.commit()
-            except Exception:
-                host_conn.rollback()
-                raise
+
+            self._run_serialized_write_tx(
+                host_conn,
+                operation="import.ensure_fts",
+                action=_ensure_fts,
+            )
             logger.info("Ensured FTS tables exist in host DB")
 
             total_tables = len(TABLE_INSERT_ORDER)
@@ -400,8 +436,8 @@ class ProjectImportEngine:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
-                host_conn.execute("BEGIN IMMEDIATE")
-                try:
+                def _import_current_table() -> None:
+                    nonlocal new_project_id, tm_global_id_map
                     if table_name == "tm_global":
                         count, tm_global_id_map, new_tm_global_ids = self._import_tm_global_table(
                             host_conn,
@@ -437,22 +473,24 @@ class ProjectImportEngine:
                             if result:
                                 new_project_id = result[0]
 
-                    host_conn.commit()
-                except Exception:
-                    host_conn.rollback()
-                    raise
+                self._run_serialized_write_tx(
+                    host_conn,
+                    operation=f"import.table.{table_name}",
+                    action=_import_current_table,
+                )
 
             # Fix self-referencing FK on dict_project.general_corpus_id
             if new_project_id:
-                host_conn.execute("BEGIN IMMEDIATE")
-                try:
+                def _fix_self_ref() -> None:
                     self._fix_general_corpus_self_ref(
                         host_conn, payload_conn, offsets, new_project_id, warnings
                     )
-                    host_conn.commit()
-                except Exception:
-                    host_conn.rollback()
-                    raise
+
+                self._run_serialized_write_tx(
+                    host_conn,
+                    operation="import.fix_general_corpus_self_ref",
+                    action=_fix_self_ref,
+                )
 
             logger.info("Import committed successfully")
 
@@ -493,47 +531,46 @@ class ProjectImportEngine:
             return
 
         try:
-            host_conn.execute("BEGIN IMMEDIATE")
+            def _cleanup_action() -> None:
+                if new_project_id is not None:
+                    host_conn.execute(
+                        "DELETE FROM dict_project WHERE project_id = ?",
+                        (int(new_project_id),),
+                    )
 
-            if new_project_id is not None:
-                host_conn.execute(
-                    "DELETE FROM dict_project WHERE project_id = ?",
-                    (int(new_project_id),),
-                )
+                # Remove newly inserted global TM rows that are now unreferenced.
+                for tm_global_id in sorted(set(inserted_tm_global_ids)):
+                    host_conn.execute(
+                        """
+                        DELETE FROM tm_global
+                        WHERE tm_global_id = ?
+                          AND NOT EXISTS (
+                            SELECT 1 FROM tm_entry WHERE tm_entry.tm_global_id = tm_global.tm_global_id
+                          )
+                        """,
+                        (int(tm_global_id),),
+                    )
 
-            # Remove newly inserted global TM rows that are now unreferenced.
-            for tm_global_id in sorted(set(inserted_tm_global_ids)):
-                host_conn.execute(
-                    """
-                    DELETE FROM tm_global
-                    WHERE tm_global_id = ?
-                      AND NOT EXISTS (
-                        SELECT 1 FROM tm_entry WHERE tm_entry.tm_global_id = tm_global.tm_global_id
-                      )
-                    """,
-                    (int(tm_global_id),),
-                )
+                # Remove orphan libraries introduced by this import.
+                for library_id in sorted(set(inserted_library_ids)):
+                    host_conn.execute(
+                        """
+                        DELETE FROM library
+                        WHERE library_id = ?
+                          AND NOT EXISTS (
+                            SELECT 1 FROM dict_project WHERE dict_project.library_id = library.library_id
+                          )
+                        """,
+                        (int(library_id),),
+                    )
 
-            # Remove orphan libraries introduced by this import.
-            for library_id in sorted(set(inserted_library_ids)):
-                host_conn.execute(
-                    """
-                    DELETE FROM library
-                    WHERE library_id = ?
-                      AND NOT EXISTS (
-                        SELECT 1 FROM dict_project WHERE dict_project.library_id = library.library_id
-                      )
-                    """,
-                    (int(library_id),),
-                )
-
-            host_conn.commit()
+            self._run_serialized_write_tx(
+                host_conn,
+                operation="import.cleanup_partial_rows",
+                action=_cleanup_action,
+            )
             logger.info("Cleaned up partial import rows")
         except Exception as cleanup_exc:
-            try:
-                host_conn.rollback()
-            except Exception:
-                pass
             logger.warning("Failed to cleanup partial import rows: %s", cleanup_exc)
 
     def _import_tm_global_table(

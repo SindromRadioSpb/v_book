@@ -937,6 +937,7 @@ class TermsView(QWidget):
                 # PATCH-19-02: Upsert tm_global and link
                 # Use retry mechanism to handle database locked errors
                 from app.infra.db_retry import with_retry_on_locked
+                from app.infra.write_gate import serialized_db_write
 
                 def save_and_propagate():
                     session.flush()
@@ -951,12 +952,13 @@ class TermsView(QWidget):
                 def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
                     self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
 
-                with_retry_on_locked(
-                    save_and_propagate,
-                    max_retries=4,
-                    rollback_callback=session.rollback,
-                    retry_callback=_on_retry,
-                )
+                with serialized_db_write("terms.inline_tm_save"):
+                    with_retry_on_locked(
+                        save_and_propagate,
+                        max_retries=4,
+                        rollback_callback=session.rollback,
+                        retry_callback=_on_retry,
+                    )
 
                 # Update status in model to "approved"
                 cluster.translation_status = "approved"
