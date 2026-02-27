@@ -73,6 +73,68 @@ def _validate_sqlite_readable(db_path: Path) -> tuple[bool, str | None]:
         return False, str(exc)
 
 
+def _probe_target_db_corruption(db_path: Path, *, quick_check_timeout_sec: float = 10.0) -> dict[str, Any]:
+    probe: dict[str, Any] = {
+        "ok": True,
+        "quick_check_rows": [],
+        "quick_check_error": None,
+        "quick_check_timed_out": False,
+        "quick_check_timeout_sec": float(quick_check_timeout_sec),
+        "tm_entry_probe_ok": True,
+        "tm_entry_probe_error": None,
+    }
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            quick_started = time.perf_counter()
+
+            def _progress_handler() -> int:
+                if quick_check_timeout_sec <= 0:
+                    return 0
+                elapsed = time.perf_counter() - quick_started
+                return 1 if elapsed >= quick_check_timeout_sec else 0
+
+            conn.set_progress_handler(_progress_handler, 10_000)
+            quick_rows: list[str] = []
+            try:
+                quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if "interrupted" in msg and quick_check_timeout_sec > 0:
+                    probe["quick_check_timed_out"] = True
+                    quick_rows = []
+                else:
+                    raise
+            finally:
+                conn.set_progress_handler(None, 0)
+
+            probe["quick_check_rows"] = quick_rows
+            if probe["quick_check_timed_out"]:
+                probe["quick_check_error"] = (
+                    f"quick_check timed out after {quick_check_timeout_sec:.1f}s; treated as inconclusive"
+                )
+            elif not quick_rows or any(row.lower() != "ok" for row in quick_rows):
+                probe["ok"] = False
+                probe["quick_check_error"] = "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+
+            try:
+                conn.execute("SELECT 1 FROM tm_entry LIMIT 1").fetchone()
+            except Exception as exc:  # noqa: BLE001
+                probe["ok"] = False
+                probe["tm_entry_probe_ok"] = False
+                probe["tm_entry_probe_error"] = str(exc)
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        probe["ok"] = False
+        probe["quick_check_error"] = str(exc)
+        probe["tm_entry_probe_ok"] = False
+        if probe["tm_entry_probe_error"] is None:
+            probe["tm_entry_probe_error"] = str(exc)
+
+    return probe
+
+
 def _build_source_db(db_path: Path, docs: int, lemmas: int) -> None:
     _apply_migrations(db_path)
     conn = sqlite3.connect(str(db_path))
@@ -201,9 +263,15 @@ def _parse_gate_trace(trace_path: Path) -> dict[str, Any]:
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
-    target_db = Path(args.db_path).expanduser()
-    if not target_db.exists():
-        raise FileNotFoundError(f"Target DB not found: {target_db}")
+    target_db_input = Path(args.db_path).expanduser()
+    if not target_db_input.exists():
+        raise FileNotFoundError(f"Target DB not found: {target_db_input}")
+
+    repaired_db = Path(args.use_repaired_db).expanduser() if args.use_repaired_db else None
+    if repaired_db and not repaired_db.exists():
+        raise FileNotFoundError(f"Repaired DB not found: {repaired_db}")
+
+    selected_target_db = repaired_db if repaired_db else target_db_input
 
     logs_dir = Path("build/logs")
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -216,28 +284,52 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         temp_root = Path(temp_dir)
         source_db = temp_root / "source_seed.db"
         bundle_path = temp_root / "bench_bundle.hdleproj"
-        target_db_mode = "direct"
+        target_db_mode = "direct_repaired" if repaired_db else "direct"
         target_fallback_reason: str | None = None
 
         if args.copy_target:
             target_work_db = temp_root / "target_work.db"
-            _backup_sqlite(target_db, target_work_db)
+            _backup_sqlite(selected_target_db, target_work_db)
             target_db_mode = "copied"
         else:
-            target_work_db = target_db
+            target_work_db = selected_target_db
 
         target_ok, target_err = _validate_sqlite_readable(target_work_db)
         if not target_ok:
-            if not args.allow_fallback:
+            lowered = (target_err or "").lower()
+            if "malformed database schema" in lowered and "sentence_fts" in lowered:
                 raise RuntimeError(
                     "Target DB FTS schema is malformed. "
                     "Run scripts/repair_fts_schema.py --db-path "
-                    f"\"{target_db}\". Probe error: {target_err}"
+                    f"\"{target_work_db}\". Probe error: {target_err}"
+                )
+            if any(token in lowered for token in ("disk image is malformed", "database corrupt", "database corruption")):
+                raise RuntimeError(
+                    "DB corruption detected during readability probe. Run: "
+                    f"python scripts/repair_db_corruption.py --db-path \"{target_work_db}\". "
+                    f"Probe error: {target_err}"
+                )
+            if not args.allow_fallback:
+                raise RuntimeError(
+                    "Target DB is not readable. "
+                    f"Probe error: {target_err}"
                 )
             target_fallback_reason = target_err
             target_work_db = temp_root / "target_fallback.db"
             _apply_migrations(target_work_db)
             target_db_mode = "fresh_migrated_fallback"
+
+        corruption_probe = _probe_target_db_corruption(
+            target_work_db,
+            quick_check_timeout_sec=float(args.quick_check_timeout_sec),
+        )
+        if not corruption_probe["ok"]:
+            raise RuntimeError(
+                "DB corruption detected. Run: "
+                f"python scripts/repair_db_corruption.py --db-path \"{target_work_db}\". "
+                f"quick_check={corruption_probe.get('quick_check_rows') or corruption_probe.get('quick_check_error')}; "
+                f"tm_entry_probe_error={corruption_probe.get('tm_entry_probe_error')}"
+            )
 
         _build_source_db(source_db, docs=args.seed_docs, lemmas=args.seed_lemmas)
 
@@ -364,10 +456,12 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
         metrics: dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "target_db_input": str(target_db),
+            "target_db_input": str(target_db_input),
+            "target_db_selected": str(selected_target_db),
             "target_db_used": str(target_work_db),
             "target_db_mode": target_db_mode,
             "target_db_fallback_reason": target_fallback_reason,
+            "target_db_corruption_probe": corruption_probe,
             "scenario": "import + concurrent save translation",
             "seed": {
                 "docs": int(args.seed_docs),
@@ -430,6 +524,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", required=True, help="Target hewiki-scale DB path.")
     parser.add_argument(
+        "--use-repaired-db",
+        default=None,
+        help="Explicit path to repaired DB; benchmark runs against this DB instead of --db-path.",
+    )
+    parser.add_argument(
         "--copy-target",
         action="store_true",
         help="Use copied target DB snapshot in temp directory (sandbox mode).",
@@ -452,6 +551,12 @@ def parse_args() -> argparse.Namespace:
         default=2000,
         help="Batch size for lemma import phase (500..10000).",
     )
+    parser.add_argument(
+        "--quick-check-timeout-sec",
+        type=float,
+        default=10.0,
+        help="Timeout for benchmark corruption quick_check probe; timeout is treated as inconclusive.",
+    )
     return parser.parse_args()
 
 
@@ -466,6 +571,7 @@ def main() -> int:
             "status": "FAILED",
             "error": str(exc),
             "db_path": str(args.db_path),
+            "use_repaired_db": str(args.use_repaired_db) if args.use_repaired_db else None,
             "allow_fallback": bool(args.allow_fallback),
         }
         print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
