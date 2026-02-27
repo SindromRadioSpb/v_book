@@ -81,6 +81,23 @@ Target DB for manual smoke and profiling:
 
 - `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
 
+Pre-smoke prerequisite (run once per target DB when FTS is uncertain):
+
+```powershell
+python scripts/repair_fts_schema.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db"
+```
+
+If bulk FTS repopulation fails on a damaged source DB, run schema-only recovery:
+
+```powershell
+python scripts/repair_fts_schema.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --skip-rebuild
+```
+
+Expected:
+
+- script returns `status=OK` or `status=REPAIRED`,
+- JSON evidence is saved to `build/logs/fts_repair_*.json`.
+
 ### Smoke cases
 
 1. `PHON-01`: run prebuild validate gate and confirm required local module check includes `phonikud` and passes import.
@@ -155,6 +172,11 @@ Benchmark command:
 python scripts/benchmark_import_concurrent_save.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100
 ```
 
+Behavior note:
+
+- strict mode by default: malformed target DB causes benchmark failure (no silent fallback),
+- sandbox fallback is available only with explicit `--allow-fallback`.
+
 Artifacts:
 
 - `build/logs/import_concurrent_save_metrics_20260227_041029.json`
@@ -182,9 +204,9 @@ Batch-size rationale:
 
 Environment note:
 
-- The target hewiki DB path is used as input in benchmark runs.
-- In this environment the file reports `malformed database schema (sentence_fts) - table sentence_fts already exists`
-  on direct sqlite probe; benchmark script records this and falls back to a migrated working DB snapshot for write tests.
+- benchmark evidence for release must be captured in direct mode:
+  `target_db_used == target_db_input`.
+- if direct probe fails, repair target DB first via `scripts/repair_fts_schema.py` and rerun benchmark.
 
 ## Prebuild Profiles
 
