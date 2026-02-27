@@ -136,6 +136,29 @@ Expected:
 - targeted pytest suite passes,
 - no repeated modal spam for transient DB busy windows.
 
+### Installer-level automated smoke evidence (2026-02-27)
+
+Executed against installed binary:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify_frozen_health.ps1 -DistRoot "M:\Soft\HDLE" -DbPath "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" -OutDir "J:\Project_Vibe\V_book\build\verify"
+Start-Process -FilePath "M:\Soft\HDLE\HDLE_Premium.exe" -ArgumentList "--self-check db_open --db-path `"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`" --self-check-out `"J:\Project_Vibe\V_book\build\verify\db_open_dist.json`"" -Wait -PassThru
+```
+
+Artifacts:
+
+- `build/verify/probe_dist.json` (`ok=true`)
+- `build/verify/import_dist.json` (`phonikud_import.ok=true`, `onnxruntime_import.ok=true`)
+- `build/verify/health_dist.json` (`ok=true`, bootstrap checks `ok`)
+- `build/verify/db_open_dist.json` (`ok=true`, `elapsed_ms=163`)
+
+Targeted regression evidence (same run window):
+
+- `python -m pytest tests/test_dictionary_pagination_flow.py tests/test_document_picker_flow.py -q` -> `9 passed`
+- `python -m pytest tests/test_project_exchange.py -k "cancel_returns_cancelled_report" -q` -> `2 passed`
+- `python -m pytest tests/test_project_exchange.py -q` -> `18 passed`
+- `python -m pytest tests/test_write_gate.py tests/test_translation_admin_write_gate.py -q` -> `4 passed`
+
 ## Performance Smoke (Hewiki)
 
 Performance contract source:
@@ -184,6 +207,12 @@ Benchmark command:
 python scripts/benchmark_import_concurrent_save.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100
 ```
 
+Release-gate evidence command (validated reference DB):
+
+```powershell
+python scripts/benchmark_import_concurrent_save.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100 --quick-check-timeout-sec 5
+```
+
 Benchmark on repaired DB explicitly:
 
 ```powershell
@@ -200,6 +229,10 @@ Artifacts:
 - `build/logs/import_concurrent_save_metrics_20260227_041029.json`
 - `build/logs/import_concurrent_save_ops_20260227_041029.jsonl`
 - `build/logs/import_write_gate_trace_20260227_041029.jsonl`
+- `build/logs/import_concurrent_save_metrics_20260227_115457.json` (release-gate evidence on `J:\...`)
+- `build/logs/import_concurrent_save_metrics_20260227_140745.json` (post-rebuild release-gate evidence on `J:\...`)
+- `build/logs/import_concurrent_save_ops_20260227_140745.jsonl`
+- `build/logs/import_write_gate_trace_20260227_140745.jsonl`
 
 Before/after summary (baseline before chunked lemma phase vs current):
 
@@ -208,11 +241,32 @@ Before/after summary (baseline before chunked lemma phase vs current):
 - `count_gt_1000ms`: `1 -> 0`
 - `terminal SQLITE_BUSY`: `0 -> 0`
 
+Release-gate evidence summary (`build/logs/import_concurrent_save_metrics_20260227_115457.json`):
+
+- `save_latency_p95_ms`: `205.234`
+- `max_save_latency_ms`: `384.936`
+- `count_gt_1000ms`: `0`
+- `gate_release.max_hold_ms`: `287.526`
+- `target_db_mode`: `direct`
+
+Release-gate evidence summary (`build/logs/import_concurrent_save_metrics_20260227_140745.json`):
+
+- `save_latency_p95_ms`: `209.879`
+- `max_save_latency_ms`: `345.706`
+- `count_gt_1000ms`: `0`
+- `gate_release.max_hold_ms`: `339.617`
+- `target_db_mode`: `direct`
+- `target_db_used == target_db_input`: `true`
+
+Evidence line (benchmark command + artifact + key numbers):
+
+- `python scripts/benchmark_import_concurrent_save.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100 --quick-check-timeout-sec 5` -> `build/logs/import_concurrent_save_metrics_20260227_140745.json` (`p95=209.879ms`, `max=345.706ms`, `count_gt_1000ms=0`, `max_hold_ms=339.617ms`)
+
 Top gate holds after chunking (`gate_release.max_hold_ms`, by phase):
 
-- `import.table.lemma`: `227.862ms`
-- `import.table.source_document`: `211.364ms`
-- `import.table.document_text`: `87.145ms`
+- `import.table.source_document`: `339.617ms`
+- `import.table.lemma`: `336.396ms`
+- `import.table.document_text`: `108.771ms`
 
 Batch-size rationale:
 
