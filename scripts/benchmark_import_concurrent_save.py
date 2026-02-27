@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -215,17 +216,24 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         temp_root = Path(temp_dir)
         source_db = temp_root / "source_seed.db"
         bundle_path = temp_root / "bench_bundle.hdleproj"
-        target_db_mode = "in_place" if args.use_db_in_place else "copied"
+        target_db_mode = "direct"
         target_fallback_reason: str | None = None
 
-        if args.use_db_in_place:
-            target_work_db = target_db
-        else:
+        if args.copy_target:
             target_work_db = temp_root / "target_work.db"
             _backup_sqlite(target_db, target_work_db)
+            target_db_mode = "copied"
+        else:
+            target_work_db = target_db
 
         target_ok, target_err = _validate_sqlite_readable(target_work_db)
         if not target_ok:
+            if not args.allow_fallback:
+                raise RuntimeError(
+                    "Target DB FTS schema is malformed. "
+                    "Run scripts/repair_fts_schema.py --db-path "
+                    f"\"{target_db}\". Probe error: {target_err}"
+                )
             target_fallback_reason = target_err
             target_work_db = temp_root / "target_fallback.db"
             _apply_migrations(target_work_db)
@@ -247,7 +255,13 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(f"Export failed: {export_report.error_message}")
 
         _reset_db_service()
-        probe_tm_id = _ensure_probe_tm_entry(target_work_db)
+        try:
+            probe_tm_id = _ensure_probe_tm_entry(target_work_db)
+        except Exception as exc:
+            raise RuntimeError(
+                "Target DB write probe failed before benchmark execution "
+                f"(mode={target_db_mode}, target_db_input={target_db}, target_db_used={target_work_db}): {exc}"
+            ) from exc
 
         _reset_db_service()
         DBService.initialize(str(target_work_db))
@@ -416,9 +430,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", required=True, help="Target hewiki-scale DB path.")
     parser.add_argument(
-        "--use-db-in-place",
+        "--copy-target",
         action="store_true",
-        help="Use target DB directly (mutating). Default is safe copy to temp work DB.",
+        help="Use copied target DB snapshot in temp directory (sandbox mode).",
+    )
+    parser.add_argument(
+        "--allow-fallback",
+        action="store_true",
+        help=(
+            "Allow fallback to fresh migrated temp DB when target probe fails. "
+            "Disabled by default; benchmark fails fast on malformed target DB."
+        ),
     )
     parser.add_argument("--seed-docs", type=int, default=6000)
     parser.add_argument("--seed-lemmas", type=int, default=120000)
@@ -433,11 +455,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
     os.environ["HDLE_IMPORT_LEMMA_BATCH_SIZE"] = str(args.lemma_batch_size)
-    run_benchmark(args)
+    try:
+        run_benchmark(args)
+        return 0
+    except Exception as exc:
+        error = {
+            "status": "FAILED",
+            "error": str(exc),
+            "db_path": str(args.db_path),
+            "allow_fallback": bool(args.allow_fallback),
+        }
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
