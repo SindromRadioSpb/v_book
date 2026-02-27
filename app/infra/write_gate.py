@@ -17,6 +17,12 @@ _STATE_LOCK = threading.Lock()
 _WAITING_WRITERS = 0
 
 
+def get_waiting_writer_count() -> int:
+    """Return number of threads currently waiting to enter serialized write section."""
+    with _STATE_LOCK:
+        return int(_WAITING_WRITERS)
+
+
 @contextmanager
 def serialized_db_write(
     operation: str,
@@ -86,4 +92,3 @@ def run_serialized_db_write(
         warn_hold_ms=warn_hold_ms,
     ):
         return callback()
-

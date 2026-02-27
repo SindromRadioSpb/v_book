@@ -1,13 +1,16 @@
 """Import engine for project bundles with ID remapping."""
 
+import json
 import logging
+import os
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 
 from app.services.db_service import DBService
 from app.services.project_exchange import bundle_format
@@ -23,7 +26,7 @@ from app.services.project_exchange.dto import (
     ImportReport,
 )
 from app.infra.fts_manager import ensure_fts_tables
-from app.infra.write_gate import run_serialized_db_write
+from app.infra.write_gate import run_serialized_db_write, get_waiting_writer_count
 from app.services.pronunciation_import_export_service import PronunciationImportExportService
 
 logger = logging.getLogger(__name__)
@@ -36,8 +39,15 @@ class ImportCancelledError(Exception):
 class ProjectImportEngine:
     """Handles import of .hdleproj bundles with ID remapping."""
 
+    _DEFAULT_LEMMA_BATCH_SIZE = 2000
+    _MIN_LEMMA_BATCH_SIZE = 500
+    _MAX_LEMMA_BATCH_SIZE = 10000
+
     def __init__(self):
         self.db_service = DBService.get_instance()
+        self._lemma_batch_size = self._DEFAULT_LEMMA_BATCH_SIZE
+        self._gate_trace_path: Optional[Path] = None
+        self._gate_trace_lock = threading.Lock()
 
     def import_project(
         self,
@@ -45,6 +55,7 @@ class ProjectImportEngine:
         options: ImportOptions = ImportOptions(),
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        gate_trace_path: Optional[Path] = None,
     ) -> ImportReport:
         """Import a project from a .hdleproj bundle.
 
@@ -52,6 +63,7 @@ class ProjectImportEngine:
             bundle_path: Path to .hdleproj file
             options: Import options
             progress_callback: Optional progress callback (stage, current, total)
+            gate_trace_path: Optional JSONL path for write-gate phase tracing.
 
         Returns:
             ImportReport with results
@@ -64,6 +76,8 @@ class ProjectImportEngine:
         warnings = []
         host_conn = None
         payload_conn = None
+        self._lemma_batch_size = self._resolve_lemma_batch_size()
+        self._configure_gate_trace(gate_trace_path)
 
         try:
             self._check_cancelled(cancel_check)
@@ -177,22 +191,135 @@ class ProjectImportEngine:
                     logger.debug(f"Cleaned up temp dir: {temp_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
+            self._gate_trace_path = None
 
     @staticmethod
     def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
         if cancel_check and bool(cancel_check()):
             raise ImportCancelledError("Import cancelled by user")
 
-    @staticmethod
+    def _resolve_lemma_batch_size(self) -> int:
+        raw = os.environ.get("HDLE_IMPORT_LEMMA_BATCH_SIZE", "").strip()
+        if not raw:
+            return self._DEFAULT_LEMMA_BATCH_SIZE
+        try:
+            parsed = int(raw)
+        except ValueError:
+            logger.warning(
+                "Invalid HDLE_IMPORT_LEMMA_BATCH_SIZE=%r; using default %s",
+                raw,
+                self._DEFAULT_LEMMA_BATCH_SIZE,
+            )
+            return self._DEFAULT_LEMMA_BATCH_SIZE
+        clamped = max(self._MIN_LEMMA_BATCH_SIZE, min(self._MAX_LEMMA_BATCH_SIZE, parsed))
+        if clamped != parsed:
+            logger.info(
+                "Clamped lemma batch size from %s to %s (allowed range: %s..%s)",
+                parsed,
+                clamped,
+                self._MIN_LEMMA_BATCH_SIZE,
+                self._MAX_LEMMA_BATCH_SIZE,
+            )
+        return clamped
+
+    def _configure_gate_trace(self, gate_trace_path: Optional[Path]) -> None:
+        resolved: Optional[Path] = None
+        if gate_trace_path:
+            resolved = Path(gate_trace_path)
+        else:
+            env_path = os.environ.get("HDLE_IMPORT_GATE_TRACE_JSONL", "").strip()
+            if env_path:
+                resolved = Path(env_path)
+
+        if resolved is None:
+            self._gate_trace_path = None
+            return
+
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            self._gate_trace_path = resolved
+        except Exception:
+            logger.warning("Failed to configure gate trace path: %s", resolved, exc_info=True)
+            self._gate_trace_path = None
+
+    def _emit_gate_trace(
+        self,
+        *,
+        event: str,
+        phase: str,
+        batch_idx: Optional[int] = None,
+        rows_in_batch: Optional[int] = None,
+        wait_ms: Optional[float] = None,
+        hold_ms: Optional[float] = None,
+        waiters: Optional[int] = None,
+    ) -> None:
+        if self._gate_trace_path is None:
+            return
+
+        payload: dict[str, Any] = {
+            "ts": time.time(),
+            "event": event,
+            "phase": phase,
+        }
+        if batch_idx is not None:
+            payload["batch_idx"] = int(batch_idx)
+        if rows_in_batch is not None:
+            payload["rows_in_batch"] = int(rows_in_batch)
+        if wait_ms is not None:
+            payload["wait_ms"] = float(round(wait_ms, 3))
+        if hold_ms is not None:
+            payload["hold_ms"] = float(round(hold_ms, 3))
+        if waiters is not None:
+            payload["waiters"] = int(waiters)
+
+        try:
+            with self._gate_trace_lock:
+                with self._gate_trace_path.open("a", encoding="utf-8") as trace_file:
+                    trace_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            logger.debug("Failed to write import gate trace event", exc_info=True)
+
+    def _cooperative_yield_if_needed(self, *, phase: str) -> None:
+        waiters = get_waiting_writer_count()
+        if waiters <= 0:
+            return
+        self._emit_gate_trace(
+            event="gate_cooperative_yield",
+            phase=phase,
+            waiters=waiters,
+        )
+        time.sleep(0)
+
     def _run_serialized_write_tx(
+        self,
         host_conn: sqlite3.Connection,
         *,
         operation: str,
         action: Callable[[], None],
+        batch_idx: Optional[int] = None,
+        rows_in_batch: Optional[int] = None,
     ) -> None:
         """Execute a write transaction through the shared process-local write gate."""
 
+        acquire_start = time.perf_counter()
+        self._emit_gate_trace(
+            event="gate_acquire_start",
+            phase=operation,
+            batch_idx=batch_idx,
+            rows_in_batch=rows_in_batch,
+        )
+
         def _run_tx() -> None:
+            acquired_at = time.perf_counter()
+            wait_ms = (acquired_at - acquire_start) * 1000.0
+            self._emit_gate_trace(
+                event="gate_acquired",
+                phase=operation,
+                batch_idx=batch_idx,
+                rows_in_batch=rows_in_batch,
+                wait_ms=wait_ms,
+            )
+            hold_start = time.perf_counter()
             host_conn.execute("BEGIN IMMEDIATE")
             try:
                 action()
@@ -200,6 +327,15 @@ class ProjectImportEngine:
             except Exception:
                 host_conn.rollback()
                 raise
+            finally:
+                hold_ms = (time.perf_counter() - hold_start) * 1000.0
+                self._emit_gate_trace(
+                    event="gate_release",
+                    phase=operation,
+                    batch_idx=batch_idx,
+                    rows_in_batch=rows_in_batch,
+                    hold_ms=hold_ms,
+                )
 
         run_serialized_db_write(
             operation,
@@ -232,9 +368,32 @@ class ProjectImportEngine:
                     session.commit()
                     return result_local
 
+            acquire_start = time.perf_counter()
+            self._emit_gate_trace(
+                event="gate_acquire_start",
+                phase="import.pronunciation_metadata",
+            )
+
+            def _run_import_metadata_traced() -> dict:
+                acquired_at = time.perf_counter()
+                self._emit_gate_trace(
+                    event="gate_acquired",
+                    phase="import.pronunciation_metadata",
+                    wait_ms=(acquired_at - acquire_start) * 1000.0,
+                )
+                hold_start = time.perf_counter()
+                try:
+                    return _import_metadata()
+                finally:
+                    self._emit_gate_trace(
+                        event="gate_release",
+                        phase="import.pronunciation_metadata",
+                        hold_ms=(time.perf_counter() - hold_start) * 1000.0,
+                    )
+
             result = run_serialized_db_write(
                 "import.pronunciation_metadata",
-                _import_metadata,
+                _run_import_metadata_traced,
                 warn_wait_ms=250.0,
                 warn_hold_ms=2500.0,
             )
@@ -436,6 +595,27 @@ class ProjectImportEngine:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
+                if table_name == "lemma":
+                    count = self._import_table_in_gate_batches(
+                        host_conn,
+                        payload_conn,
+                        table_name,
+                        offsets,
+                        None,
+                        warnings,
+                        tm_global_id_map,
+                        cancel_check=cancel_check,
+                        batch_size=self._lemma_batch_size,
+                    )
+                    table_counts[table_name] = count
+                    logger.debug(
+                        "Imported %s rows into %s using batch_size=%s",
+                        count,
+                        table_name,
+                        self._lemma_batch_size,
+                    )
+                    continue
+
                 def _import_current_table() -> None:
                     nonlocal new_project_id, tm_global_id_map
                     if table_name == "tm_global":
@@ -448,30 +628,31 @@ class ProjectImportEngine:
                             inserted_tm_global_ids.extend(new_tm_global_ids)
                         table_counts[table_name] = count
                         logger.debug(f"Imported {count} rows into {table_name}")
-                    else:
-                        inserted_pk_values = inserted_library_ids if table_name == "library" else None
-                        count = self._import_table(
-                            host_conn,
-                            payload_conn,
-                            table_name,
-                            offsets,
-                            final_project_name if table_name == "dict_project" else None,
-                            warnings,
-                            tm_global_id_map,
-                            cancel_check=cancel_check,
-                            inserted_pk_values=inserted_pk_values,
-                        )
-                        table_counts[table_name] = count
-                        logger.debug(f"Imported {count} rows into {table_name}")
+                        return
 
-                        # Capture new project ID
-                        if table_name == "dict_project" and count > 0:
-                            result = host_conn.execute(
-                                "SELECT project_id FROM dict_project WHERE name = ?",
-                                (final_project_name,),
-                            ).fetchone()
-                            if result:
-                                new_project_id = result[0]
+                    inserted_pk_values = inserted_library_ids if table_name == "library" else None
+                    count = self._import_table(
+                        host_conn,
+                        payload_conn,
+                        table_name,
+                        offsets,
+                        final_project_name if table_name == "dict_project" else None,
+                        warnings,
+                        tm_global_id_map,
+                        cancel_check=cancel_check,
+                        inserted_pk_values=inserted_pk_values,
+                    )
+                    table_counts[table_name] = count
+                    logger.debug(f"Imported {count} rows into {table_name}")
+
+                    # Capture new project ID
+                    if table_name == "dict_project" and count > 0:
+                        result = host_conn.execute(
+                            "SELECT project_id FROM dict_project WHERE name = ?",
+                            (final_project_name,),
+                        ).fetchone()
+                        if result:
+                            new_project_id = result[0]
 
                 self._run_serialized_write_tx(
                     host_conn,
@@ -650,6 +831,96 @@ class ProjectImportEngine:
             inserted_ids.append(mapped_id)
 
         return len(row_dicts), id_map, inserted_ids
+
+    def _import_table_in_gate_batches(
+        self,
+        host_conn: sqlite3.Connection,
+        payload_conn: sqlite3.Connection,
+        table_name: str,
+        offsets: dict[str, int],
+        override_name: Optional[str],
+        warnings: list[str],
+        tm_global_id_map: Optional[dict[int, int]] = None,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        batch_size: int,
+    ) -> int:
+        """Import a table in multiple short write-gate transactions."""
+        self._check_cancelled(cancel_check)
+        schema = TABLE_SCHEMA.get(table_name)
+        if not schema:
+            logger.warning(f"No schema for table {table_name}, skipping")
+            return 0
+
+        try:
+            cursor = payload_conn.execute(f"SELECT * FROM {table_name}")
+            col_names = [desc[0] for desc in cursor.description]
+        except sqlite3.OperationalError as e:
+            logger.debug(f"Table {table_name} not in payload: {e}")
+            return 0
+
+        placeholders = ",".join(["?"] * len(col_names))
+        insert_sql = f"INSERT INTO {table_name} ({','.join(col_names)}) VALUES ({placeholders})"
+
+        total_rows = 0
+        batch_idx = 0
+        read_chunk_size = max(batch_size, 2048)
+
+        while True:
+            self._check_cancelled(cancel_check)
+            raw_rows = cursor.fetchmany(read_chunk_size)
+            if not raw_rows:
+                break
+
+            remapped_rows = []
+            for idx, row in enumerate(raw_rows):
+                if idx % 256 == 0:
+                    self._check_cancelled(cancel_check)
+                remapped_rows.append(
+                    self._remap_row(
+                        table_name,
+                        col_names,
+                        row,
+                        offsets,
+                        override_name,
+                        tm_global_id_map=tm_global_id_map,
+                    )
+                )
+
+            for offset in range(0, len(remapped_rows), batch_size):
+                self._check_cancelled(cancel_check)
+                batch_rows = remapped_rows[offset:offset + batch_size]
+                rows_in_batch = len(batch_rows)
+
+                def _insert_batch() -> None:
+                    try:
+                        host_conn.executemany(insert_sql, batch_rows)
+                    except sqlite3.IntegrityError:
+                        logger.error(
+                            "FK constraint failed on table %s, batch_idx=%s, rows=%s",
+                            table_name,
+                            batch_idx,
+                            rows_in_batch,
+                        )
+                        if batch_rows:
+                            logger.error("First row in failed batch: %s", batch_rows[0])
+                        logger.error("SQL: %s", insert_sql)
+                        raise
+
+                self._run_serialized_write_tx(
+                    host_conn,
+                    operation=f"import.table.{table_name}",
+                    action=_insert_batch,
+                    batch_idx=batch_idx,
+                    rows_in_batch=rows_in_batch,
+                )
+                total_rows += rows_in_batch
+                batch_idx += 1
+
+                self._check_cancelled(cancel_check)
+                self._cooperative_yield_if_needed(phase=f"import.table.{table_name}")
+
+        return total_rows
 
     def _import_table(
         self,
