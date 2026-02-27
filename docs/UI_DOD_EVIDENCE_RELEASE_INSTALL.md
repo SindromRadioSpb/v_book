@@ -159,6 +159,30 @@ Targeted regression evidence (same run window):
 - `python -m pytest tests/test_project_exchange.py -q` -> `18 passed`
 - `python -m pytest tests/test_write_gate.py tests/test_translation_admin_write_gate.py -q` -> `4 passed`
 
+### Connected M: DB short smoke evidence (2026-02-27)
+
+Connected DB path:
+
+- `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
+
+Commands (automated):
+
+```powershell
+python scripts/perf_harness.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --runs 3 --warmup 1 --out build/logs/perf_smoke_m_hewiki_20260227_144336.json
+```
+
+Artifacts:
+
+- `build/logs/perf_smoke_m_hewiki_20260227_144336.json`
+- `build/verify/smoke_short_m_hewiki_20260227_124425.json`
+
+Key results:
+
+- Dictionary (`project_id=1`): `page_rows=100`, `page_elapsed_ms=33.452`, `count_total=2070890`, `count_elapsed_ms=184.4`
+- Picker (`project_id=1`): `empty_elapsed_ms=58.035`, `search_elapsed_ms=67.3`, `search_rows=1`
+- Sentences (`project_id=1`): `total_count=13387588`, `count_elapsed_ms=1066.278`, `page_rows=100`, `page_elapsed_ms=6387.039`, `doc_filter_elapsed_ms=48.302`
+- Export cancel (`project_id=2`): `success=false` (expected), `error_message="Export cancelled by user."`, `elapsed_ms=65.126`, temporary output cleaned (`output_removed_after_cancel=true`)
+
 ## Performance Smoke (Hewiki)
 
 Performance contract source:
