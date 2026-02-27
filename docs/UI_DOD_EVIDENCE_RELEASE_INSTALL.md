@@ -98,6 +98,18 @@ Expected:
 - script returns `status=OK` or `status=REPAIRED`,
 - JSON evidence is saved to `build/logs/fts_repair_*.json`.
 
+Corruption prerequisite (when benchmark or probes hit `database disk image is malformed`):
+
+```powershell
+python scripts/repair_db_corruption.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db"
+```
+
+Expected:
+
+- script returns `OK`, `SALVAGED_OK`, or `SALVAGED_WITH_WARNINGS`,
+- JSON evidence is saved to `build/logs/db_corruption_repair_*.json`,
+- recover log is saved to `build/logs/db_recover_*.log`.
+
 ### Smoke cases
 
 1. `PHON-01`: run prebuild validate gate and confirm required local module check includes `phonikud` and passes import.
@@ -170,6 +182,12 @@ Benchmark command:
 
 ```powershell
 python scripts/benchmark_import_concurrent_save.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100
+```
+
+Benchmark on repaired DB explicitly:
+
+```powershell
+python scripts/benchmark_import_concurrent_save.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --use-repaired-db "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.recovered_YYYYMMDD_HHMMSS.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100
 ```
 
 Behavior note:
