@@ -93,6 +93,57 @@ def test_dictionary_global_sort_before_pagination(dictionary_engine):
     assert got_page_2 == expected_page_2
 
 
+def test_dictionary_pos_multiselect_filter(dictionary_engine):
+    svc = DictionaryService()
+    with Session(dictionary_engine) as session:
+        library = Library(name="L2")
+        session.add(library)
+        session.flush()
+        project = DictProject(library_id=library.library_id, name="P2", src_lang="he", tgt_lang="ru")
+        session.add(project)
+        session.flush()
+
+        seed_rows = [
+            ("alpha", "NOUN", 30, 5),
+            ("beta", "VERB", 20, 4),
+            ("gamma", "ADJ", 10, 3),
+        ]
+        for lemma_text, pos, freq_abs, doc_freq in seed_rows:
+            lemma = Lemma(
+                project_id=project.project_id,
+                lemma_text=lemma_text,
+                pos=pos,
+                is_noise=0,
+            )
+            session.add(lemma)
+            session.flush()
+            session.add(
+                LemmaProjectStat(
+                    project_id=project.project_id,
+                    lemma_id=lemma.lemma_id,
+                    freq_abs=freq_abs,
+                    doc_freq=doc_freq,
+                )
+            )
+        session.commit()
+
+        filters = {"pos_tags": ["NOUN", "VERB"], "hide_noise": True, "search": ""}
+        rows = svc.search_lemmas(
+            session,
+            int(project.project_id),
+            filters=filters,
+            limit=100,
+            offset=0,
+            sort_column="lemma_text",
+            sort_direction="asc",
+        )
+        count = svc.count_lemmas(session, int(project.project_id), filters=filters)
+
+    assert len(rows) == 2
+    assert count == 2
+    assert {lemma.pos for lemma, _stat in rows} == {"NOUN", "VERB"}
+
+
 def test_dictionary_request_id_ignores_stale(monkeypatch, qtbot):
     monkeypatch.setattr(DictionaryView, "perform_search", lambda self: None)
     monkeypatch.setattr("app.ui.dictionary_view.QTimer.singleShot", lambda *_args, **_kwargs: None)
@@ -135,6 +186,28 @@ def test_dictionary_request_id_ignores_stale(monkeypatch, qtbot):
 
     view.on_search_count_ready(99, request_seq=2)
     assert view.total_count == 99
+
+
+def test_dictionary_build_filters_supports_pos_multiselect(monkeypatch, qtbot):
+    monkeypatch.setattr(DictionaryView, "perform_search", lambda self: None)
+    monkeypatch.setattr("app.ui.dictionary_view.QTimer.singleShot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.ui.dictionary_view.DBService.get_instance",
+        lambda: SimpleNamespace(),
+    )
+
+    view = DictionaryView(project_id=1)
+    qtbot.addWidget(view)
+
+    view.selected_pos = ["NOUN", "VERB"]
+    view.search_edit.setText("abc")
+    view.hide_noise_checkbox.setChecked(False)
+    filters = view.build_filters()
+
+    assert filters["pos_tags"] == ["NOUN", "VERB"]
+    assert filters["pos"] == "All"
+    assert filters["search"] == "abc"
+    assert filters["hide_noise"] is False
 
 
 def test_dictionary_pagination_labels_are_ascii_safe(monkeypatch, qtbot):

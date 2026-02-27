@@ -35,6 +35,7 @@ class DictionaryService:
             project_id: Project ID
             filters: Filter dict with keys:
                 - pos: POS filter ("All" or specific POS tag)
+                - pos_tags: Optional list of POS tags for multi-select filter
                 - hide_noise: bool (if True, hide noise entries)
                 - search: str (search text, LIKE on lemma_text)
             limit: Page size
@@ -117,9 +118,15 @@ class DictionaryService:
     def _apply_filters(self, stmt, filters: dict):
         """Apply filters to statement (shared by search and count)."""
         # POS filter
-        pos_filter = filters.get("pos", "All")
-        if pos_filter and pos_filter != "All":
-            stmt = stmt.where(Lemma.pos == pos_filter)
+        pos_tags = filters.get("pos_tags")
+        if isinstance(pos_tags, list):
+            selected = [str(pos).strip() for pos in pos_tags if str(pos).strip()]
+            if selected:
+                stmt = stmt.where(Lemma.pos.in_(selected))
+        else:
+            pos_filter = filters.get("pos", "All")
+            if pos_filter and pos_filter != "All":
+                stmt = stmt.where(Lemma.pos == pos_filter)
 
         # Noise filter
         if filters.get("hide_noise", True):

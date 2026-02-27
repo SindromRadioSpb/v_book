@@ -15,6 +15,10 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QMenu,
     QMessageBox,
+    QDialog,
+    QDialogButtonBox,
+    QListWidget,
+    QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QModelIndex, QTimer
 from PyQt6.QtGui import QAction
@@ -47,6 +51,84 @@ from app.ui.workers import (
 logger = logging.getLogger(__name__)
 
 
+class PosFilterDialog(QDialog):
+    """Multi-select checklist dialog for Dictionary POS filter."""
+
+    POS_OPTIONS = [
+        ("NOUN", "NOUN"),
+        ("VERB", "VERB"),
+        ("ADJ", "ADJ"),
+        ("ADV", "ADV"),
+        ("PROPN", "PROPN"),
+        ("NUM", "NUM"),
+    ]
+    ALL_POS = [pos for pos, _label in POS_OPTIONS]
+
+    def __init__(self, selected_pos: Optional[List[str]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select POS")
+        self.setMinimumSize(280, 260)
+        if selected_pos:
+            self._selected = [str(pos) for pos in selected_pos if pos]
+        else:
+            self._selected = list(self.ALL_POS)
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout()
+        info = QLabel("Select one or more POS tags to include:")
+        info.setStyleSheet("font-weight: bold;")
+        layout.addWidget(info)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        for pos, label in self.POS_OPTIONS:
+            item = QListWidgetItem(label)
+            item.setCheckState(
+                Qt.CheckState.Checked if pos in self._selected else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, pos)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        btn_row = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(self._on_select_all)
+        btn_row.addWidget(select_all)
+        clear_all = QPushButton("Clear All")
+        clear_all.clicked.connect(self._on_clear_all)
+        btn_row.addWidget(clear_all)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        self.setLayout(layout)
+
+    def _on_select_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _on_clear_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def get_selected_pos(self) -> Optional[List[str]]:
+        """Return selected POS tags or None if all/none selected."""
+        selected: List[str] = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
+        if len(selected) == 0 or len(selected) == len(self.ALL_POS):
+            return None
+        return selected
+
+
 class DictionaryView(QWidget):
     """Dictionary view showing lemmas."""
 
@@ -74,6 +156,11 @@ class DictionaryView(QWidget):
         self._pending_translation_lemmas: Optional[List[LemmaStats]] = None
         self.sort_column = str(self.settings.get_string("dictionary_view/sort_column", "freq_abs") or "freq_abs")
         self.sort_direction = str(self.settings.get_string("dictionary_view/sort_direction", "desc") or "desc")
+        saved_pos = self.settings.get_json("dictionary_view/pos_filter", None)
+        if isinstance(saved_pos, list) and len(saved_pos) > 0:
+            self.selected_pos: Optional[List[str]] = [str(pos) for pos in saved_pos if pos]
+        else:
+            self.selected_pos = None
 
         self.init_ui()
         self.perform_search()
@@ -105,10 +192,11 @@ class DictionaryView(QWidget):
 
         # POS filter
         header_layout.addWidget(QLabel("POS:"))
-        self.pos_filter = QComboBox()
-        self.pos_filter.addItems(["All", "NOUN", "VERB", "ADJ", "ADV", "PROPN", "NUM"])
-        self.pos_filter.currentTextChanged.connect(self.on_filter_changed)
-        header_layout.addWidget(self.pos_filter)
+        self.pos_filter_btn = QPushButton(self._pos_filter_btn_label())
+        self.pos_filter_btn.setMinimumWidth(120)
+        self.pos_filter_btn.setToolTip("Click to select POS tags to filter")
+        self.pos_filter_btn.clicked.connect(self.on_select_pos)
+        header_layout.addWidget(self.pos_filter_btn)
 
         # Hide noise filter (Task 11: Entity Classification)
         self.hide_noise_checkbox = QCheckBox("Hide noise")
@@ -319,11 +407,32 @@ class DictionaryView(QWidget):
 
     def build_filters(self) -> dict:
         """Build filters dict for search."""
-        return {
-            "pos": self.pos_filter.currentText(),
+        filters = {
+            "pos": "All",
             "hide_noise": self.hide_noise_checkbox.isChecked(),
             "search": self.search_edit.text().strip(),
         }
+        if self.selected_pos:
+            filters["pos_tags"] = list(self.selected_pos)
+            filters["pos"] = "All"
+        return filters
+
+    def _pos_filter_btn_label(self) -> str:
+        if not self.selected_pos:
+            return "All POS v"
+        if len(self.selected_pos) == 1:
+            return f"{self.selected_pos[0]} v"
+        return f"{len(self.selected_pos)} POS v"
+
+    def on_select_pos(self):
+        """Open POS multi-select dialog and apply filter."""
+        dlg = PosFilterDialog(self.selected_pos, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.selected_pos = dlg.get_selected_pos()
+        self.settings.set_value("dictionary_view/pos_filter", self.selected_pos)
+        self.pos_filter_btn.setText(self._pos_filter_btn_label())
+        self.on_filter_changed()
 
     def on_filter_changed(self):
         """Handle filter change - reset to page 1 and search."""
