@@ -3,7 +3,7 @@
 -- Purpose: Track MT provider usage for budget guard enforcement
 
 -- mt_usage: Usage tracking by provider and time period
-CREATE TABLE mt_usage (
+CREATE TABLE IF NOT EXISTS mt_usage (
     usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id TEXT NOT NULL,
     period_type TEXT NOT NULL,  -- 'minute', 'day', 'month'
@@ -16,7 +16,7 @@ CREATE TABLE mt_usage (
 );
 
 -- Index for efficient lookups by provider and period
-CREATE INDEX idx_mt_usage_lookup ON mt_usage(provider_id, period_type, period_key);
+CREATE INDEX IF NOT EXISTS idx_mt_usage_lookup ON mt_usage(provider_id, period_type, period_key);
 
 -- Update schema version
 UPDATE schema_meta SET value = '9' WHERE key = 'schema_version';
