@@ -141,6 +141,51 @@ Smoke expectations:
 - Document picker open/search remain responsive and non-blocking.
 - Export cancellation remains responsive and does not leave UI blocked.
 
+### Import + Concurrent Save (P0-03 follow-up)
+
+Goal:
+
+- keep write serialization correctness,
+- reduce long write-gate hold windows during import,
+- preserve `0 SQLITE_BUSY` under concurrent TM saves.
+
+Benchmark command:
+
+```powershell
+python scripts/benchmark_import_concurrent_save.py --db-path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db" --seed-docs 6000 --seed-lemmas 120000 --lemma-batch-size 2000 --save-cadence-ms 100 --max-save-attempts 100
+```
+
+Artifacts:
+
+- `build/logs/import_concurrent_save_metrics_20260227_041029.json`
+- `build/logs/import_concurrent_save_ops_20260227_041029.jsonl`
+- `build/logs/import_write_gate_trace_20260227_041029.jsonl`
+
+Before/after summary (baseline before chunked lemma phase vs current):
+
+- `max_save_latency_ms`: `2060.02 -> 281.342`
+- `save_latency_p95_ms`: `2060.02 -> 225.634`
+- `count_gt_1000ms`: `1 -> 0`
+- `terminal SQLITE_BUSY`: `0 -> 0`
+
+Top gate holds after chunking (`gate_release.max_hold_ms`, by phase):
+
+- `import.table.lemma`: `227.862ms`
+- `import.table.source_document`: `211.364ms`
+- `import.table.document_text`: `87.145ms`
+
+Batch-size rationale:
+
+- `lemma` is the dominant write volume in this scenario; importing it in `2000`-row serialized batches
+  keeps lock windows short while preserving correctness and cleanup semantics.
+- Batch size is tunable via `HDLE_IMPORT_LEMMA_BATCH_SIZE` (`500..10000`) for environment-specific tuning.
+
+Environment note:
+
+- The target hewiki DB path is used as input in benchmark runs.
+- In this environment the file reports `malformed database schema (sentence_fts) - table sentence_fts already exists`
+  on direct sqlite probe; benchmark script records this and falls back to a migrated working DB snapshot for write tests.
+
 ## Prebuild Profiles
 
 Default profile (strict, write checks enabled):
