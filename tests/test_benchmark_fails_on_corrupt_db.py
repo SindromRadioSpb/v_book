@@ -1,4 +1,4 @@
-"""Benchmark guard tests for healthy target DB requirements."""
+"""Benchmark fail-fast behavior on detected DB corruption."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _make_args(db_path: Path) -> argparse.Namespace:
     )
 
 
-def test_benchmark_main_fails_without_allow_fallback_on_malformed_target(
+def test_benchmark_main_fails_fast_when_corruption_probe_fails(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -33,16 +33,24 @@ def test_benchmark_main_fails_without_allow_fallback_on_malformed_target(
     target_db = tmp_path / "target.db"
     sqlite3.connect(str(target_db)).close()
 
-    malformed_error = "malformed database schema (sentence_fts) - table sentence_fts already exists"
-    monkeypatch.setattr(bench_mod, "_validate_sqlite_readable", lambda _path: (False, malformed_error))
     monkeypatch.setattr(bench_mod, "parse_args", lambda: _make_args(target_db))
+    monkeypatch.setattr(bench_mod, "_validate_sqlite_readable", lambda _path: (True, None))
+    monkeypatch.setattr(
+        bench_mod,
+        "_probe_target_db_corruption",
+        lambda _path, quick_check_timeout_sec=10.0: {
+            "ok": False,
+            "quick_check_rows": ["database disk image is malformed"],
+            "quick_check_error": "database disk image is malformed",
+            "tm_entry_probe_ok": False,
+            "tm_entry_probe_error": "database disk image is malformed",
+        },
+    )
 
     exit_code = bench_mod.main()
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert captured.err.strip()
     payload = json.loads(captured.err)
     assert payload["status"] == "FAILED"
-    assert "repair_fts_schema.py" in payload["error"]
-    assert payload["allow_fallback"] is False
+    assert "repair_db_corruption.py" in payload["error"]
