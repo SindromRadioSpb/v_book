@@ -74,6 +74,14 @@ try {
     exit 1
 }
 
+Write-Host "Generating build metadata..." -ForegroundColor Yellow
+python scripts/generate_build_meta.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] Failed to generate build metadata" -ForegroundColor Red
+    exit 1
+}
+Write-Host "[OK] Build metadata generated" -ForegroundColor Green
+
 Write-Host "`n=== STARTING BUILD ===" -ForegroundColor Cyan
 
 # --- CLEAN OLD ARTIFACTS ---

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.build_meta import format_build_meta_line, get_build_meta
+
 logger = logging.getLogger(__name__)
 
 _PHONIKUD_SUBPROCESS_SENTINELS = (
@@ -58,6 +60,12 @@ def get_app_dir() -> Path:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _attach_build_meta(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload or {})
+    data["build"] = get_build_meta()
+    return data
 
 
 def _redact_value(value: str, *, keep_prefix: int = 3, keep_suffix: int = 2) -> str:
@@ -904,19 +912,21 @@ def run_self_check(mode: str, *, db_path_arg: str | None) -> tuple[int, dict[str
 
     settings = SettingsService.get_instance()
     if mode == "import":
-        return _run_import_self_check(settings)
-    if mode == "db_open":
-        return _run_db_open_self_check(settings, db_path_arg)
-    if mode == "health":
-        return _run_health_self_check(settings, db_path_arg)
-    if mode == "cloud_tests":
-        return _run_cloud_tests_self_check(settings, db_path_arg)
-    return 1, {
-        "mode": mode,
-        "timestamp_utc": _utc_now_iso(),
-        "ok": False,
-        "error": f"Unknown self-check mode: {mode}",
-    }
+        exit_code, payload = _run_import_self_check(settings)
+    elif mode == "db_open":
+        exit_code, payload = _run_db_open_self_check(settings, db_path_arg)
+    elif mode == "health":
+        exit_code, payload = _run_health_self_check(settings, db_path_arg)
+    elif mode == "cloud_tests":
+        exit_code, payload = _run_cloud_tests_self_check(settings, db_path_arg)
+    else:
+        exit_code, payload = 1, {
+            "mode": mode,
+            "timestamp_utc": _utc_now_iso(),
+            "ok": False,
+            "error": f"Unknown self-check mode: {mode}",
+        }
+    return exit_code, _attach_build_meta(payload)
 
 
 def main():
@@ -992,6 +1002,7 @@ def main():
     setup_logging(log_dir, level=logging.INFO)
     logger.info("=" * 60)
     logger.info("HDLE Premium starting")
+    logger.info(format_build_meta_line())
     logger.info(f"App directory: {app_dir}")
     logger.info(f"Database: {db_path}")
     logger.info(f"Database source: {resolved_db.source}")

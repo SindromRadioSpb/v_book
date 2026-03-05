@@ -28,6 +28,16 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "✓ Virtual environment activated" -ForegroundColor Green
 Write-Host ""
 
+# Build metadata traceability
+Write-Host "Generating build metadata..." -ForegroundColor Yellow
+python scripts/generate_build_meta.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Failed to generate build metadata" -ForegroundColor Red
+    exit 1
+}
+Write-Host "OK Build metadata generated" -ForegroundColor Green
+Write-Host ""
+
 # Check PyInstaller
 Write-Host "[2/5] Checking PyInstaller..." -ForegroundColor Yellow
 python -c "import PyInstaller; print(f'PyInstaller {PyInstaller.__version__}')" 2>$null

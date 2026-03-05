@@ -79,10 +79,11 @@ The standalone executable is built using PyInstaller with a custom spec file.
 
 **What this does:**
 1. Activates virtual environment
-2. Checks/installs PyInstaller
-3. Cleans previous build artifacts
-4. Runs `pyinstaller build/v_book.spec` (onedir mode)
-5. Verifies output: `dist\HDLE_Premium\HDLE_Premium.exe`
+2. Generates build traceability metadata (`scripts/generate_build_meta.py`)
+3. Checks/installs PyInstaller
+4. Cleans previous build artifacts
+5. Runs `pyinstaller build/v_book.spec` (onedir mode)
+6. Verifies output: `dist\HDLE_Premium\HDLE_Premium.exe`
 
 **Expected output:**
 ```
@@ -145,6 +146,18 @@ Or run automated smoke test:
 2. Database created at `%LOCALAPPDATA%\HDLE\hdle.db`
 3. Logs created at `%LOCALAPPDATA%\HDLE\logs\`
 4. UI displays correctly
+5. Build metadata is available in Help -> About HDLE Premium (version/commit/dirty/built_at)
+
+**Build traceability check (required before release):**
+
+```powershell
+python scripts/generate_build_meta.py
+powershell -ExecutionPolicy Bypass -File scripts\verify_frozen_health.ps1
+```
+
+Expected:
+- `build\verify\import_dist.json` and `build\verify\health_dist.json` contain `build.version`, `build.commit`, `build.dirty`, `build.built_at_utc`
+- `build\verify\build_meta_dist.txt` exists and matches the expected commit for the release candidate
 
 **Troubleshooting:**
 - If app crashes immediately, check `%LOCALAPPDATA%\HDLE\logs\` for error messages

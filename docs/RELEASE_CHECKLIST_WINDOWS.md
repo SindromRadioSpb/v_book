@@ -27,6 +27,9 @@ cd J:\Project_Vibe\V_book
 - [ ] `dist\HDLE_Premium\HDLE_Premium.exe` exists
 - [ ] Distribution folder `dist\HDLE_Premium\` contains all dependencies
 - [ ] Run smoke test: `.\scripts\run_packaged_smoke.ps1`
+- [ ] Build metadata generated (commit/dirty/built_at)
+- [ ] `powershell -ExecutionPolicy Bypass -File scripts\verify_frozen_health.ps1` passes
+- [ ] `build\verify\build_meta_dist.txt` exists and commit matches target release SHA
 
 ### 2. Build Installer
 
@@ -67,6 +70,7 @@ ISCC.exe installer\installer.iss
 **Launch app:**
 - [ ] Start → HDLE Premium
 - [ ] App launches (may take 10-20s on first run)
+- [ ] Help → About HDLE Premium shows version + commit + dirty + built_at
 
 **Stanza models download (if internet available):**
 - [ ] Check logs for model download messages
@@ -298,6 +302,10 @@ Remove-Item -Recurse -Force $env:LOCALAPPDATA\HDLE
 **Build Version:** ________________
 
 **Build SHA:** ________________ (git commit hash)
+
+**Build Dirty:** ________________ (0/1)
+
+**Build UTC Timestamp:** ________________
 
 **Test Results:**
 

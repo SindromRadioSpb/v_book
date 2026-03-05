@@ -720,6 +720,10 @@ class AppWindow(QMainWindow):
         self._set_action_shortcuts(help_center_action, "F1")
         help_center_action.triggered.connect(self.open_help_center)
         help_menu.addAction(help_center_action)
+        help_menu.addSeparator()
+        about_action = QAction("&About HDLE Premium", self)
+        about_action.triggered.connect(self.open_about_dialog)
+        help_menu.addAction(about_action)
 
     def open_verification(self):
         """Open verification panel."""
@@ -960,6 +964,23 @@ class AppWindow(QMainWindow):
 
         logger.info("Opening help center dialog")
         show_help_center_dialog(parent=self)
+
+    def open_about_dialog(self):
+        """Show build traceability metadata."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        from app.build_meta import get_build_meta
+
+        meta = get_build_meta()
+        details = [
+            "HDLE Premium",
+            "",
+            f"Version: {meta['version']}",
+            f"Commit: {meta['commit']}",
+            f"Dirty: {meta['dirty']}",
+            f"Built at (UTC): {meta['built_at_utc']}",
+        ]
+        QMessageBox.information(self, "About HDLE Premium", "\n".join(details))
 
     def open_project(self, project_id: int):
         """Open a project view."""
@@ -1309,6 +1330,15 @@ class AppWindow(QMainWindow):
             keywords=["help", "guide", "shortcuts", "manual", "docs"],
             shortcut="F1",
             callback=self.open_help_center,
+            category="Help"
+        ))
+
+        registry.register(ActionSpec(
+            action_id="help.about",
+            title="About HDLE Premium",
+            keywords=["about", "version", "build", "commit", "sha"],
+            shortcut="",
+            callback=self.open_about_dialog,
             category="Help"
         ))
 

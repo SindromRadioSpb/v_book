@@ -22,6 +22,10 @@ function Invoke-Step {
     Write-Host "[OK] $Name"
 }
 
+Invoke-Step -Name "Generate build metadata" -LogPath "build\logs\prebuild_generate_build_meta.log" -Action {
+    python scripts/generate_build_meta.py
+}
+
 Invoke-Step -Name "Spec contract tests" -LogPath "build\logs\prebuild_spec_contract.log" -Action {
     python -m pytest `
         tests/test_installer_spec_contract_shape.py `
