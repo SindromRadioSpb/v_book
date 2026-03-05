@@ -8,6 +8,9 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 Set-Location $repoRoot
+$logsDir = Join-Path $repoRoot "build\\logs"
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+$smokeGateLog = Join-Path $logsDir "smoke_gate_latest.log"
 
 $python = Join-Path $repoRoot ".venv\\Scripts\\python.exe"
 if (-not (Test-Path $python)) {
@@ -38,9 +41,15 @@ if ($env:SMOKE_PROJECT_ID) {
 }
 Write-Host "Using TEMP/TMP=$pytestTemp" -ForegroundColor Yellow
 
-& $python -m pytest -q tests/smoke -m "smoke and env" -vv
-if ($LASTEXITCODE -ne 0) {
-    throw "Smoke gate failed (exit code: $LASTEXITCODE)"
-}
+Start-Transcript -Path $smokeGateLog -Force | Out-Null
+try {
+    & $python -m pytest -q tests/smoke -m "smoke and env" -vv
+    if ($LASTEXITCODE -ne 0) {
+        throw "Smoke gate failed (exit code: $LASTEXITCODE)"
+    }
 
-Write-Host "PASS: Smoke/env gate completed." -ForegroundColor Green
+    Write-Host "PASS: Smoke/env gate completed." -ForegroundColor Green
+} finally {
+    Stop-Transcript | Out-Null
+    Write-Host "Smoke gate log: $smokeGateLog" -ForegroundColor Yellow
+}
