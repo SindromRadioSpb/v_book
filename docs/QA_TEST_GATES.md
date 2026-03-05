@@ -1,5 +1,7 @@
 # QA Test Gates (Variant A)
 
+Canonical policy source: `docs/PROJECT_CONTRACT_GATES.md`
+
 ## Policy
 
 Variant A is the default for development and PATCH work.
