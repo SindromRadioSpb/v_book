@@ -1,5 +1,6 @@
 """Database connection and migration management."""
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,15 @@ class DatabaseManager:
         """Create a new database session."""
         return self.SessionLocal()
 
+    def _resolve_migration_lock_path(self) -> Path:
+        """Return migration lock path, allowing a test-only env override."""
+        override_dir = (os.environ.get("HDLE_MIGRATION_LOCK_DIR") or "").strip()
+        if override_dir:
+            lock_dir = Path(override_dir).expanduser()
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            return lock_dir / "migrate.lock"
+        return self.db_path.parent / "migrate.lock"
+
     def apply_migrations(self) -> None:
         """Apply SQL migrations from the migrations folder with automatic backup."""
         migrations_dir = Path(__file__).parent / "migrations"
@@ -82,7 +92,7 @@ class DatabaseManager:
         # NEW: Acquire migration lock to prevent concurrent migrations
         from app.infra.process_lock import ProcessLock
 
-        lock_path = self.db_path.parent / "migrate.lock"
+        lock_path = self._resolve_migration_lock_path()
 
         try:
             with ProcessLock(lock_path, timeout_seconds=30):

@@ -1,1 +1,1 @@
-# Smoke tests package — requires running QApplication and real DB.
+# Smoke tests package: pytest smoke/env gates with isolated temp runtime.

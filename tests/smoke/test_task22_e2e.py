@@ -1,20 +1,17 @@
-"""
-pytest-qt smoke coverage for Task 22 critical flows.
+"""pytest-qt smoke coverage for Task 22 critical flows.
 
-Marked with @pytest.mark.smoke — excluded from regular test runs.
+Marked with @pytest.mark.smoke and @pytest.mark.env.
 Requires:
-  - Real (or test) database with project_id=12 and its corpus
-  - SMOKE_DB_PATH env var pointing to the DB (or auto-resolved like app.main)
-  - SMOKE_DOC_PATH env var pointing to the .docx test document
-  - SMOKE_PROJECT_ID env var (default: 12)
+  - SMOKE_DB_PATH env var pointing to a source DB
+  - Optional SMOKE_DOC_PATH env var pointing to a .docx test document
+  - Optional SMOKE_PROJECT_ID env var (auto-detects first project if absent)
 
 Run:
-    python -m pytest tests/smoke/test_task22_e2e.py -q -m smoke
+    python -m pytest tests/smoke/test_task22_e2e.py -q -m "smoke and env"
 """
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -23,61 +20,75 @@ import pytest
 # ---------------------------------------------------------------------------
 # Markers
 # ---------------------------------------------------------------------------
-pytestmark = pytest.mark.smoke
+pytestmark = [pytest.mark.smoke, pytest.mark.env, pytest.mark.serial]
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
+def test_smoke_paths_are_isolated(isolate_smoke_environment):
+    """Smoke runtime must stay under per-run temp paths, not user AppData."""
+    lock_dir = Path(os.environ["HDLE_MIGRATION_LOCK_DIR"]).resolve()
+    isolated_root = isolate_smoke_environment["session_root"].resolve()
+    smoke_db = Path(os.environ["SMOKE_DB_PATH"]).resolve()
+
+    assert str(lock_dir).startswith(str(isolated_root))
+    assert str(smoke_db).startswith(str(isolated_root))
+
 @pytest.fixture(scope="session")
 def db_path() -> Path:
-    custom = os.environ.get("SMOKE_DB_PATH")
-    if custom:
-        p = Path(custom)
-        assert p.exists(), f"SMOKE_DB_PATH does not exist: {p}"
-        return p
-    # Fallback: same resolution as app.main
-    if sys.platform == "win32":
-        dev_path = Path(r"M:\V_book\HDLE")
-        if dev_path.parent.exists() and os.environ.get("HDLE_DEV_MODE") == "1":
-            p = dev_path / "hdle.db"
-        else:
-            localappdata = os.environ.get("LOCALAPPDATA", "")
-            p = Path(localappdata) / "HDLE" / "hdle.db"
-    else:
-        p = Path.home() / "Library" / "Application Support" / "HDLE" / "hdle.db"
-    assert p.exists(), (
-        f"Database not found at default path: {p}\n"
-        "Set SMOKE_DB_PATH env var to point to the DB."
-    )
+    custom = (os.environ.get("SMOKE_DB_PATH") or "").strip()
+    assert custom, "SMOKE_DB_PATH must be set by smoke fixture or environment"
+    p = Path(custom)
+    assert p.exists(), f"SMOKE_DB_PATH does not exist: {p}"
     return p
 
 
 @pytest.fixture(scope="session")
-def project_id() -> int:
-    return int(os.environ.get("SMOKE_PROJECT_ID", "12"))
+def project_id(db_service) -> int:
+    from sqlalchemy import select
+    from app.infra.sa_models import DictProject
+
+    forced_raw = (os.environ.get("SMOKE_PROJECT_ID") or "").strip()
+    with db_service.get_session() as session:
+        if forced_raw:
+            forced = int(forced_raw)
+            exists = session.execute(
+                select(DictProject.project_id).where(DictProject.project_id == forced)
+            ).scalar_one_or_none()
+            if exists is None:
+                pytest.skip(f"SMOKE_PROJECT_ID={forced} not found in isolated smoke DB")
+            return int(exists)
+
+        detected = session.execute(
+            select(DictProject.project_id).order_by(DictProject.project_id.asc()).limit(1)
+        ).scalar_one_or_none()
+
+    if detected is None:
+        pytest.skip("No projects found in isolated smoke DB")
+    return int(detected)
 
 
 @pytest.fixture(scope="session")
 def doc_path() -> Optional[Path]:
-    raw = os.environ.get("SMOKE_DOC_PATH")
+    raw = (os.environ.get("SMOKE_DOC_PATH") or "").strip()
     if raw:
         return Path(raw)
-    default = (
-        r"E:\andasai_mechonot\Физика. Семестр 2. Год 1"
-        r"\Словарь из учебника"
-        r"\Для программы обработчика Физика. Гос 1. Главы 1-7.docx"
-    )
-    p = Path(default)
-    return p if p.exists() else None
+    return None
 
 
 @pytest.fixture(scope="session")
 def db_service(db_path):
     from app.services.db_service import DBService
+    DBService.shutdown()
     DBService.initialize(db_path)
-    return DBService.get_instance()
+    instance = DBService.get_instance()
+    try:
+        yield instance
+    finally:
+        DBService.shutdown()
 
 
 @pytest.fixture(scope="session")
@@ -130,8 +141,8 @@ def _wait(worker, timeout_ms: int = 60_000):
 class TestDocumentMetadata:
 
     def test_project_and_corpus_exist(self, db_service, project_id, corpus_id):
-        """Project 12 and its default corpus are present."""
-        assert project_id == 12
+        """Selected project and its default corpus are present."""
+        assert project_id > 0
         assert corpus_id > 0
 
     def test_document_service_list(self, db_service, corpus_id):
@@ -168,7 +179,7 @@ class TestDocumentMetadata:
             all_docs = DocumentService().list_documents(session, corpus_id)
         if not all_docs:
             pytest.skip("No documents to search")
-        # Search by first 4 chars of first doc's filename — should return ≥1
+        # Search by first 4 chars of first doc's filename; should return >=1.
         query = all_docs[0].file_name[:4]
         with db_service.get_session() as session:
             filtered = DocumentService().list_documents(
@@ -238,11 +249,11 @@ class TestSentencesService:
             )
         assert result == {}
 
-    def test_batch_get_pronunciations_empty(self, db_service):
-        """_batch_get_pronunciations with empty texts returns empty dict."""
+    def test_batch_get_sentence_niqqud_empty(self, db_service):
+        """_batch_get_sentence_niqqud with empty IDs returns empty dict."""
         from app.services.sentences_workspace_service import SentencesWorkspaceService
         with db_service.get_session() as session:
-            result = SentencesWorkspaceService()._batch_get_pronunciations(
+            result = SentencesWorkspaceService()._batch_get_sentence_niqqud(
                 session, []
             )
         assert result == {}
@@ -325,23 +336,26 @@ class TestTMKindFilter:
         from app.ui.translation_management_panel import KindFilterDialog
         all_k = KindFilterDialog.ALL_KINDS
 
-        # All selected → None
+        # All selected -> None
         selected_all = all_k[:]
         result = selected_all if (
             len(selected_all) != len(all_k) and len(selected_all) != 0
         ) else None
         assert result is None
 
-        # None selected → None
+        # None selected -> None
         selected_none: list = []
         result = selected_none if (
             len(selected_none) != len(all_k) and len(selected_none) != 0
         ) else None
         assert result is None
 
-        # Partial selection → list
+        # Partial selection -> list
         selected_partial = ["lemma", "surface"]
         result = selected_partial if (
             len(selected_partial) != len(all_k) and len(selected_partial) != 0
         ) else None
         assert result == ["lemma", "surface"]
+
+
+
