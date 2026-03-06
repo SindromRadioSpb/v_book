@@ -126,3 +126,70 @@ Copy-Item -Force `
 ## Notes
 - `PRAGMA quick_check(10)` in write benchmark timed out at `5s` and was treated as inconclusive by harness policy; `tm_entry` probe succeeded in both runs.
 - No write-heavy benchmark operations targeted `M:\...`; all writes were against the local `J:\...` sandbox.
+
+## PATCH-02 Planning (3-run stability, sandbox-only)
+### Objective
+- Re-measure post PATCH-01 state and confirm the next stable top write-gate bottleneck before coding PATCH-02.
+
+### Commands used for stability scan
+```powershell
+Set-Location J:\Project_Vibe\V_book
+New-Item -ItemType Directory -Force build\tmp | Out-Null
+$tmp = (Resolve-Path build\tmp).Path
+$env:TEMP = $tmp
+$env:TMP = $tmp
+
+1..3 | ForEach-Object {
+  .\.venv\Scripts\python.exe scripts\benchmark_import_concurrent_save.py `
+    --db-path "J:\Project_Vibe\V_book\build\bench\hewiki_sandbox.db" `
+    --copy-target `
+    --seed-docs 6000 `
+    --seed-lemmas 120000 `
+    --lemma-batch-size 2000 `
+    --save-cadence-ms 100 `
+    --max-save-attempts 100 `
+    --quick-check-timeout-sec 5
+}
+```
+
+### Stability artifacts (before PATCH-02)
+- `build\logs\import_concurrent_save_metrics_20260306_053257.json`
+- `build\logs\import_concurrent_save_metrics_20260306_053749.json`
+- `build\logs\import_concurrent_save_metrics_20260306_054243.json`
+
+### Stability finding
+- Stable top bottleneck phase: `import.table.lemma` (`3/3` runs).
+- Aggregate (`3-run`) before PATCH-02:
+  - `overall_max_hold_ms`: max/p95 `336.019`, mean `250.024`
+  - `lemma_phase_max_hold_ms`: max/p95 `336.019`, mean `250.024`
+  - `save_p95_ms`: max/p95 `164.394`, mean `157.091`
+  - `save_max_ms`: max/p95 `335.669`, mean `267.579`
+
+## PATCH-02 Mitigation
+- Single safe mitigation: add deterministic gate-batch cap for `lemma` write transactions during import.
+- Implementation detail:
+  - `HDLE_IMPORT_LEMMA_GATE_BATCH_CAP` (default `1500`) limits `lemma` write-gate batch size.
+  - Existing configured `HDLE_IMPORT_LEMMA_BATCH_SIZE` remains the upper target; effective `lemma` batch = `min(batch_size, gate_cap)`.
+- Safety:
+  - no UI-thread changes,
+  - deterministic order preserved,
+  - chunked WAL-safe write transactions preserved,
+  - cancel checks and cooperative yields preserved.
+
+## PATCH-02 After (3-run)
+### Artifacts
+- `build\logs\import_concurrent_save_metrics_20260306_062342.json`
+- `build\logs\import_concurrent_save_metrics_20260306_062835.json`
+- `build\logs\import_concurrent_save_metrics_20260306_063324.json`
+
+### Before vs After (3-run aggregate)
+| Metric | Before max/p95 | After max/p95 | Delta (max/p95) | Before mean | After mean | Delta mean |
+|---|---:|---:|---:|---:|---:|---:|
+| overall_max_hold_ms | 336.019 | 275.991 | -60.028 | 250.024 | 270.934 | +20.910 |
+| lemma_phase_max_hold_ms | 336.019 | 275.991 | -60.028 | 250.024 | 270.934 | +20.910 |
+| save_max_ms | 335.669 | 307.853 | -27.816 | 267.579 | 281.957 | +14.378 |
+| save_p95_ms | 164.394 | 174.271 | +9.877 | 157.091 | 172.032 | +14.941 |
+
+### Interpretation
+- Primary PATCH-02 goal achieved: worst-case `lemma` gate hold window reduced by ~`60ms` (`-17.9%`) on max/p95 tail.
+- Tradeoff observed: average and p95 concurrent save latency increased; this is a follow-up target for PATCH-03.

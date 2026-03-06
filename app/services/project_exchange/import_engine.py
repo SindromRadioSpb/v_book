@@ -42,10 +42,14 @@ class ProjectImportEngine:
     _DEFAULT_LEMMA_BATCH_SIZE = 2000
     _MIN_LEMMA_BATCH_SIZE = 500
     _MAX_LEMMA_BATCH_SIZE = 10000
+    _DEFAULT_LEMMA_GATE_BATCH_CAP = 1500
+    _MIN_LEMMA_GATE_BATCH_CAP = 500
+    _MAX_LEMMA_GATE_BATCH_CAP = 10000
 
     def __init__(self):
         self.db_service = DBService.get_instance()
         self._lemma_batch_size = self._DEFAULT_LEMMA_BATCH_SIZE
+        self._lemma_gate_batch_cap = self._DEFAULT_LEMMA_GATE_BATCH_CAP
         self._gate_trace_path: Optional[Path] = None
         self._gate_trace_lock = threading.Lock()
 
@@ -77,6 +81,7 @@ class ProjectImportEngine:
         host_conn = None
         payload_conn = None
         self._lemma_batch_size = self._resolve_lemma_batch_size()
+        self._lemma_gate_batch_cap = self._resolve_lemma_gate_batch_cap()
         self._configure_gate_trace(gate_trace_path)
 
         try:
@@ -219,6 +224,33 @@ class ProjectImportEngine:
                 clamped,
                 self._MIN_LEMMA_BATCH_SIZE,
                 self._MAX_LEMMA_BATCH_SIZE,
+            )
+        return clamped
+
+    def _resolve_lemma_gate_batch_cap(self) -> int:
+        raw = os.environ.get("HDLE_IMPORT_LEMMA_GATE_BATCH_CAP", "").strip()
+        if not raw:
+            return self._DEFAULT_LEMMA_GATE_BATCH_CAP
+        try:
+            parsed = int(raw)
+        except ValueError:
+            logger.warning(
+                "Invalid HDLE_IMPORT_LEMMA_GATE_BATCH_CAP=%r; using default %s",
+                raw,
+                self._DEFAULT_LEMMA_GATE_BATCH_CAP,
+            )
+            return self._DEFAULT_LEMMA_GATE_BATCH_CAP
+        clamped = max(
+            self._MIN_LEMMA_GATE_BATCH_CAP,
+            min(self._MAX_LEMMA_GATE_BATCH_CAP, parsed),
+        )
+        if clamped != parsed:
+            logger.info(
+                "Clamped lemma gate batch cap from %s to %s (allowed range: %s..%s)",
+                parsed,
+                clamped,
+                self._MIN_LEMMA_GATE_BATCH_CAP,
+                self._MAX_LEMMA_GATE_BATCH_CAP,
             )
         return clamped
 
@@ -888,9 +920,13 @@ class ProjectImportEngine:
                     )
                 )
 
-            for offset in range(0, len(remapped_rows), batch_size):
+            table_batch_size = batch_size
+            if table_name == "lemma":
+                table_batch_size = min(batch_size, self._lemma_gate_batch_cap)
+
+            for offset in range(0, len(remapped_rows), table_batch_size):
                 self._check_cancelled(cancel_check)
-                batch_rows = remapped_rows[offset:offset + batch_size]
+                batch_rows = remapped_rows[offset:offset + table_batch_size]
                 rows_in_batch = len(batch_rows)
 
                 def _insert_batch() -> None:

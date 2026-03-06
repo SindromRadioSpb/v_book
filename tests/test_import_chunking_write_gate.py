@@ -35,6 +35,7 @@ def _make_engine_without_dbservice() -> ProjectImportEngine:
     engine = object.__new__(ProjectImportEngine)
     engine.db_service = None
     engine._lemma_batch_size = 2000
+    engine._lemma_gate_batch_cap = 1500
     engine._gate_trace_path = None
     engine._gate_trace_lock = threading.Lock()
     return engine
@@ -153,3 +154,55 @@ def test_import_table_in_gate_batches_checks_cancel_between_batches() -> None:
             host_conn.close()
             payload_conn.close()
 
+
+def test_import_table_in_gate_batches_respects_lemma_gate_batch_cap() -> None:
+    engine = _make_engine_without_dbservice()
+    engine._lemma_gate_batch_cap = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host_path = Path(tmpdir) / "host.db"
+        payload_path = Path(tmpdir) / "payload.db"
+        host_conn = _build_minimal_conn(host_path)
+        payload_conn = _build_minimal_conn(payload_path)
+
+        try:
+            payload_conn.executemany(
+                "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
+                [(i, f"lemma_{i}") for i in range(1, 11)],
+            )
+            payload_conn.commit()
+
+            batch_sizes: list[int] = []
+
+            def fake_run_serialized_write_tx(
+                _host_conn,
+                *,
+                operation: str,
+                action,
+                batch_idx=None,
+                rows_in_batch=None,
+            ) -> None:
+                if operation == "import.table.lemma":
+                    batch_sizes.append(int(rows_in_batch or 0))
+                action()
+
+            engine._run_serialized_write_tx = fake_run_serialized_write_tx  # type: ignore[method-assign]
+            engine._cooperative_yield_if_needed = lambda **_kwargs: None  # type: ignore[method-assign]
+
+            imported = engine._import_table_in_gate_batches(
+                host_conn,
+                payload_conn,
+                "lemma",
+                offsets={"lemma": 0, "dict_project": 0},
+                override_name=None,
+                warnings=[],
+                tm_global_id_map=None,
+                cancel_check=None,
+                batch_size=6,
+            )
+
+            assert imported == 10
+            assert batch_sizes == [4, 4, 2]
+        finally:
+            host_conn.close()
+            payload_conn.close()
