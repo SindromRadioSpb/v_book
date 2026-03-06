@@ -50,16 +50,11 @@ Write-Host "== Release Gate Diagnostic ==" -ForegroundColor Cyan
 Write-Host "Using TEMP/TMP=$tmpDir" -ForegroundColor Yellow
 Write-Host "Writing log: $releaseLog" -ForegroundColor Yellow
 
-$pytestOutput = & $python -m pytest -q -ra --maxfail=0 2>&1 | Tee-Object -FilePath $releaseLog
+cmd /c "`"$python`" -m pytest -q -ra --maxfail=0 > `"$releaseLog`" 2>&1"
 $pytestExitCode = $LASTEXITCODE
 
 $lines = @()
-if ($pytestOutput -is [System.Array]) {
-    $lines = $pytestOutput | ForEach-Object { [string]$_ }
-} elseif ($null -ne $pytestOutput) {
-    $lines = @([string]$pytestOutput)
-}
-if ($lines.Count -eq 0 -and (Test-Path $releaseLog)) {
+if (Test-Path $releaseLog) {
     $lines = Get-Content -Path $releaseLog
 }
 
