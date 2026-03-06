@@ -257,6 +257,33 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
             "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
             [(next_lemma_id + i, f"lemma_batch_{i:05d}") for i in range(1200)],
         )
+
+        # Add enough documents so source_document import is split into multiple gate batches.
+        next_doc_id = conn.execute("SELECT COALESCE(MAX(doc_id), 0) FROM source_document").fetchone()[0] + 1
+        source_docs = []
+        source_texts = []
+        for i in range(600):
+            doc_id = next_doc_id + i
+            source_docs.append(
+                (
+                    doc_id,
+                    f"/batch/doc_{doc_id}.txt",
+                    f"doc_{doc_id}.txt",
+                    f"sha{doc_id:064d}",
+                )
+            )
+            source_texts.append((doc_id, f"Batch text {doc_id}"))
+        conn.executemany(
+            """
+            INSERT INTO source_document (doc_id, corpus_id, file_path, file_name, file_ext, sha256, status)
+            VALUES (?, 1, ?, ?, 'txt', ?, 'processed')
+            """,
+            source_docs,
+        )
+        conn.executemany(
+            "INSERT INTO document_text (doc_id, raw_text, ocr_used) VALUES (?, ?, 0)",
+            source_texts,
+        )
         conn.commit()
     finally:
         conn.close()
@@ -296,7 +323,9 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
     assert any(op.startswith("import.table.") for op in operations)
     assert "import.fix_general_corpus_self_ref" in operations
     lemma_ops = [op for op in operations if op == "import.table.lemma"]
+    source_document_ops = [op for op in operations if op == "import.table.source_document"]
     assert len(lemma_ops) >= 3
+    assert len(source_document_ops) >= 2
 
 
 def test_import_cancel_during_lemma_batch_cleans_rows(populated_project, temp_db, monkeypatch):

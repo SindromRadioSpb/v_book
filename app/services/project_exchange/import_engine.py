@@ -595,7 +595,8 @@ class ProjectImportEngine:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
-                if table_name == "lemma":
+                if table_name in {"lemma", "source_document"}:
+                    batch_size = self._lemma_batch_size
                     count = self._import_table_in_gate_batches(
                         host_conn,
                         payload_conn,
@@ -605,14 +606,14 @@ class ProjectImportEngine:
                         warnings,
                         tm_global_id_map,
                         cancel_check=cancel_check,
-                        batch_size=self._lemma_batch_size,
+                        batch_size=batch_size,
                     )
                     table_counts[table_name] = count
                     logger.debug(
                         "Imported %s rows into %s using batch_size=%s",
                         count,
                         table_name,
-                        self._lemma_batch_size,
+                        batch_size,
                     )
                     continue
 
