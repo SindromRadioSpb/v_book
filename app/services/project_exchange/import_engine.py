@@ -897,7 +897,13 @@ class ProjectImportEngine:
 
         total_rows = 0
         batch_idx = 0
-        read_chunk_size = max(batch_size, 2048)
+        table_batch_size = batch_size
+        if table_name == "lemma":
+            table_batch_size = min(batch_size, self._lemma_gate_batch_cap)
+            multiplier = max(1, (batch_size + table_batch_size - 1) // table_batch_size)
+            read_chunk_size = table_batch_size * multiplier
+        else:
+            read_chunk_size = max(batch_size, 2048)
 
         while True:
             self._check_cancelled(cancel_check)
@@ -919,10 +925,6 @@ class ProjectImportEngine:
                         tm_global_id_map=tm_global_id_map,
                     )
                 )
-
-            table_batch_size = batch_size
-            if table_name == "lemma":
-                table_batch_size = min(batch_size, self._lemma_gate_batch_cap)
 
             for offset in range(0, len(remapped_rows), table_batch_size):
                 self._check_cancelled(cancel_check)

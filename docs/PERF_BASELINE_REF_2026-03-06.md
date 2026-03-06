@@ -193,3 +193,48 @@ $env:TMP = $tmp
 ### Interpretation
 - Primary PATCH-02 goal achieved: worst-case `lemma` gate hold window reduced by ~`60ms` (`-17.9%`) on max/p95 tail.
 - Tradeoff observed: average and p95 concurrent save latency increased; this is a follow-up target for PATCH-03.
+
+## PATCH-03 Planning (3-run stability, sandbox-only)
+### Objective
+- Confirm post PATCH-02 bottleneck and save/hold profile before implementing a single mitigation to recover save p95.
+
+### BEFORE artifacts
+- `build\logs\import_concurrent_save_metrics_20260306_122846.json`
+- `build\logs\import_concurrent_save_metrics_20260306_123335.json`
+- `build\logs\import_concurrent_save_metrics_20260306_123829.json`
+
+### Top phase frequency
+- `import.table.lemma`: `3/3` runs (stable TOP-1 bottleneck).
+
+### BEFORE metrics summary (3-run aggregate)
+- `overall_max_hold_ms`: max/p95 `270.701`, mean `262.223`
+- `lemma_phase_max_hold_ms`: max/p95 `270.701`, mean `262.223`
+- `save_p95_ms`: max/p95 `186.422`, mean `180.525`
+- `save_max_ms`: max/p95 `330.063`, mean `282.359`
+
+## PATCH-03 Mitigation
+- One change only (lemma path):
+  - align lemma import read chunk size to a multiple of effective lemma gate cap (`HDLE_IMPORT_LEMMA_GATE_BATCH_CAP`).
+  - with `--lemma-batch-size 2000` and cap `1500`, read chunk becomes `3000` (aligned), avoiding `1500+500` mid-stream bursts.
+- Other tables/phases unchanged.
+
+## PATCH-03 AFTER (3-run)
+### AFTER artifacts
+- `build\logs\import_concurrent_save_metrics_20260306_130103.json`
+- `build\logs\import_concurrent_save_metrics_20260306_130552.json`
+- `build\logs\import_concurrent_save_metrics_20260306_131044.json`
+
+### Top phase frequency
+- `import.table.lemma`: `3/3` runs (still TOP-1 bottleneck).
+
+### BEFORE vs AFTER (3-run aggregate)
+| Metric | BEFORE max/p95 | AFTER max/p95 | Delta (max/p95) | BEFORE mean | AFTER mean | Delta mean |
+|---|---:|---:|---:|---:|---:|---:|
+| overall_max_hold_ms | 270.701 | 278.947 | +8.246 | 262.223 | 263.257 | +1.034 |
+| lemma_phase_max_hold_ms | 270.701 | 278.947 | +8.246 | 262.223 | 263.257 | +1.034 |
+| save_p95_ms | 186.422 | 190.623 | +4.201 | 180.525 | 166.507 | -14.018 |
+| save_max_ms | 330.063 | 297.981 | -32.082 | 282.359 | 284.149 | +1.790 |
+
+### Tradeoff note
+- Goal partially recovered: `save_p95` trend improved on mean (`-14.018ms`) and `save_max` tail improved (`-32.082ms`).
+- Hold tail stayed in similar band with minor noise-level increase on max/p95 (`+8.246ms`), no large regression.
