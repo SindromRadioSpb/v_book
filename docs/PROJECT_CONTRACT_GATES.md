@@ -61,6 +61,26 @@ Command:
 powershell -ExecutionPolicy Bypass -File scripts\run_packaged_smoke.ps1
 ```
 
+### 5) Write-Gate Perf Gate (optional, evidence track)
+
+Purpose:
+- deterministic 3-run write-gate benchmark + budget classification (PASS/WARN/FAIL)
+- produce machine-readable and markdown evidence for scaling patches
+
+Command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_write_gate_perf_gate.ps1
+```
+
+Policy:
+- optional by default and does not block Variant A PATCH flow.
+- can be opt-in from Fast Gate with `HDLE_ENABLE_PERF_GATE=1`.
+- result handling when enabled from Fast Gate:
+  - exit `0` (PASS): continue
+  - exit `2` (WARN): continue with warning and report link
+  - exit `1` (FAIL): fail Fast Gate
+
 ## GO / NO-GO Rules
 
 ### Scaling PATCH GO (Variant A)
@@ -84,6 +104,7 @@ cd /d J:\Project_Vibe\V_book
 powershell -ExecutionPolicy Bypass -File scripts\run_fast_gates.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_smoke_gates.ps1 -SmokeDbPath "J:\Project_Vibe\V_book\test_data\test.db"
 powershell -ExecutionPolicy Bypass -File scripts\run_release_gate_diagnostic.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_write_gate_perf_gate.ps1
 ```
 
 ## Required Artifacts
@@ -92,6 +113,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run_release_gate_diagnostic.ps1
 - `build\logs\smoke_gate_latest.log`
 - `build\logs\release_gate_latest.txt`
 - `build\logs\release_gate_inventory.md`
+- `build\logs\write_gate_perf_gate_latest.log` (optional perf gate)
+- `build\logs\write_gate_budget_report_latest.md` (optional perf gate)
 
 ## Never Re-Litigate Clause
 

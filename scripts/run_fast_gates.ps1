@@ -59,6 +59,21 @@ try {
             -m "not smoke and not env"
     }
 
+    if ($env:HDLE_ENABLE_PERF_GATE -eq "1") {
+        Write-Host "== Optional write-gate perf gate (HDLE_ENABLE_PERF_GATE=1) ==" -ForegroundColor Cyan
+        powershell -ExecutionPolicy Bypass -File "scripts\run_write_gate_perf_gate.ps1"
+        $perfExit = $LASTEXITCODE
+        if ($perfExit -eq 1) {
+            throw "Optional write-gate perf gate failed (exit code: 1). See build\\logs\\write_gate_budget_report_latest.md"
+        } elseif ($perfExit -eq 2) {
+            Write-Warning "Optional write-gate perf gate returned WARN (exit code: 2). Fast Gate continues. Report: build\\logs\\write_gate_budget_report_latest.md"
+        } elseif ($perfExit -ne 0) {
+            throw "Optional write-gate perf gate returned unexpected exit code: $perfExit"
+        } else {
+            Write-Host "[OK] Optional write-gate perf gate" -ForegroundColor Green
+        }
+    }
+
     Write-Host "PASS: Variant A fast gate is green." -ForegroundColor Green
 } finally {
     Stop-Transcript | Out-Null
