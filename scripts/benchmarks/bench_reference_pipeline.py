@@ -1,441 +1,1273 @@
+﻿
 #!/usr/bin/env python3
-"""
-PATCH-00: Benchmark Hebrew Wikipedia Reference Pipeline
+"""PATCH-05: Real pipeline benchmark harness (sandbox-only, deterministic)."""
 
-Estimates runtime for:
-1. "Process with NLP" (387,639 documents)
-2. "Extract Terms" (387,639 documents)
-
-Methodology:
-- Select N sample documents from reference corpus (deterministic seed)
-- Measure throughput (docs/sec) for NLP processing
-- Measure throughput (docs/sec) for term extraction
-- Extrapolate to full corpus size
-
-Output:
-- Console report with estimates
-- JSON report saved to docs/BENCH_HEWIKI_PIPELINE_<timestamp>.json
-- Markdown report saved to docs/BENCH_HEWIKI_PIPELINE_<timestamp>.md
-"""
+from __future__ import annotations
 
 import argparse
 import json
 import logging
-import random
+import shutil
+import sqlite3
 import sys
+import tempfile
 import time
+import traceback
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from sqlalchemy import select, func
-from app.infra.util.logging import setup_logging
-from app.services.db_service import DBService
-from app.services.process_service import ProcessService
-from app.services.term_extraction_service import TermExtractionService
-from app.infra.sa_models import SourceDocument, SourceCorpus, DictProject
+LOG = logging.getLogger("pipeline_bench")
 
-logger = logging.getLogger(__name__)
+DEFAULT_PHONIKUD_MODEL_PATH = r"M:\V_book\HDLE_Processing\models\phonikud-1.0.int8.onnx"
+DEFAULT_GCT_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_translait"
+DEFAULT_GCTTS_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_tts"
+DEFAULT_SOURCE_DB = (
+    r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db"
+)
+DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
+DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"
+DEFAULT_TEMP_ROOT = r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 
 
-def format_duration(seconds: float) -> str:
-    """Format duration as human-readable string."""
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        return f"{seconds/60:.1f}min"
-    else:
-        hours = seconds / 3600
-        return f"{hours:.1f}h"
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def get_reference_project_docs(session, project_name: str, sample_size: int, seed: int) -> List[int]:
-    """
-    Get sample document IDs from reference corpus (deterministic).
+def deterministic_slice_doc_ids(doc_ids: list[int], limit: int) -> list[int]:
+    """Sorted deterministic subset helper (used by tests and runtime)."""
+    unique_sorted = sorted({int(v) for v in doc_ids})
+    if limit <= 0:
+        return unique_sorted
+    return unique_sorted[:limit]
 
-    Args:
-        session: Database session
-        project_name: Reference project name
-        sample_size: Number of docs to sample
-        seed: Random seed for reproducibility
 
-    Returns:
-        List of document IDs
-    """
-    logger.info(f"Finding reference project: {project_name}")
-
-    # Find project
-    project = session.execute(
-        select(DictProject).where(DictProject.name == project_name)
-    ).scalar_one_or_none()
-
-    if not project:
-        raise ValueError(f"Project not found: {project_name}")
-
-    logger.info(f"Found project ID={project.project_id}, is_general_corpus={project.is_general_corpus}")
-
-    # Get all document IDs
-    result = session.execute(
-        select(SourceDocument.doc_id)
-        .join(SourceCorpus)
-        .where(SourceCorpus.project_id == project.project_id)
-        .order_by(SourceDocument.doc_id)  # Deterministic ordering
-    )
-    all_doc_ids = [row[0] for row in result]
-
-    total_docs = len(all_doc_ids)
-    logger.info(f"Total documents in project: {total_docs:,}")
-
-    if sample_size >= total_docs:
-        logger.warning(f"Sample size ({sample_size}) >= total docs ({total_docs}), using all docs")
-        return all_doc_ids
-
-    # Deterministic sample
-    random.seed(seed)
-    sample_doc_ids = random.sample(all_doc_ids, sample_size)
-    sample_doc_ids.sort()  # Keep sorted for consistency
-
-    logger.info(f"Sampled {len(sample_doc_ids):,} documents (seed={seed})")
-    return sample_doc_ids
-
-
-def benchmark_nlp_processing(session, doc_ids: List[int], use_gpu: bool = False) -> Dict:
-    """
-    Benchmark NLP processing throughput.
-
-    Args:
-        session: Database session
-        doc_ids: List of document IDs to process
-        use_gpu: Whether to use GPU
-
-    Returns:
-        Dict with benchmark results
-    """
-    logger.info(f"=== BENCHMARK: NLP Processing ===")
-    logger.info(f"Documents: {len(doc_ids):,}")
-    logger.info(f"GPU: {use_gpu}")
-
-    process_service = ProcessService()
-
-    # Warm up (process 1 doc to load models)
-    logger.info("Warming up NLP engine...")
-    warmup_start = time.time()
-    process_service.process_document(session, doc_ids[0], use_gpu=use_gpu, use_mock=False)
-    warmup_duration = time.time() - warmup_start
-    logger.info(f"Warmup complete: {warmup_duration:.2f}s")
-
-    # Benchmark processing
-    logger.info(f"Processing {len(doc_ids)-1:,} documents...")
-    start_time = time.time()
-    success_count = 0
-    error_count = 0
-
-    for i, doc_id in enumerate(doc_ids[1:], start=1):  # Skip warmup doc
-        try:
-            success = process_service.process_document(session, doc_id, use_gpu=use_gpu, use_mock=False)
-            if success:
-                success_count += 1
-            else:
-                error_count += 1
-        except Exception as e:
-            logger.error(f"Error processing doc {doc_id}: {e}")
-            error_count += 1
-
-        # Progress every 100 docs
-        if i % 100 == 0:
-            elapsed = time.time() - start_time
-            rate = i / elapsed if elapsed > 0 else 0
-            logger.info(f"Progress: {i}/{len(doc_ids)-1} ({rate:.1f} docs/sec)")
-
-    total_duration = time.time() - start_time
-    throughput = (len(doc_ids) - 1) / total_duration if total_duration > 0 else 0
-
-    result = {
-        "phase": "nlp_processing",
-        "sample_size": len(doc_ids) - 1,  # Exclude warmup
-        "success": success_count,
-        "errors": error_count,
-        "duration_sec": total_duration,
-        "warmup_sec": warmup_duration,
-        "throughput_docs_per_sec": throughput,
-        "use_gpu": use_gpu,
-    }
-
-    logger.info(f"NLP Processing complete:")
-    logger.info(f"  Success: {success_count:,}")
-    logger.info(f"  Errors: {error_count:,}")
-    logger.info(f"  Duration: {format_duration(total_duration)}")
-    logger.info(f"  Throughput: {throughput:.2f} docs/sec")
-
-    return result
-
-
-def benchmark_term_extraction(session, project_id: int, doc_ids: List[int]) -> Dict:
-    """
-    Benchmark term extraction throughput.
-
-    Args:
-        session: Database session
-        project_id: Project ID
-        doc_ids: List of document IDs (should be already processed with NLP)
-
-    Returns:
-        Dict with benchmark results
-    """
-    logger.info(f"=== BENCHMARK: Term Extraction ===")
-    logger.info(f"Documents: {len(doc_ids):,}")
-
-    term_service = TermExtractionService()
-
-    # Extract terms for the project
-    logger.info("Extracting terms...")
-    start_time = time.time()
-
-    report = term_service.extract_terms_for_project(session, project_id)
-
-    total_duration = time.time() - start_time
-    throughput = len(doc_ids) / total_duration if total_duration > 0 else 0
-
-    result = {
-        "phase": "term_extraction",
-        "sample_size": len(doc_ids),
-        "duration_sec": total_duration,
-        "throughput_docs_per_sec": throughput,
-        "ngrams_extracted": report.ngrams_extracted if report else 0,
-        "clusters_created": report.clusters_created if report else 0,
-    }
-
-    logger.info(f"Term Extraction complete:")
-    logger.info(f"  Duration: {format_duration(total_duration)}")
-    logger.info(f"  Throughput: {throughput:.2f} docs/sec")
-    logger.info(f"  N-grams: {result['ngrams_extracted']:,}")
-    logger.info(f"  Clusters: {result['clusters_created']:,}")
-
-    return result
-
-
-def extrapolate_to_full_corpus(nlp_result: Dict, term_result: Dict, total_docs: int) -> Dict:
-    """
-    Extrapolate benchmark results to full corpus.
-
-    Args:
-        nlp_result: NLP benchmark results
-        term_result: Term extraction benchmark results
-        total_docs: Total documents in full corpus
-
-    Returns:
-        Dict with extrapolated estimates
-    """
-    nlp_throughput = nlp_result["throughput_docs_per_sec"]
-    term_throughput = term_result["throughput_docs_per_sec"]
-
-    nlp_estimated_sec = total_docs / nlp_throughput if nlp_throughput > 0 else float('inf')
-    term_estimated_sec = total_docs / term_throughput if term_throughput > 0 else float('inf')
-    total_estimated_sec = nlp_estimated_sec + term_estimated_sec
-
-    return {
-        "total_docs": total_docs,
-        "nlp_processing": {
-            "estimated_duration_sec": nlp_estimated_sec,
-            "estimated_duration_human": format_duration(nlp_estimated_sec),
-            "throughput_docs_per_sec": nlp_throughput,
-        },
-        "term_extraction": {
-            "estimated_duration_sec": term_estimated_sec,
-            "estimated_duration_human": format_duration(term_estimated_sec),
-            "throughput_docs_per_sec": term_throughput,
-        },
-        "total_pipeline": {
-            "estimated_duration_sec": total_estimated_sec,
-            "estimated_duration_human": format_duration(total_estimated_sec),
-        },
-    }
-
-
-def save_reports(benchmark_data: Dict, estimates: Dict, output_dir: Path):
-    """Save benchmark reports in JSON and Markdown formats."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-    # JSON report
-    json_path = output_dir / f"BENCH_HEWIKI_PIPELINE_{timestamp}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "benchmark_results": benchmark_data,
-            "extrapolated_estimates": estimates,
-            "timestamp": timestamp,
-        }, f, indent=2, ensure_ascii=False)
-
-    logger.info(f"JSON report saved: {json_path}")
-
-    # Markdown report
-    md_path = output_dir / f"BENCH_HEWIKI_PIPELINE_{timestamp}.md"
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# Hebrew Wikipedia Pipeline Benchmark\n\n")
-        f.write(f"**Date:** {timestamp}\n\n")
-        f.write(f"## Sample Benchmark Results\n\n")
-        f.write(f"### NLP Processing\n")
-        f.write(f"- Sample size: {benchmark_data['nlp']['sample_size']:,} documents\n")
-        f.write(f"- Duration: {format_duration(benchmark_data['nlp']['duration_sec'])}\n")
-        f.write(f"- Throughput: {benchmark_data['nlp']['throughput_docs_per_sec']:.2f} docs/sec\n")
-        f.write(f"- Success: {benchmark_data['nlp']['success']:,}\n")
-        f.write(f"- Errors: {benchmark_data['nlp']['errors']}\n\n")
-
-        f.write(f"### Term Extraction\n")
-        f.write(f"- Sample size: {benchmark_data['term']['sample_size']:,} documents\n")
-        f.write(f"- Duration: {format_duration(benchmark_data['term']['duration_sec'])}\n")
-        f.write(f"- Throughput: {benchmark_data['term']['throughput_docs_per_sec']:.2f} docs/sec\n")
-        f.write(f"- N-grams extracted: {benchmark_data['term']['ngrams_extracted']:,}\n")
-        f.write(f"- Clusters created: {benchmark_data['term']['clusters_created']:,}\n\n")
-
-        f.write(f"## Extrapolated Estimates (Full Corpus: {estimates['total_docs']:,} documents)\n\n")
-        f.write(f"### NLP Processing\n")
-        f.write(f"- **Estimated duration:** {estimates['nlp_processing']['estimated_duration_human']}\n")
-        f.write(f"- Throughput: {estimates['nlp_processing']['throughput_docs_per_sec']:.2f} docs/sec\n\n")
-
-        f.write(f"### Term Extraction\n")
-        f.write(f"- **Estimated duration:** {estimates['term_extraction']['estimated_duration_human']}\n")
-        f.write(f"- Throughput: {estimates['term_extraction']['throughput_docs_per_sec']:.2f} docs/sec\n\n")
-
-        f.write(f"### Total Pipeline\n")
-        f.write(f"- **Estimated total duration:** {estimates['total_pipeline']['estimated_duration_human']}\n\n")
-
-        f.write(f"## Notes\n\n")
-        f.write(f"- Estimates based on {benchmark_data['nlp']['sample_size']:,} sample documents\n")
-        f.write(f"- Actual performance may vary based on document size, complexity, and system load\n")
-        f.write(f"- GPU acceleration: {benchmark_data['nlp']['use_gpu']}\n")
-
-    logger.info(f"Markdown report saved: {md_path}")
-
-    return json_path, md_path
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark Hebrew Wikipedia reference pipeline"
-    )
-    parser.add_argument(
-        "--db-path",
-        type=str,
-        help="Path to database file (default: production DB)",
-    )
-    parser.add_argument(
-        "--project-name",
-        type=str,
-        default="Hebrew Wikipedia Baseline",
-        help="Reference project name (default: Hebrew Wikipedia Baseline)",
-    )
-    parser.add_argument(
-        "--sample-docs",
-        type=int,
-        default=1000,
-        help="Number of documents to sample (default: 1000)",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducibility (default: 42)",
-    )
-    parser.add_argument(
-        "--use-gpu",
-        action="store_true",
-        help="Use GPU for NLP processing",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="docs",
-        help="Output directory for reports (default: docs/)",
-    )
-
-    args = parser.parse_args()
-
-    # Setup logging
-    setup_logging(Path("logs"), level=logging.INFO)
-
-    # Initialize database
-    if args.db_path:
-        db_path = Path(args.db_path).resolve()
-    else:
-        # Use production DB
-        if sys.platform == "win32":
-            db_path = Path(r"M:\V_book\HDLE\hdle_production_new.db")
-        else:
-            db_path = Path.home() / ".local" / "share" / "hdle" / "hdle.db"
-
-    logger.info(f"Database: {db_path}")
-    DBService.initialize(db_path)
-
-    db_service = DBService.get_instance()
-    output_dir = Path(args.output_dir)
+def build_artifact_file_paths(output_dir: Path) -> dict[str, Path]:
+    output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    ts = _utc_now().strftime("%Y%m%d_%H%M%S")
+    return {
+        "timestamp": Path(ts),
+        "latest_log": output_dir / "pipeline_bench_latest.log",
+        "metrics_json": output_dir / f"pipeline_bench_metrics_{ts}.json",
+        "report_md": output_dir / f"pipeline_bench_report_{ts}.md",
+    }
+
+
+def _is_forbidden_m_path(path: Path) -> bool:
+    normalized = str(path.resolve()).replace("/", "\\").upper()
+    return normalized.startswith("M:\\")
+
+
+def _is_expected_j_path(path: Path) -> bool:
+    normalized = str(path.resolve()).replace("/", "\\").upper()
+    return normalized.startswith("J:\\")
+
+
+def _sqlite_backup(source_path: Path, dest_path: Path) -> None:
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    src_conn = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
+    dst_conn = sqlite3.connect(str(dest_path))
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
+
+
+def _reset_db_service() -> None:
+    from app.services.db_service import DBService
 
     try:
-        with db_service.get_session() as session:
-            # Get sample documents
-            doc_ids = get_reference_project_docs(
-                session,
-                args.project_name,
-                args.sample_docs,
-                args.seed
-            )
-
-            # Get total doc count for extrapolation
-            total_docs_result = session.execute(
-                select(func.count(SourceDocument.doc_id))
-                .join(SourceCorpus)
-                .join(DictProject)
-                .where(DictProject.name == args.project_name)
-            )
-            total_docs = total_docs_result.scalar()
-
-            # Benchmark NLP processing
-            nlp_result = benchmark_nlp_processing(session, doc_ids, args.use_gpu)
-            session.commit()
-
-            # Benchmark term extraction
-            project = session.execute(
-                select(DictProject).where(DictProject.name == args.project_name)
-            ).scalar_one()
-
-            term_result = benchmark_term_extraction(session, project.project_id, doc_ids)
-            session.commit()
-
-            # Extrapolate to full corpus
-            estimates = extrapolate_to_full_corpus(nlp_result, term_result, total_docs)
-
-            # Save reports
-            benchmark_data = {
-                "nlp": nlp_result,
-                "term": term_result,
-            }
-            json_path, md_path = save_reports(benchmark_data, estimates, output_dir)
-
-            # Print summary
-            print("\n" + "="*80)
-            print("BENCHMARK COMPLETE")
-            print("="*80)
-            print(f"\nSample Size: {args.sample_docs:,} documents")
-            print(f"Total Corpus: {total_docs:,} documents")
-            print(f"\nNLP Processing:")
-            print(f"  Sample throughput: {nlp_result['throughput_docs_per_sec']:.2f} docs/sec")
-            print(f"  Estimated for {total_docs:,} docs: {estimates['nlp_processing']['estimated_duration_human']}")
-            print(f"\nTerm Extraction:")
-            print(f"  Sample throughput: {term_result['throughput_docs_per_sec']:.2f} docs/sec")
-            print(f"  Estimated for {total_docs:,} docs: {estimates['term_extraction']['estimated_duration_human']}")
-            print(f"\nTotal Pipeline:")
-            print(f"  Estimated duration: {estimates['total_pipeline']['estimated_duration_human']}")
-            print(f"\nReports saved:")
-            print(f"  {json_path}")
-            print(f"  {md_path}")
-            print("="*80)
-
-    finally:
         DBService.shutdown()
+    except Exception:
+        pass
+    DBService._instance = None
+    DBService._db_manager = None
+
+
+def _setup_logging(log_file: Path) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    for handler in list(LOG.handlers):
+        LOG.removeHandler(handler)
+    LOG.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    LOG.addHandler(file_handler)
+    LOG.addHandler(stream_handler)
+
+
+def _cleanup_temp_root(temp_root: Path) -> None:
+    """Best-effort cleanup of stale temp run directories from prior aborted runs."""
+    if not temp_root.exists():
+        return
+    for child in sorted(temp_root.iterdir(), key=lambda p: p.name):
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        except Exception as exc:
+            LOG.warning("Temp cleanup skipped for %s: %s", child, exc)
+
+
+def _resolve_json_path(raw_path: str, label: str) -> Path:
+    path = Path(raw_path).expanduser().resolve()
+    if path.is_file():
+        return path
+    if path.is_dir():
+        candidates = sorted(path.glob("*.json"))
+        if candidates:
+            return candidates[0].resolve()
+    raise FileNotFoundError(
+        f"{label} path is invalid: expected JSON file or folder with *.json -> {path}"
+    )
+
+
+def _load_build_meta() -> dict[str, Any]:
+    try:
+        from app import build_meta
+
+        return {
+            "app_version": getattr(build_meta, "APP_VERSION", "unknown"),
+            "build_commit": getattr(build_meta, "BUILD_COMMIT", "unknown"),
+            "build_dirty": getattr(build_meta, "BUILD_DIRTY", 0),
+            "build_time_utc": getattr(build_meta, "BUILD_TIME_UTC", "unknown"),
+        }
+    except Exception:
+        return {
+            "app_version": "unknown",
+            "build_commit": "unknown",
+            "build_dirty": 0,
+            "build_time_utc": "unknown",
+        }
+
+
+def _validate_runtime_contract(args: argparse.Namespace) -> None:
+    db_path = Path(args.db_path).expanduser().resolve()
+    source_db = Path(args.source_db).expanduser().resolve()
+    temp_root = Path(args.temp_root).expanduser().resolve()
+
+    if _is_forbidden_m_path(db_path):
+        raise ValueError(f"Forbidden --db-path on M: drive: {db_path}")
+    if _is_forbidden_m_path(source_db):
+        raise ValueError(f"Forbidden --source-db on M: drive: {source_db}")
+    if _is_forbidden_m_path(temp_root):
+        raise ValueError(f"Forbidden --temp-root on M: drive: {temp_root}")
+    if not args.copy_target:
+        raise ValueError("--copy-target is mandatory for all scenarios")
+    if not _is_expected_j_path(db_path):
+        raise ValueError(f"--db-path must be on J: drive for sandbox safety: {db_path}")
+    if not _is_expected_j_path(source_db):
+        raise ValueError(f"--source-db must be on J: drive for sandbox safety: {source_db}")
+    if not _is_expected_j_path(temp_root):
+        raise ValueError(f"--temp-root must be on J: drive for sandbox safety: {temp_root}")
+    if not source_db.exists():
+        raise FileNotFoundError(f"--source-db not found: {source_db}")
+    if args.doc_limit <= 0:
+        raise ValueError("--doc-limit must be > 0")
+    if args.lemma_limit <= 0 or args.term_limit <= 0 or args.sentence_limit <= 0:
+        raise ValueError("--lemma-limit/--term-limit/--sentence-limit must be > 0")
+
+
+def _configure_google_cloud_translate(key_path: Path) -> None:
+    from app.infra.settings import SettingsService
+    from app.infra.translators.local_providers_setup import register_google_cloud_translate
+
+    settings = SettingsService.get_instance()
+    settings.set_value("mt/providers/google_cloud_translate/enabled", True)
+    settings.set_value("mt/providers/google_cloud_translate/auth_mode", "service_account_json")
+    settings.set_value("mt/providers/google_cloud_translate/service_account_path", str(key_path))
+    settings.set_value("mt/providers/google_cloud_translate/service_account_credential_id", "")
+    settings.sync()
+    if not register_google_cloud_translate():
+        raise RuntimeError("Failed to register google_cloud_translate provider")
+
+
+def _configure_google_cloud_tts(key_path: Path) -> None:
+    from app.infra.settings import SettingsService
+    from app.infra.audio.local_providers_setup import register_default_audio_providers
+
+    settings = SettingsService.get_instance()
+    settings.set_value("audio/providers/google_cloud_tts/enabled", True)
+    settings.set_value("audio/providers/google_cloud_tts/auth_mode", "service_account_json")
+    settings.set_value("audio/providers/google_cloud_tts/service_account_path", str(key_path))
+    settings.set_value("audio/providers/google_cloud_tts/service_account_credential_id", "")
+    settings.sync()
+    register_default_audio_providers()
+
+
+def _prepare_base_sandbox(base_db: Path, source_db: Path) -> None:
+    base_db.parent.mkdir(parents=True, exist_ok=True)
+    # Refresh canonical sandbox base from local writable corpus copy.
+    _sqlite_backup(source_db, base_db)
+
+
+@contextmanager
+def _working_db_copy(base_db: Path, temp_root: Path):
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="hdle_pipeline_bench_",
+        dir=str(temp_root),
+        ignore_cleanup_errors=True,
+    ) as temp_dir:
+        run_db = Path(temp_dir) / "pipeline_work.db"
+        _sqlite_backup(base_db, run_db)
+        yield run_db
+
+
+def _select_source_doc_ids(session, source_project_id: int, doc_limit: int) -> list[int]:
+    from sqlalchemy import select
+    from app.infra.sa_models import SourceCorpus, SourceDocument
+
+    source_doc_ids = (
+        session.execute(
+            select(SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == source_project_id)
+            .order_by(SourceDocument.doc_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return deterministic_slice_doc_ids(list(source_doc_ids), doc_limit)
+
+def _clone_slice_into_bench_project(
+    session,
+    *,
+    source_project_id: int,
+    bench_project_name: str,
+    doc_limit: int,
+) -> dict[str, Any]:
+    from sqlalchemy import select
+    from app.infra.sa_models import (
+        DictProject,
+        DocumentSentence,
+        DocumentText,
+        Lemma,
+        LemmaDocStat,
+        LemmaProjectStat,
+        SourceCorpus,
+        SourceDocument,
+    )
+
+    source_project = session.get(DictProject, source_project_id)
+    if source_project is None:
+        raise ValueError(f"Source project not found: {source_project_id}")
+
+    selected_source_doc_ids = _select_source_doc_ids(session, source_project_id, doc_limit)
+    if not selected_source_doc_ids:
+        raise RuntimeError(f"No documents available for source project_id={source_project_id}")
+
+    existing_bench = session.execute(
+        select(DictProject)
+        .where(
+            DictProject.library_id == source_project.library_id,
+            DictProject.name == bench_project_name,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing_bench is not None:
+        session.delete(existing_bench)
+        session.flush()
+
+    bench_project = DictProject(
+        library_id=source_project.library_id,
+        name=bench_project_name,
+        description=f"Deterministic benchmark slice from project_id={source_project_id}",
+        src_lang=source_project.src_lang,
+        tgt_lang=source_project.tgt_lang,
+        nlp_engine=source_project.nlp_engine,
+        nlp_engine_version=source_project.nlp_engine_version,
+        mwe_min_freq=source_project.mwe_min_freq,
+        mwe_min_pmi=source_project.mwe_min_pmi,
+        mwe_min_tscore=source_project.mwe_min_tscore,
+        mwe_max_n=source_project.mwe_max_n,
+        is_general_corpus=0,
+        general_corpus_id=None,
+    )
+    session.add(bench_project)
+    session.flush()
+
+    bench_corpus = SourceCorpus(
+        project_id=bench_project.project_id,
+        name=f"{bench_project_name}_CORPUS",
+        description="Generated by scripts/benchmarks/bench_reference_pipeline.py",
+    )
+    session.add(bench_corpus)
+    session.flush()
+
+    source_docs = (
+        session.execute(
+            select(SourceDocument)
+            .where(SourceDocument.doc_id.in_(selected_source_doc_ids))
+            .order_by(SourceDocument.doc_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    doc_id_map: dict[int, int] = {}
+    for row in source_docs:
+        copied = SourceDocument(
+            corpus_id=bench_corpus.corpus_id,
+            file_path=row.file_path,
+            file_name=row.file_name,
+            file_ext=row.file_ext,
+            file_size_bytes=row.file_size_bytes,
+            sha256=row.sha256,
+            imported_at=row.imported_at,
+            processed_at=row.processed_at,
+            file_mtime_utc=row.file_mtime_utc,
+            status=row.status,
+            error_message=row.error_message,
+            sentence_count=row.sentence_count,
+            token_count=row.token_count,
+            tag=row.tag,
+            link_url=row.link_url,
+            level=row.level,
+            topic=row.topic,
+        )
+        session.add(copied)
+        session.flush()
+        doc_id_map[int(row.doc_id)] = int(copied.doc_id)
+
+    source_texts = (
+        session.execute(
+            select(DocumentText)
+            .where(DocumentText.doc_id.in_(selected_source_doc_ids))
+            .order_by(DocumentText.doc_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    for row in source_texts:
+        mapped_doc_id = doc_id_map.get(int(row.doc_id))
+        if mapped_doc_id is None:
+            continue
+        session.add(
+            DocumentText(
+                doc_id=mapped_doc_id,
+                raw_text=row.raw_text,
+                cleaned_text=row.cleaned_text,
+                ocr_used=row.ocr_used,
+            )
+        )
+
+    sentence_id_map: dict[int, int] = {}
+    source_sentences = (
+        session.execute(
+            select(DocumentSentence)
+            .where(DocumentSentence.doc_id.in_(selected_source_doc_ids))
+            .order_by(
+                DocumentSentence.doc_id.asc(),
+                DocumentSentence.sent_index.asc(),
+                DocumentSentence.sentence_id.asc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in source_sentences:
+        mapped_doc_id = doc_id_map.get(int(row.doc_id))
+        if mapped_doc_id is None:
+            continue
+        copied = DocumentSentence(
+            doc_id=mapped_doc_id,
+            sent_index=row.sent_index,
+            text=row.text,
+        )
+        session.add(copied)
+        session.flush()
+        sentence_id_map[int(row.sentence_id)] = int(copied.sentence_id)
+
+    lemma_id_map: dict[int, int] = {}
+    source_lemmas = (
+        session.execute(
+            select(Lemma)
+            .join(LemmaDocStat, LemmaDocStat.lemma_id == Lemma.lemma_id)
+            .where(
+                Lemma.project_id == source_project_id,
+                LemmaDocStat.project_id == source_project_id,
+                LemmaDocStat.doc_id.in_(selected_source_doc_ids),
+            )
+            .distinct()
+            .order_by(Lemma.lemma_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    for row in source_lemmas:
+        copied = Lemma(
+            project_id=bench_project.project_id,
+            lemma_text=row.lemma_text,
+            pos=row.pos,
+            morph_json=row.morph_json,
+            created_at=row.created_at,
+            entity_class=row.entity_class,
+            is_noise=row.is_noise,
+            noise_reason=row.noise_reason,
+            norm_text=row.norm_text,
+        )
+        session.add(copied)
+        session.flush()
+        lemma_id_map[int(row.lemma_id)] = int(copied.lemma_id)
+
+    copied_lemma_doc_stats = 0
+    if lemma_id_map:
+        source_lemma_stats = (
+            session.execute(
+                select(LemmaDocStat)
+                .where(
+                    LemmaDocStat.project_id == source_project_id,
+                    LemmaDocStat.doc_id.in_(selected_source_doc_ids),
+                )
+                .order_by(LemmaDocStat.doc_id.asc(), LemmaDocStat.lemma_id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        agg: dict[int, dict[str, Any]] = {}
+        for row in source_lemma_stats:
+            mapped_doc_id = doc_id_map.get(int(row.doc_id))
+            mapped_lemma_id = lemma_id_map.get(int(row.lemma_id))
+            if mapped_doc_id is None or mapped_lemma_id is None:
+                continue
+            mapped_sample_sentence = None
+            if row.sample_sentence_id is not None:
+                mapped_sample_sentence = sentence_id_map.get(int(row.sample_sentence_id))
+
+            session.add(
+                LemmaDocStat(
+                    project_id=bench_project.project_id,
+                    doc_id=mapped_doc_id,
+                    lemma_id=mapped_lemma_id,
+                    freq_abs=row.freq_abs,
+                    sample_sentence_id=mapped_sample_sentence,
+                )
+            )
+            copied_lemma_doc_stats += 1
+
+            stat = agg.setdefault(
+                mapped_lemma_id,
+                {
+                    "freq_abs": 0,
+                    "doc_ids": set(),
+                    "sample_sentence_id": None,
+                },
+            )
+            stat["freq_abs"] += int(row.freq_abs or 0)
+            stat["doc_ids"].add(mapped_doc_id)
+            if stat["sample_sentence_id"] is None and mapped_sample_sentence is not None:
+                stat["sample_sentence_id"] = mapped_sample_sentence
+
+        for mapped_lemma_id in sorted(agg.keys()):
+            stat = agg[mapped_lemma_id]
+            session.add(
+                LemmaProjectStat(
+                    project_id=bench_project.project_id,
+                    lemma_id=mapped_lemma_id,
+                    freq_abs=int(stat["freq_abs"]),
+                    doc_freq=len(stat["doc_ids"]),
+                    sample_sentence_id=stat["sample_sentence_id"],
+                )
+            )
+
+    session.commit()
+
+    bench_doc_ids = [doc_id_map[doc_id] for doc_id in selected_source_doc_ids if doc_id in doc_id_map]
+    bench_sentence_ids = (
+        session.execute(
+            select(DocumentSentence.sentence_id)
+            .where(DocumentSentence.doc_id.in_(bench_doc_ids))
+            .order_by(DocumentSentence.sentence_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "source_project_id": int(source_project.project_id),
+        "source_project_name": str(source_project.name),
+        "bench_project_id": int(bench_project.project_id),
+        "bench_project_name": str(bench_project.name),
+        "bench_corpus_id": int(bench_corpus.corpus_id),
+        "src_lang": str(bench_project.src_lang),
+        "tgt_lang": str(bench_project.tgt_lang),
+        "selected_source_doc_ids": [int(x) for x in selected_source_doc_ids],
+        "bench_doc_ids": [int(x) for x in bench_doc_ids],
+        "bench_sentence_ids": [int(x) for x in bench_sentence_ids],
+        "copied_counts": {
+            "documents": len(doc_id_map),
+            "document_texts": len(source_texts),
+            "sentences": len(sentence_id_map),
+            "lemmas": len(lemma_id_map),
+            "lemma_doc_stats": copied_lemma_doc_stats,
+        },
+    }
+
+
+def _load_scope_rows(
+    session,
+    *,
+    bench_project_id: int,
+    lemma_limit: int,
+    term_limit: int,
+    sentence_limit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    from sqlalchemy import select
+    from app.infra.sa_models import DocumentSentence, Lemma, SourceCorpus, SourceDocument, TermCluster
+
+    lemmas = (
+        session.execute(
+            select(Lemma.lemma_id, Lemma.lemma_text, Lemma.norm_text)
+            .where(Lemma.project_id == bench_project_id)
+            .order_by(Lemma.lemma_id.asc())
+            .limit(lemma_limit)
+        )
+        .all()
+    )
+    terms = (
+        session.execute(
+            select(TermCluster.cluster_id, TermCluster.representative_he, TermCluster.norm_text)
+            .where(TermCluster.project_id == bench_project_id)
+            .order_by(TermCluster.cluster_id.asc())
+            .limit(term_limit)
+        )
+        .all()
+    )
+    sentences = (
+        session.execute(
+            select(DocumentSentence.sentence_id, DocumentSentence.text)
+            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == bench_project_id)
+            .order_by(DocumentSentence.sentence_id.asc())
+            .limit(sentence_limit)
+        )
+        .all()
+    )
+
+    return {
+        "lemmas": [
+            {
+                "id": int(row.lemma_id),
+                "text": str(row.lemma_text or ""),
+                "norm_text": str(row.norm_text or ""),
+            }
+            for row in lemmas
+            if str(row.lemma_text or "").strip()
+        ],
+        "terms": [
+            {
+                "id": int(row.cluster_id),
+                "text": str(row.representative_he or ""),
+                "norm_text": str(row.norm_text or ""),
+            }
+            for row in terms
+            if str(row.representative_he or "").strip()
+        ],
+        "sentences": [
+            {
+                "id": int(row.sentence_id),
+                "text": str(row.text or ""),
+            }
+            for row in sentences
+            if str(row.text or "").strip()
+        ],
+    }
+
+
+def _run_extract_terms(session, *, bench_project_id: int, overwrite: bool) -> dict[str, Any]:
+    from sqlalchemy import func, select
+    from app.infra.sa_models import Lemma, SourceCorpus, SourceDocument, TermCluster, DocumentSentence
+    from app.services.term_extraction_service import TermExtractionService
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    service = TermExtractionService()
+    report = service.extract_terms_for_project(
+        session,
+        bench_project_id,
+        overwrite=overwrite,
+    )
+    session.commit()
+
+    if not report.success:
+        raise RuntimeError(report.error_message or "extract_terms_for_project returned success=False")
+
+    lemma_count = int(
+        session.execute(
+            select(func.count(Lemma.lemma_id)).where(Lemma.project_id == bench_project_id)
+        ).scalar_one()
+    )
+    term_count = int(
+        session.execute(
+            select(func.count(TermCluster.cluster_id)).where(TermCluster.project_id == bench_project_id)
+        ).scalar_one()
+    )
+    sentence_count = int(
+        session.execute(
+            select(func.count(DocumentSentence.sentence_id))
+            .select_from(DocumentSentence)
+            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == bench_project_id)
+        ).scalar_one()
+    )
+
+    return {
+        "name": "extract_terms",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": lemma_count,
+            "term": term_count,
+            "sentence": sentence_count,
+        },
+        "overwrite": bool(overwrite),
+        "errors_count": 0,
+        "error_samples": [],
+        "details": {
+            "ngrams_extracted": int(report.ngrams_extracted),
+            "np_chunks_extracted": int(report.np_chunks_extracted),
+            "clusters_created": int(report.clusters_created),
+        },
+    }
+
+def _run_niqqud_bootstrap(
+    session,
+    *,
+    bench_project_id: int,
+    src_lang: str,
+    overwrite: bool,
+    scope_rows: dict[str, list[dict[str, Any]]],
+    model_path: str,
+    pron_chunk_size: int,
+    sentence_chunk_size: int,
+    sentence_sub_chunk_size: int,
+) -> dict[str, Any]:
+    from app.domain.normalization.normalizer import normalize_for_tm
+    from app.services.pronunciation_bootstrap_service import (
+        PhonikudPronunciationGenerator,
+        PronunciationBootstrapService,
+    )
+    from app.services.sentence_pronunciation_bootstrap_service import SentencePronunciationBootstrapService
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    generator = PhonikudPronunciationGenerator(model_path=model_path, enabled=True)
+    health = generator.health_check()
+
+    lexical_items: list[dict[str, Any]] = []
+    for row in scope_rows["lemmas"]:
+        text = row["text"]
+        norm = row["norm_text"] or normalize_for_tm(src_lang, text, "lemma").norm or ""
+        norm = str(norm).strip()
+        if not norm:
+            continue
+        lexical_items.append(
+            {
+                "src_lang": src_lang,
+                "src_norm": norm,
+                "raw_src_norm": norm,
+                "src_text": text,
+                "source_group": "lemmas",
+            }
+        )
+
+    for row in scope_rows["terms"]:
+        text = row["text"]
+        norm = row["norm_text"] or normalize_for_tm(src_lang, text, "term_cluster").norm or ""
+        norm = str(norm).strip()
+        if not norm:
+            continue
+        lexical_items.append(
+            {
+                "src_lang": src_lang,
+                "src_norm": norm,
+                "raw_src_norm": norm,
+                "src_text": text,
+                "source_group": "terms",
+            }
+        )
+
+    lexical_service = PronunciationBootstrapService(generator=generator)
+    lexical_result = lexical_service.bootstrap(
+        session,
+        lang=src_lang,
+        chunk_size=max(1, int(pron_chunk_size)),
+        rebuild_auto=overwrite,
+        include_lemmas=True,
+        include_terms=True,
+        include_user_dictionary=False,
+        include_sentences=False,
+        selected_items=lexical_items,
+    )
+
+    sentence_service = SentencePronunciationBootstrapService(
+        chunk_size=max(1, int(sentence_chunk_size)),
+        sub_chunk_size=max(1, int(sentence_sub_chunk_size)),
+    )
+    sentence_ids = [int(row["id"]) for row in scope_rows["sentences"]]
+    sentence_mode = "rebuild" if overwrite else "fill_only"
+    sentence_result = sentence_service.run(
+        session,
+        sentence_ids=sentence_ids,
+        lang=src_lang,
+        mode=sentence_mode,
+        phonikud_generator=generator,
+        phonikud_version=health.mode,
+    )
+    session.commit()
+
+    return {
+        "name": "niqqud_bootstrap",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": len(scope_rows["lemmas"]),
+            "term": len(scope_rows["terms"]),
+            "sentence": len(scope_rows["sentences"]),
+        },
+        "overwrite": bool(overwrite),
+        "errors_count": int(lexical_result.failed + sentence_result.failed),
+        "error_samples": [],
+        "details": {
+            "health": {
+                "mode": health.mode,
+                "status": health.status,
+                "latency_ms": int(health.latency_ms),
+                "model_path": health.model_path,
+            },
+            "lexical": {
+                "updated": int(lexical_result.updated),
+                "skipped": int(lexical_result.skipped),
+                "failed": int(lexical_result.failed),
+                "generated_candidates": int(lexical_result.generated_candidates),
+                "generator_mode": str(lexical_result.generator_mode),
+            },
+            "sentence": {
+                "inserted": int(sentence_result.inserted),
+                "updated": int(sentence_result.updated),
+                "skipped_total": int(sentence_result.skipped_total),
+                "failed": int(sentence_result.failed),
+                "generator_mode": str(sentence_result.generator_mode),
+                "elapsed_seconds": float(sentence_result.elapsed_seconds),
+            },
+        },
+    }
+
+
+def _run_translate_bootstrap(
+    session,
+    *,
+    bench_project_id: int,
+    src_lang: str,
+    tgt_lang: str,
+    overwrite: bool,
+    scope_rows: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    from app.services.batch_mt_translate_service import (
+        BatchMTTranslateService,
+        BatchTranslateItem,
+        BatchTranslateOptions,
+    )
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    service = BatchMTTranslateService()
+    options = BatchTranslateOptions(
+        provider_mode="force:google_cloud_translate",
+        write_mode="OVERWRITE" if overwrite else "FILL_EMPTY",
+    )
+
+    summaries: dict[str, dict[str, int]] = {}
+    error_samples: list[str] = []
+
+    def _execute(items: list[BatchTranslateItem], scope: str) -> None:
+        result = service.execute_batch(
+            session=session,
+            items=items,
+            options=options,
+        )
+        summaries[scope] = {
+            "total": int(result.total),
+            "succeeded": int(result.succeeded),
+            "skipped": int(result.skipped),
+            "failed": int(result.failed),
+        }
+        for row in result.row_results:
+            if row.error_message and len(error_samples) < 5:
+                error_samples.append(str(row.error_message))
+
+    lemma_items = [
+        BatchTranslateItem(
+            entity_type="lemma",
+            entity_id=str(row["id"]),
+            source_text=row["text"],
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            current_translation=None,
+            project_id=bench_project_id,
+        )
+        for row in scope_rows["lemmas"]
+    ]
+    _execute(lemma_items, "lemma")
+
+    term_items = [
+        BatchTranslateItem(
+            entity_type="term_cluster",
+            entity_id=str(row["id"]),
+            source_text=row["text"],
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            current_translation=None,
+            project_id=bench_project_id,
+        )
+        for row in scope_rows["terms"]
+    ]
+    _execute(term_items, "term")
+
+    sentence_items = [
+        BatchTranslateItem(
+            entity_type="surface",
+            entity_id=str(row["id"]),
+            source_text=row["text"],
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            current_translation=None,
+            project_id=bench_project_id,
+        )
+        for row in scope_rows["sentences"]
+    ]
+    _execute(sentence_items, "sentence")
+    session.commit()
+
+    total_failed = sum(v["failed"] for v in summaries.values())
+    return {
+        "name": "translate_bootstrap",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": len(scope_rows["lemmas"]),
+            "term": len(scope_rows["terms"]),
+            "sentence": len(scope_rows["sentences"]),
+        },
+        "overwrite": bool(overwrite),
+        "errors_count": int(total_failed),
+        "error_samples": error_samples[:5],
+        "details": summaries,
+    }
+
+def _run_tts_bootstrap(
+    session,
+    *,
+    src_lang: str,
+    overwrite: bool,
+    scope_rows: dict[str, list[dict[str, Any]]],
+    tts_commit_chunk: int,
+) -> dict[str, Any]:
+    from app.domain.normalization.normalizer import normalize_for_tm
+    from app.services.audio_generation_service import AudioGenerationService
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    service = AudioGenerationService()
+    summaries = {
+        "lemma": {"total": 0, "succeeded": 0, "skipped": 0, "failed": 0},
+        "term": {"total": 0, "succeeded": 0, "skipped": 0, "failed": 0},
+        "sentence": {"total": 0, "succeeded": 0, "skipped": 0, "failed": 0},
+    }
+    error_samples: list[str] = []
+    pending = 0
+    commit_chunk = max(1, int(tts_commit_chunk))
+
+    def _handle(scope: str, row_id: int, text: str, norm_hint: str, kind: str) -> None:
+        nonlocal pending
+        summaries[scope]["total"] += 1
+        norm_value = (norm_hint or "").strip() or (normalize_for_tm(src_lang, text, kind).norm or "").strip()
+        if not norm_value:
+            summaries[scope]["failed"] += 1
+            if len(error_samples) < 5:
+                error_samples.append(f"{scope}:{row_id}: empty norm")
+            return
+        result = service.generate_one(
+            session=session,
+            src_text=text,
+            src_lang=src_lang,
+            source_norm=norm_value,
+            provider_mode="force:google_cloud_tts",
+            force_regenerate=overwrite,
+            trace_id=f"bench_tts:{scope}:{row_id}",
+        )
+        pending += 1
+        if pending >= commit_chunk:
+            session.commit()
+            pending = 0
+
+        if result.get("ok"):
+            if result.get("status") == "skipped":
+                summaries[scope]["skipped"] += 1
+            else:
+                summaries[scope]["succeeded"] += 1
+            return
+
+        summaries[scope]["failed"] += 1
+        if len(error_samples) < 5:
+            msg = str(result.get("error") or "unknown audio generation error")
+            error_samples.append(f"{scope}:{row_id}: {msg}")
+
+    for row in scope_rows["lemmas"]:
+        _handle("lemma", int(row["id"]), str(row["text"]), str(row["norm_text"]), "lemma")
+    for row in scope_rows["terms"]:
+        _handle("term", int(row["id"]), str(row["text"]), str(row["norm_text"]), "term_cluster")
+    for row in scope_rows["sentences"]:
+        _handle("sentence", int(row["id"]), str(row["text"]), "", "surface")
+
+    if pending:
+        session.commit()
+
+    total_failed = sum(scope["failed"] for scope in summaries.values())
+    return {
+        "name": "tts_bootstrap",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": len(scope_rows["lemmas"]),
+            "term": len(scope_rows["terms"]),
+            "sentence": len(scope_rows["sentences"]),
+        },
+        "overwrite": bool(overwrite),
+        "errors_count": int(total_failed),
+        "error_samples": error_samples[:5],
+        "details": summaries,
+    }
+
+
+def _run_stage(name: str, fn) -> dict[str, Any]:
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    try:
+        result = fn()
+        result["status"] = "ok"
+        if "started_at_utc" not in result:
+            result["started_at_utc"] = started
+        if "ended_at_utc" not in result:
+            result["ended_at_utc"] = _utc_now().isoformat()
+        if "duration_sec" not in result:
+            result["duration_sec"] = round(time.perf_counter() - t0, 3)
+        return result
+    except Exception as exc:
+        return {
+            "name": name,
+            "status": "error",
+            "started_at_utc": started,
+            "ended_at_utc": _utc_now().isoformat(),
+            "duration_sec": round(time.perf_counter() - t0, 3),
+            "rows_processed": {"lemma": 0, "term": 0, "sentence": 0},
+            "errors_count": 1,
+            "error_samples": [str(exc)],
+            "details": {"traceback": traceback.format_exc(limit=12)},
+        }
+
+
+def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
+    db_info = report.get("db") or {}
+    bench_info = report.get("bench") or {}
+    lines: list[str] = []
+    lines.append("# Pipeline Benchmark Report (PATCH-05)")
+    lines.append("")
+    lines.append(f"- Timestamp UTC: `{report['timestamp_utc']}`")
+    lines.append(f"- Scenario: `{report['scenario']}`")
+    lines.append(f"- Overall status: `{report['overall_status']}`")
+    lines.append(f"- Base sandbox DB: `{db_info.get('base_sandbox_db', 'n/a')}`")
+    lines.append(f"- Source DB: `{db_info.get('source_db', 'n/a')}`")
+    lines.append(f"- Working DB (temp): `{db_info.get('working_db', 'n/a')}`")
+    lines.append("")
+    lines.append("## Bench Slice")
+    lines.append("")
+    lines.append(
+        f"- Source project: `{bench_info.get('source_project_id', 'n/a')}` "
+        f"(`{bench_info.get('source_project_name', 'n/a')}`)"
+    )
+    lines.append(
+        f"- Bench project: `{bench_info.get('bench_project_id', 'n/a')}` "
+        f"(`{bench_info.get('bench_project_name', 'n/a')}`)"
+    )
+    lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
+    lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
+    lines.append("")
+    lines.append("## Stage Summary")
+    lines.append("")
+    lines.append("| Stage | Status | Duration (s) | Lemma | Term | Sentence | Errors |")
+    lines.append("|---|---|---:|---:|---:|---:|---:|")
+    for stage in report["stages"]:
+        rows = stage.get("rows_processed", {})
+        lines.append(
+            f"| {stage.get('name')} | {stage.get('status')} | {float(stage.get('duration_sec', 0.0)):.3f} | "
+            f"{int(rows.get('lemma', 0))} | {int(rows.get('term', 0))} | {int(rows.get('sentence', 0))} | "
+            f"{int(stage.get('errors_count', 0))} |"
+        )
+    lines.append("")
+    lines.append("## Artifacts")
+    lines.append("")
+    lines.append(f"- Log: `{report['artifacts']['latest_log']}`")
+    lines.append(f"- JSON: `{report['artifacts']['metrics_json']}`")
+    lines.append(f"- Markdown: `{report['artifacts']['report_md']}`")
+    lines.append("")
+
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Benchmark real pipeline stages on sandbox-only DB copies.",
+    )
+    subparsers = parser.add_subparsers(dest="scenario", required=True)
+
+    def _add_common_arguments(cmd_parser: argparse.ArgumentParser) -> None:
+        cmd_parser.add_argument("--db-path", required=True, default=DEFAULT_SANDBOX_DB)
+        cmd_parser.add_argument("--copy-target", action="store_true")
+        cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
+        cmd_parser.add_argument("--source-project-id", type=int, default=1)
+        cmd_parser.add_argument("--bench-project-name", default=DEFAULT_PROJECT_NAME)
+        cmd_parser.add_argument("--doc-limit", type=int, default=6000)
+        cmd_parser.add_argument("--overwrite", type=int, choices=(0, 1), default=1)
+
+        cmd_parser.add_argument("--lemma-limit", type=int, default=1000)
+        cmd_parser.add_argument("--term-limit", type=int, default=1000)
+        cmd_parser.add_argument("--sentence-limit", type=int, default=1000)
+
+        cmd_parser.add_argument("--phonikud-model-path", default=DEFAULT_PHONIKUD_MODEL_PATH)
+        cmd_parser.add_argument("--gct-key-path", default=DEFAULT_GCT_KEY_PATH)
+        cmd_parser.add_argument("--gctts-key-path", default=DEFAULT_GCTTS_KEY_PATH)
+
+        cmd_parser.add_argument("--pron-chunk-size", type=int, default=200)
+        cmd_parser.add_argument("--sentence-chunk-size", type=int, default=200)
+        cmd_parser.add_argument("--sentence-sub-chunk-size", type=int, default=50)
+        cmd_parser.add_argument("--tts-commit-chunk", type=int, default=25)
+
+        cmd_parser.add_argument("--output-dir", default="build/logs")
+        cmd_parser.add_argument("--temp-root", default=DEFAULT_TEMP_ROOT)
+
+    for name in (
+        "extract_terms",
+        "niqqud_bootstrap",
+        "translate_bootstrap",
+        "tts_bootstrap",
+        "all",
+    ):
+        child = subparsers.add_parser(name, help=f"Run scenario: {name}")
+        _add_common_arguments(child)
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Public parser factory for tests."""
+    return _build_parser()
+
+
+def run(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    paths = build_artifact_file_paths(Path(args.output_dir))
+    _setup_logging(paths["latest_log"])
+
+    report: dict[str, Any] = {
+        "timestamp_utc": _utc_now().isoformat(),
+        "scenario": args.scenario,
+        "overall_status": "error",
+        "build_meta": _load_build_meta(),
+            "config": {
+                "doc_limit": int(args.doc_limit),
+                "overwrite": int(args.overwrite),
+                "lemma_limit": int(args.lemma_limit),
+                "term_limit": int(args.term_limit),
+                "sentence_limit": int(args.sentence_limit),
+                "copy_target": bool(args.copy_target),
+                "bench_project_name": str(args.bench_project_name),
+                "temp_root": str(args.temp_root),
+            },
+        "db": {},
+        "bench": {},
+        "stages": [],
+        "artifacts": {
+            "latest_log": str(paths["latest_log"].resolve()),
+            "metrics_json": str(paths["metrics_json"].resolve()),
+            "report_md": str(paths["report_md"].resolve()),
+        },
+    }
+
+    try:
+        _validate_runtime_contract(args)
+
+        source_db = Path(args.source_db).expanduser().resolve()
+        base_db = Path(args.db_path).expanduser().resolve()
+        temp_root = Path(args.temp_root).expanduser().resolve()
+        _cleanup_temp_root(temp_root)
+        _prepare_base_sandbox(base_db, source_db)
+
+        with _working_db_copy(base_db, temp_root) as working_db:
+            report["db"] = {
+                "source_db": str(source_db),
+                "base_sandbox_db": str(base_db),
+                "working_db": str(working_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                },
+            }
+
+            _reset_db_service()
+            from app.services.db_service import DBService
+
+            DBService.initialize(working_db)
+            db_service = DBService.get_instance()
+
+            with db_service.get_session() as session:
+                bench = _clone_slice_into_bench_project(
+                    session,
+                    source_project_id=int(args.source_project_id),
+                    bench_project_name=str(args.bench_project_name),
+                    doc_limit=int(args.doc_limit),
+                )
+                report["bench"] = bench
+
+            planned_stages: list[str]
+            if args.scenario == "all":
+                planned_stages = [
+                    "extract_terms",
+                    "niqqud_bootstrap",
+                    "translate_bootstrap",
+                    "tts_bootstrap",
+                ]
+            else:
+                planned_stages = [args.scenario]
+
+            overwrite_flag = bool(int(args.overwrite))
+            for stage_name in planned_stages:
+                with db_service.get_session() as session:
+                    scope_rows = _load_scope_rows(
+                        session,
+                        bench_project_id=int(report["bench"]["bench_project_id"]),
+                        lemma_limit=int(args.lemma_limit),
+                        term_limit=int(args.term_limit),
+                        sentence_limit=int(args.sentence_limit),
+                    )
+
+                    if stage_name == "extract_terms":
+                        stage_result = _run_stage(
+                            stage_name,
+                            lambda: _run_extract_terms(
+                                session,
+                                bench_project_id=int(report["bench"]["bench_project_id"]),
+                                overwrite=overwrite_flag,
+                            ),
+                        )
+                    elif stage_name == "niqqud_bootstrap":
+                        model_path = Path(args.phonikud_model_path).expanduser().resolve()
+                        if not model_path.exists():
+                            raise FileNotFoundError(
+                                f"Niqqud model path not found: {model_path}. "
+                                "Set --phonikud-model-path to ONNX file."
+                            )
+                        stage_result = _run_stage(
+                            stage_name,
+                            lambda: _run_niqqud_bootstrap(
+                                session,
+                                bench_project_id=int(report["bench"]["bench_project_id"]),
+                                src_lang=str(report["bench"]["src_lang"]),
+                                overwrite=overwrite_flag,
+                                scope_rows=scope_rows,
+                                model_path=str(model_path),
+                                pron_chunk_size=int(args.pron_chunk_size),
+                                sentence_chunk_size=int(args.sentence_chunk_size),
+                                sentence_sub_chunk_size=int(args.sentence_sub_chunk_size),
+                            ),
+                        )
+                    elif stage_name == "translate_bootstrap":
+                        key_path = _resolve_json_path(args.gct_key_path, "Google Cloud Translate key")
+                        _configure_google_cloud_translate(key_path)
+                        stage_result = _run_stage(
+                            stage_name,
+                            lambda: _run_translate_bootstrap(
+                                session,
+                                bench_project_id=int(report["bench"]["bench_project_id"]),
+                                src_lang=str(report["bench"]["src_lang"]),
+                                tgt_lang=str(report["bench"]["tgt_lang"]),
+                                overwrite=overwrite_flag,
+                                scope_rows=scope_rows,
+                            ),
+                        )
+                    elif stage_name == "tts_bootstrap":
+                        key_path = _resolve_json_path(args.gctts_key_path, "Google Cloud TTS key")
+                        _configure_google_cloud_tts(key_path)
+                        stage_result = _run_stage(
+                            stage_name,
+                            lambda: _run_tts_bootstrap(
+                                session,
+                                src_lang=str(report["bench"]["src_lang"]),
+                                overwrite=overwrite_flag,
+                                scope_rows=scope_rows,
+                                tts_commit_chunk=int(args.tts_commit_chunk),
+                            ),
+                        )
+                    else:
+                        raise ValueError(f"Unsupported stage: {stage_name}")
+
+                    report["stages"].append(stage_result)
+                    if stage_result.get("status") != "ok":
+                        break
+
+            report["overall_status"] = (
+                "pass"
+                if report["stages"] and all(stage.get("status") == "ok" for stage in report["stages"])
+                else "fail"
+            )
+
+    except Exception as exc:
+        report["overall_status"] = "fail"
+        report.setdefault("errors", [])
+        report["errors"].append(
+            {
+                "message": str(exc),
+                "traceback": traceback.format_exc(limit=12),
+            }
+        )
+        LOG.exception("Pipeline benchmark failed")
+    finally:
+        try:
+            _reset_db_service()
+        except Exception:
+            pass
+        paths["metrics_json"].write_text(
+            json.dumps(report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        _write_markdown_report(report, paths["report_md"])
+        LOG.info("Artifacts:")
+        LOG.info("  log: %s", paths["latest_log"])
+        LOG.info("  json: %s", paths["metrics_json"])
+        LOG.info("  md: %s", paths["report_md"])
+
+    return 0 if report["overall_status"] == "pass" else 1
+
+
+def main() -> int:
+    return run()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
