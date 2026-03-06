@@ -454,6 +454,11 @@ class DocumentsView(QWidget):
             return True
         except ImportError:
             return False
+        except Exception as exc:
+            # Handle native dependency load failures (e.g. torch DLL init errors)
+            # so project opening stays operational without NLP acceleration.
+            logger.warning("Stanza check failed; NLP features will be disabled: %s", exc)
+            return False
 
     def _check_cuda_available(self):
         """Check if CUDA is available."""
@@ -461,6 +466,9 @@ class DocumentsView(QWidget):
             import torch
             return torch.cuda.is_available()
         except ImportError:
+            return False
+        except Exception as exc:
+            logger.warning("CUDA availability check failed; GPU NLP disabled: %s", exc)
             return False
 
     def load_corpus(self):
