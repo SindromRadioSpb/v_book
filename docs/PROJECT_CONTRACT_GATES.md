@@ -81,6 +81,26 @@ Policy:
   - exit `2` (WARN): continue with warning and report link
   - exit `1` (FAIL): fail Fast Gate
 
+### 6) Pipeline Stage Perf Gate (optional, evidence track)
+
+Purpose:
+- deterministic budget evaluation for real pipeline stages (`extract_terms`, `niqqud_bootstrap`, `translate_bootstrap`)
+- `tts_bootstrap` is deferred-aware until baseline is approved
+
+Command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_pipeline_perf_gate.ps1
+```
+
+Policy:
+- optional by default and does not block Variant A PATCH flow.
+- can be opt-in from Fast Gate with `HDLE_ENABLE_PIPELINE_PERF_GATE=1`.
+- result handling when enabled from Fast Gate:
+  - exit `0` (PASS): continue
+  - exit `2` (WARN): continue with warning and report link
+  - exit `1` (FAIL): fail Fast Gate
+
 ## GO / NO-GO Rules
 
 ### Scaling PATCH GO (Variant A)
@@ -105,6 +125,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_fast_gates.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_smoke_gates.ps1 -SmokeDbPath "J:\Project_Vibe\V_book\test_data\test.db"
 powershell -ExecutionPolicy Bypass -File scripts\run_release_gate_diagnostic.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_write_gate_perf_gate.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_pipeline_perf_gate.ps1
 ```
 
 ## Required Artifacts
@@ -115,6 +136,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run_write_gate_perf_gate.ps1
 - `build\logs\release_gate_inventory.md`
 - `build\logs\write_gate_perf_gate_latest.log` (optional perf gate)
 - `build\logs\write_gate_budget_report_latest.md` (optional perf gate)
+- `build\logs\pipeline_perf_gate_latest.log` (optional pipeline perf gate)
+- `build\logs\pipeline_budget_report_latest.md` (optional pipeline perf gate)
 
 ## Never Re-Litigate Clause
 

@@ -74,6 +74,21 @@ try {
         }
     }
 
+    if ($env:HDLE_ENABLE_PIPELINE_PERF_GATE -eq "1") {
+        Write-Host "== Optional pipeline perf gate (HDLE_ENABLE_PIPELINE_PERF_GATE=1) ==" -ForegroundColor Cyan
+        powershell -ExecutionPolicy Bypass -File "scripts\run_pipeline_perf_gate.ps1"
+        $pipelinePerfExit = $LASTEXITCODE
+        if ($pipelinePerfExit -eq 1) {
+            throw "Optional pipeline perf gate failed (exit code: 1). See build\\logs\\pipeline_budget_report_latest.md"
+        } elseif ($pipelinePerfExit -eq 2) {
+            Write-Warning "Optional pipeline perf gate returned WARN (exit code: 2). Fast Gate continues. Report: build\\logs\\pipeline_budget_report_latest.md"
+        } elseif ($pipelinePerfExit -ne 0) {
+            throw "Optional pipeline perf gate returned unexpected exit code: $pipelinePerfExit"
+        } else {
+            Write-Host "[OK] Optional pipeline perf gate" -ForegroundColor Green
+        }
+    }
+
     Write-Host "PASS: Variant A fast gate is green." -ForegroundColor Green
 } finally {
     Stop-Transcript | Out-Null
