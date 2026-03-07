@@ -98,6 +98,126 @@ TERM_FTS_TRIGGERS = [
 ]
 
 
+# FTS5 DDL for document_name_fts (PERF-SCALE PATCH-D, migration 027)
+DOCUMENT_NAME_FTS_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS document_name_fts USING fts5(
+    file_name,
+    content=source_document,
+    content_rowid=doc_id,
+    tokenize='unicode61 remove_diacritics 1'
+);
+"""
+
+DOCUMENT_NAME_FTS_TRIGGERS = [
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_doc_name_fts_ai
+    AFTER INSERT ON source_document BEGIN
+        INSERT INTO document_name_fts(rowid, file_name)
+            VALUES (new.doc_id, new.file_name);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_doc_name_fts_au
+    AFTER UPDATE OF file_name ON source_document BEGIN
+        INSERT INTO document_name_fts(document_name_fts, rowid, file_name)
+            VALUES ('delete', old.doc_id, old.file_name);
+        INSERT INTO document_name_fts(rowid, file_name)
+            VALUES (new.doc_id, new.file_name);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_doc_name_fts_ad
+    AFTER DELETE ON source_document BEGIN
+        INSERT INTO document_name_fts(document_name_fts, rowid, file_name)
+            VALUES ('delete', old.doc_id, old.file_name);
+    END;
+    """,
+]
+
+
+def ensure_document_name_fts_health(
+    conn: sqlite3.Connection, schema: str = "main", rebuild: bool = False
+) -> dict[str, bool]:
+    """Ensure document_name_fts FTS5 table and its sync triggers exist.
+
+    Creates the virtual table and triggers if missing.
+    If rebuild=True (or table just created) and source_document has rows,
+    repopulates the FTS index from source_document.file_name.
+
+    Returns:
+        {"document_name_fts": True}  — if table was created/rebuilt
+        {"document_name_fts": False} — if table already existed and was not rebuilt
+    """
+    prefix = f"{schema}." if schema != "main" else ""
+    created = False
+
+    try:
+        cursor = conn.execute(
+            f"SELECT name FROM {schema}.sqlite_master"
+            " WHERE type='table' AND name='document_name_fts'"
+        )
+        table_exists = cursor.fetchone() is not None
+
+        if not table_exists:
+            logger.warning(
+                "document_name_fts missing in schema '%s', creating...", schema
+            )
+            conn.execute(
+                DOCUMENT_NAME_FTS_DDL.replace(
+                    "document_name_fts", f"{prefix}document_name_fts"
+                ).replace("source_document", f"{prefix}source_document")
+            )
+            for trigger_ddl in DOCUMENT_NAME_FTS_TRIGGERS:
+                conn.execute(trigger_ddl)
+            logger.info(
+                "Created document_name_fts and triggers in schema '%s'", schema
+            )
+            created = True
+            rebuild = True  # always rebuild after creation
+
+        if rebuild:
+            row_count = conn.execute(
+                f"SELECT COUNT(*) FROM {prefix}source_document"
+            ).fetchone()[0]
+            if row_count > 0:
+                # Check if FTS index is already populated to avoid redundant rebuild.
+                fts_count = conn.execute(
+                    f"SELECT COUNT(*) FROM {prefix}document_name_fts"
+                ).fetchone()[0]
+                if fts_count == 0:
+                    logger.info(
+                        "Rebuilding document_name_fts for %d rows in schema '%s'...",
+                        row_count,
+                        schema,
+                    )
+                    conn.execute(
+                        f"INSERT INTO {prefix}document_name_fts"
+                        f"({prefix}document_name_fts) VALUES('rebuild')"
+                    )
+                    logger.info(
+                        "Rebuilt document_name_fts in schema '%s'", schema
+                    )
+                else:
+                    logger.debug(
+                        "document_name_fts already populated (%d entries), skipping rebuild",
+                        fts_count,
+                    )
+            else:
+                logger.debug(
+                    "source_document is empty in schema '%s', skipping FTS rebuild", schema
+                )
+
+        conn.commit()
+        return {"document_name_fts": created}
+
+    except Exception as e:
+        logger.error(
+            "Failed to ensure document_name_fts in schema '%s': %s", schema, e
+        )
+        conn.rollback()
+        raise
+
+
 def check_fts_exists(conn: sqlite3.Connection, schema: str = "main") -> tuple[bool, bool]:
     """Check if FTS tables exist.
 
@@ -187,6 +307,16 @@ def ensure_fts_tables(
         else:
             logger.debug(f"term_fts exists in schema '{schema}'")
             results["term_fts"] = False
+
+        # PERF-SCALE PATCH-D: also ensure document_name_fts health on every startup.
+        try:
+            doc_fts_result = ensure_document_name_fts_health(conn, schema, rebuild=rebuild)
+            results.update(doc_fts_result)
+        except Exception as doc_fts_err:
+            # Non-fatal: log and continue; picker will fall back to LIKE search.
+            logger.warning(
+                "document_name_fts health check failed (non-fatal): %s", doc_fts_err
+            )
 
         conn.commit()
         return results
