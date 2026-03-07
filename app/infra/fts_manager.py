@@ -218,6 +218,116 @@ def ensure_document_name_fts_health(
         raise
 
 
+# FTS5 DDL for lemma_fts (PERF-SCALE PATCH-E, migration 029)
+LEMMA_FTS_DDL = """\
+CREATE VIRTUAL TABLE IF NOT EXISTS lemma_fts USING fts5(
+    lemma_text,
+    content=lemma,
+    content_rowid=lemma_id,
+    tokenize='unicode61 remove_diacritics 1'
+);
+"""
+
+LEMMA_FTS_TRIGGERS = [
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_lemma_fts_ai
+    AFTER INSERT ON lemma BEGIN
+        INSERT INTO lemma_fts(rowid, lemma_text)
+            VALUES (new.lemma_id, new.lemma_text);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_lemma_fts_au
+    AFTER UPDATE OF lemma_text ON lemma BEGIN
+        INSERT INTO lemma_fts(lemma_fts, rowid, lemma_text)
+            VALUES ('delete', old.lemma_id, old.lemma_text);
+        INSERT INTO lemma_fts(rowid, lemma_text)
+            VALUES (new.lemma_id, new.lemma_text);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_lemma_fts_ad
+    AFTER DELETE ON lemma BEGIN
+        INSERT INTO lemma_fts(lemma_fts, rowid, lemma_text)
+            VALUES ('delete', old.lemma_id, old.lemma_text);
+    END;
+    """,
+]
+
+
+def ensure_lemma_fts_health(
+    conn: sqlite3.Connection, schema: str = "main", rebuild: bool = False
+) -> dict[str, bool]:
+    """Ensure lemma_fts FTS5 table and its sync triggers exist.
+
+    Creates the virtual table and triggers if missing.
+    If rebuild=True (or table just created) and lemma has rows,
+    repopulates the FTS index.
+
+    Returns:
+        {"lemma_fts": True}  — if table was created/rebuilt
+        {"lemma_fts": False} — if table already existed and was not rebuilt
+    """
+    prefix = f"{schema}." if schema != "main" else ""
+    created = False
+
+    try:
+        cursor = conn.execute(
+            f"SELECT name FROM {schema}.sqlite_master"
+            " WHERE type='table' AND name='lemma_fts'"
+        )
+        table_exists = cursor.fetchone() is not None
+
+        if not table_exists:
+            logger.warning("lemma_fts missing in schema '%s', creating...", schema)
+            conn.execute(
+                LEMMA_FTS_DDL.replace("lemma_fts", f"{prefix}lemma_fts")
+                             .replace("content=lemma", f"content={prefix}lemma")
+            )
+            for trigger_ddl in LEMMA_FTS_TRIGGERS:
+                conn.execute(trigger_ddl)
+            logger.info("Created lemma_fts and triggers in schema '%s'", schema)
+            created = True
+            rebuild = True
+
+        if rebuild:
+            row_count = conn.execute(
+                f"SELECT COUNT(*) FROM {prefix}lemma"
+            ).fetchone()[0]
+            if row_count > 0:
+                fts_count = conn.execute(
+                    f"SELECT COUNT(*) FROM {prefix}lemma_fts"
+                ).fetchone()[0]
+                if fts_count == 0:
+                    logger.info(
+                        "Rebuilding lemma_fts for %d rows in schema '%s'...",
+                        row_count,
+                        schema,
+                    )
+                    conn.execute(
+                        f"INSERT INTO {prefix}lemma_fts"
+                        f"({prefix}lemma_fts) VALUES('rebuild')"
+                    )
+                    logger.info("Rebuilt lemma_fts in schema '%s'", schema)
+                else:
+                    logger.debug(
+                        "lemma_fts already populated (%d entries), skipping rebuild",
+                        fts_count,
+                    )
+            else:
+                logger.debug(
+                    "lemma table is empty in schema '%s', skipping FTS rebuild", schema
+                )
+
+        conn.commit()
+        return {"lemma_fts": created}
+
+    except Exception as e:
+        logger.error("Failed to ensure lemma_fts in schema '%s': %s", schema, e)
+        conn.rollback()
+        raise
+
+
 def check_fts_exists(conn: sqlite3.Connection, schema: str = "main") -> tuple[bool, bool]:
     """Check if FTS tables exist.
 
@@ -316,6 +426,16 @@ def ensure_fts_tables(
             # Non-fatal: log and continue; picker will fall back to LIKE search.
             logger.warning(
                 "document_name_fts health check failed (non-fatal): %s", doc_fts_err
+            )
+
+        # PERF-SCALE PATCH-E: ensure lemma_fts health on every startup.
+        try:
+            lemma_fts_result = ensure_lemma_fts_health(conn, schema, rebuild=rebuild)
+            results.update(lemma_fts_result)
+        except Exception as lemma_fts_err:
+            # Non-fatal: dictionary search falls back to LIKE.
+            logger.warning(
+                "lemma_fts health check failed (non-fatal): %s", lemma_fts_err
             )
 
         conn.commit()
