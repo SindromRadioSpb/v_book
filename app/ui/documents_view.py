@@ -879,6 +879,13 @@ class DocumentsView(QWidget):
 
         use_ocr = self.ocr_checkbox.isChecked()
 
+        # PERF-SCALE PATCH-K: throttle check — block concurrent heavy ingest.
+        from app.services.pipeline_throttler import PipelineThrottler
+        if not PipelineThrottler.instance().check_and_warn(
+            "ingest", parent=self, operation_label=f"Import ({len(file_paths)} files)"
+        ):
+            return
+
         # Create worker
         self.current_worker = IngestWorker(
             self.corpus_id,
@@ -1043,6 +1050,14 @@ class DocumentsView(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            # PERF-SCALE PATCH-K: throttle check — block concurrent NLP runs.
+            from app.services.pipeline_throttler import PipelineThrottler
+            if not PipelineThrottler.instance().check_and_warn(
+                "nlp_process", parent=self,
+                operation_label=f"NLP Process ({len(doc_ids)} docs)"
+            ):
+                return
+
             # Create worker
             self.process_worker = ProcessWorker(
                 doc_ids=doc_ids,
@@ -1146,6 +1161,14 @@ class DocumentsView(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            # PERF-SCALE PATCH-K: throttle check — block concurrent NLP runs.
+            from app.services.pipeline_throttler import PipelineThrottler
+            if not PipelineThrottler.instance().check_and_warn(
+                "nlp_process", parent=self,
+                operation_label=f"NLP Re-process ({len(doc_ids)} docs)"
+            ):
+                return
+
             # Create worker (same as process, will handle reprocessing automatically)
             self.process_worker = ProcessWorker(
                 doc_ids=doc_ids,

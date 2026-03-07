@@ -752,6 +752,19 @@ class TermsView(QWidget):
         self.progress_bar.setRange(0, 0)  # Indeterminate
         self.status_label.setText("Extracting terms...")
 
+        # PERF-SCALE PATCH-K: throttle check — block concurrent term extraction.
+        from app.services.pipeline_throttler import PipelineThrottler
+        if not PipelineThrottler.instance().check_and_warn(
+            "term_extract", parent=self,
+            operation_label="Term Extraction"
+        ):
+            # Re-enable UI since we're not starting
+            self.extract_btn.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.status_label.setText("Ready")
+            return
+
         # Create and start worker (keep strong reference to prevent GC)
         self.extract_worker = ProjectTermExtractionWorker(
             project_id=self.project_id,

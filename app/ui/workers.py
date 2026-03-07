@@ -280,6 +280,10 @@ class ProjectTermExtractionWorker(QThread):
 
     def run(self):
         """Extract terms for project."""
+        from app.services.operations_center import OperationsCenter
+        op_id = OperationsCenter.instance().register(
+            f"Term Extract (project {self.project_id})", "term_extract"
+        )
         try:
             from app.services.db_service import DBService
             from app.services.term_extraction_service import TermExtractionService
@@ -304,6 +308,8 @@ class ProjectTermExtractionWorker(QThread):
         except Exception as e:
             logger.exception("Project term extraction worker error")
             self.error.emit(str(e))
+        finally:
+            OperationsCenter.instance().unregister(op_id)
 
 
 class ConcordanceSearchWorker(QThread):
