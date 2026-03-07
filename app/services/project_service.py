@@ -291,6 +291,12 @@ class ProjectService:
             # DELETE triggers on document_sentence/term_search reference sentence_fts/term_fts
             conn = session.connection().connection  # Get raw SQLite connection
             ensure_fts_tables(conn, schema="main", rebuild=False)
+            # ensure_fts_tables() ends with conn.commit() → we are now outside
+            # any active transaction.  Set FK=OFF HERE, before the count queries
+            # open a new implicit transaction.  SQLite silently ignores
+            # PRAGMA foreign_keys=OFF/ON inside a transaction, so the PRAGMA
+            # MUST be set while no transaction is active.
+            conn.execute("PRAGMA foreign_keys=OFF")
 
             # Count what will be deleted (for reporting)
             corpora_count = session.execute(
@@ -353,9 +359,6 @@ class ProjectService:
 
             pid = project_id
 
-            # Disable FK cascade on raw pysqlite connection (bypasses SQLAlchemy
-            # transaction scope — effective even mid-transaction in SQLite).
-            conn.execute("PRAGMA foreign_keys=OFF")
             try:
                 # 1. FTS: explicit delete (project_id is stored in term_fts content).
                 session.execute(text(
