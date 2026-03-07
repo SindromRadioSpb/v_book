@@ -120,6 +120,7 @@ diagnosis_result.json
 # Агенты и кодекс
 .agents/
 .codex/
+.codex_home/
 AGENTS.md
 
 # Local ad-hoc verification artifacts

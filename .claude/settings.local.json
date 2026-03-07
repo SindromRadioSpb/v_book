@@ -108,7 +108,15 @@
       "Bash(set:*)",
       "Bash(git status:*)",
       "Bash(cmd /c \"sqlite3 %LOCALAPPDATA%\\\\HDLE\\\\hdle.db \"\"PRAGMA table_info\\(tm_entry\\)\"\" | findstr \"\"lemma_id cluster_id ngram_id\"\"\")",
-      "Bash(powershell -Command \"sqlite3 \"\"$env:LOCALAPPDATA\\\\HDLE\\\\hdle.db\"\" \"\"PRAGMA table_info\\(tm_entry\\)\"\" | Select-String ''lemma_id|cluster_id|ngram_id''\")"
+      "Bash(powershell -Command \"sqlite3 \"\"$env:LOCALAPPDATA\\\\HDLE\\\\hdle.db\"\" \"\"PRAGMA table_info\\(tm_entry\\)\"\" | Select-String ''lemma_id|cluster_id|ngram_id''\")",
+      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe:*)",
+      "Bash(\"/J/Project_Vibe/V_book/.venv/Scripts/python.exe\":*)",
+      "Bash(..venvScriptspython.exe:*)",
+      "Bash(\"J:\\\\Project_Vibe\\\\V_book\\\\.venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(do echo:*)",
+      "Read(//c/Windows/System32/**)",
+      "Read(//c/Users/Win10_Game_OS/AppData/Local/HDLE/logs/**)",
+      "Read(//m/Soft/1. Data folder HDLE Local \\(model, dataset, logs temporary\\)/HDLE_Processing/**)"
     ]
   },
   "model": "opusplan"
