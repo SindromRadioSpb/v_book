@@ -9,3 +9,11 @@ You can pre-stage optional installer payloads before running `rebuild.ps1`:
 
 If files are absent, installer components still exist, and users can install resources later from in-app `Resources Manager`.
 
+## Clarification: installer baseline vs DB quick-pick
+
+- Installer `baseline` component consumes only:
+  - `installer/resources/baseline/*.hdleproj`
+- Setup Wizard / Switch DB baseline quick-pick is a separate runtime DB path from:
+  - `app/infra/db_path_resolver.py`
+  - `DEV_HEWIKI_BASELINE_DB_PATH`
+- Replacing the dev baseline DB for quick-pick does not replace installer `.hdleproj` bundles, and vice versa.

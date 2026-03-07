@@ -60,6 +60,25 @@ Reference processed DB (internal/dev path):
 
 This path is **internal/dev** and is not guaranteed on end-user machines.
 
+### Installer vs baseline quick-pick source (important)
+
+- Baseline quick-pick in Setup Wizard / Switch DB dialog resolves from:
+  - `app/infra/db_path_resolver.py`
+  - constant: `DEV_HEWIKI_BASELINE_DB_PATH`
+  - current value:
+    `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+- Installer optional `baseline` component does **not** read this `.db` directly.
+  Installer picks optional `.hdleproj` bundles from:
+  - `installer/resources/baseline/*.hdleproj`
+
+### 2026-03-07 recovery note
+
+- Recovered DB was placed into:
+  `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+  so baseline quick-pick now points to the recovered file.
+- Archive backup created by operator:
+  `J:\Project_Vibe\V_book\build\hewiki_gpu_processing.recovered_7.03.26.rar`
+
 Release users should use:
 
 - installer baseline component (if provided),

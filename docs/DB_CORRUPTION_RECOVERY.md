@@ -100,3 +100,21 @@ Strict behavior:
   - `tm_entry_probe.ok = true`,
   - `fts_status.ok = true`.
 - Benchmark runs without fallback on selected DB path.
+
+## Recovery record: 2026-03-07
+
+Outcome summary:
+
+- Recovery status: `SALVAGED_OK`
+- Recovered DB target (used for baseline quick-pick):
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+- Operator archive backup:
+  - `J:\Project_Vibe\V_book\build\hewiki_gpu_processing.recovered_7.03.26.rar`
+
+Important operational note:
+
+- After replacing a SQLite DB file manually, remove stale sidecars if present:
+  - `<db>.db-wal`
+  - `<db>.db-shm`
+- Keeping stale WAL/SHM next to a newly replaced DB can trigger false
+  `database disk image is malformed` errors.
