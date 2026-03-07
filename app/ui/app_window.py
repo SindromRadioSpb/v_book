@@ -366,6 +366,10 @@ class AppWindow(QMainWindow):
         self.create_menu_bar()
         self._db_indicator = QLabel("")
         self.statusBar().addPermanentWidget(self._db_indicator)
+        # PERF-SCALE PATCH-B: operations status widget (shows active heavy ops)
+        from app.ui.widgets.operations_status_widget import OperationsStatusWidget
+        self._ops_status = OperationsStatusWidget()
+        self.statusBar().addPermanentWidget(self._ops_status)
 
         # Connect sidebar actions
         self.workspace.sidebar.action_triggered.connect(self._on_sidebar_action)

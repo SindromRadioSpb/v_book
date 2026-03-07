@@ -60,6 +60,10 @@ class IngestWorker(QThread):
 
     def run(self):
         """Run the ingestion process."""
+        from app.services.operations_center import OperationsCenter
+        op_id = OperationsCenter.instance().register(
+            f"Ingest ({len(self.file_paths)} files)", "ingest"
+        )
         try:
             from app.services.db_service import DBService
             from app.services.ingest_service import IngestService
@@ -90,6 +94,8 @@ class IngestWorker(QThread):
         except Exception as e:
             logger.exception("Ingest worker error")
             self.error.emit(str(e))
+        finally:
+            OperationsCenter.instance().unregister(op_id)
 
 
 class ProcessWorker(QThread):
@@ -108,6 +114,10 @@ class ProcessWorker(QThread):
 
     def run(self):
         """Run the processing pipeline."""
+        from app.services.operations_center import OperationsCenter
+        op_id = OperationsCenter.instance().register(
+            f"NLP Process ({len(self.doc_ids)} docs)", "nlp_process"
+        )
         try:
             from app.services.db_service import DBService
             from app.services.process_service import ProcessService
@@ -166,6 +176,8 @@ class ProcessWorker(QThread):
             # Make error message user-friendly
             error_msg = self._make_user_friendly_error(str(e))
             self.error.emit(error_msg)
+        finally:
+            OperationsCenter.instance().unregister(op_id)
 
     def _make_user_friendly_error(self, error: str) -> str:
         """Convert technical error to user-friendly message."""
