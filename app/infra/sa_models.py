@@ -67,6 +67,13 @@ class DictProject(Base):
     is_general_corpus = Column(Integer, nullable=False, default=0)
     general_corpus_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL"))
 
+    # PERF-SCALE PATCH-A: reference project support (migration 028)
+    # is_reference=1 → project data lives in ref_db_path (read-only mount).
+    # ref_db_path    → absolute path to external SQLite DB file (NULL for normal projects).
+    # NOTE: is_reference is independent of is_general_corpus (different semantics).
+    is_reference = Column(Integer, nullable=False, default=0)
+    ref_db_path = Column(Text)
+
     # Migration 011: Term extraction parameters tracking (for UX feedback)
     last_extract_np_max_len = Column(Integer)  # Last NP max length used
     last_extract_min_freq = Column(Integer)     # Last min frequency used

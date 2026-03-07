@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from app.infra.db import DatabaseManager
+from app.infra.db import DatabaseManager, ReadOnlyDatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,10 @@ class DBService:
 
     _instance: Optional["DBService"] = None
     _db_manager: Optional[DatabaseManager] = None
+
+    # PERF-SCALE PATCH-A: reference DB registry.
+    # Maps project_id (int) → ReadOnlyDatabaseManager for each attached reference DB.
+    _ref_managers: dict[int, ReadOnlyDatabaseManager] = {}
 
     @classmethod
     def initialize(cls, db_path: Path) -> "DBService":
@@ -94,9 +98,90 @@ class DBService:
 
             return len(running_runs)
 
+    # ------------------------------------------------------------------
+    # PERF-SCALE PATCH-A: reference DB helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def attach_reference(cls, project_id: int, db_path: str | Path) -> None:
+        """Open a read-only manager for a reference project and register it.
+
+        Safe to call multiple times for the same project_id — if a manager is
+        already registered and points to the same path it is left unchanged;
+        if the path differs the old manager is closed first.
+
+        Args:
+            project_id: PK of the reference project in dict_project.
+            db_path:    Absolute path to the external SQLite DB file.
+
+        Raises:
+            FileNotFoundError: if db_path does not exist.
+        """
+        db_path = Path(db_path)
+        existing = cls._ref_managers.get(project_id)
+        if existing is not None:
+            if existing.db_path == db_path:
+                logger.debug(
+                    "Reference DB for project %d already attached at %s",
+                    project_id,
+                    db_path,
+                )
+                return
+            # Path changed — close old manager before opening new one.
+            existing.close()
+
+        manager = ReadOnlyDatabaseManager(db_path)
+        cls._ref_managers[project_id] = manager
+        logger.info(
+            "Attached reference DB for project %d → %s", project_id, db_path
+        )
+
+    @classmethod
+    def get_ref_session(cls, project_id: int):
+        """Return a new read-only session for the given reference project.
+
+        Args:
+            project_id: PK of the reference project.
+
+        Returns:
+            A SQLAlchemy Session bound to the reference DB engine.
+
+        Raises:
+            KeyError: if the reference DB is not attached. Call attach_reference() first.
+        """
+        manager = cls._ref_managers.get(project_id)
+        if manager is None:
+            raise KeyError(
+                f"No reference DB attached for project {project_id}. "
+                "Call DBService.attach_reference() first."
+            )
+        return manager.get_session()
+
+    @classmethod
+    def detach_reference(cls, project_id: int) -> None:
+        """Close and unregister the reference DB for a project.
+
+        No-op if the project has no attached reference DB.
+
+        Args:
+            project_id: PK of the reference project.
+        """
+        manager = cls._ref_managers.pop(project_id, None)
+        if manager is not None:
+            manager.close()
+            logger.info("Detached reference DB for project %d", project_id)
+
     @classmethod
     def shutdown(cls) -> None:
         """Shutdown the database service."""
+        # Close all reference DBs first.
+        for pid, mgr in list(cls._ref_managers.items()):
+            try:
+                mgr.close()
+            except Exception as e:
+                logger.warning("Error closing reference DB for project %d: %s", pid, e)
+        cls._ref_managers.clear()
+
         if cls._db_manager:
             cls._db_manager.close()
             cls._db_manager = None

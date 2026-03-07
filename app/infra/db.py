@@ -1,6 +1,7 @@
 """Database connection and migration management."""
 import logging
 import os
+import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -276,3 +277,67 @@ class DatabaseManager:
         """Close database connections."""
         self.engine.dispose()
         logger.info("Database connections closed")
+
+
+class ReadOnlyDatabaseManager:
+    """Read-only database manager for reference projects (PERF-SCALE PATCH-A).
+
+    Opens the target SQLite file with URI mode=ro so the OS kernel enforces
+    read-only access at the file-descriptor level.  An additional
+    PRAGMA query_only=ON is applied on every connection as a second guard.
+
+    No migrations are applied — the reference DB is an external artifact
+    (e.g. hewiki_gpu_processing.db) whose schema is managed separately.
+    """
+
+    def __init__(self, db_path: str | Path):
+        self.db_path = Path(db_path)
+        if not self.db_path.exists():
+            raise FileNotFoundError(
+                f"Reference DB not found: {self.db_path}"
+            )
+
+        # Use a creator function to open the SQLite file via the URI interface
+        # with mode=ro.  This bypasses SQLAlchemy's URL-string path encoding
+        # (which breaks on Windows paths that contain colons/backslashes) and
+        # directly calls sqlite3.connect() with uri=True.
+        _path_str = self.db_path.as_posix()
+
+        def _ro_creator():
+            return _sqlite3.connect(
+                f"file:{_path_str}?mode=ro",
+                uri=True,
+                check_same_thread=False,
+            )
+
+        self.engine = create_engine(
+            "sqlite+pysqlite://",
+            creator=_ro_creator,
+            echo=False,
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def set_ro_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            # Belt-and-suspenders: SQLAlchemy + pysqlite may not forward the
+            # URI flags directly on all versions, so also apply via PRAGMA.
+            cursor.execute("PRAGMA query_only=ON")
+            # PERF-SCALE PATCH-I tuning applies here too for read performance.
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            cursor.execute("PRAGMA mmap_size=268435456")
+            cursor.execute("PRAGMA cache_size=-65536")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=self.engine
+        )
+        logger.info(f"ReadOnly reference DB opened: {self.db_path}")
+
+    def get_session(self) -> Session:
+        """Create a new read-only session."""
+        return self.SessionLocal()
+
+    def close(self) -> None:
+        """Dispose all connections."""
+        self.engine.dispose()
+        logger.info(f"ReadOnly reference DB closed: {self.db_path}")
