@@ -26,6 +26,32 @@ logger = logging.getLogger(__name__)
 class ProjectService:
     """Service for managing projects and libraries."""
 
+    _PROJECT_ID_TABLES = (
+        "dict_project",
+        "source_corpus",
+        "lemma",
+        "ngram",
+        "term_cluster",
+        "term_card",
+        "translation_memory",
+        "term_search",
+        "tm_entry",
+        "processor_run",
+        "task_queue",
+        "project_snapshot",
+        "stopword_set",
+        "dict_source",
+        "term_alias",
+        "lemma_doc_stat",
+        "lemma_project_stat",
+        "ngram_doc_stat",
+        "ngram_project_stat",
+    )
+    _CORPUS_ID_TABLES = (
+        "source_corpus",
+        "source_document",
+    )
+
     def __init__(self):
         self.db_service = DBService.get_instance()
 
@@ -86,6 +112,47 @@ class ProjectService:
 
         return ref_id
 
+    def _next_id_from_tables(
+        self,
+        session: Session,
+        *,
+        column_name: str,
+        table_names: tuple[str, ...],
+    ) -> int:
+        """
+        Allocate a safe next ID from all relevant FK-bearing tables.
+
+        Why this exists:
+        - Corrupted databases may leave orphan rows after partial deletes.
+        - SQLite can reuse deleted INTEGER PK values.
+        - Reusing an old ID may reattach orphaned rows to a new entity.
+        """
+        conn = session.connection()
+        max_id = 0
+
+        for table_name in table_names:
+            table_exists = conn.execute(
+                text(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name=:table_name"
+                ),
+                {"table_name": table_name},
+            ).scalar()
+            if not table_exists:
+                continue
+
+            quoted_table = table_name.replace('"', '""')
+            quoted_column = column_name.replace('"', '""')
+            value = conn.execute(
+                text(f'SELECT COALESCE(MAX("{quoted_column}"), 0) FROM "{quoted_table}"')
+            ).scalar()
+            try:
+                max_id = max(max_id, int(value or 0))
+            except (TypeError, ValueError):
+                continue
+
+        return max_id + 1
+
     def create_project(
         self,
         session: Session,
@@ -117,7 +184,14 @@ class ProjectService:
             if reference_id:
                 logger.info(f"Auto-assigning reference corpus ID: {reference_id}")
 
+        next_project_id = self._next_id_from_tables(
+            session,
+            column_name="project_id",
+            table_names=self._PROJECT_ID_TABLES,
+        )
+
         project = DictProject(
+            project_id=next_project_id,
             library_id=library.library_id,
             name=name,
             description=description,
@@ -128,7 +202,13 @@ class ProjectService:
         session.refresh(project)
 
         # Create default corpus
+        next_corpus_id = self._next_id_from_tables(
+            session,
+            column_name="corpus_id",
+            table_names=self._CORPUS_ID_TABLES,
+        )
         corpus = SourceCorpus(
+            corpus_id=next_corpus_id,
             project_id=project.project_id,
             name="Main Corpus",
             description="Default corpus",
