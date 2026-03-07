@@ -55,11 +55,11 @@ class TestSentencesWorkspaceServiceBatchOverlays:
         assert result == {}
         session.execute.assert_not_called()
 
-    def test_batch_get_pronunciations_empty(self):
+    def test_batch_get_sentence_niqqud_empty(self):
         from app.services.sentences_workspace_service import SentencesWorkspaceService
         svc = SentencesWorkspaceService()
         session = MagicMock()
-        result = svc._batch_get_pronunciations(session, "he", [])
+        result = svc._batch_get_sentence_niqqud(session, [])
         assert result == {}
         session.execute.assert_not_called()
 
@@ -116,9 +116,12 @@ class TestSentencesWorkspaceServiceIdHelpers:
         session.execute.assert_not_called()
 
     def test_count_sentences_returns_int(self):
+        """Unfiltered path uses SUM fast path (scalar), not scalar_one_or_none."""
         from app.services.sentences_workspace_service import SentencesWorkspaceService
         svc = SentencesWorkspaceService()
         session = MagicMock()
+        # Fast path (no doc_filter, no text_search) calls .scalar()
+        session.execute.return_value.scalar.return_value = 42
         session.execute.return_value.scalar_one_or_none.return_value = 42
         result = svc.count_sentences(session, project_id=1)
         assert result == 42

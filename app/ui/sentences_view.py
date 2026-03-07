@@ -57,13 +57,22 @@ COL_AUDIO = 7
 
 
 class _SentencesLoadWorker(QThread):
-    """Background worker: load paginated sentences + count.
+    """Background worker: load paginated sentences + count (two-stage).
 
     PATCH-H: carries request_id so that stale responses from superseded
-    workers are silently dropped by the view's _on_load_finished handler.
+    workers are silently dropped by the view's handlers.
+
+    Two-stage emit (PATCH-P):
+      1. page_ready emitted immediately after list_sentences() returns — UI
+         shows row data without waiting for the (potentially slow) count.
+      2. count_ready emitted after count_sentences() completes.
+      The legacy `finished` signal is also emitted (after both stages) for
+      backward compatibility with existing tests.
     """
 
-    finished = pyqtSignal(int, list, int)   # request_id, dtos, total_count
+    page_ready = pyqtSignal(int, list)      # request_id, dtos  (stage 1 - fast)
+    count_ready = pyqtSignal(int, int)      # request_id, total (stage 2)
+    finished = pyqtSignal(int, list, int)   # request_id, dtos, total (legacy compat)
     error = pyqtSignal(int, str)            # request_id, message
 
     def __init__(self, request_id: int, project_id: int, page: int,
@@ -83,6 +92,8 @@ class _SentencesLoadWorker(QThread):
             from app.services.db_service import DBService
             db = DBService.get_instance()
             svc = SentencesWorkspaceService()
+
+            # Stage 1: fetch page data (fast — bounded by page_size rows)
             with db.get_read_session() as session:
                 dtos = svc.list_sentences(
                     session,
@@ -92,13 +103,18 @@ class _SentencesLoadWorker(QThread):
                     page=self.page,
                     page_size=self.page_size,
                 )
+            self.page_ready.emit(self.request_id, dtos)  # UI shows rows immediately
+
+            # Stage 2: fetch count (may be slow on unfiltered 13M-row projects)
+            with db.get_read_session() as session:
                 total = svc.count_sentences(
                     session,
                     self.project_id,
                     doc_id_filter=self.doc_filter,
                     text_search=self.text_search,
                 )
-            self.finished.emit(self.request_id, dtos, total)
+            self.count_ready.emit(self.request_id, total)
+            self.finished.emit(self.request_id, dtos, total)  # legacy compat
         except Exception as e:
             self.error.emit(self.request_id, str(e))
 
@@ -337,19 +353,31 @@ class SentencesView(QWidget):
             self._doc_filter,
             self._text_search,
         )
+        self._load_worker.page_ready.connect(self._on_page_ready)
+        self._load_worker.count_ready.connect(self._on_count_ready)
         self._load_worker.finished.connect(self._on_load_finished)
         self._load_worker.error.connect(self._on_load_error)
         self._load_worker.start()
 
-    def _on_load_finished(self, request_id: int, dtos: List[SentenceDTO], total: int):
-        """Populate table from loaded DTOs; drop stale responses (PATCH-H)."""
+    def _on_page_ready(self, request_id: int, dtos: List[SentenceDTO]):
+        """Stage 1: show row data immediately; pagination shows 'counting...'."""
         if request_id != self._active_request_id:
-            return  # superseded by a newer request
+            return
         self._current_dtos = dtos
-        self.total_count = total
         self._populate_table(dtos)
+        self.status_label.setText(f"Showing {len(dtos)} rows (counting…)")
+
+    def _on_count_ready(self, request_id: int, total: int):
+        """Stage 2: update pagination total once the count query completes."""
+        if request_id != self._active_request_id:
+            return
+        self.total_count = total
         self._update_pagination(total)
-        self.status_label.setText(f"Showing {len(dtos)} of {total} sentences")
+        self.status_label.setText(f"Showing {len(self._current_dtos)} of {total} sentences")
+
+    def _on_load_finished(self, request_id: int, dtos: List[SentenceDTO], total: int):
+        """Legacy compat: only fires after both stages complete — no-op if stages handled it."""
+        pass
 
     def _on_load_error(self, request_id: int, msg: str):
         if request_id != self._active_request_id:

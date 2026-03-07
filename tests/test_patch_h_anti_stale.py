@@ -65,8 +65,10 @@ class _FakeSentencesView:
     def status_label_setText(self, text):
         self.status_text = text
 
-    # Bind the real method to this stub
+    # Bind the real methods to this stub
     from app.ui.sentences_view import SentencesView
+    _on_page_ready = SentencesView._on_page_ready
+    _on_count_ready = SentencesView._on_count_ready
     _on_load_finished = SentencesView._on_load_finished
     _on_load_error = SentencesView._on_load_error
 
@@ -87,23 +89,61 @@ def _make_fake_view(active_id: int):
     return v
 
 
-def test_on_load_finished_applies_when_request_id_matches():
+def test_on_page_ready_applies_when_request_id_matches():
+    """Stage-1: _on_page_ready populates table when request matches."""
     from app.ui.sentences_view import SentencesView
     v = _make_fake_view(active_id=3)
     dtos = [object(), object()]
-    SentencesView._on_load_finished(v, request_id=3, dtos=dtos, total=2)
+    SentencesView._on_page_ready(v, request_id=3, dtos=dtos)
     assert v._current_dtos is dtos
-    assert v.total_count == 2
+    assert "counting" in v.status_label.text
 
 
-def test_on_load_finished_drops_stale_request():
+def test_on_page_ready_drops_stale_request():
+    """Stage-1: stale request_id must not update _current_dtos."""
     from app.ui.sentences_view import SentencesView
     v = _make_fake_view(active_id=5)
     original_dtos = [object()]
     v._current_dtos = original_dtos
-    # Old worker (request_id=3) finishes after new one (active=5) — must be dropped
-    SentencesView._on_load_finished(v, request_id=3, dtos=[object(), object()], total=99)
+    SentencesView._on_page_ready(v, request_id=3, dtos=[object(), object()])
     assert v._current_dtos is original_dtos  # unchanged
+
+
+def test_on_count_ready_applies_when_request_id_matches():
+    """Stage-2: _on_count_ready updates total when request matches."""
+    from app.ui.sentences_view import SentencesView
+    v = _make_fake_view(active_id=3)
+    v._current_dtos = [object()]
+    SentencesView._on_count_ready(v, request_id=3, total=42)
+    assert v.total_count == 42
+
+
+def test_on_count_ready_drops_stale_request():
+    """Stage-2: stale request_id must not update total_count."""
+    from app.ui.sentences_view import SentencesView
+    v = _make_fake_view(active_id=5)
+    v.total_count = 99
+    SentencesView._on_count_ready(v, request_id=3, total=1000)
+    assert v.total_count == 99  # unchanged
+
+
+# Legacy compat: _on_load_finished is now a no-op pass
+def test_on_load_finished_is_noop():
+    from app.ui.sentences_view import SentencesView
+    v = _make_fake_view(active_id=3)
+    dtos = [object(), object()]
+    # Must not raise; _current_dtos unchanged (stages 1+2 already handled it)
+    SentencesView._on_load_finished(v, request_id=3, dtos=dtos, total=2)
+
+
+def test_on_load_finished_drops_stale_request():
+    """Legacy compat: no-op pass means stale request still safe."""
+    from app.ui.sentences_view import SentencesView
+    v = _make_fake_view(active_id=5)
+    original_dtos = [object()]
+    v._current_dtos = original_dtos
+    SentencesView._on_load_finished(v, request_id=3, dtos=[object(), object()], total=99)
+    assert v._current_dtos is original_dtos  # unchanged (no-op)
     assert v.total_count == 0
 
 
