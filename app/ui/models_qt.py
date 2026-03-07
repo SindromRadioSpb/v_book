@@ -1,11 +1,14 @@
 """Qt models for tables and lists."""
 import logging
-from typing import List
+from typing import List, Optional
 
-from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
+from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, pyqtSignal
+from PyQt6.QtGui import QColor
 from app.domain.dto import (
+    DocumentDTO,
     ProjectStats,
     LemmaStats,
+    SentenceDTO,
     UserDictionaryDTO,
     UserDictionaryItemDTO,
 )
@@ -1010,3 +1013,256 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
         if 0 <= row < len(self.items):
             return self.items[row]
         return None
+
+
+# ---------------------------------------------------------------------------
+# PATCH-G: DocumentsTableModel
+# ---------------------------------------------------------------------------
+
+class DocumentsTableModel(QAbstractTableModel):
+    """Model for the Documents tab table (12 columns).
+
+    Replaces QTableWidget in DocumentsView, enabling Qt virtualized rendering.
+    COL_NAME (1) is editable — rename triggers rename_committed signal.
+    """
+
+    COL_ID = 0
+    COL_NAME = 1
+    COL_SIZE = 2
+    COL_STATUS = 3
+    COL_SENTENCES = 4
+    COL_TOKENS = 5
+    COL_IMPORTED = 6
+    COL_PATH = 7
+    COL_TAG = 8
+    COL_LINK = 9
+    COL_LEVEL = 10
+    COL_TOPIC = 11
+
+    HEADERS = [
+        "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens",
+        "Imported", "Path", "Tag", "Link", "Level", "Topic",
+    ]
+
+    # Emitted by setData when user commits a rename; view handles the DB write.
+    rename_committed = pyqtSignal(int, str)  # doc_id, new_name
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: List[DocumentDTO] = []
+        self._sort_col: int = -1
+        self._sort_dir: str = "asc"
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def update_rows(self, dtos: List[DocumentDTO]) -> None:
+        self.beginResetModel()
+        self._rows = list(dtos)
+        self.endResetModel()
+
+    def set_sort_indicator(self, col: int, direction: str) -> None:
+        """Update header sort arrow without resetting row data."""
+        self._sort_col = col
+        self._sort_dir = direction
+        self.headerDataChanged.emit(
+            Qt.Orientation.Horizontal, 0, len(self.HEADERS) - 1
+        )
+
+    def get_dto(self, row: int) -> Optional[DocumentDTO]:
+        if 0 <= row < len(self._rows):
+            return self._rows[row]
+        return None
+
+    # ------------------------------------------------------------------
+    # QAbstractTableModel interface
+    # ------------------------------------------------------------------
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            base = self.HEADERS[section]
+            if self._sort_col == section:
+                indicator = " \u25b2" if self._sort_dir == "asc" else " \u25bc"
+                return base + indicator
+            return base
+        return None
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row, col = index.row(), index.column()
+        if row >= len(self._rows):
+            return None
+        dto = self._rows[row]
+
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+            if col == self.COL_ID:        return str(dto.doc_id)
+            if col == self.COL_NAME:      return dto.file_name
+            if col == self.COL_SIZE:      return f"{dto.file_size_bytes / 1024:.1f}"
+            if col == self.COL_STATUS:    return dto.status
+            if col == self.COL_SENTENCES: return str(dto.sentence_count) if dto.sentence_count else ""
+            if col == self.COL_TOKENS:    return str(dto.token_count) if dto.token_count else ""
+            if col == self.COL_IMPORTED:  return (dto.imported_at or "")[:19]
+            if col == self.COL_PATH:      return dto.file_path or ""
+            if col == self.COL_TAG:       return dto.tag or ""
+            if col == self.COL_LINK:      return dto.link_url or ""
+            if col == self.COL_LEVEL:     return dto.level or ""
+            if col == self.COL_TOPIC:     return dto.topic or ""
+
+        if role == Qt.ItemDataRole.UserRole:
+            return dto.doc_id  # row → doc_id for all columns
+
+        if role == Qt.ItemDataRole.UserRole + 1:
+            if col == self.COL_LINK:
+                return dto.link_url  # raw URL for click handler
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if col == self.COL_LINK and dto.link_url:
+                return QColor(Qt.GlobalColor.blue)
+
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if col == self.COL_LINK and dto.link_url:
+                return f"Click to open: {dto.link_url}"
+
+        return None
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() == self.COL_NAME:
+            return base | Qt.ItemFlag.ItemIsEditable
+        return base
+
+    def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
+        if role == Qt.ItemDataRole.EditRole and index.column() == self.COL_NAME:
+            row = index.row()
+            if 0 <= row < len(self._rows):
+                new_name = str(value).strip()
+                if new_name and new_name != self._rows[row].file_name:
+                    self.rename_committed.emit(self._rows[row].doc_id, new_name)
+                return True
+        return False
+
+
+# ---------------------------------------------------------------------------
+# PATCH-G: SentencesTableModel
+# ---------------------------------------------------------------------------
+
+class SentencesTableModel(QAbstractTableModel):
+    """Model for the Sentences workspace table (8 columns, read-only).
+
+    Replaces QTableWidget in SentencesView. Handles QC badge colours,
+    audio status colours, and niqqud tooltip without per-cell QTableWidgetItems.
+    """
+
+    COL_ID = 0
+    COL_DOC = 1
+    COL_IDX = 2
+    COL_TEXT = 3
+    COL_TRANSLATION = 4
+    COL_NIQQUD = 5
+    COL_QC = 6
+    COL_AUDIO = 7
+
+    HEADERS = ["ID", "Document", "#", "Sentence Text", "Translation", "Niqqud", "QC", "Audio"]
+
+    _QC_MAP = {
+        "ok":        ("\u2713", "darkGreen"),
+        "auto_fixed": ("~",     "olive"),
+        "partial":   ("~",      "darkorange"),
+        "rejected":  ("\u2717", "red"),
+        "failed":    ("!",      "red"),
+        "pending":   ("\u2026", "gray"),
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: List[SentenceDTO] = []
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def update_rows(self, dtos: List[SentenceDTO]) -> None:
+        self.beginResetModel()
+        self._rows = list(dtos)
+        self.endResetModel()
+
+    def get_dto(self, row: int) -> Optional[SentenceDTO]:
+        if 0 <= row < len(self._rows):
+            return self._rows[row]
+        return None
+
+    # ------------------------------------------------------------------
+    # QAbstractTableModel interface
+    # ------------------------------------------------------------------
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row, col = index.row(), index.column()
+        if row >= len(self._rows):
+            return None
+        dto = self._rows[row]
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == self.COL_ID:          return str(dto.sentence_id)
+            if col == self.COL_DOC:         return dto.doc_name
+            if col == self.COL_IDX:         return str(dto.sent_index)
+            if col == self.COL_TEXT:        return dto.text
+            if col == self.COL_TRANSLATION: return dto.translation or ""
+            if col == self.COL_NIQQUD:      return dto.pronunciation_text or ""
+            if col == self.COL_AUDIO:       return dto.audio_status or "\u2014"
+            if col == self.COL_QC:
+                badge, _ = self._QC_MAP.get(dto.niqqud_qc, (dto.niqqud_qc[:2] if dto.niqqud_qc else "\u2014", None))
+                return badge
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if col == self.COL_QC:
+                _, color_name = self._QC_MAP.get(dto.niqqud_qc, (None, None))
+                if color_name:
+                    return QColor(color_name)
+            if col == self.COL_AUDIO:
+                if dto.audio_status == "ready":  return QColor(Qt.GlobalColor.darkGreen)
+                if dto.audio_status == "failed": return QColor(Qt.GlobalColor.red)
+
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if col == self.COL_NIQQUD and dto.pronunciation_text:
+                cov = f"{dto.niqqud_coverage * 100:.0f}%" if dto.niqqud_coverage is not None else "\u2014"
+                conf = f"{dto.niqqud_confidence:.2f}" if dto.niqqud_confidence is not None else "\u2014"
+                override = "manual override" if dto.niqqud_is_override else "auto"
+                return "\n".join([
+                    f"Source: {dto.niqqud_source or '\u2014'}  ({override})",
+                    f"Confidence: {conf}",
+                    f"Coverage: {cov}",
+                    f"QC: {dto.niqqud_qc or '\u2014'}",
+                ])
+            if col == self.COL_QC and dto.niqqud_qc:
+                return f"QC status: {dto.niqqud_qc}"
+
+        if role == Qt.ItemDataRole.UserRole:
+            return dto.sentence_id
+
+        return None
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable

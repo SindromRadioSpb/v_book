@@ -8,8 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QLabel,
     QFileDialog,
     QCheckBox,
@@ -29,6 +28,7 @@ from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
 from app.services.document_service import DocumentService, validate_link_url, VALID_LEVELS
 from app.infra.settings import SettingsService
+from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker
 from app.ui.dialogs import show_error, show_info, show_warning
@@ -156,7 +156,7 @@ class DocumentsView(QWidget):
         self.process_worker = None
         self.documents_worker: Optional[DocumentsPageWorker] = None
 
-        self._loading = False  # Flag to suppress cellChanged during load
+        self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
         self._active_request_id = 0
 
@@ -306,25 +306,25 @@ class DocumentsView(QWidget):
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint_label)
 
-        # Documents table (12 columns including metadata)
-        self.docs_table = QTableWidget()
-        self.docs_table.setColumnCount(12)
-        self.docs_table.setHorizontalHeaderLabels(self.HEADER_LABELS)
-        self.docs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        # Documents table — PATCH-G: QTableView + DocumentsTableModel
+        self._docs_model = DocumentsTableModel(self)
+        self._docs_model.rename_committed.connect(self._on_rename_committed)
 
-        # Enable F2 and double-click editing on File Name column
+        self.docs_table = QTableView()
+        self.docs_table.setModel(self._docs_model)
+        self.docs_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.docs_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.docs_table.setEditTriggers(
-            QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.EditKeyPressed
+            QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
         )
+        self.docs_table.setSortingEnabled(False)
+        self.docs_table.setAlternatingRowColors(True)
+        self.docs_table.verticalHeader().setVisible(False)
 
         # Install event filter for F2 key
         self.docs_table.installEventFilter(self)
 
-        # Connect cellChanged to rename handler
-        self.docs_table.cellChanged.connect(self.on_cell_changed)
-
-        # Server-side sorting only (global SQL sort before pagination).
-        self.docs_table.setSortingEnabled(False)
+        # Server-side sort: header click → on_header_clicked
         self.docs_table.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
 
         self.table_layout_controller = TableLayoutController(
@@ -352,8 +352,13 @@ class DocumentsView(QWidget):
         self.docs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.docs_table.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Link click handler
-        self.docs_table.cellClicked.connect(self.on_cell_clicked)
+        # Link click handler (QTableView uses clicked signal with QModelIndex)
+        self.docs_table.clicked.connect(self._on_cell_clicked)
+
+        # Selection changes
+        self.docs_table.selectionModel().selectionChanged.connect(
+            lambda *_: self.on_selection_changed()
+        )
 
         layout.addWidget(self.docs_table)
 
@@ -439,9 +444,6 @@ class DocumentsView(QWidget):
         action_layout.addWidget(self.delete_btn)
 
         layout.addLayout(action_layout)
-
-        # Enable/disable buttons on selection
-        self.docs_table.itemSelectionChanged.connect(self.on_selection_changed)
 
         self.setLayout(layout)
         self._update_sort_header_labels()
@@ -601,52 +603,9 @@ class DocumentsView(QWidget):
         self.update_pagination_controls(is_loading=False)
 
     def _render_documents_rows(self, dtos: list):
-        """Render one page of rows into QTableWidget (no in-memory global sort)."""
-        self._loading = True
-        try:
-            self.docs_table.setRowCount(len(dtos))
-
-            def _ro_item(text="", data=None):
-                item = QTableWidgetItem(text)
-                if data is not None:
-                    item.setData(Qt.ItemDataRole.DisplayRole, data)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                return item
-
-            for row, doc in enumerate(dtos):
-                id_item = _ro_item(data=doc.doc_id)
-                id_item.setText(str(doc.doc_id))
-                self.docs_table.setItem(row, self.COL_ID, id_item)
-
-                fn_item = QTableWidgetItem(doc.file_name)
-                fn_item.setData(Qt.ItemDataRole.UserRole, doc.doc_id)
-                self.docs_table.setItem(row, self.COL_NAME, fn_item)
-
-                size_kb = doc.file_size_bytes / 1024
-                self.docs_table.setItem(row, self.COL_SIZE, _ro_item(f"{size_kb:.1f}", data=size_kb))
-                self.docs_table.setItem(row, self.COL_STATUS, _ro_item(doc.status))
-
-                sc = doc.sentence_count or 0
-                self.docs_table.setItem(row, self.COL_SENTENCES, _ro_item(str(sc) if sc else "", data=sc))
-
-                tc = doc.token_count or 0
-                self.docs_table.setItem(row, self.COL_TOKENS, _ro_item(str(tc) if tc else "", data=tc))
-                self.docs_table.setItem(row, self.COL_IMPORTED, _ro_item((doc.imported_at or "")[:19]))
-                self.docs_table.setItem(row, self.COL_PATH, _ro_item(doc.file_path))
-                self.docs_table.setItem(row, self.COL_TAG, _ro_item(doc.tag or ""))
-
-                link_text = doc.link_url or ""
-                lk_item = _ro_item(link_text)
-                lk_item.setData(Qt.ItemDataRole.UserRole + 1, doc.link_url)
-                if doc.link_url:
-                    lk_item.setForeground(Qt.GlobalColor.blue)
-                    lk_item.setToolTip(f"Click to open: {doc.link_url}")
-                self.docs_table.setItem(row, self.COL_LINK, lk_item)
-
-                self.docs_table.setItem(row, self.COL_LEVEL, _ro_item(doc.level or ""))
-                self.docs_table.setItem(row, self.COL_TOPIC, _ro_item(doc.topic or ""))
-        finally:
-            self._loading = False
+        """Push one page of DTOs into the model (PATCH-G: replaces setItem loops)."""
+        self._current_dtos = list(dtos)
+        self._docs_model.update_rows(dtos)
 
     @property
     def total_pages(self) -> int:
@@ -739,26 +698,17 @@ class DocumentsView(QWidget):
         self.reload_documents(reset_page=False)
 
     def _update_sort_header_labels(self):
-        """Show active server-side sort indicator in headers."""
-        for idx, base in enumerate(self.HEADER_LABELS):
-            item = self.docs_table.horizontalHeaderItem(idx)
-            if item is None:
-                item = QTableWidgetItem(base)
-                self.docs_table.setHorizontalHeaderItem(idx, item)
-            if self.COLUMN_TO_DB.get(idx) == self.sort_column:
-                indicator = " ▲" if self.sort_direction == "asc" else " ▼"
-                item.setText(f"{base}{indicator}")
-            else:
-                item.setText(base)
+        """Show active server-side sort indicator in headers (PATCH-G: model-driven)."""
+        sort_col_idx = next(
+            (k for k, v in self.COLUMN_TO_DB.items() if v == self.sort_column), None
+        )
+        self._docs_model.set_sort_indicator(sort_col_idx, self.sort_direction)
 
-    def on_cell_clicked(self, row: int, column: int):
-        """Handle click on Link column вЂ” open URL safely."""
-        if column != self.COL_LINK:
+    def _on_cell_clicked(self, index):
+        """Handle click on Link column - open URL safely (PATCH-G: QModelIndex)."""
+        if index.column() != self.COL_LINK:
             return
-        item = self.docs_table.item(row, column)
-        if not item:
-            return
-        url = item.data(Qt.ItemDataRole.UserRole + 1)
+        url = index.data(Qt.ItemDataRole.UserRole + 1)
         if not url:
             return
         # Safety: re-validate scheme before opening
@@ -938,31 +888,23 @@ class DocumentsView(QWidget):
 
     def on_selection_changed(self):
         """Handle table selection change."""
-        has_selection = len(self.docs_table.selectedItems()) > 0
+        selected_indexes = self.docs_table.selectionModel().selectedRows()
+        has_selection = bool(selected_indexes)
         self.view_text_btn.setEnabled(has_selection)
-
-        # Delete button: enabled only if has selection AND not reference corpus
         self.delete_btn.setEnabled(has_selection and not self.is_reference_corpus)
 
-        # Enable process/re-process based on document status
         if has_selection:
-            selected_rows = set(item.row() for item in self.docs_table.selectedItems())
-
-            # Count processed and unprocessed documents
             has_processed = False
             has_unprocessed = False
-
-            for row in selected_rows:
-                status = self.docs_table.item(row, 3).text()  # Column 3 is Status
-                if status in ('processed', 'failed'):
+            for idx in selected_indexes:
+                dto = self._docs_model.get_dto(idx.row())
+                if dto is None:
+                    continue
+                if dto.status in ('processed', 'failed'):
                     has_processed = True
                 else:
                     has_unprocessed = True
-
-            # Process button: only for unprocessed documents
             self.process_btn.setEnabled(has_unprocessed)
-
-            # Re-process button: only for processed/failed documents
             self.reprocess_btn.setEnabled(has_processed)
         else:
             self.process_btn.setEnabled(False)
@@ -984,22 +926,21 @@ class DocumentsView(QWidget):
             )
             return
 
-        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
         if not selected_rows:
             return
 
         # Get selected document IDs and check statuses
         doc_ids = []
         processed_docs = []
-        for row in selected_rows:
-            doc_id = int(self.docs_table.item(row, 0).text())
-            status = self.docs_table.item(row, 3).text()
-            file_name = self.docs_table.item(row, 1).text()
-
-            if status in ('processed', 'failed'):
-                processed_docs.append(file_name)
+        for row in sorted(selected_rows):
+            dto = self._docs_model.get_dto(row)
+            if dto is None:
+                continue
+            if dto.status in ('processed', 'failed'):
+                processed_docs.append(dto.file_name)
             else:
-                doc_ids.append(doc_id)
+                doc_ids.append(dto.doc_id)
 
         # Warn if trying to process already-processed documents
         if processed_docs:
@@ -1121,15 +1062,17 @@ class DocumentsView(QWidget):
             )
             return
 
-        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
         if not selected_rows:
             return
 
         # Get selected document IDs
         doc_ids = []
-        for row in selected_rows:
-            doc_id = int(self.docs_table.item(row, 0).text())
-            doc_ids.append(doc_id)
+        for row in sorted(selected_rows):
+            dto = self._docs_model.get_dto(row)
+            if dto is None:
+                continue
+            doc_ids.append(dto.doc_id)
 
         if self.process_worker and self.process_worker.isRunning():
             show_error(self, "Error", "Processing already in progress")
@@ -1190,12 +1133,15 @@ class DocumentsView(QWidget):
 
     def on_view_text(self):
         """View document text."""
-        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
-        if not selected_rows:
+        selected_indexes = self.docs_table.selectionModel().selectedRows()
+        if not selected_indexes:
             return
 
-        row = min(selected_rows)
-        doc_id = int(self.docs_table.item(row, 0).text())
+        row = min(idx.row() for idx in selected_indexes)
+        dto = self._docs_model.get_dto(row)
+        if dto is None:
+            return
+        doc_id = dto.doc_id
 
         try:
             with self.db_service.get_session() as session:
@@ -1223,18 +1169,19 @@ class DocumentsView(QWidget):
             )
             return
 
-        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
         if not selected_rows:
             return
 
         # Collect document IDs and names
         doc_ids = []
         doc_names = []
-        for row in selected_rows:
-            doc_id = int(self.docs_table.item(row, 0).text())
-            file_name = self.docs_table.item(row, 1).text()
-            doc_ids.append(doc_id)
-            doc_names.append(file_name)
+        for row in sorted(selected_rows):
+            dto = self._docs_model.get_dto(row)
+            if dto is None:
+                continue
+            doc_ids.append(dto.doc_id)
+            doc_names.append(dto.file_name)
 
         # Confirmation dialog (single vs multiple)
         from PyQt6.QtWidgets import QMessageBox
@@ -1302,84 +1249,45 @@ class DocumentsView(QWidget):
                 show_error(self, "Error", f"Failed to delete: {e}")
 
     def eventFilter(self, obj, event):
-        """Handle F2 key to start editing File Name column."""
+        """Handle F2 key to start editing File Name column (PATCH-G: QTableView)."""
         if obj == self.docs_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
             if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_F2:
-                # Get current selection
-                selected_rows = set(item.row() for item in self.docs_table.selectedItems())
-                if selected_rows:
-                    row = min(selected_rows)
-                    # Jump to File Name column (column 1)
-                    file_name_item = self.docs_table.item(row, 1)
-                    if file_name_item:
-                        self.docs_table.setCurrentItem(file_name_item)
-                        self.docs_table.editItem(file_name_item)
-                        return True  # Event handled
+                selected_indexes = self.docs_table.selectionModel().selectedRows()
+                if selected_indexes:
+                    row = min(idx.row() for idx in selected_indexes)
+                    index = self._docs_model.index(row, self.COL_NAME)
+                    self.docs_table.setCurrentIndex(index)
+                    self.docs_table.edit(index)
+                    return True
 
         return super().eventFilter(obj, event)
 
-    def on_cell_changed(self, row, column):
-        """Handle cell edit (only File Name column)."""
-        # Skip if loading or not File Name column
-        if self._loading or column != 1:
-            return
-
-        # Get the edited item
-        file_name_item = self.docs_table.item(row, 1)
-        if not file_name_item:
-            return
-
-        # Get doc_id from UserRole (reliable after sorting)
-        doc_id = file_name_item.data(Qt.ItemDataRole.UserRole)
-        if not doc_id:
-            logger.warning(f"No doc_id found in UserRole for row {row}")
-            return
-
-        # Get new file name
-        new_file_name = file_name_item.text()
-
-        # Validate and save
+    def _on_rename_committed(self, doc_id: int, new_file_name: str):
+        """Handle rename committed from DocumentsTableModel (PATCH-G: replaces on_cell_changed)."""
         try:
             with self.db_service.get_session() as session:
-                # Get old name for comparison
                 from app.infra.sa_models import SourceDocument
                 doc = session.get(SourceDocument, doc_id)
                 if not doc:
                     raise Exception(f"Document with ID {doc_id} not found")
-
-                old_name = doc.file_name
-
-                # Skip if unchanged
-                if new_file_name == old_name:
+                if new_file_name == doc.file_name:
                     return
-
-                # Save via service (includes validation and audit)
-                updated_doc = self.ingest_service.rename_document(
-                    session, doc_id, new_file_name
-                )
-
-                logger.info(f"Renamed document {doc_id}: '{old_name}' в†’ '{new_file_name}'")
-
-                # Refresh to show updated name everywhere
+                self.ingest_service.rename_document(session, doc_id, new_file_name)
+                logger.info("Renamed document %d: ‘%s’ → ‘%s’", doc_id, doc.file_name, new_file_name)
                 self.load_documents()
-
         except ValueError as e:
-            # Validation error - revert and show error
-            logger.warning(f"Document rename validation failed: {e}")
+            logger.warning("Document rename validation failed: %s", e)
             show_error(self, "Rename Failed", str(e))
-            # Revert by reloading
             self.load_documents()
         except Exception as e:
-            # Other error - revert and show error
             logger.exception("Failed to rename document")
             show_error(self, "Rename Failed", f"Failed to rename document: {e}")
-            # Revert by reloading
             self.load_documents()
 
     def show_context_menu(self, position):
         """Show context menu with Rename, Edit Metadata, View Text, and Delete options."""
-        selected_rows = set(item.row() for item in self.docs_table.selectedItems())
+        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
         if not selected_rows:
             return
 
@@ -1414,21 +1322,16 @@ class DocumentsView(QWidget):
         menu.exec(self.docs_table.viewport().mapToGlobal(position))
 
     def on_edit_metadata(self, row: int):
-        """Open Edit Metadata dialog for the document at given row."""
-        fn_item = self.docs_table.item(row, self.COL_NAME)
-        if not fn_item:
+        """Open Edit Metadata dialog for the document at given row (PATCH-G: DTO-driven)."""
+        dto = self._docs_model.get_dto(row)
+        if dto is None:
             return
-        doc_id = fn_item.data(Qt.ItemDataRole.UserRole)
-        if not doc_id:
-            return
-
-        # Read current metadata from table
-        tag = (self.docs_table.item(row, self.COL_TAG) or QTableWidgetItem()).text()
-        link_url = self.docs_table.item(row, self.COL_LINK)
-        link_url = link_url.data(Qt.ItemDataRole.UserRole + 1) if link_url else None
-        level = (self.docs_table.item(row, self.COL_LEVEL) or QTableWidgetItem()).text()
-        topic = (self.docs_table.item(row, self.COL_TOPIC) or QTableWidgetItem()).text()
-        doc_name = fn_item.text()
+        doc_id = dto.doc_id
+        doc_name = dto.file_name
+        tag = dto.tag or ""
+        link_url = dto.link_url or ""
+        level = dto.level or ""
+        topic = dto.topic or ""
 
         dlg = EditMetadataDialog(doc_name, tag, link_url or "", level, topic, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -1457,11 +1360,10 @@ class DocumentsView(QWidget):
             show_error(self, "Error", f"Failed to save metadata: {e}")
 
     def start_rename(self, row):
-        """Start editing the File Name column for a specific row."""
-        file_name_item = self.docs_table.item(row, 1)
-        if file_name_item:
-            self.docs_table.setCurrentItem(file_name_item)
-            self.docs_table.editItem(file_name_item)
+        """Start editing the File Name column for a specific row (PATCH-G: QTableView)."""
+        index = self._docs_model.index(row, self.COL_NAME)
+        self.docs_table.setCurrentIndex(index)
+        self.docs_table.edit(index)
 
     # Drag and drop handlers
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -1511,14 +1413,13 @@ class DocumentsView(QWidget):
         """
         logger.info(f"Highlighting document {doc_id}, sentence {sentence_id}")
 
-        # Find the row with this doc_id
-        for row in range(self.docs_table.rowCount()):
-            item = self.docs_table.item(row, 0)  # ID column
-            if item and int(item.text()) == doc_id:
+        # Find the row with this doc_id (PATCH-G: search _current_dtos cache)
+        for row, dto in enumerate(self._current_dtos):
+            if dto.doc_id == doc_id:
                 # Select this row
                 self.docs_table.selectRow(row)
                 # Scroll to make it visible
-                self.docs_table.scrollToItem(item)
+                self.docs_table.scrollTo(self._docs_model.index(row, 0))
                 logger.info(f"Selected document row {row}")
 
                 # Open text viewer with highlighting (M6 - no placeholder)

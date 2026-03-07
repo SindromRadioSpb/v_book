@@ -15,8 +15,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QLabel,
     QLineEdit,
     QComboBox,
@@ -41,6 +40,7 @@ from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.infra.settings import SettingsService
 from app.domain.dto import SentenceDTO
 from app.ui.dialogs import show_error, show_info, show_warning
+from app.ui.models_qt import SentencesTableModel
 from app.ui.workers import UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
@@ -226,22 +226,20 @@ class SentencesView(QWidget):
         action_row.addStretch()
         layout.addLayout(action_row)
 
-        # --- Table ---
-        self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels([
-            "ID", "Document", "#", "Sentence Text",
-            "Translation", "Niqqud", "QC", "Audio"
-        ])
+        # --- Table --- (PATCH-G: QTableView + SentencesTableModel)
+        self._sentences_model = SentencesTableModel(self)
+        self.table = QTableView()
+        self.table.setModel(self._sentences_model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setSortingEnabled(False)  # Server-side only
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.verticalHeader().setVisible(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_selection_changed())
 
         # Column widths
         self.table.setColumnWidth(COL_ID, 70)
@@ -376,56 +374,8 @@ class SentencesView(QWidget):
         return _MAP.get(qc_status, (qc_status[:2], None))
 
     def _populate_table(self, dtos: List[SentenceDTO]):
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(dtos))
-
-        def _ro(text=""):
-            item = QTableWidgetItem(str(text))
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            return item
-
-        for row, dto in enumerate(dtos):
-            self.table.setItem(row, COL_ID, _ro(dto.sentence_id))
-            self.table.setItem(row, COL_DOC, _ro(dto.doc_name))
-            self.table.setItem(row, COL_IDX, _ro(dto.sent_index))
-            self.table.setItem(row, COL_TEXT, _ro(dto.text))
-            self.table.setItem(row, COL_TRANSLATION, _ro(dto.translation or ""))
-
-            # Niqqud column with tooltip
-            niqqud_item = _ro(dto.pronunciation_text or "")
-            if dto.pronunciation_text:
-                cov_pct = f"{dto.niqqud_coverage * 100:.0f}%" if dto.niqqud_coverage is not None else "—"
-                conf_str = f"{dto.niqqud_confidence:.2f}" if dto.niqqud_confidence is not None else "—"
-                override_str = "manual override" if dto.niqqud_is_override else "auto"
-                tooltip_lines = [
-                    f"Source: {dto.niqqud_source or '—'}  ({override_str})",
-                    f"Confidence: {conf_str}",
-                    f"Coverage: {cov_pct}",
-                    f"QC: {dto.niqqud_qc or '—'}",
-                ]
-                if dto.niqqud_qc in ("partial", "rejected") and dto.niqqud_coverage is not None:
-                    pass  # qc_reason would be in overlay but not in DTO — tooltip shows coverage
-                niqqud_item.setToolTip("\n".join(tooltip_lines))
-            self.table.setItem(row, COL_NIQQUD, niqqud_item)
-
-            # QC badge column
-            qc_badge, qc_color = self._qc_badge_static(dto.niqqud_qc)
-            qc_item = _ro(qc_badge)
-            if qc_color:
-                qc_item.setForeground(qc_color)
-            if dto.niqqud_qc:
-                qc_item.setToolTip(f"QC status: {dto.niqqud_qc}")
-            self.table.setItem(row, COL_QC, qc_item)
-
-            audio_text = dto.audio_status or "—"
-            audio_item = _ro(audio_text)
-            if dto.audio_status == "ready":
-                audio_item.setForeground(Qt.GlobalColor.darkGreen)
-            elif dto.audio_status == "failed":
-                audio_item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row, COL_AUDIO, audio_item)
-
-        self.table.setSortingEnabled(False)
+        """Push DTOs into the model (PATCH-G: replaces setItem loops)."""
+        self._sentences_model.update_rows(dtos)
 
     # ------------------------------------------------------------------
     # Pagination
@@ -469,15 +419,14 @@ class SentencesView(QWidget):
         self._reload()
 
     def focus_sentence_by_id(self, sentence_id: int) -> bool:
-        """Best-effort focus helper used by Audio Player 'Go to Source'."""
+        """Best-effort focus helper used by Audio Player 'Go to Source' (PATCH-G: QTableView)."""
         for row, dto in enumerate(self._current_dtos):
             if int(getattr(dto, "sentence_id", 0) or 0) != int(sentence_id):
                 continue
-            self.table.setCurrentCell(row, COL_ID)
+            index = self._sentences_model.index(row, COL_ID)
+            self.table.setCurrentIndex(index)
             self.table.selectRow(row)
-            item = self.table.item(row, COL_ID)
-            if item is not None:
-                self.table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+            self.table.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
             return True
         return False
 
@@ -518,7 +467,7 @@ class SentencesView(QWidget):
     # ------------------------------------------------------------------
 
     def _on_selection_changed(self):
-        has_sel = bool(self.table.selectedItems())
+        has_sel = bool(self.table.selectionModel().selectedRows())
         self.translate_btn.setEnabled(has_sel)
         self.audio_btn.setEnabled(has_sel)
         self.play_btn.setEnabled(has_sel)
@@ -526,7 +475,7 @@ class SentencesView(QWidget):
         self.add_user_dict_btn.setEnabled(has_sel)
 
     def _get_selected_dtos(self) -> List[SentenceDTO]:
-        rows = {item.row() for item in self.table.selectedItems()}
+        rows = {idx.row() for idx in self.table.selectionModel().selectedRows()}
         return [self._current_dtos[r] for r in sorted(rows) if r < len(self._current_dtos)]
 
     # ------------------------------------------------------------------
