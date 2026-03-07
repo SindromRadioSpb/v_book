@@ -1026,6 +1026,33 @@ def main():
         if recovered_count > 0:
             logger.warning(f"Crash recovery: marked {recovered_count} runs as failed")
 
+        # PERF-SCALE PATCH-A: mount read-only reference DBs.
+        # Scan dict_project for is_reference=1 rows and attach each ref_db_path
+        # as a ReadOnlyDatabaseManager so get_ref_session() works throughout the session.
+        try:
+            from sqlalchemy import text as _sa_text
+            with db_service.get_session() as _s:
+                _ref_rows = _s.execute(
+                    _sa_text(
+                        "SELECT project_id, ref_db_path FROM dict_project "
+                        "WHERE is_reference=1 AND ref_db_path IS NOT NULL"
+                    )
+                ).fetchall()
+            for _pid, _rpath in _ref_rows:
+                try:
+                    DBService.attach_reference(_pid, _rpath)
+                    logger.info(
+                        "Reference DB attached: project %d → %s", _pid, _rpath
+                    )
+                except FileNotFoundError:
+                    logger.warning(
+                        "Reference DB file not found for project %d (path: %s); "
+                        "project will remain read-only in UI but physical RO mount skipped.",
+                        _pid, _rpath,
+                    )
+        except Exception as _ref_err:
+            logger.warning("Reference DB attach scan failed (non-fatal): %s", _ref_err)
+
         # Initialize local MT providers (lazy - on first use)
         # NOTE: Providers are initialized when first needed to avoid blocking app startup
         # Model loading can take 30-60 seconds, so we defer it until actual translation request
