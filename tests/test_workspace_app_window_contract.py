@@ -15,11 +15,16 @@ class _StubProjectView(QWidget):
     def __init__(self, project_id):
         super().__init__()
         self.project_id = int(project_id)
+        self.project_created_at = ""
         self.focused_tabs = []
+        self.load_project_calls = 0
 
     def focus_tab(self, tab_key: str) -> bool:
         self.focused_tabs.append(str(tab_key))
         return True
+
+    def load_project(self) -> None:
+        self.load_project_calls += 1
 
 
 def _fresh_window(monkeypatch, qtbot):
@@ -60,6 +65,50 @@ def test_pending_project_tab_routes_after_open(monkeypatch, qtbot):
     current = window.stack.currentWidget()
     assert isinstance(current, _StubProjectView)
     assert current.focused_tabs == ["terms"]
+
+
+def test_open_project_recreates_cached_view_when_identity_changed(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+
+    monkeypatch.setattr("app.ui.app_window.ProjectView", _StubProjectView)
+    monkeypatch.setattr(window, "_is_valid_project_id", lambda project_id: True)
+    monkeypatch.setattr(window, "_lookup_project_identity", lambda project_id: ("Recreated", "created-new"))
+
+    stale = _StubProjectView(55)
+    stale.project_created_at = "created-old"
+    window.stack.addWidget(stale)
+    window._project_instances[55] = stale
+    window._register_workspace_instance("project:55", stale)
+
+    window.open_project(55)
+    current = window.stack.currentWidget()
+    assert isinstance(current, _StubProjectView)
+    assert current is not stale
+    assert window._project_instances[55] is current
+    assert window._is_widget_in_stack(stale) is False
+    assert window.current_project_name == "Recreated"
+
+
+def test_project_deleted_invalidates_runtime_and_recent_state(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+
+    monkeypatch.setattr(window, "_is_valid_project_id", lambda project_id: True)
+    window.current_project_id = 7
+    window.current_project_name = "Legacy"
+    window._recent_project_ids = [7, 9]
+
+    stale = _StubProjectView(7)
+    stale.project_created_at = "created-old"
+    window.stack.addWidget(stale)
+    window._project_instances[7] = stale
+    window._register_workspace_instance("project:7", stale)
+
+    window._on_project_deleted(7)
+
+    assert 7 not in window._project_instances
+    assert window._is_widget_in_stack(stale) is False
+    assert window.current_project_id is None
+    assert 7 not in window._recent_project_ids
 
 
 def test_expand_layout_shortcuts_adds_hebrew_variant(monkeypatch, qtbot):

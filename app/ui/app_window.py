@@ -203,20 +203,26 @@ class AppWindow(QMainWindow):
             return False
 
     def _lookup_project_name(self, project_id: Optional[int]) -> str:
+        name, _created_at = self._lookup_project_identity(project_id)
+        return name
+
+    def _lookup_project_identity(self, project_id: Optional[int]) -> tuple[str, str]:
         if project_id is None:
-            return ""
+            return "", ""
         try:
             pid = int(project_id)
         except (TypeError, ValueError):
-            return ""
+            return "", ""
         try:
             with self.project_service.db_service.get_session() as session:
                 project = self.project_service.get_project(session, pid)
             if project is None:
-                return ""
-            return str(getattr(project, "name", "") or "").strip()
+                return "", ""
+            name = str(getattr(project, "name", "") or "").strip()
+            created_at = str(getattr(project, "created_at", "") or "").strip()
+            return name, created_at
         except Exception:
-            return ""
+            return "", ""
 
     def _save_current_project_context(self) -> None:
         if self.current_project_id is None:
@@ -290,8 +296,75 @@ class AppWindow(QMainWindow):
         if not self._is_valid_project_id(self.current_project_id):
             self._set_current_project_context(None, "")
             return
-        if not self.current_project_name:
-            self._set_current_project_context(self.current_project_id, self._lookup_project_name(self.current_project_id))
+        live_name = self._lookup_project_name(self.current_project_id)
+        if live_name != self.current_project_name:
+            self._set_current_project_context(self.current_project_id, live_name)
+
+    def _remove_recent_project_id(self, project_id: int) -> None:
+        filtered = [value for value in self._recent_project_ids if int(value) != int(project_id)]
+        if len(filtered) == len(self._recent_project_ids):
+            return
+        self._recent_project_ids = filtered
+        self.settings.set_json("workspace/recent_project_ids", self._recent_project_ids)
+        self.workspace.sidebar.set_recent_project_ids(self._recent_project_ids)
+
+    def _drop_project_bound_widgets(self, project_id: int) -> bool:
+        pid = int(project_id)
+        widgets_to_remove: List[object] = []
+        for i in range(self.stack.count()):
+            widget = self.stack.widget(i)
+            if widget is None:
+                continue
+            wid_pid = getattr(widget, "project_id", None)
+            try:
+                if wid_pid is not None and int(wid_pid) == pid:
+                    widgets_to_remove.append(widget)
+            except (TypeError, ValueError):
+                continue
+
+        if not widgets_to_remove:
+            return False
+
+        for widget in widgets_to_remove:
+            for key, value in list(self._workspace_instances.items()):
+                if value is widget:
+                    self._unregister_workspace_instance(key)
+            self._remove_widget_from_stack(widget)
+        self._project_instances.pop(pid, None)
+        return True
+
+    def _invalidate_project_runtime(self, project_id: int) -> None:
+        pid = int(project_id)
+        current_widget = self.stack.currentWidget()
+        current_widget_pid = getattr(current_widget, "project_id", None)
+        current_matches_deleted = False
+        try:
+            current_matches_deleted = current_widget_pid is not None and int(current_widget_pid) == pid
+        except (TypeError, ValueError):
+            current_matches_deleted = False
+
+        removed = self._drop_project_bound_widgets(pid)
+        self._unregister_workspace_instance(f"project:{pid}")
+        self._pending_refresh_project_ids.discard(pid)
+        self._remove_recent_project_id(pid)
+
+        if self.current_project_id == pid:
+            self._set_current_project_context(None, "")
+
+        if current_matches_deleted:
+            self.stack.setCurrentWidget(self.dashboard)
+            self._set_active_workspace("workspace.projects", push_history=False)
+            self._show_nav_status(f"Project #{pid} was removed. Returned to dashboard.")
+
+        if removed:
+            logger.info("Invalidated runtime widgets for project %d", pid)
+
+    def _on_project_deleted(self, project_id: int) -> None:
+        try:
+            pid = int(project_id)
+        except (TypeError, ValueError):
+            return
+        self._invalidate_project_runtime(pid)
 
     def _focus_or_create_workspace_widget(self, key: str, factory):
         widget = self._resolve_workspace_instance(key)
@@ -383,6 +456,7 @@ class AppWindow(QMainWindow):
         self.dashboard.project_selected.connect(self.open_project)
         self.dashboard.verification_requested.connect(self.open_verification)
         self.dashboard.projects_loaded.connect(self._on_projects_catalog_loaded)
+        self.dashboard.project_deleted.connect(self._on_project_deleted)
         self.stack.addWidget(self.dashboard)
         self._register_workspace_instance("workspace.projects", self.dashboard)
 
@@ -999,19 +1073,44 @@ class AppWindow(QMainWindow):
             self._show_nav_status(f"Project #{pid} does not exist.")
             return
 
+        live_name, live_created_at = self._lookup_project_identity(pid)
         project_view = self._project_instances.get(pid)
         if project_view is not None and self._is_widget_in_stack(project_view):
-            self.stack.setCurrentWidget(project_view)
-            self._set_active_workspace("workspace.projects")
-            self._set_current_project_context(pid)
-            self._push_recent_project(pid)
-            pending_tab = self._pending_project_tab
-            self._pending_project_tab = None
-            if pending_tab and project_view.focus_tab(pending_tab):
-                self._show_nav_status(f"Project #{pid} focused. Routed to {pending_tab.replace('_', ' ').title()}.")
+            cached_created_at = str(getattr(project_view, "project_created_at", "") or "").strip()
+            if live_created_at and cached_created_at and cached_created_at != live_created_at:
+                logger.info(
+                    "Discarding stale cached ProjectView for project %d "
+                    "(created_at changed from %s to %s)",
+                    pid,
+                    cached_created_at,
+                    live_created_at,
+                )
+                self._invalidate_project_runtime(pid)
+                project_view = None
             else:
-                self._show_nav_status(f"Project #{pid} focused.")
-            return
+                if hasattr(project_view, "load_project"):
+                    try:
+                        project_view.load_project()
+                    except Exception:
+                        logger.debug(
+                            "ProjectView.load_project refresh failed for project %d",
+                            pid,
+                            exc_info=True,
+                        )
+                self.stack.setCurrentWidget(project_view)
+                self._set_active_workspace("workspace.projects")
+                self._set_current_project_context(pid, live_name)
+                self._push_recent_project(pid)
+                pending_tab = self._pending_project_tab
+                self._pending_project_tab = None
+                if pending_tab and project_view.focus_tab(pending_tab):
+                    self._show_nav_status(f"Project #{pid} focused. Routed to {pending_tab.replace('_', ' ').title()}.")
+                else:
+                    self._show_nav_status(f"Project #{pid} focused.")
+                return
+
+        if not live_name:
+            live_name = self._lookup_project_name(pid)
 
         # Create project view
         project_key = f"project:{pid}"
@@ -1025,7 +1124,7 @@ class AppWindow(QMainWindow):
         self._project_instances[pid] = project_view
         self._register_workspace_instance(project_key, project_view)
         self._set_active_workspace("workspace.projects")
-        self._set_current_project_context(pid)
+        self._set_current_project_context(pid, live_name)
         self._push_recent_project(pid)
         pending_tab = self._pending_project_tab
         self._pending_project_tab = None

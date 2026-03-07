@@ -30,6 +30,7 @@ class ProjectDashboard(QWidget):
     project_selected = pyqtSignal(int)  # Emits project_id
     verification_requested = pyqtSignal()  # Emits when verification button clicked
     projects_loaded = pyqtSignal(list)  # Emits list[dict] for sidebar search catalog
+    project_deleted = pyqtSignal(int)  # Emits deleted project_id after successful deletion
 
     def __init__(self):
         super().__init__()
@@ -293,6 +294,12 @@ class ProjectDashboard(QWidget):
         self._cleanup_delete_worker()
 
         if report.success:
+            deleted_project_id = getattr(report, "project_id", None)
+            if deleted_project_id is not None:
+                try:
+                    self.project_deleted.emit(int(deleted_project_id))
+                except (TypeError, ValueError):
+                    logger.warning("Delete report contains invalid project_id: %r", deleted_project_id)
             show_info(
                 self,
                 "Project Deleted",

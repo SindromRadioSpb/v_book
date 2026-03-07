@@ -32,6 +32,8 @@ class ProjectView(QWidget):
     def __init__(self, project_id: int):
         super().__init__()
         self.project_id = project_id
+        self.project_name = ""
+        self.project_created_at = ""
         self.project_service = ProjectService()
         self.init_ui()
         self.load_project()
@@ -110,15 +112,21 @@ class ProjectView(QWidget):
             with self.project_service.db_service.get_session() as session:
                 project = self.project_service.get_project(session, self.project_id)
                 if project:
+                    self.project_name = str(project.name or "")
+                    self.project_created_at = str(getattr(project, "created_at", "") or "")
                     # Add 🌐 marker for reference corpus projects
                     if project.is_general_corpus:
                         self.project_title.setText(f"Project: 🌐 {project.name}")
                     else:
                         self.project_title.setText(f"Project: {project.name}")
                 else:
+                    self.project_name = ""
+                    self.project_created_at = ""
                     self.project_title.setText("Project not found")
         except Exception as e:
             logger.exception("Failed to load project")
+            self.project_name = ""
+            self.project_created_at = ""
             self.project_title.setText("Error loading project")
 
     def on_back_clicked(self):
