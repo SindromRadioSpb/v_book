@@ -184,10 +184,13 @@ class DocumentSentence(Base):
     doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), nullable=False)
     sent_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
+    # Denormalized for fast corpus-level pagination (migration 031)
+    corpus_id = Column(Integer, ForeignKey("source_corpus.corpus_id"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("doc_id", "sent_index", name="uq_sentence_doc_index"),
         Index("idx_sentence_doc", "doc_id", "sent_index"),
+        Index("idx_sentence_corpus_sent_id", "corpus_id", "sentence_id"),
     )
 
     document = relationship("SourceDocument", back_populates="sentences")

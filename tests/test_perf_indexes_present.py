@@ -35,12 +35,18 @@ def test_perf_indexes_present_after_migrations():
 
             assert "idx_lemma_proj_doc_freq" in index_names
             assert "idx_doc_corpus_file_name" in index_names
+            # Migration 030: sort covering indexes
+            assert "idx_tm_entry_proj_updated_at" in index_names
+            assert "idx_doc_corpus_imported_at" in index_names
+            assert "idx_doc_corpus_sentence_count_sum" in index_names
+            # Migration 031: fast corpus-level sentence pagination
+            assert "idx_sentence_corpus_sent_id" in index_names
 
             schema_version = conn.execute(
                 "SELECT value FROM schema_meta WHERE key='schema_version'"
             ).fetchone()
             assert schema_version is not None
-            assert str(schema_version[0]) == "30"
+            assert str(schema_version[0]) == "31"
         finally:
             conn.close()
     finally:

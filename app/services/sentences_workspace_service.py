@@ -59,11 +59,14 @@ class SentencesWorkspaceService:
         Returns:
             List of SentenceDTO with overlays populated.
         """
+        # PATCH-Q fast path: use denormalized corpus_id on document_sentence
+        # (migration 031) so the query can use idx_sentence_corpus_sent_id
+        # instead of a 3-table JOIN + TEMP B-TREE sort over 13M rows.
+        corpus_ids = self._get_project_corpus_ids(session, project_id)
         stmt = (
             select(DocumentSentence, SourceDocument.file_name)
             .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == project_id)
+            .where(DocumentSentence.corpus_id.in_(corpus_ids))
         )
 
         if doc_id_filter is not None:
@@ -159,11 +162,10 @@ class SentencesWorkspaceService:
             return int(session.execute(stmt).scalar() or 0)
 
         # Filtered path: must touch individual sentence rows.
-        stmt = (
-            select(func.count(DocumentSentence.sentence_id))
-            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == project_id)
+        # PATCH-Q: use corpus_id on document_sentence to avoid 3-table JOIN.
+        corpus_ids = self._get_project_corpus_ids(session, project_id)
+        stmt = select(func.count(DocumentSentence.sentence_id)).where(
+            DocumentSentence.corpus_id.in_(corpus_ids)
         )
         if doc_id_filter is not None:
             stmt = stmt.where(DocumentSentence.doc_id == doc_id_filter)
@@ -186,11 +188,10 @@ class SentencesWorkspaceService:
         page_size: int = 100,
     ) -> List[int]:
         """Return sentence_ids for the current page (for batch actions)."""
+        corpus_ids = self._get_project_corpus_ids(session, project_id)
         stmt = (
             select(DocumentSentence.sentence_id)
-            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == project_id)
+            .where(DocumentSentence.corpus_id.in_(corpus_ids))
             .order_by(DocumentSentence.sentence_id.asc())
         )
         if doc_id_filter is not None:
@@ -210,11 +211,10 @@ class SentencesWorkspaceService:
         text_search: Optional[str] = None,
     ) -> List[int]:
         """Return all sentence_ids matching current filter (for 'All Filtered' batch action)."""
+        corpus_ids = self._get_project_corpus_ids(session, project_id)
         stmt = (
             select(DocumentSentence.sentence_id)
-            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == project_id)
+            .where(DocumentSentence.corpus_id.in_(corpus_ids))
             .order_by(DocumentSentence.sentence_id.asc())
         )
         if doc_id_filter is not None:
@@ -329,6 +329,12 @@ class SentencesWorkspaceService:
             return normalize_for_tm(lang, text, "surface").norm
         except Exception:
             return text.strip().lower()
+
+    @staticmethod
+    def _get_project_corpus_ids(session: Session, project_id: int) -> List[int]:
+        """Return all corpus_ids belonging to project_id (cached in caller for batch use)."""
+        stmt = select(SourceCorpus.corpus_id).where(SourceCorpus.project_id == project_id)
+        return [row[0] for row in session.execute(stmt).all()]
 
     @staticmethod
     def _get_project_src_lang(session: Session, project_id: int) -> str:
