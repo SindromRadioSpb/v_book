@@ -2,7 +2,7 @@
 import logging
 from typing import List, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete as sql_delete, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.infra.sa_models import (
@@ -307,14 +307,12 @@ class ProjectService:
                 .where(SourceCorpus.project_id == project_id)
             ).scalar()
 
-            # Count sentences across all documents
+            # Count sentences — use SUM(sentence_count) fast path (no 13M-row JOIN)
             sentences_count = session.execute(
-                select(func.count())
-                .select_from(DocumentSentence)
-                .join(SourceDocument)
-                .join(SourceCorpus)
+                select(func.coalesce(func.sum(SourceDocument.sentence_count), 0))
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
                 .where(SourceCorpus.project_id == project_id)
-            ).scalar()
+            ).scalar() or 0
 
             lemmas_count = session.execute(
                 select(func.count()).select_from(Lemma).where(
@@ -334,9 +332,45 @@ class ProjectService:
                 )
             ).scalar()
 
-            # Delete project (CASCADE will handle all related data)
-            session.delete(project)
+            # --- Fast delete: bypass ORM cascade (avoids N+1 loads) ---
+            #
+            # OLD: session.delete(project) → SA loads every sentence/pronunciation
+            #      into Python objects then issues N individual DELETE statements +
+            #      N FTS trigger executions.  For 1 K sentences ≈ 3 K round-trips.
+            #
+            # NEW: bulk-clear FTS entries first (single SQL), then delete the
+            #      project row and let SQLite's FK CASCADE handle all child tables.
+            #      The per-row FTS triggers still fire but become fast no-ops
+            #      (DELETE FROM sentence_fts WHERE sentence_id = ? finds nothing).
+
             from app.infra.db_retry import with_retry_on_locked
+
+            # 1. Bulk-delete FTS entries for this project's sentences.
+            #    Join via source_document/source_corpus — works on any schema version.
+            session.execute(text("""
+                DELETE FROM sentence_fts
+                WHERE sentence_id IN (
+                    SELECT ds.sentence_id
+                    FROM document_sentence ds
+                    JOIN source_document sd ON ds.doc_id = sd.doc_id
+                    JOIN source_corpus   sc ON sd.corpus_id = sc.corpus_id
+                    WHERE sc.project_id = :pid
+                )
+            """), {"pid": project_id})
+
+            # 2. Bulk-delete term FTS entries (direct project_id filter — fast).
+            session.execute(text(
+                "DELETE FROM term_fts WHERE project_id = :pid"
+            ), {"pid": project_id})
+
+            # 3. Delete the project row.  SQLite FK CASCADE propagates to:
+            #    source_corpus → source_document → document_sentence →
+            #    sentence_pronunciation, lemma → lemma_doc_stat/project_stat,
+            #    ngram, tm_entry, term_card, term_search, etc.
+            session.execute(
+                sql_delete(DictProject).where(DictProject.project_id == project_id)
+            )
+            session.expunge_all()  # clear stale ORM references
 
             with_retry_on_locked(
                 session.commit,
