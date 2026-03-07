@@ -359,150 +359,135 @@ class ProjectService:
 
             pid = project_id
 
-            try:
-                # 1. FTS: explicit delete (project_id is stored in term_fts content).
-                session.execute(text(
-                    "DELETE FROM term_fts WHERE project_id = :pid"
-                ), {"pid": pid})
+            # Helper: execute one DML statement tolerating B-tree corruption.
+            # Uses begin_nested() (SAVEPOINT) so a failed statement is rolled
+            # back in isolation — the outer transaction stays valid.
+            # Truly undeleted rows become orphans (harmless once dict_project
+            # is gone and all queries filter by project_id).
+            corruption_warnings: list[str] = []
 
-                # 2. Nullify SET-NULL FK references in user_dictionary_item
-                #    (won't auto-null with FK=OFF — do it manually).
-                session.execute(text(
+            def _safe(stmt: str, params: dict) -> None:
+                try:
+                    with session.begin_nested():
+                        session.execute(text(stmt), params)
+                except Exception as _err:
+                    msg = f"{stmt[:60]!r}: {_err}"
+                    logger.warning("Delete skipped (B-tree corruption?): %s", msg)
+                    corruption_warnings.append(msg)
+
+            p = {"pid": pid}
+
+            try:
+                # 1. FTS: explicit delete (project_id is stored in term_fts).
+                _safe("DELETE FROM term_fts WHERE project_id = :pid", p)
+
+                # 2. Nullify SET-NULL FK references in user_dictionary_item.
+                _safe(
                     "UPDATE user_dictionary_item "
-                    "SET origin_project_id = NULL WHERE origin_project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
+                    "SET origin_project_id = NULL WHERE origin_project_id = :pid", p
+                )
+                _safe(
                     "UPDATE user_dictionary_item SET origin_tm_entry_id = NULL "
                     "WHERE origin_tm_entry_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                )
+                _safe(
                     "UPDATE user_dictionary_item SET origin_doc_id = NULL "
                     "WHERE origin_doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)"
-                ), {"pid": pid})
+                    "  WHERE sc.project_id = :pid)", p
+                )
 
-                # 3. Grandchildren (leaf tables — deleted before their parents).
-                session.execute(text(
+                # 3. Grandchildren (leaf tables first).
+                _safe(
                     "DELETE FROM run_error WHERE run_id IN "
-                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM stopword_item WHERE stopset_id IN "
-                    "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM ngram_component WHERE ngram_id IN "
-                    "(SELECT ngram_id FROM ngram WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT ngram_id FROM ngram WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM term_cluster_member WHERE cluster_id IN "
-                    "(SELECT cluster_id FROM term_cluster WHERE project_id = :pid)"
-                ), {"pid": pid})
+                    "(SELECT cluster_id FROM term_cluster WHERE project_id = :pid)", p
+                )
                 # Stat tables: PK starts with project_id → O(log N) via PK index.
-                session.execute(text(
-                    "DELETE FROM lemma_doc_stat WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM lemma_project_stat WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM ngram_doc_stat WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM ngram_project_stat WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
+                _safe("DELETE FROM lemma_doc_stat WHERE project_id = :pid", p)
+                _safe("DELETE FROM lemma_project_stat WHERE project_id = :pid", p)
+                _safe("DELETE FROM ngram_doc_stat WHERE project_id = :pid", p)
+                _safe("DELETE FROM ngram_project_stat WHERE project_id = :pid", p)
+                _safe(
                     "DELETE FROM tm_entry_history WHERE tm_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM tm_alias WHERE tm_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM dict_entry WHERE dict_source_id IN "
-                    "(SELECT dict_source_id FROM dict_source WHERE project_id = :pid)"
-                ), {"pid": pid})
-                # sentence_pronunciation cascades from document_sentence (sentence_id FK).
-                session.execute(text(
+                    "(SELECT dict_source_id FROM dict_source WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM sentence_pronunciation WHERE sentence_id IN ("
                     "  SELECT ds.sentence_id FROM document_sentence ds"
                     "  JOIN source_document sd ON ds.doc_id = sd.doc_id"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)"
-                ), {"pid": pid})
+                    "  WHERE sc.project_id = :pid)", p
+                )
 
                 # 4. Children: direct project_id FK tables.
-                session.execute(text(
-                    "DELETE FROM lemma WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM ngram WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM term_cluster WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM term_card WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM translation_memory WHERE project_id = :pid"
-                ), {"pid": pid})
+                _safe("DELETE FROM lemma WHERE project_id = :pid", p)
+                _safe("DELETE FROM ngram WHERE project_id = :pid", p)
+                _safe("DELETE FROM term_cluster WHERE project_id = :pid", p)
+                _safe("DELETE FROM term_card WHERE project_id = :pid", p)
+                _safe("DELETE FROM translation_memory WHERE project_id = :pid", p)
                 # term_search delete fires trg_term_search_ad → cleans term_fts.
-                session.execute(text(
-                    "DELETE FROM term_search WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM tm_entry WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM processor_run WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM task_queue WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM project_snapshot WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM term_alias WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM stopword_set WHERE project_id = :pid"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM dict_source WHERE project_id = :pid"
-                ), {"pid": pid})
+                _safe("DELETE FROM term_search WHERE project_id = :pid", p)
+                _safe("DELETE FROM tm_entry WHERE project_id = :pid", p)
+                _safe("DELETE FROM processor_run WHERE project_id = :pid", p)
+                _safe("DELETE FROM task_queue WHERE project_id = :pid", p)
+                _safe("DELETE FROM project_snapshot WHERE project_id = :pid", p)
+                _safe("DELETE FROM term_alias WHERE project_id = :pid", p)
+                _safe("DELETE FROM stopword_set WHERE project_id = :pid", p)
+                _safe("DELETE FROM dict_source WHERE project_id = :pid", p)
 
                 # 5. Document hierarchy (trg_sentence_ad fires → sentence_fts cleaned).
-                session.execute(text(
+                _safe(
                     "DELETE FROM document_text WHERE doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "  WHERE sc.project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM document_sentence WHERE doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
+                    "  WHERE sc.project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM source_document WHERE corpus_id IN "
-                    "(SELECT corpus_id FROM source_corpus WHERE project_id = :pid)"
-                ), {"pid": pid})
-                session.execute(text(
-                    "DELETE FROM source_corpus WHERE project_id = :pid"
-                ), {"pid": pid})
+                    "(SELECT corpus_id FROM source_corpus WHERE project_id = :pid)", p
+                )
+                _safe("DELETE FROM source_corpus WHERE project_id = :pid", p)
 
-                # 6. Delete the project row itself.
+                # 6. Delete the project row itself (critical — project becomes invisible).
                 session.execute(
                     sql_delete(DictProject).where(DictProject.project_id == project_id)
                 )
                 session.expunge_all()
+
+                if corruption_warnings:
+                    logger.warning(
+                        "Project %d deleted with %d orphaned rows due to "
+                        "B-tree corruption. Run VACUUM to rebuild the database.",
+                        project_id, len(corruption_warnings)
+                    )
 
                 with_retry_on_locked(
                     session.commit,
@@ -511,7 +496,6 @@ class ProjectService:
                 )
             except Exception:
                 # On failure: attempt FK restoration before rollback.
-                # (SQLite may accept it here since the transaction is being aborted.)
                 try:
                     session.execute(text("PRAGMA foreign_keys=ON"))
                 except Exception:
