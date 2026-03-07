@@ -332,51 +332,188 @@ class ProjectService:
                 )
             ).scalar()
 
-            # --- Fast delete: bypass ORM cascade (avoids N+1 loads) ---
+            # --- Fast explicit delete (bypass FK CASCADE) ---
             #
-            # OLD: session.delete(project) → SA loads every sentence/pronunciation
-            #      into Python objects then issues N individual DELETE statements +
-            #      N FTS trigger executions.  For 1 K sentences ≈ 3 K round-trips.
+            # ROOT CAUSE of hang: SQLite FK CASCADE from lemma→lemma_doc_stat
+            # uses the lemma_id column, which has NO standalone index in a
+            # 104M-row lemma_doc_stat table.  Even a tiny project (7 lemmas)
+            # triggers 7 full-table scans of 104M rows = minutes of I/O.
             #
-            # NEW: bulk-clear FTS entries first (single SQL), then delete the
-            #      project row and let SQLite's FK CASCADE handle all child tables.
-            #      The per-row FTS triggers still fire but become fast no-ops
-            #      (DELETE FROM sentence_fts WHERE sentence_id = ? finds nothing).
+            # FIX: PRAGMA foreign_keys=OFF so SQLite never launches cascade scans.
+            # We manually delete every child table by project_id (all use leading
+            # project_id in PK/UNIQUE index → fast). Triggers still fire with
+            # FK=OFF, so sentence_fts/term_fts are cleaned automatically.
+            #
+            # IMPORTANT: SQLite ignores PRAGMA foreign_keys=ON inside a transaction.
+            # FK is restored AFTER commit via the raw pysqlite connection (which
+            # is then outside any transaction). The DatabaseManager checkout event
+            # also re-applies foreign_keys=ON whenever the connection is reused.
 
             from app.infra.db_retry import with_retry_on_locked
 
-            # 1. Bulk-delete FTS entries for this project's sentences.
-            #    Join via source_document/source_corpus — works on any schema version.
-            session.execute(text("""
-                DELETE FROM sentence_fts
-                WHERE sentence_id IN (
-                    SELECT ds.sentence_id
-                    FROM document_sentence ds
-                    JOIN source_document sd ON ds.doc_id = sd.doc_id
-                    JOIN source_corpus   sc ON sd.corpus_id = sc.corpus_id
-                    WHERE sc.project_id = :pid
+            pid = project_id
+
+            # Disable FK cascade on raw pysqlite connection (bypasses SQLAlchemy
+            # transaction scope — effective even mid-transaction in SQLite).
+            conn.execute("PRAGMA foreign_keys=OFF")
+            try:
+                # 1. FTS: explicit delete (project_id is stored in term_fts content).
+                session.execute(text(
+                    "DELETE FROM term_fts WHERE project_id = :pid"
+                ), {"pid": pid})
+
+                # 2. Nullify SET-NULL FK references in user_dictionary_item
+                #    (won't auto-null with FK=OFF — do it manually).
+                session.execute(text(
+                    "UPDATE user_dictionary_item "
+                    "SET origin_project_id = NULL WHERE origin_project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "UPDATE user_dictionary_item SET origin_tm_entry_id = NULL "
+                    "WHERE origin_tm_entry_id IN "
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "UPDATE user_dictionary_item SET origin_doc_id = NULL "
+                    "WHERE origin_doc_id IN ("
+                    "  SELECT sd.doc_id FROM source_document sd"
+                    "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
+                    "  WHERE sc.project_id = :pid)"
+                ), {"pid": pid})
+
+                # 3. Grandchildren (leaf tables — deleted before their parents).
+                session.execute(text(
+                    "DELETE FROM run_error WHERE run_id IN "
+                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM stopword_item WHERE stopset_id IN "
+                    "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM ngram_component WHERE ngram_id IN "
+                    "(SELECT ngram_id FROM ngram WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM term_cluster_member WHERE cluster_id IN "
+                    "(SELECT cluster_id FROM term_cluster WHERE project_id = :pid)"
+                ), {"pid": pid})
+                # Stat tables: PK starts with project_id → O(log N) via PK index.
+                session.execute(text(
+                    "DELETE FROM lemma_doc_stat WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM lemma_project_stat WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM ngram_doc_stat WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM ngram_project_stat WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM tm_entry_history WHERE tm_id IN "
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM tm_alias WHERE tm_id IN "
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM dict_entry WHERE dict_source_id IN "
+                    "(SELECT dict_source_id FROM dict_source WHERE project_id = :pid)"
+                ), {"pid": pid})
+                # sentence_pronunciation cascades from document_sentence (sentence_id FK).
+                session.execute(text(
+                    "DELETE FROM sentence_pronunciation WHERE sentence_id IN ("
+                    "  SELECT ds.sentence_id FROM document_sentence ds"
+                    "  JOIN source_document sd ON ds.doc_id = sd.doc_id"
+                    "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
+                    "  WHERE sc.project_id = :pid)"
+                ), {"pid": pid})
+
+                # 4. Children: direct project_id FK tables.
+                session.execute(text(
+                    "DELETE FROM lemma WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM ngram WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM term_cluster WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM term_card WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM translation_memory WHERE project_id = :pid"
+                ), {"pid": pid})
+                # term_search delete fires trg_term_search_ad → cleans term_fts.
+                session.execute(text(
+                    "DELETE FROM term_search WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM tm_entry WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM processor_run WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM task_queue WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM project_snapshot WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM term_alias WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM stopword_set WHERE project_id = :pid"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM dict_source WHERE project_id = :pid"
+                ), {"pid": pid})
+
+                # 5. Document hierarchy (trg_sentence_ad fires → sentence_fts cleaned).
+                session.execute(text(
+                    "DELETE FROM document_text WHERE doc_id IN ("
+                    "  SELECT sd.doc_id FROM source_document sd"
+                    "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
+                    "  WHERE sc.project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM document_sentence WHERE doc_id IN ("
+                    "  SELECT sd.doc_id FROM source_document sd"
+                    "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
+                    "  WHERE sc.project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM source_document WHERE corpus_id IN "
+                    "(SELECT corpus_id FROM source_corpus WHERE project_id = :pid)"
+                ), {"pid": pid})
+                session.execute(text(
+                    "DELETE FROM source_corpus WHERE project_id = :pid"
+                ), {"pid": pid})
+
+                # 6. Delete the project row itself.
+                session.execute(
+                    sql_delete(DictProject).where(DictProject.project_id == project_id)
                 )
-            """), {"pid": project_id})
+                session.expunge_all()
 
-            # 2. Bulk-delete term FTS entries (direct project_id filter — fast).
-            session.execute(text(
-                "DELETE FROM term_fts WHERE project_id = :pid"
-            ), {"pid": project_id})
-
-            # 3. Delete the project row.  SQLite FK CASCADE propagates to:
-            #    source_corpus → source_document → document_sentence →
-            #    sentence_pronunciation, lemma → lemma_doc_stat/project_stat,
-            #    ngram, tm_entry, term_card, term_search, etc.
-            session.execute(
-                sql_delete(DictProject).where(DictProject.project_id == project_id)
-            )
-            session.expunge_all()  # clear stale ORM references
-
-            with_retry_on_locked(
-                session.commit,
-                max_retries=4,
-                rollback_callback=session.rollback,
-            )
+                with_retry_on_locked(
+                    session.commit,
+                    max_retries=4,
+                    rollback_callback=session.rollback,
+                )
+            except Exception:
+                # On failure: attempt FK restoration before rollback.
+                # (SQLite may accept it here since the transaction is being aborted.)
+                try:
+                    session.execute(text("PRAGMA foreign_keys=ON"))
+                except Exception:
+                    pass  # checkout event in DatabaseManager will restore FK on next use
+                raise
 
             logger.info(
                 f"Deleted project '{project_name}': "

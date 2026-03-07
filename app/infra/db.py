@@ -50,6 +50,19 @@ class DatabaseManager:
             cursor.execute("PRAGMA cache_size=-65536")
             cursor.close()
 
+        # Re-apply foreign_keys=ON whenever a connection is checked out from the
+        # pool.  This guards against any code that temporarily sets FK=OFF (e.g.
+        # delete_project fast-delete path) and ensures the pooled connection is
+        # always in a known state when reused.
+        @event.listens_for(self.engine, "checkout")
+        def reset_fk_on_checkout(dbapi_conn, connection_record, connection_proxy):
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.close()
+            except Exception:
+                pass  # Don't block checkout on PRAGMA failure
+
         self.SessionLocal = sessionmaker(
             autocommit=False, autoflush=False, bind=self.engine
         )
