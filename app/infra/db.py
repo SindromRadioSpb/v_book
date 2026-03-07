@@ -32,6 +32,21 @@ class DatabaseManager:
             cursor.execute("PRAGMA journal_mode=WAL")
             # Keep write-lock windows survivable across workers and UI actions.
             cursor.execute("PRAGMA busy_timeout=15000")
+            # PERF-SCALE PATCH-I: performance hardening for hewiki-scale DBs.
+            # synchronous=NORMAL: WAL-safe and faster than FULL (default); no durability
+            # regression in WAL mode since WAL itself provides crash safety.
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            # temp_store=MEMORY: all temporary B-tree sorts and indexes are kept in RAM
+            # instead of spilling to a temp file on disk. Directly removes disk I/O cost
+            # from ORDER BY operations that cannot be served from an existing index
+            # (e.g. picker_page_empty, picker_page_search TEMP B-TREE confirmed in audit).
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            # mmap_size=256MB: memory-mapped I/O for the database file reduces syscall
+            # overhead on large sequential reads (17 GB hewiki DB benefits significantly).
+            cursor.execute("PRAGMA mmap_size=268435456")
+            # cache_size=-65536: 64 MB page cache (negative value = KB units).
+            # Default is only 2 MB; hewiki-scale queries benefit from larger hot-page pool.
+            cursor.execute("PRAGMA cache_size=-65536")
             cursor.close()
 
         self.SessionLocal = sessionmaker(
