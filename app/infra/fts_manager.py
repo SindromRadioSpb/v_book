@@ -41,24 +41,24 @@ SENTENCE_FTS_TRIGGERS = [
     CREATE TRIGGER IF NOT EXISTS trg_sentence_ai
     AFTER INSERT ON document_sentence
     BEGIN
-      INSERT INTO sentence_fts(text, doc_id, sentence_id)
-      VALUES (NEW.text, NEW.doc_id, NEW.sentence_id);
+      INSERT INTO sentence_fts(rowid, text, doc_id, sentence_id)
+      VALUES (NEW.sentence_id, NEW.text, NEW.doc_id, NEW.sentence_id);
     END;
     """,
     """
     CREATE TRIGGER IF NOT EXISTS trg_sentence_ad
     AFTER DELETE ON document_sentence
     BEGIN
-      DELETE FROM sentence_fts WHERE sentence_id = OLD.sentence_id;
+      DELETE FROM sentence_fts WHERE rowid = OLD.sentence_id;
     END;
     """,
     """
     CREATE TRIGGER IF NOT EXISTS trg_sentence_au
     AFTER UPDATE OF text ON document_sentence
     BEGIN
-      UPDATE sentence_fts
-      SET text = NEW.text, doc_id = NEW.doc_id
-      WHERE sentence_id = NEW.sentence_id;
+      DELETE FROM sentence_fts WHERE rowid = OLD.sentence_id;
+      INSERT INTO sentence_fts(rowid, text, doc_id, sentence_id)
+      VALUES (NEW.sentence_id, NEW.text, NEW.doc_id, NEW.sentence_id);
     END;
     """,
 ]

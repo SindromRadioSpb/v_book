@@ -46,7 +46,7 @@ def test_perf_indexes_present_after_migrations():
                 "SELECT value FROM schema_meta WHERE key='schema_version'"
             ).fetchone()
             assert schema_version is not None
-            assert str(schema_version[0]) == "31"
+            assert str(schema_version[0]) == "32"
         finally:
             conn.close()
     finally:
