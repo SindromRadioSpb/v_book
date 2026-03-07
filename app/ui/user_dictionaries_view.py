@@ -45,6 +45,7 @@ from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import (
+    UserDictItemsPageWorker,
     UserDictionaryBulkAddWorker,
     UserDictionaryBulkRemoveWorker,
     UserDictGenerateAudioWorker,
@@ -165,6 +166,10 @@ class UserDictionariesView(QWidget):
         self._review_cards = []
         self._review_index = -1
         self._view_mode = "browse"
+        # PATCH-H: async items loader — request_id anti-stale
+        self._items_request_seq: int = 0
+        self._active_items_request_id: int = 0
+        self._items_worker: Optional[UserDictItemsPageWorker] = None
 
         self.dictionary_model = UserDictionaryListModel()
         self.items_model = UserDictionaryItemsTableModel()
@@ -890,6 +895,7 @@ class UserDictionariesView(QWidget):
             item.audio_status = status_map.get((item.src_lang, item.src_norm), "missing")
 
     def load_items(self):
+        """Start async page load; stale responses are ignored by request_id (PATCH-H)."""
         if not self.current_dictionary_id:
             self.items_model.update_items([], 0)
             self.total_count = 0
@@ -897,29 +903,41 @@ class UserDictionariesView(QWidget):
             self._update_study_summary()
             return
 
-        try:
-            filters = self.build_filters()
-            with self.db_service.get_session() as session:
-                items, total = self.user_dict_service.query_items(
-                    session=session,
-                    dictionary_id=self.current_dictionary_id,
-                    filters=filters,
-                    limit=self.page_size,
-                    offset=self.current_offset,
-                    sort_column=self.sort_column,
-                    sort_direction=self.sort_direction,
-                )
-                self._apply_audio_status(session, items)
+        self._items_request_seq += 1
+        request_id = self._items_request_seq
+        self._active_items_request_id = request_id
 
-            self.items_model.update_items(items, total)
-            self.total_count = total
-            self.update_pagination_controls()
-            self._update_study_summary()
-            self.on_items_selection_changed()
-            self.status_label.setText(f"Loaded {len(items)} rows")
-        except Exception as e:
-            logger.error("Failed to load dictionary items: %s", e, exc_info=True)
-            QMessageBox.warning(self, "Error", f"Failed to load dictionary items:\n{e}")
+        self.status_label.setText("Loading...")
+        self._items_worker = UserDictItemsPageWorker(
+            request_id=request_id,
+            dictionary_id=self.current_dictionary_id,
+            filters=self.build_filters(),
+            limit=self.page_size,
+            offset=self.current_offset,
+            sort_column=self.sort_column,
+            sort_direction=self.sort_direction,
+        )
+        self._items_worker.page_loaded.connect(self._on_items_loaded)
+        self._items_worker.error.connect(self._on_items_error)
+        self._items_worker.start()
+
+    def _on_items_loaded(self, request_id: int, items: list, total: int) -> None:
+        """Apply loaded items; drop stale responses (PATCH-H)."""
+        if request_id != self._active_items_request_id:
+            return
+        self.items_model.update_items(items, total)
+        self.total_count = total
+        self.update_pagination_controls()
+        self._update_study_summary()
+        self.on_items_selection_changed()
+        self.status_label.setText(f"Loaded {len(items)} rows")
+
+    def _on_items_error(self, request_id: int, message: str) -> None:
+        if request_id != self._active_items_request_id:
+            return
+        logger.error("Failed to load dictionary items: %s", message)
+        self.status_label.setText("Error loading items")
+        QMessageBox.warning(self, "Error", f"Failed to load dictionary items:\n{message}")
 
     def on_dictionary_selected(self):
         selected_rows = self.dictionary_table.selectionModel().selectedRows()

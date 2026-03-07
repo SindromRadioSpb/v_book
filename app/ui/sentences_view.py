@@ -57,14 +57,20 @@ COL_AUDIO = 7
 
 
 class _SentencesLoadWorker(QThread):
-    """Background worker: load paginated sentences + count."""
+    """Background worker: load paginated sentences + count.
 
-    finished = pyqtSignal(list, int)   # (dtos, total_count)
-    error = pyqtSignal(str)
+    PATCH-H: carries request_id so that stale responses from superseded
+    workers are silently dropped by the view's _on_load_finished handler.
+    """
 
-    def __init__(self, project_id: int, page: int, page_size: int,
-                 doc_filter: Optional[int], text_search: Optional[str]):
+    finished = pyqtSignal(int, list, int)   # request_id, dtos, total_count
+    error = pyqtSignal(int, str)            # request_id, message
+
+    def __init__(self, request_id: int, project_id: int, page: int,
+                 page_size: int, doc_filter: Optional[int],
+                 text_search: Optional[str]):
         super().__init__()
+        self.request_id = int(request_id)
         self.project_id = project_id
         self.page = page
         self.page_size = page_size
@@ -77,7 +83,7 @@ class _SentencesLoadWorker(QThread):
             from app.services.db_service import DBService
             db = DBService.get_instance()
             svc = SentencesWorkspaceService()
-            with db.get_session() as session:
+            with db.get_read_session() as session:
                 dtos = svc.list_sentences(
                     session,
                     self.project_id,
@@ -92,9 +98,9 @@ class _SentencesLoadWorker(QThread):
                     doc_id_filter=self.doc_filter,
                     text_search=self.text_search,
                 )
-            self.finished.emit(dtos, total)
+            self.finished.emit(self.request_id, dtos, total)
         except Exception as e:
-            self.error.emit(str(e))
+            self.error.emit(self.request_id, str(e))
 
 
 class SentencesView(QWidget):
@@ -114,6 +120,8 @@ class SentencesView(QWidget):
         self._doc_filter: Optional[int] = None
         self._text_search: Optional[str] = None
         self._load_worker: Optional[_SentencesLoadWorker] = None
+        self._request_seq: int = 0
+        self._active_request_id: int = 0
 
         # Batch workers refs (to prevent GC)
         self._batch_translate_worker = None
@@ -310,14 +318,21 @@ class SentencesView(QWidget):
     # ------------------------------------------------------------------
 
     def _reload(self):
-        """Launch background load worker."""
-        if self._load_worker and self._load_worker.isRunning():
-            return  # Debounce: skip if already running
+        """Launch background load worker.
+
+        PATCH-H: Each call gets a unique request_id.  The previous worker
+        is left to finish (read-only — no harm) but its result is dropped
+        by _on_load_finished when request_id doesn't match _active_request_id.
+        """
+        self._request_seq += 1
+        request_id = self._request_seq
+        self._active_request_id = request_id
 
         self._text_search = self.text_search_edit.text().strip() or None
 
         self.status_label.setText("Loading...")
         self._load_worker = _SentencesLoadWorker(
+            request_id,
             self.project_id,
             self.current_page,
             self.page_size,
@@ -328,15 +343,19 @@ class SentencesView(QWidget):
         self._load_worker.error.connect(self._on_load_error)
         self._load_worker.start()
 
-    def _on_load_finished(self, dtos: List[SentenceDTO], total: int):
-        """Populate table from loaded DTOs."""
+    def _on_load_finished(self, request_id: int, dtos: List[SentenceDTO], total: int):
+        """Populate table from loaded DTOs; drop stale responses (PATCH-H)."""
+        if request_id != self._active_request_id:
+            return  # superseded by a newer request
         self._current_dtos = dtos
         self.total_count = total
         self._populate_table(dtos)
         self._update_pagination(total)
         self.status_label.setText(f"Showing {len(dtos)} of {total} sentences")
 
-    def _on_load_error(self, msg: str):
+    def _on_load_error(self, request_id: int, msg: str):
+        if request_id != self._active_request_id:
+            return
         self.status_label.setText(f"Error: {msg}")
         logger.error(f"Sentences load error: {msg}")
 

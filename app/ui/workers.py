@@ -2257,6 +2257,85 @@ class TranslateAllFilteredWorker(QThread):
             self.error.emit(str(e))
 
 
+class UserDictItemsPageWorker(QThread):
+    """Async paginated loader for user dictionary items (PERF-SCALE PATCH-H).
+
+    Replaces the synchronous load_items() call in user_dictionaries_view so
+    the UI thread is never blocked during DB + audio-status queries.
+
+    Uses the read engine (PATCH-C) — pure SELECT, no writes.
+
+    Signals:
+        page_loaded(request_id, items, total_count)
+        error(request_id, message)
+    """
+
+    page_loaded = pyqtSignal(int, list, int)   # request_id, items, total_count
+    error = pyqtSignal(int, str)               # request_id, message
+
+    def __init__(
+        self,
+        *,
+        request_id: int,
+        dictionary_id: int,
+        filters: Dict[str, Any],
+        limit: int,
+        offset: int,
+        sort_column: str,
+        sort_direction: str,
+    ):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.dictionary_id = int(dictionary_id)
+        self.filters = dict(filters)
+        self.limit = int(limit)
+        self.offset = int(offset)
+        self.sort_column = sort_column
+        self.sort_direction = sort_direction
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.user_dictionary_service import UserDictionaryService
+            from app.services.audio_asset_service import AudioAssetService
+
+            db = DBService.get_instance()
+            svc = UserDictionaryService()
+            audio_svc = AudioAssetService()
+
+            with db.get_read_session() as session:
+                items, total = svc.query_items(
+                    session=session,
+                    dictionary_id=self.dictionary_id,
+                    filters=self.filters,
+                    limit=self.limit,
+                    offset=self.offset,
+                    sort_column=self.sort_column,
+                    sort_direction=self.sort_direction,
+                )
+                # Audio status overlay (bulk lookup — same session)
+                if items:
+                    by_lang: Dict[str, list] = {}
+                    for item in items:
+                        by_lang.setdefault(item.src_lang, []).append(item.src_norm)
+                    status_map = {}
+                    for lang, norms in by_lang.items():
+                        mapping = audio_svc.bulk_get_status_any(
+                            session, lang=lang, norm_texts=norms
+                        )
+                        for norm, status in mapping.items():
+                            status_map[(lang, norm)] = status
+                    for item in items:
+                        item.audio_status = status_map.get(
+                            (item.src_lang, item.src_norm), "missing"
+                        )
+
+            self.page_loaded.emit(self.request_id, items, total)
+        except Exception as e:
+            logger.exception("UserDictItemsPageWorker error")
+            self.error.emit(self.request_id, str(e))
+
+
 class UserDictionaryBulkAddWorker(QThread):
     """Background worker for adding many rows to a user dictionary."""
 
