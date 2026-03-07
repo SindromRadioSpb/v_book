@@ -475,10 +475,15 @@ class DocumentsView(QWidget):
         """Load the default corpus for this project."""
         try:
             with self.db_service.get_session() as session:
-                # Get project to check is_general_corpus flag
+                # Get project to check reference flags.
+                # is_general_corpus: used as reference corpus for term scoring.
+                # is_reference (PERF-SCALE PATCH-A): physical RO DB mount — also read-only.
                 project = self.project_service.get_project(session, self.project_id)
                 if project:
-                    self.is_reference_corpus = bool(project.is_general_corpus)
+                    self.is_reference_corpus = bool(
+                        project.is_general_corpus
+                        or getattr(project, "is_reference", 0)
+                    )
 
                 corpus = self.project_service.get_default_corpus(session, self.project_id)
                 if corpus:
@@ -782,6 +787,20 @@ class DocumentsView(QWidget):
         self.delete_btn.setEnabled(False)
         self.delete_btn.setToolTip("Cannot delete documents from reference corpus (read-only)")
 
+        # PERF-SCALE PATCH-J: Disable NLP process/re-process buttons on reference corpus.
+        # Processing 387K reference docs must be done via CLI only
+        # (scripts/process_reference_corpus.py) to avoid UI lockup and unguarded
+        # multi-hour write sessions.
+        _process_tip = (
+            "NLP processing of reference corpus is CLI-only.\n"
+            "Use: python scripts/process_reference_corpus.py --project-id <id>"
+        )
+        for attr in ("process_btn", "reprocess_btn"):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setEnabled(False)
+                btn.setToolTip(_process_tip)
+
         # Update hint label
         self.hint_label.setText(
             "в„№пёЏ This is a Reference Corpus (read-only documents)\n"
@@ -944,6 +963,20 @@ class DocumentsView(QWidget):
 
     def on_process(self):
         """Process selected documents with NLP."""
+        # PERF-SCALE PATCH-J: hard block for reference corpus — CLI only.
+        if self.is_reference_corpus:
+            from app.ui.helpers import show_warning
+            show_warning(
+                self,
+                "Reference Corpus — CLI Only",
+                "NLP processing of a reference corpus is not allowed from the UI.\n\n"
+                "Use the CLI script instead:\n"
+                "  python scripts/process_reference_corpus.py --project-id <id>\n\n"
+                "This protects against accidental multi-hour write sessions that would\n"
+                "block all other operations.",
+            )
+            return
+
         selected_rows = set(item.row() for item in self.docs_table.selectedItems())
         if not selected_rows:
             return
@@ -1062,6 +1095,17 @@ class DocumentsView(QWidget):
 
     def on_reprocess(self):
         """Re-process selected documents with NLP (M4: Live Update)."""
+        # PERF-SCALE PATCH-J: hard block for reference corpus — CLI only.
+        if self.is_reference_corpus:
+            from app.ui.helpers import show_warning
+            show_warning(
+                self,
+                "Reference Corpus — CLI Only",
+                "NLP re-processing of a reference corpus is not allowed from the UI.\n\n"
+                "Use: python scripts/process_reference_corpus.py --project-id <id>",
+            )
+            return
+
         selected_rows = set(item.row() for item in self.docs_table.selectedItems())
         if not selected_rows:
             return
