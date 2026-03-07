@@ -43,8 +43,16 @@ class DBService:
         return self._db_manager
 
     def get_session(self):
-        """Create a new database session."""
+        """Create a new database session (write pool)."""
         return self.db_manager.get_session()
+
+    def get_read_session(self):
+        """Create a new read-optimised session (PERF-SCALE PATCH-C).
+
+        Use for workers that only SELECT: page loads, FTS/LIKE searches,
+        concordance, TM search.  Never commit or mutate ORM objects.
+        """
+        return self.db_manager.get_read_session()
 
     def recover_from_crash(self) -> int:
         """

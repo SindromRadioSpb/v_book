@@ -738,7 +738,10 @@ class P1VerificationWorker(QThread):
 # ============================================================================
 
 class TMSearchWorker(QThread):
-    """P2: Worker for searching TM entries (non-blocking)."""
+    """P2: Worker for searching TM entries (non-blocking).
+
+    Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
+    """
 
     results_ready = pyqtSignal(list, int)  # (entries: List[TMEntryDTO], total_count: int)
     error = pyqtSignal(str)
@@ -771,7 +774,7 @@ class TMSearchWorker(QThread):
             db_service = DBService.get_instance()
             admin_service = TranslationAdminService()
 
-            with db_service.get_session() as session:
+            with db_service.get_read_session() as session:
                 if self._cancelled:
                     return
 
@@ -807,7 +810,10 @@ class TMSearchWorker(QThread):
 
 
 class DocumentsPageWorker(QThread):
-    """Worker for Documents server-side count + page fetch (global filters/sort)."""
+    """Worker for Documents server-side count + page fetch (global filters/sort).
+
+    Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
+    """
 
     page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
     error = pyqtSignal(int, str)              # request_id, message
@@ -847,7 +853,7 @@ class DocumentsPageWorker(QThread):
             db_service = DBService.get_instance()
             doc_service = DocumentService()
 
-            with db_service.get_session() as session:
+            with db_service.get_read_session() as session:
                 if self._cancelled:
                     return
 
@@ -889,7 +895,10 @@ class DocumentsPageWorker(QThread):
 
 
 class ProjectDocumentsPageWorker(QThread):
-    """Worker for project-scoped document picker queries (search + paging)."""
+    """Worker for project-scoped document picker queries (search + paging).
+
+    Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
+    """
 
     page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
     error = pyqtSignal(int, str)              # request_id, message
@@ -924,7 +933,7 @@ class ProjectDocumentsPageWorker(QThread):
             db_service = DBService.get_instance()
             doc_service = DocumentService()
 
-            with db_service.get_session() as session:
+            with db_service.get_read_session() as session:
                 if self._cancelled:
                     return
 
@@ -986,7 +995,10 @@ class ProjectDeleteWorker(QThread):
 
 
 class DictionarySearchWorker(QThread):
-    """Worker for searching lemmas with pagination (non-blocking)."""
+    """Worker for searching lemmas with pagination (non-blocking).
+
+    Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
+    """
 
     results_ready = pyqtSignal(list)  # rows: List[Tuple[Lemma, LemmaProjectStat]]
     count_ready = pyqtSignal(int)     # total_count
@@ -1019,7 +1031,7 @@ class DictionarySearchWorker(QThread):
             db_service = DBService.get_instance()
             dict_service = DictionaryService()
 
-            with db_service.get_session() as session:
+            with db_service.get_read_session() as session:
                 if self._cancelled:
                     return
 
@@ -1059,7 +1071,10 @@ class DictionarySearchWorker(QThread):
 
 
 class TermsSearchWorker(QThread):
-    """Worker for searching term clusters with pagination (non-blocking)."""
+    """Worker for searching term clusters with pagination (non-blocking).
+
+    Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
+    """
 
     results_ready = pyqtSignal(list, int)  # (clusters: List[TermCluster], total_count: int)
     error = pyqtSignal(str)
@@ -1091,7 +1106,7 @@ class TermsSearchWorker(QThread):
             db_service = DBService.get_instance()
             term_service = TermExtractionService()
 
-            with db_service.get_session() as session:
+            with db_service.get_read_session() as session:
                 if self._cancelled:
                     return
 

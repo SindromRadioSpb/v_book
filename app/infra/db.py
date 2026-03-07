@@ -54,11 +54,48 @@ class DatabaseManager:
             autocommit=False, autoflush=False, bind=self.engine
         )
 
+        # PERF-SCALE PATCH-C: dedicated read engine.
+        # Separate connection pool for read-only workers (page loads, searches,
+        # concordance) so they don't compete with write sessions for pool slots.
+        # Both engines open the same WAL file — SQLite WAL mode allows concurrent
+        # readers alongside one writer without blocking.
+        _read_url = f"sqlite:///{self.db_path}"
+        self._read_engine = create_engine(
+            _read_url,
+            echo=False,
+            connect_args={"check_same_thread": False},
+            pool_size=4,
+            max_overflow=4,
+        )
+
+        @event.listens_for(self._read_engine, "connect")
+        def set_read_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=15000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            cursor.execute("PRAGMA mmap_size=268435456")
+            cursor.execute("PRAGMA cache_size=-65536")
+            cursor.close()
+
+        self.ReadSessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=self._read_engine
+        )
+
         logger.info(f"Database initialized at {self.db_path}")
 
     def get_session(self) -> Session:
-        """Create a new database session."""
+        """Create a new database session (write pool)."""
         return self.SessionLocal()
+
+    def get_read_session(self) -> Session:
+        """Create a new read-optimised session (read pool, PERF-SCALE PATCH-C).
+
+        Use for workers that only SELECT data (page loads, searches, concordance).
+        Never call session.commit() or mutate ORM objects on a read session.
+        """
+        return self.ReadSessionLocal()
 
     def _resolve_migration_lock_path(self) -> Path:
         """Return migration lock path, allowing a test-only env override."""
@@ -276,6 +313,7 @@ class DatabaseManager:
     def close(self) -> None:
         """Close database connections."""
         self.engine.dispose()
+        self._read_engine.dispose()
         logger.info("Database connections closed")
 
 
