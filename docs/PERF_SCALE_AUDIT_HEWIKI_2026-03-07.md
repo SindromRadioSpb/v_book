@@ -378,6 +378,120 @@ PATCH-K:  perf(pipeline): sequential stage throttler for reference corpus pipeli
 
 ---
 
+## 10. Implemented UI-Layer Performance Patches (2026-03-07)
+
+These patches were implemented in response to the UI performance audit and freeze measurements
+on the hewiki reference project. They are independent of the dual-DB architecture (PATCH-A)
+and provide immediate improvements on the single-DB path.
+
+---
+
+### PATCH-G ✅ — QAbstractTableModel virtualization (Documents + Sentences tabs)
+**Commit:** `PATCH-G: perf(ui): replace QTableWidget with QAbstractTableModel+QTableView`
+
+**Problem:** `QTableWidget` allocates a `QTableWidgetItem` per cell. At 250 rows × 12 cols =
+3,000 heap objects per page load — serialized from DB to Python to Qt. Any re-render (sort,
+resize, selection change) touched all allocated items.
+
+**Fix:**
+- `DocumentsTableModel(QAbstractTableModel)` — 12-col model, `update_rows()` batch push
+- `SentencesTableModel(QAbstractTableModel)` — 8-col model, niqqud QC badge colors
+- `_current_dtos: List[SentenceDTO]` cache — eliminates all `item(row, N).text()` cell reads
+- `selectionModel().selectedRows()` replaces `selectedItems()` throughout
+- `rename_committed = pyqtSignal(int, str)` drives rename from model `setData()`
+
+**Result:** Page navigation O(1) model swap instead of O(rows × cols) item allocation.
+
+---
+
+### PATCH-H ✅ — Anti-stale request_id guards
+**Commit:** `PATCH-H: perf(anti-stale): request_id guards for sentences + user_dict async load`
+
+**Problem:** Rapid tab switching or filter changes could deliver stale worker results to the
+UI, replacing current data with outdated rows.
+
+**Fix:**
+- `_SentencesLoadWorker` carries `request_id` in all signals
+- `SentencesView._active_request_id` — stale responses silently dropped
+- `UserDictItemsPageWorker` — same pattern for dictionaries tab
+
+---
+
+### PATCH-P ✅ — Two-stage worker + migration 030 sort indexes
+**Commit:** `PATCH-P: perf(sentences): two-stage worker + covering indexes + SUM fast path`
+
+**Measurements (hewiki):**
+| Query | Before | After |
+|---|---|---|
+| `tm_entry ORDER BY updated_at DESC` | 426 ms | <5 ms |
+| `source_document ORDER BY imported_at DESC` | 137 ms | <5 ms |
+| `SUM(sentence_count)` unfiltered COUNT | >2 s | ~10 ms |
+
+**Fixes:**
+1. **Migration 030** — 5 covering indexes for default sort columns:
+   - `idx_tm_entry_proj_updated_at(project_id, updated_at DESC)`
+   - `idx_doc_corpus_imported_at(corpus_id, imported_at DESC)`
+   - `idx_doc_corpus_sentence_count_sum(corpus_id, sentence_count)` (for SUM fast path)
+   - `idx_doc_corpus_sentence_count_cov`, `idx_doc_corpus_token_count_cov`
+2. **`count_sentences()` fast path** — `SUM(sentence_count)` over `source_document` rows
+   instead of 3-table JOIN COUNT on 13M rows (~10ms vs >2s)
+3. **Two-stage `_SentencesLoadWorker`** — emits `page_ready` immediately after
+   `list_sentences()`, `count_ready` after `count_sentences()`. UI shows row data without
+   waiting for the COUNT query.
+
+---
+
+### PATCH-Q ✅ — Corpus ID denormalization for O(page_size) sentence pagination
+**Commit:** `PATCH-Q: perf(sentences): denormalize corpus_id for O(page_size) pagination`
+
+**Root cause:** Even after PATCH-P, `list_sentences()` page query took **~584 seconds** on
+hewiki. The nested-loop JOIN `document_sentence → source_document → source_corpus` with
+`ORDER BY sentence_id LIMIT 100` forced SQLite to build a TEMP B-TREE over all 13M rows
+before applying LIMIT.
+
+**Query plan before:**
+```
+SEARCH sd USING COVERING INDEX idx_doc_corpus_doc_id_desc (corpus_id=?)
+SEARCH ds USING COVERING INDEX idx_sentence_doc (doc_id=?)
+USE TEMP B-TREE FOR ORDER BY     ← sorts 13M rows, then LIMIT 100
+```
+
+**Fix — migration 031:**
+```sql
+ALTER TABLE document_sentence ADD COLUMN corpus_id INTEGER;
+UPDATE document_sentence SET corpus_id = (SELECT corpus_id FROM source_document ...);
+CREATE INDEX idx_sentence_corpus_sent_id ON document_sentence(corpus_id, sentence_id);
+```
+
+**Query plan after:**
+```
+SEARCH document_sentence USING INDEX idx_sentence_corpus_sent_id (corpus_id=?)
+→ O(page_size) covering index scan, no TEMP B-TREE
+```
+
+**Expected result:** `list_sentences()` page query <5ms (from 584s).
+
+**Service changes:**
+- `list_sentences()` — `WHERE corpus_id IN (project_corpus_ids)` replaces 3-table JOIN
+- `count_sentences()` filtered path — same
+- `get_page_sentence_ids()`, `get_all_filtered_sentence_ids()` — same
+- `_get_project_corpus_ids()` helper (fast, few rows per project)
+
+**Migration note:** One-time backfill on 13M rows takes ~30–120s on first app startup.
+
+---
+
+## 11. Migration Application Status (hewiki reference DB)
+
+| Migration | Applied | Time |
+|---|---|---|
+| 030 (sort indexes) | ✅ 2026-03-07 | 4.5s |
+| 031 (corpus_id backfill) | ✅ 2026-03-07 | see task output |
+
+DB path: `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+
+---
+
 *Audit date: 2026-03-07*
 *Skill pack applied: `premium_desktop_pyqt_sqlite` — SKILL_01 (repo audit), SKILL_02 (patch planner),
 SKILL_03 (migrations), SKILL_05 (DB lock mitigation), SKILL_09 (scoring/canonical layer)*
