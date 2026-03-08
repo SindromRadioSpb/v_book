@@ -10,6 +10,7 @@ Provides:
 import logging
 from typing import List, Optional, Dict, Any
 
+from sqlalchemy import select
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -33,6 +34,7 @@ from PyQt6.QtGui import QAction
 from app.services.db_service import DBService
 from app.services.sentences_workspace_service import SentencesWorkspaceService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.infra.sa_models import SourceCorpus, SourceDocument
 from app.ui.dialogs.document_picker_dialog import DocumentPickerDialog
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
@@ -164,13 +166,13 @@ class SentencesView(QWidget):
     def _restore_view_state(self) -> None:
         saved_doc_id = self.settings.get_string(self._settings_key("doc_filter_id"), "").strip()
         saved_doc_name = self.settings.get_string(self._settings_key("doc_filter_name"), "").strip()
-        try:
-            self._doc_filter = int(saved_doc_id) if saved_doc_id else None
-        except ValueError:
-            self._doc_filter = None
-        self.doc_filter_label.setText(saved_doc_name or "All Documents")
-        if self._doc_filter is None:
-            self.doc_filter_label.setText("All Documents")
+        self._doc_filter, resolved_name, changed = self._resolve_saved_doc_filter(
+            saved_doc_id,
+            saved_doc_name,
+        )
+        self.doc_filter_label.setText(resolved_name)
+        if changed:
+            self._save_view_state()
 
     def _save_view_state(self) -> None:
         self.settings.set_value(
@@ -181,6 +183,48 @@ class SentencesView(QWidget):
             self._settings_key("doc_filter_name"),
             self.doc_filter_label.text().strip() or "All Documents",
         )
+
+    def _resolve_saved_doc_filter(
+        self,
+        saved_doc_id: str,
+        saved_doc_name: str,
+    ) -> tuple[Optional[int], str, bool]:
+        try:
+            parsed_doc_id = int(saved_doc_id) if saved_doc_id else None
+        except ValueError:
+            return None, "All Documents", bool(saved_doc_id or saved_doc_name)
+
+        if parsed_doc_id is None:
+            return None, "All Documents", bool(saved_doc_name and saved_doc_name != "All Documents")
+
+        session_factory = getattr(self.db_service, "get_read_session", None) or getattr(
+            self.db_service,
+            "get_session",
+            None,
+        )
+        if session_factory is None:
+            return parsed_doc_id, saved_doc_name or "All Documents", False
+
+        try:
+            with session_factory() as session:
+                row = session.execute(
+                    select(SourceDocument.doc_id, SourceDocument.file_name)
+                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(
+                        SourceCorpus.project_id == self.project_id,
+                        SourceDocument.doc_id == parsed_doc_id,
+                    )
+                ).first()
+        except Exception:
+            logger.debug("Failed to validate saved sentences doc filter", exc_info=True)
+            return parsed_doc_id, saved_doc_name or "All Documents", False
+
+        if row is None:
+            return None, "All Documents", True
+
+        current_name = str(row[1] or "All Documents")
+        changed = current_name != (saved_doc_name or "")
+        return int(row[0]), current_name, changed
 
     # ------------------------------------------------------------------
     # UI setup

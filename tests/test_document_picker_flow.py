@@ -411,6 +411,48 @@ def test_sentences_view_document_filter_state_is_project_scoped(monkeypatch, qtb
     assert second.doc_filter_label.text() == "All Documents"
 
 
+def test_sentences_view_clears_stale_saved_document_filter(monkeypatch, qtbot):
+    settings = _FakeSettings()
+    settings.set_value("sentences_view/project_11/doc_filter_id", "777")
+    settings.set_value("sentences_view/project_11/doc_filter_name", "Stale Doc")
+
+    class _FakeResult:
+        def first(self):
+            return None
+
+    class _FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, _stmt):
+            return _FakeResult()
+
+    monkeypatch.setattr(
+        "app.ui.sentences_view.DBService.get_instance",
+        lambda: SimpleNamespace(get_read_session=lambda: _FakeSession()),
+    )
+    monkeypatch.setattr(
+        "app.ui.sentences_view.SettingsService.get_instance",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        SentencesView,
+        "_reload",
+        lambda self: None,
+    )
+
+    view = SentencesView(project_id=11)
+    qtbot.addWidget(view)
+
+    assert view._doc_filter is None
+    assert view.doc_filter_label.text() == "All Documents"
+    assert settings.get_string("sentences_view/project_11/doc_filter_id", "") == ""
+    assert settings.get_string("sentences_view/project_11/doc_filter_name", "") == "All Documents"
+
+
 def test_document_picker_quick_tag_toggle_and_clear(monkeypatch, qtbot):
     monkeypatch.setattr(DocumentPickerDialog, "_reload", lambda self, reset_page: None)
     dlg = DocumentPickerDialog(project_id=1, settings=_FakeSettings())

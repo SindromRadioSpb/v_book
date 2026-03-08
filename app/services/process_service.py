@@ -160,6 +160,7 @@ class ProcessService:
                     doc_id=doc_id,
                     sent_index=sent_index,
                     text=sent_text,
+                    corpus_id=doc.corpus_id,
                 )
                 session.add(sent)
 

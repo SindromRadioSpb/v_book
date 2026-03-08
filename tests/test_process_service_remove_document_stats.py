@@ -23,6 +23,7 @@ from app.infra.sa_models import (
 from app.services.db_service import DBService
 from app.services.ingest_service import IngestService
 from app.services.process_service import ProcessService
+from app.services.sentences_workspace_service import SentencesWorkspaceService
 
 
 def _init_temp_db() -> Path:
@@ -340,6 +341,72 @@ def test_reprocess_document_clears_old_sentences_before_rebuild():
             assert cluster.pinned_example_sent_id is None
             proj_stats = session.execute(select(LemmaProjectStat)).scalars().all()
             assert proj_stats == []
+    finally:
+        DBService.shutdown()
+        DBService._instance = None
+        DBService._db_manager = None
+        try:
+            db_path.unlink()
+        except OSError:
+            pass
+
+
+def test_process_document_populates_sentence_corpus_id_for_sentences_workspace():
+    db_path = _init_temp_db()
+    DBService.shutdown()
+    DBService._instance = None
+    DBService._db_manager = None
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            lib = Library(name="L")
+            session.add(lib)
+            session.flush()
+            project = DictProject(library_id=lib.library_id, name="P", src_lang="he", tgt_lang="ru")
+            session.add(project)
+            session.flush()
+            project_id = int(project.project_id)
+            corpus = SourceCorpus(project_id=project_id, name="C")
+            session.add(corpus)
+            session.flush()
+            corpus_id = int(corpus.corpus_id)
+            doc = SourceDocument(
+                corpus_id=corpus_id,
+                file_path="/tmp/a.txt",
+                file_name="a.txt",
+                file_ext=".txt",
+                file_size_bytes=10,
+                sha256="sha1",
+                status="imported",
+            )
+            session.add(doc)
+            session.flush()
+            session.add(
+                DocumentText(
+                    doc_id=doc.doc_id,
+                    raw_text="בית ספר גדול. בית הספר החדש. הספר הזה טוב.",
+                    cleaned_text=None,
+                    ocr_used=0,
+                )
+            )
+            session.commit()
+
+            svc = ProcessService()
+            assert svc.process_document(session, int(doc.doc_id), use_mock=True) is True
+            session.commit()
+
+            rows = session.execute(
+                select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
+            ).scalars().all()
+            assert len(rows) == 3
+            assert {row.corpus_id for row in rows} == {corpus_id}
+
+            ws = SentencesWorkspaceService()
+            listed = ws.list_sentences(session, project_id=project_id, page=1, page_size=10)
+            assert len(listed) == 3
+            assert {dto.doc_id for dto in listed} == {int(doc.doc_id)}
     finally:
         DBService.shutdown()
         DBService._instance = None
