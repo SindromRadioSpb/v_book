@@ -585,6 +585,75 @@ class ProcessService:
         logger.info(f"Cleaned up {orphan_count} orphaned lemmas")
         return orphan_count
 
+    def _clear_document_sentences_fast(self, session: Session, doc_id: int) -> int:
+        """Delete old sentences for reprocess without ORM row-by-row deletes."""
+        sentence_count = int(
+            session.execute(
+                text(
+                    "SELECT COUNT(*) FROM document_sentence WHERE doc_id = :doc_id"
+                ),
+                {"doc_id": int(doc_id)},
+            ).scalar()
+            or 0
+        )
+        if sentence_count <= 0:
+            return 0
+
+        params = {"doc_id": int(doc_id)}
+        sentence_ids_sql = (
+            "SELECT sentence_id FROM document_sentence WHERE doc_id = :doc_id"
+        )
+
+        # Clear surviving sentence references once before deleting sentence rows.
+        session.execute(
+            text(
+                "UPDATE lemma_project_stat SET sample_sentence_id = NULL "
+                f"WHERE sample_sentence_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text(
+                "UPDATE ngram_doc_stat SET sample_sentence_id = NULL "
+                f"WHERE sample_sentence_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text(
+                "UPDATE ngram_project_stat SET sample_sentence_id = NULL "
+                f"WHERE sample_sentence_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text(
+                "UPDATE term_card SET pinned_sentence_id = NULL "
+                f"WHERE pinned_sentence_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text(
+                "UPDATE term_cluster SET pinned_example_sent_id = NULL "
+                f"WHERE pinned_example_sent_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text(
+                f"DELETE FROM sentence_pronunciation "
+                f"WHERE sentence_id IN ({sentence_ids_sql})"
+            ),
+            params,
+        )
+        session.execute(
+            text("DELETE FROM document_sentence WHERE doc_id = :doc_id"),
+            params,
+        )
+        logger.info("Deleted %d old sentences for doc %d", sentence_count, int(doc_id))
+        return sentence_count
+
     def reprocess_document(
         self,
         session: Session,
@@ -638,12 +707,8 @@ class ProcessService:
                 return False
 
             # Step 3: Delete old sentences
-            stmt = select(DocumentSentence).where(DocumentSentence.doc_id == doc_id)
-            old_sentences = session.execute(stmt).scalars().all()
-            for sent in old_sentences:
-                session.delete(sent)
-            session.flush()
-            logger.info(f"Deleted {len(old_sentences)} old sentences")
+            deleted_sentences = self._clear_document_sentences_fast(session, doc_id)
+            logger.info(f"Deleted {deleted_sentences} old sentences")
 
             # Step 4: Run NLP processing
             # Note: process_document will handle the rest

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import MethodType
 
 from sqlalchemy import select
 
@@ -14,8 +15,10 @@ from app.infra.sa_models import (
     LemmaDocStat,
     LemmaProjectStat,
     Library,
+    SentencePronunciation,
     SourceCorpus,
     SourceDocument,
+    TermCluster,
 )
 from app.services.db_service import DBService
 from app.services.ingest_service import IngestService
@@ -57,6 +60,7 @@ def test_remove_document_stats_cleans_doc_and_project_stats():
             corpus = SourceCorpus(project_id=project.project_id, name="C")
             session.add(corpus)
             session.flush()
+            corpus_id = int(corpus.corpus_id)
             doc = SourceDocument(
                 corpus_id=corpus.corpus_id,
                 file_path="/tmp/a.txt",
@@ -136,6 +140,7 @@ def test_delete_document_cleans_processed_sentence_references():
             corpus = SourceCorpus(project_id=project.project_id, name="C")
             session.add(corpus)
             session.flush()
+            corpus_id = int(corpus.corpus_id)
             doc = SourceDocument(
                 corpus_id=corpus.corpus_id,
                 file_path="/tmp/a.txt",
@@ -206,6 +211,135 @@ def test_delete_document_cleans_processed_sentence_references():
             assert session.execute(
                 select(Lemma).where(Lemma.project_id == project_id)
             ).scalars().all() == []
+    finally:
+        DBService.shutdown()
+        DBService._instance = None
+        DBService._db_manager = None
+        try:
+            db_path.unlink()
+        except OSError:
+            pass
+
+
+def test_reprocess_document_clears_old_sentences_before_rebuild():
+    db_path = _init_temp_db()
+    DBService.shutdown()
+    DBService._instance = None
+    DBService._db_manager = None
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            lib = Library(name="L")
+            session.add(lib)
+            session.flush()
+            project = DictProject(library_id=lib.library_id, name="P", src_lang="he", tgt_lang="ru")
+            session.add(project)
+            session.flush()
+            corpus = SourceCorpus(project_id=project.project_id, name="C")
+            session.add(corpus)
+            session.flush()
+            corpus_id = int(corpus.corpus_id)
+            doc = SourceDocument(
+                corpus_id=corpus.corpus_id,
+                file_path="/tmp/a.txt",
+                file_name="a.txt",
+                file_ext=".txt",
+                file_size_bytes=10,
+                sha256="sha1",
+                status="processed",
+                sentence_count=1,
+            )
+            session.add(doc)
+            session.flush()
+            sentence = DocumentSentence(
+                doc_id=doc.doc_id,
+                sent_index=0,
+                text="old sentence",
+                corpus_id=corpus.corpus_id,
+            )
+            session.add(sentence)
+            session.flush()
+            session.add(
+                SentencePronunciation(
+                    sentence_id=sentence.sentence_id,
+                    lang="he",
+                    src_hash="h1",
+                    niqqud_text="old",
+                    source="auto_phonikud",
+                    is_override=0,
+                    qc_status="pending",
+                    review_status="auto",
+                    sanitizer_version="1",
+                )
+            )
+            lemma = Lemma(project_id=project.project_id, lemma_text="alpha", pos="X")
+            session.add(lemma)
+            session.flush()
+            session.add(
+                LemmaDocStat(
+                    project_id=project.project_id,
+                    doc_id=doc.doc_id,
+                    lemma_id=lemma.lemma_id,
+                    freq_abs=2,
+                    sample_sentence_id=sentence.sentence_id,
+                )
+            )
+            session.add(
+                LemmaProjectStat(
+                    project_id=project.project_id,
+                    lemma_id=lemma.lemma_id,
+                    freq_abs=2,
+                    doc_freq=1,
+                    sample_sentence_id=sentence.sentence_id,
+                )
+            )
+            session.add(
+                TermCluster(
+                    project_id=project.project_id,
+                    canonical_key="c1",
+                    representative_he="term",
+                    representative_lemma="term",
+                    pinned_example_sent_id=sentence.sentence_id,
+                )
+            )
+            session.commit()
+
+            svc = ProcessService()
+
+            def _fake_process(self, session, doc_id, use_gpu=False, use_mock=False):
+                remaining = session.execute(
+                    select(DocumentSentence).where(DocumentSentence.doc_id == int(doc_id))
+                ).scalars().all()
+                assert remaining == []
+                session.expunge_all()
+                rebuilt = DocumentSentence(
+                    doc_id=int(doc_id),
+                    sent_index=0,
+                    text="new sentence",
+                    corpus_id=corpus_id,
+                )
+                session.add(rebuilt)
+                doc_row = session.get(SourceDocument, int(doc_id))
+                doc_row.status = "processed"
+                doc_row.sentence_count = 1
+                return True
+
+            svc.process_document = MethodType(_fake_process, svc)
+            assert svc.reprocess_document(session, int(doc.doc_id), use_mock=True) is True
+            session.commit()
+
+            rows = session.execute(
+                select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
+            ).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].text == "new sentence"
+            assert session.execute(select(SentencePronunciation)).scalars().all() == []
+            cluster = session.execute(select(TermCluster)).scalar_one()
+            assert cluster.pinned_example_sent_id is None
+            proj_stats = session.execute(select(LemmaProjectStat)).scalars().all()
+            assert proj_stats == []
     finally:
         DBService.shutdown()
         DBService._instance = None
