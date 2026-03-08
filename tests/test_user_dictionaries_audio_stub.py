@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import AudioAsset
+from app.services.audio_cache_key_service import AudioCacheKeyService
 from app.services.audio_asset_service import AudioAssetService
 
 
@@ -65,6 +66,61 @@ def test_audio_asset_bulk_status_lookup_ready_missing_failed():
             assert any_statuses["alpha"] == "ready"
             assert any_statuses["beta"] == "failed"
             assert any_statuses["gamma"] == "missing"
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)
+
+
+def test_audio_asset_bulk_status_for_items_is_pronunciation_aware():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+
+        service = AudioAssetService()
+        cache_keys = AudioCacheKeyService()
+        with Session(engine) as session:
+            source_text = "שלום בית"
+            payload = {
+                "text": source_text,
+                "token_text": source_text,
+                "ssml": "",
+                "mode": "none",
+                "is_valid": True,
+                "qc_flag": None,
+            }
+            speech_hash = cache_keys.build_speech_hash(
+                src_lang="he",
+                source_text=source_text,
+                source_norm="alpha",
+                pronunciation_payload=payload,
+            )
+            service.upsert_status(
+                session,
+                lang="he",
+                norm_text="alpha",
+                voice_id="default",
+                speed=1.0,
+                provider="none",
+                speech_hash=speech_hash,
+                input_hash="alpha-input",
+                status="ready",
+                audio_rel_path="audio/alpha.mp3",
+            )
+            session.commit()
+
+            statuses = service.bulk_get_status_for_items(
+                session,
+                items=[
+                    {"lang": "he", "norm_text": "alpha", "source_text": "שלום בית"},
+                    {"lang": "he", "norm_text": "alpha", "source_text": "שלום בַיִת"},
+                ],
+            )
+
+            assert statuses[("he", "alpha", "שלום בית")] == "ready"
+            assert statuses[("he", "alpha", "שלום בַיִת")] == "missing"
     finally:
         engine.dispose()
         Path(db_path).unlink(missing_ok=True)

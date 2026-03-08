@@ -70,17 +70,18 @@ class TestSentencesWorkspaceServiceBatchOverlays:
         result = svc._batch_get_audio(session, "he", [])
         assert result == {}
 
-    def test_batch_get_audio_calls_bulk_status_any(self):
+    def test_batch_get_audio_calls_hash_aware_bulk_status(self):
         from app.services.sentences_workspace_service import SentencesWorkspaceService
         svc = SentencesWorkspaceService()
         session = MagicMock()
         with patch("app.services.audio_asset_service.AudioAssetService") as mock_cls:
             mock_svc = MagicMock()
-            mock_svc.bulk_get_status_any.return_value = {"norm": "ready"}
+            mock_svc.bulk_get_status_for_items.return_value = {
+                ("he", "norm", "Ч©ЧњЧ•Чќ"): "ready"
+            }
             mock_cls.return_value = mock_svc
             result = svc._batch_get_audio(session, "he", ["שלום"])
-            # Should have called bulk_get_status_any (not per-row)
-            mock_svc.bulk_get_status_any.assert_called_once()
+            mock_svc.bulk_get_status_for_items.assert_called_once()
 
 
 class TestSentencesWorkspaceServiceIdHelpers:

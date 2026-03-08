@@ -877,22 +877,22 @@ class UserDictionariesView(QWidget):
         if not items:
             return
 
-        by_lang: Dict[str, List[str]] = {}
+        status_map = self.audio_service.bulk_get_status_for_items(
+            session,
+            items=[
+                {
+                    "lang": item.src_lang,
+                    "norm_text": item.src_norm,
+                    "source_text": getattr(item, "src_text", "") or "",
+                }
+                for item in items
+            ],
+        )
         for item in items:
-            by_lang.setdefault(item.src_lang, []).append(item.src_norm)
-
-        status_map = {}
-        for lang, norms in by_lang.items():
-            mapping = self.audio_service.bulk_get_status_any(
-                session,
-                lang=lang,
-                norm_texts=norms,
+            item.audio_status = status_map.get(
+                (item.src_lang, item.src_norm, getattr(item, "src_text", "") or ""),
+                "missing",
             )
-            for norm, status in mapping.items():
-                status_map[(lang, norm)] = status
-
-        for item in items:
-            item.audio_status = status_map.get((item.src_lang, item.src_norm), "missing")
 
     def load_items(self):
         """Start async page load; stale responses are ignored by request_id (PATCH-H)."""

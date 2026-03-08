@@ -129,7 +129,7 @@ class SentencesWorkspaceService:
                     niqqud_coverage=overlay.niqqud_coverage if overlay else None,
                     niqqud_is_override=overlay.is_override if overlay else False,
                     niqqud_review=overlay.review_status if overlay else None,
-                    audio_status=audio_map.get(norm),
+                    audio_status=audio_map.get((norm, text)),
                 )
             )
         return result
@@ -305,15 +305,27 @@ class SentencesWorkspaceService:
         session: Session,
         src_lang: str,
         texts: List[str],
-    ) -> Dict[str, str]:
-        """Return {norm_text: audio_status} using AudioAssetService.bulk_get_status_any."""
+    ) -> Dict[tuple[str, str], str]:
+        """Return {(norm_text, source_text): audio_status} using hash-aware audio lookup."""
         if not texts:
             return {}
         try:
             from app.services.audio_asset_service import AudioAssetService
-            norms = list({self._norm(src_lang, t) for t in texts})
             svc = AudioAssetService()
-            return svc.bulk_get_status_any(session, lang=src_lang, norm_texts=norms)
+            items = [
+                {
+                    "lang": src_lang,
+                    "norm_text": self._norm(src_lang, text),
+                    "source_text": text,
+                }
+                for text in texts
+                if text
+            ]
+            mapping = svc.bulk_get_status_for_items(session, items=items)
+            return {
+                (norm_text, source_text): status
+                for (_lang, norm_text, source_text), status in mapping.items()
+            }
         except Exception:
             logger.debug("Audio status lookup failed (skipping overlay)", exc_info=True)
             return {}

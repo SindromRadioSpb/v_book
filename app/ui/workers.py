@@ -2397,19 +2397,20 @@ class UserDictItemsPageWorker(QThread):
                 )
                 # Audio status overlay (bulk lookup — same session)
                 if items:
-                    by_lang: Dict[str, list] = {}
-                    for item in items:
-                        by_lang.setdefault(item.src_lang, []).append(item.src_norm)
-                    status_map = {}
-                    for lang, norms in by_lang.items():
-                        mapping = audio_svc.bulk_get_status_any(
-                            session, lang=lang, norm_texts=norms
-                        )
-                        for norm, status in mapping.items():
-                            status_map[(lang, norm)] = status
+                    status_map = audio_svc.bulk_get_status_for_items(
+                        session,
+                        items=[
+                            {
+                                "lang": item.src_lang,
+                                "norm_text": item.src_norm,
+                                "source_text": item.src_text,
+                            }
+                            for item in items
+                        ],
+                    )
                     for item in items:
                         item.audio_status = status_map.get(
-                            (item.src_lang, item.src_norm), "missing"
+                            (item.src_lang, item.src_norm, item.src_text), "missing"
                         )
 
             self.page_loaded.emit(self.request_id, items, total)
@@ -3018,12 +3019,15 @@ class UserDictGenerateAudioWorker(QThread):
                         row_id = str(item.item_id)
                         try:
                             if self.write_mode == "MISSING_ONLY":
-                                current = asset_service.bulk_get_status_any(
+                                current = asset_service.bulk_get_status_for_items(
                                     session=session,
-                                    lang=item.src_lang,
-                                    norm_texts=[item.src_norm],
+                                    items=[{
+                                        "lang": item.src_lang,
+                                        "norm_text": item.src_norm,
+                                        "source_text": item.src_text,
+                                    }],
                                 )
-                                if current.get(item.src_norm) == "ready":
+                                if current.get((item.src_lang, item.src_norm, item.src_text)) == "ready":
                                     skipped += 1
                                     completed += 1
                                     self.row_translated.emit(row_id, "audio already exists", False)
@@ -3196,12 +3200,15 @@ class BatchGenerateAudioWorker(QThread):
                     self.stage_updated.emit(f"Generating audio {index}/{total}...")
                     try:
                         if self.write_mode == "MISSING_ONLY":
-                            current = asset_service.bulk_get_status_any(
+                            current = asset_service.bulk_get_status_for_items(
                                 session=session,
-                                lang=src_lang,
-                                norm_texts=[src_norm],
+                                items=[{
+                                    "lang": src_lang,
+                                    "norm_text": src_norm,
+                                    "source_text": src_text,
+                                }],
                             )
-                            if current.get(src_norm) == "ready":
+                            if current.get((src_lang, src_norm, src_text)) == "ready":
                                 skipped += 1
                                 completed += 1
                                 self.row_translated.emit(row_id, "audio already exists", False)

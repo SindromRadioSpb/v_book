@@ -831,6 +831,44 @@ def test_resolve_cross_view_status_includes_failed_audio_for_non_ud_rows(user_di
         assert overlay[canonical_hash]["study_tooltip"] is None
 
 
+def test_resolve_cross_view_status_ignores_stale_norm_only_audio(user_dict_engine):
+    service = UserDictionaryService()
+    with Session(user_dict_engine) as session:
+        src_text = "שלום בית"
+        src_norm = normalize_for_tm("he", src_text, "term_cluster").norm
+        canonical_hash = service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+
+        session.add(
+            AudioAsset(
+                lang="he",
+                norm_text=src_norm,
+                voice_id="default",
+                speed=1.0,
+                provider="google_cloud_tts",
+                speech_hash="stale-speech-hash",
+                input_hash="stale-input-hash",
+                asset_status="ready",
+                audio_rel_path="audio/stale.wav",
+            )
+        )
+        session.commit()
+
+        overlay = service.resolve_cross_view_status(
+            session,
+            rows=[
+                {
+                    "src_lang": "he",
+                    "tgt_lang": "ru",
+                    "kind": "term_cluster",
+                    "src_text": "שלום בַיִת",
+                    "src_norm": src_norm,
+                }
+            ],
+        )
+
+        assert overlay[canonical_hash]["audio_status"] == "missing"
+
+
 def test_resolve_cross_view_status_pronunciation_falls_back_to_raw_norm(user_dict_engine):
     service = UserDictionaryService()
     with Session(user_dict_engine) as session:

@@ -1109,23 +1109,28 @@ class UserDictionaryService:
         pronunciation_by_item: Dict[int, Dict[str, Any]] = {}
         if source_items:
             audio_service = AudioAssetService()
-            by_lang: Dict[str, List[Tuple[int, str]]] = {}
+            try:
+                status_map = audio_service.bulk_get_status_for_items(
+                    session,
+                    items=[
+                        {
+                            "lang": (item.src_lang or "").strip(),
+                            "norm_text": (item.src_norm or "").strip(),
+                            "source_text": (item.src_text or "").strip(),
+                        }
+                        for item in source_items
+                    ],
+                )
+            except Exception:
+                # Keep backward compatibility for fixture DBs without audio_asset.
+                status_map = {}
             for item in source_items:
-                lang_key = (item.src_lang or "").strip()
-                norm_key = (item.src_norm or "").strip()
-                by_lang.setdefault(lang_key, []).append((item.item_id, norm_key))
-            for lang, tuples in by_lang.items():
-                try:
-                    status_map = audio_service.bulk_get_status_any(
-                        session,
-                        lang=lang,
-                        norm_texts=[norm for _item_id, norm in tuples],
-                    )
-                except Exception:
-                    # Keep backward compatibility for fixture DBs without audio_asset.
-                    status_map = {}
-                for item_id, norm_text in tuples:
-                    audio_status_by_item[item_id] = status_map.get(norm_text, "missing")
+                key = (
+                    (item.src_lang or "").strip(),
+                    (item.src_norm or "").strip(),
+                    (item.src_text or "").strip(),
+                )
+                audio_status_by_item[item.item_id] = status_map.get(key, "missing")
 
             pronunciation_pairs: List[Tuple[str, str]] = []
             pronunciation_keys_by_item: Dict[int, Tuple[str, str, str]] = {}
@@ -1405,6 +1410,7 @@ class UserDictionaryService:
             }
         """
         prepared: List[Dict[str, str]] = []
+        source_text_by_hash: Dict[str, str] = {}
         for raw in rows or []:
             src_lang = (raw.get("src_lang") or "").strip()
             tgt_lang = (raw.get("tgt_lang") or "").strip()
@@ -1428,6 +1434,7 @@ class UserDictionaryService:
             if not src_norm:
                 continue
             canonical_hash = self.build_canonical_hash(src_lang, tgt_lang, kind, src_norm)
+            source_text_by_hash[canonical_hash] = src_text
             prepared.append(
                 {
                     "src_lang": src_lang,
@@ -1444,7 +1451,6 @@ class UserDictionaryService:
 
         by_hash = {row["canonical_hash"]: row for row in prepared}
         canonical_hashes = sorted(by_hash.keys())
-
         membership_rows = session.execute(
             select(
                 UserDictionaryItem.canonical_hash,
@@ -1489,23 +1495,20 @@ class UserDictionaryService:
             tm_by_hash[canonical_hash] = tm_row
 
         audio_service = AudioAssetService()
-        audio_status: Dict[Tuple[str, str], str] = {}
-        by_lang_norms: Dict[str, List[str]] = {}
-        for row in by_hash.values():
-            lang_key = (row["src_lang"] or "").strip()
-            norm_key = (row["src_norm"] or "").strip()
-            by_lang_norms.setdefault(lang_key, []).append(norm_key)
-        for lang, norms in by_lang_norms.items():
-            try:
-                status_map = audio_service.bulk_get_status_any(
-                    session=session,
-                    lang=lang,
-                    norm_texts=norms,
-                )
-            except Exception:
-                status_map = {}
-            for norm_text, status in status_map.items():
-                audio_status[(lang, norm_text)] = status
+        try:
+            audio_status = audio_service.bulk_get_status_for_items(
+                session=session,
+                items=[
+                    {
+                        "lang": (row["src_lang"] or "").strip(),
+                        "norm_text": (row["src_norm"] or "").strip(),
+                        "source_text": source_text_by_hash.get(row["canonical_hash"], ""),
+                    }
+                    for row in by_hash.values()
+                ],
+            )
+        except Exception:
+            audio_status = {}
         pronunciation_pairs: List[Tuple[str, str]] = []
         for row in by_hash.values():
             lang_clean = (row.get("src_lang") or "").strip()
@@ -1546,7 +1549,8 @@ class UserDictionaryService:
             lang_clean = (row.get("src_lang") or "").strip()
             canonical_norm = (row.get("src_norm") or "").strip()
             raw_norm = (row.get("raw_src_norm") or "").strip()
-            row_key = (lang_clean, canonical_norm)
+            source_text = source_text_by_hash.get(canonical_hash, "")
+            row_key = (lang_clean, canonical_norm, source_text)
             item_audio_status = audio_status.get(row_key, "missing")
             item_pronunciation = pronunciation_map.get(row_key)
             if not item_pronunciation and raw_norm and raw_norm != canonical_norm:
