@@ -48,8 +48,9 @@ class _DummyGenerator:
         mode: str = "fallback"
         status: str = "fallback"
         latency_ms: int = 1
+        cancelled: bool = False
 
-    def health_check(self, *_):
+    def health_check(self, *_, **__):
         return self._Health()
 
 
@@ -125,4 +126,42 @@ def test_bootstrap_worker_commit_when_not_dry_run(monkeypatch):
     worker.run()
 
     assert session.commit_calls == 1
+    assert session.rollback_calls == 0
+
+
+def test_bootstrap_worker_finishes_cancelled_when_health_check_is_cancelled(monkeypatch):
+    session = _DummySession()
+    monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: _DummyDB(session))
+
+    class _CancelledGenerator(_DummyGenerator):
+        @dataclass
+        class _Health:
+            mode: str = "error"
+            status: str = "error"
+            latency_ms: int = 1
+            cancelled: bool = True
+
+    monkeypatch.setattr(
+        "app.services.pronunciation_bootstrap_service.PhonikudPronunciationGenerator",
+        _CancelledGenerator,
+    )
+    monkeypatch.setattr(
+        "app.services.pronunciation_bootstrap_service.PronunciationBootstrapService",
+        _DummyBootstrapService,
+    )
+
+    worker = PronunciationBootstrapWorker(
+        lang="he",
+        model_path="",
+        enabled=True,
+        chunk_size=100,
+        dry_run=False,
+    )
+    result = {}
+    worker.finished.connect(lambda payload: result.update(payload))
+    worker.cancel()
+    worker.run()
+
+    assert result["cancelled"] is True
+    assert session.commit_calls == 0
     assert session.rollback_calls == 0

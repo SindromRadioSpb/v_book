@@ -3284,13 +3284,17 @@ class PhonikudHealthCheckWorker(QThread):
         self.model_path = model_path
         self.enabled = enabled
         self.sample_texts = sample_texts or ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
 
     def run(self):
         try:
             from app.infra.pronunciation import PhonikudAdapter
 
             adapter = PhonikudAdapter(model_path=self.model_path, enabled=self.enabled)
-            report = adapter.health_check(self.sample_texts)
+            report = adapter.health_check(self.sample_texts, cancel_check=lambda: bool(self._cancel_requested))
             self.finished.emit(report.to_dict())
         except Exception as exc:
             logger.error("PhonikudHealthCheckWorker error: %s", exc, exc_info=True)
@@ -3377,7 +3381,31 @@ class PronunciationBootstrapWorker(QThread):
                 model_path=self.model_path or None,
                 enabled=self.enabled,
             )
-            health = generator.health_check(["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"])
+            if self._cancel_requested:
+                self.finished.emit({"cancelled": True, "updated": 0, "skipped": 0, "failed": 0, "dry_run": bool(self.dry_run)})
+                return
+            health = generator.health_check(
+                ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"],
+                cancel_check=lambda: bool(self._cancel_requested),
+            )
+            if bool(getattr(health, "cancelled", False)) or self._cancel_requested:
+                self.stage_updated.emit("Phonikud health check cancelled")
+                self.finished.emit(
+                    {
+                        "total_candidates": 0,
+                        "generated_candidates": 0,
+                        "updated": 0,
+                        "skipped": 0,
+                        "failed": 0,
+                        "cancelled": True,
+                        "dry_run": bool(self.dry_run),
+                        "generator_mode": str(health.mode),
+                        "health_mode": str(health.mode),
+                        "health_status": str(health.status),
+                        "health_latency_ms": int(health.latency_ms),
+                    }
+                )
+                return
             self.row_translated.emit("health", f"{health.mode} ({health.status})", health.status == "ok")
             self.stage_updated.emit(f"Mode: {health.mode} ({health.status})")
 
@@ -3511,7 +3539,23 @@ class SentenceNiqqudBootstrapWorker(QThread):
             )
 
             # Health check (non-blocking; warn but continue)
-            health = generator.health_check()
+            health = generator.health_check(cancel_check=lambda: bool(self._cancel_requested))
+            if bool(getattr(health, "cancelled", False)) or self._cancel_requested:
+                self.stage_updated.emit("Phonikud health check cancelled")
+                self.finished.emit(
+                    {
+                        "total": len(self.sentence_ids),
+                        "processed": 0,
+                        "inserted": 0,
+                        "updated": 0,
+                        "skipped": 0,
+                        "failed": 0,
+                        "cancelled": True,
+                        "mode": self.mode,
+                        "generator_mode": str(health.mode),
+                    }
+                )
+                return
             self.stage_updated.emit(f"Phonikud mode: {health.mode}")
 
             guard = GuardParams(

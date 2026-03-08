@@ -56,8 +56,13 @@ class PhonikudPronunciationGenerator(PronunciationGenerator):
     def mode(self) -> str:
         return self._adapter.last_mode
 
-    def health_check(self, sample_texts: Optional[List[str]] = None) -> PhonikudHealthReport:
-        return self._adapter.health_check(sample_texts)
+    def health_check(
+        self,
+        sample_texts: Optional[List[str]] = None,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> PhonikudHealthReport:
+        return self._adapter.health_check(sample_texts, cancel_check=cancel_check)
 
     def generate(self, lang: str, source_texts: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
         if lang.strip().lower() not in {"he", "he-il"}:

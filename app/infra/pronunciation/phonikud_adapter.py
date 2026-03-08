@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from app.infra.resource_paths import ResourcePaths
 
@@ -42,6 +45,7 @@ class PhonikudHealthReport:
     model_path: str
     details: str
     samples: List[Dict[str, str]]
+    cancelled: bool = False
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -52,6 +56,8 @@ class PhonikudAdapter:
 
     _CALLABLE_ATTRS = ("add_niqqud", "phonikud", "nekud", "diacritize")
     _BATCH_CALLABLE_ATTRS = ("batch_add_niqqud", "batch_phonikud", "batch_nekud")
+    _HEALTH_TIMEOUT_MS = 3000
+    _HEALTH_RETRY_TIMEOUT_MS = 8000
 
     def __init__(
         self,
@@ -69,6 +75,7 @@ class PhonikudAdapter:
         self._batch_callable = None
         self._load_error = ""
         self._last_mode: PhonikudMode = PhonikudMode.FALLBACK
+        self._health_blocked = False
 
     @property
     def last_mode(self) -> str:
@@ -255,10 +262,15 @@ class PhonikudAdapter:
         return default
 
     def is_available(self) -> bool:
+        if self._health_blocked:
+            return False
         self._ensure_loaded()
         return self._callable is not None
 
     def infer(self, texts: List[str]) -> Dict[str, str]:
+        if self._health_blocked:
+            normalized = [str(text or "").strip() for text in (texts or [])]
+            return {text: text for text in normalized if text}
         self._ensure_loaded()
         normalized = [str(text or "").strip() for text in (texts or [])]
         normalized = [text for text in normalized if text]
@@ -320,8 +332,226 @@ class PhonikudAdapter:
             self._last_mode = PhonikudMode.REAL_INFERENCE if changed_any else PhonikudMode.FALLBACK
         return outputs
 
-    def health_check(self, sample_texts: Optional[List[str]] = None) -> PhonikudHealthReport:
+    def _resolve_probe_script(self) -> Path:
+        return Path(__file__).resolve().parents[3] / "app" / "tools" / "onnx_probe.py"
+
+    def _run_local_probe(
+        self,
+        *,
+        mode: str,
+        timeout_ms: int,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Dict[str, object]:
+        script_path = self._resolve_probe_script()
+        if not script_path.exists():
+            return {
+                "ok": False,
+                "mode": mode,
+                "stage": "import",
+                "error": f"ONNX probe script not found: {script_path}",
+                "details": "Local health-check helper is missing.",
+                "timed_out": False,
+                "cancelled": False,
+                "timeout_ms": int(timeout_ms),
+            }
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--mode",
+            mode,
+            "--timeout-ms",
+            str(int(timeout_ms)),
+        ]
+        model_path = self._sanitize_model_path(self.model_path_effective)
+        if model_path:
+            cmd.extend(["--model-path", model_path])
+
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["HF_HUB_OFFLINE"] = "1"
+        env["TRANSFORMERS_OFFLINE"] = "1"
+        env["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        env.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        start = time.perf_counter()
+        cancelled = False
+        try:
+            while True:
+                if cancel_check and cancel_check():
+                    cancelled = True
+                    proc.kill()
+                    stdout, stderr = proc.communicate(timeout=1)
+                    return {
+                        "ok": False,
+                        "mode": mode,
+                        "stage": "cancelled",
+                        "error": "Health check cancelled",
+                        "details": (stderr or stdout or "").strip(),
+                        "timed_out": False,
+                        "cancelled": True,
+                        "timeout_ms": int(timeout_ms),
+                    }
+
+                if proc.poll() is not None:
+                    stdout, stderr = proc.communicate(timeout=1)
+                    try:
+                        payload = json.loads(stdout or "{}")
+                    except Exception:
+                        payload = {}
+                    payload["stderr"] = (stderr or "").strip()
+                    payload["timeout_ms"] = int(timeout_ms)
+                    payload["cancelled"] = False
+                    payload.setdefault("ok", proc.returncode == 0)
+                    payload.setdefault("mode", mode)
+                    payload.setdefault("stage", "probe")
+                    if proc.returncode != 0 and not str(payload.get("error") or "").strip():
+                        payload["error"] = payload["stderr"] or f"Helper exited with code {proc.returncode}"
+                    return payload
+
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                if elapsed_ms >= int(timeout_ms):
+                    proc.kill()
+                    stdout, stderr = proc.communicate(timeout=1)
+                    return {
+                        "ok": False,
+                        "mode": mode,
+                        "stage": "timeout",
+                        "error": f"Health check timed out after {timeout_ms}ms",
+                        "details": (stderr or stdout or "").strip(),
+                        "timed_out": True,
+                        "cancelled": False,
+                        "timeout_ms": int(timeout_ms),
+                    }
+                time.sleep(0.05)
+        finally:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def _health_from_probe_payload(
+        self,
+        *,
+        payload: Dict[str, object],
+        sample_texts: List[str],
+        started_at: float,
+        timeout_ms: int,
+    ) -> PhonikudHealthReport:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        cancelled = bool(payload.get("cancelled", False))
+        timed_out = bool(payload.get("timed_out", False))
+        error_text = str(payload.get("error") or "").strip()
+        details_text = str(payload.get("details") or "").strip()
+        stderr_text = str(payload.get("stderr") or "").strip()
+        sample_output = str(payload.get("sample_output") or (sample_texts[0] if sample_texts else "")).strip()
+        sample_input = sample_texts[0] if sample_texts else ""
+        model_path = self.model_path_safe()
+
+        if cancelled:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = "Health check cancelled"
+            self._health_blocked = True
+            return PhonikudHealthReport(
+                mode=self._last_mode.value,
+                status=PhonikudHealthStatus.ERROR.value,
+                latency_ms=latency_ms,
+                model_path=model_path,
+                details="Health check cancelled.",
+                samples=[{"input": sample_input, "output": sample_output or sample_input}],
+                cancelled=True,
+            )
+
+        if bool(payload.get("ok", False)):
+            self._last_mode = PhonikudMode.REAL_INFERENCE
+            self._load_error = ""
+            self._health_blocked = False
+            return PhonikudHealthReport(
+                mode=self._last_mode.value,
+                status=PhonikudHealthStatus.OK.value,
+                latency_ms=latency_ms,
+                model_path=model_path,
+                details="Local ONNX probe passed.",
+                samples=[{"input": sample_input, "output": sample_output or sample_input}],
+            )
+
+        merged_details = ". ".join(part for part in (error_text, details_text, stderr_text) if part).strip()
+        if timed_out:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = error_text or "Health check timed out"
+            self._health_blocked = True
+            status = PhonikudHealthStatus.ERROR.value
+            details = merged_details or f"Health check timed out after {timeout_ms}ms"
+        elif "identity" in merged_details.lower() or "fallback" in merged_details.lower():
+            self._last_mode = PhonikudMode.FALLBACK
+            self._load_error = merged_details or "Fallback mode active"
+            self._health_blocked = True
+            status = PhonikudHealthStatus.FALLBACK.value
+            details = merged_details or "Fallback mode active; baseline quality may be degraded"
+        else:
+            self._last_mode = PhonikudMode.ERROR
+            self._load_error = merged_details or "Phonikud runtime unavailable"
+            self._health_blocked = True
+            status = PhonikudHealthStatus.ERROR.value
+            details = merged_details or "Phonikud runtime unavailable"
+
+        expected_root = self._resolve_models_root()
+        if self._last_mode != PhonikudMode.REAL_INFERENCE and expected_root is not None:
+            details = f"{details}. Expected model path: {expected_root / 'phonikud'}"
+        return PhonikudHealthReport(
+            mode=self._last_mode.value,
+            status=status,
+            latency_ms=latency_ms,
+            model_path=model_path,
+            details=details,
+            samples=[{"input": sample_input, "output": sample_output or sample_input}],
+        )
+
+    def health_check(
+        self,
+        sample_texts: Optional[List[str]] = None,
+        *,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        timeout_ms: int = _HEALTH_TIMEOUT_MS,
+    ) -> PhonikudHealthReport:
         samples = sample_texts or ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
+        resolved_path = self._sanitize_model_path(self.model_path_effective)
+        if resolved_path.lower().endswith(".onnx"):
+            started_at = time.perf_counter()
+            payload = self._run_local_probe(mode="probe", timeout_ms=timeout_ms, cancel_check=cancel_check)
+            effective_timeout_ms = int(timeout_ms)
+            if (
+                bool(payload.get("timed_out", False))
+                and int(timeout_ms) < self._HEALTH_RETRY_TIMEOUT_MS
+                and not bool(payload.get("cancelled", False))
+                and not (cancel_check and cancel_check())
+            ):
+                payload = self._run_local_probe(
+                    mode="probe",
+                    timeout_ms=self._HEALTH_RETRY_TIMEOUT_MS,
+                    cancel_check=cancel_check,
+                )
+                payload["retry_attempted"] = True
+                payload["retry_from_timeout_ms"] = int(timeout_ms)
+                payload["retry_timeout_ms"] = self._HEALTH_RETRY_TIMEOUT_MS
+                effective_timeout_ms = self._HEALTH_RETRY_TIMEOUT_MS
+            return self._health_from_probe_payload(
+                payload=payload,
+                sample_texts=samples,
+                started_at=started_at,
+                timeout_ms=effective_timeout_ms,
+            )
+
         start = time.perf_counter()
         outputs = self.infer(samples)
         latency_ms = int((time.perf_counter() - start) * 1000)

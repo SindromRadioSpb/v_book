@@ -90,6 +90,10 @@ Capabilities:
   - direct `.onnx` file selection (preferred),
   - or folder selection (auto-picks `*int8.onnx` first, then first `*.onnx`).
 - Health check via worker (no UI freeze), with mode/status/latency/samples.
+- Health check is local/offline-only for ONNX paths:
+  - no implicit Hugging Face downloads during readiness check,
+  - bounded timeout,
+  - bootstrap cancel can interrupt the health preflight instead of hanging indefinitely.
 - Worker-safe bootstrap with `BatchProgressDialogV3`:
   - stages, counters, activity log, cancel/pause/resume.
 - Selection scope preserves existing source checkboxes:
@@ -113,3 +117,9 @@ Deterministic model path resolution order:
 3. auto-discovery in `<data_root>/models/phonikud` (`*int8.onnx` preferred)
 
 `data_root` resolves through `ResourcePaths` (`%LOCALAPPDATA%\HDLE` by default on Windows).
+
+## Health-check contract
+
+- `Pronunciation Bootstrap` readiness checks must not fetch remote assets implicitly.
+- If local ONNX/tokenizer prerequisites are missing, health-check fails fast with remediation instead of hanging.
+- `Cancel` during bootstrap must stop at health-check safe points and return `cancelled`, not require process kill.

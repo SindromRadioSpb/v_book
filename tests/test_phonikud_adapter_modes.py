@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 import types
+from pathlib import Path
 
 from app.infra.pronunciation import PhonikudAdapter
 
@@ -182,3 +183,83 @@ def test_phonikud_adapter_fallback_details_include_resolved_models_root(monkeypa
 
     assert report.status == "fallback"
     assert f"Expected model path: {models_root / 'phonikud'}" in report.details
+
+
+def test_phonikud_adapter_uses_local_probe_for_onnx_health_check(monkeypatch, tmp_path):
+    model_path = tmp_path / "phonikud-1.0.int8.onnx"
+    model_path.write_text("x", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path=str(model_path), enabled=True)
+    monkeypatch.setattr(adapter, "_resolve_probe_script", lambda: Path("J:/fake/onnx_probe.py"))
+    monkeypatch.setattr(
+        adapter,
+        "_run_local_probe",
+        lambda **_kwargs: {
+            "ok": True,
+            "mode": "probe",
+            "sample_output": "שָׁלוֹם",
+        },
+    )
+
+    report = adapter.health_check(["שלום"])
+
+    assert report.status == "ok"
+    assert report.mode == "real_inference"
+    assert report.samples[0]["output"] == "שָׁלוֹם"
+    assert adapter.is_available() is True
+
+
+def test_phonikud_adapter_cancelled_health_check_blocks_generation(monkeypatch, tmp_path):
+    model_path = tmp_path / "phonikud-1.0.int8.onnx"
+    model_path.write_text("x", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path=str(model_path), enabled=True)
+    monkeypatch.setattr(adapter, "_resolve_probe_script", lambda: Path("J:/fake/onnx_probe.py"))
+    monkeypatch.setattr(
+        adapter,
+        "_run_local_probe",
+        lambda **_kwargs: {
+            "ok": False,
+            "mode": "probe",
+            "cancelled": True,
+            "error": "Health check cancelled",
+        },
+    )
+
+    report = adapter.health_check(["שלום"])
+
+    assert report.cancelled is True
+    assert report.status == "error"
+    assert adapter.is_available() is False
+    assert adapter.infer(["שלום"]) == {"שלום": "שלום"}
+
+
+def test_phonikud_adapter_retries_probe_once_after_timeout(monkeypatch, tmp_path):
+    model_path = tmp_path / "phonikud-1.0.int8.onnx"
+    model_path.write_text("x", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path=str(model_path), enabled=True)
+    calls = []
+
+    def _fake_probe(**kwargs):
+        calls.append(int(kwargs["timeout_ms"]))
+        if len(calls) == 1:
+            return {
+                "ok": False,
+                "mode": "probe",
+                "timed_out": True,
+                "error": "Health check timed out after 3000ms",
+            }
+        return {
+            "ok": True,
+            "mode": "probe",
+            "sample_output": "שָׁלוֹם",
+        }
+
+    monkeypatch.setattr(adapter, "_run_local_probe", _fake_probe)
+
+    report = adapter.health_check(["שלום"])
+
+    assert calls == [adapter._HEALTH_TIMEOUT_MS, adapter._HEALTH_RETRY_TIMEOUT_MS]
+    assert report.status == "ok"
+    assert report.mode == "real_inference"
