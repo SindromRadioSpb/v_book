@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from app.infra.db_path_resolver import (
     SETTINGS_KEY_ACTIVE_DB_PATH,
+    clear_deferred_db_startup_guard,
     discover_baseline_db_path,
     get_default_db_path,
     inspect_db_path,
@@ -354,6 +355,7 @@ class FirstRunWizardDialog(QDialog):
             self.settings.remove(SETTINGS_KEY_ACTIVE_DB_PATH)
         else:
             self.settings.set_value(SETTINGS_KEY_ACTIVE_DB_PATH, str(selected))
+        clear_deferred_db_startup_guard(settings=self.settings)
         self.settings.sync()
 
         try:

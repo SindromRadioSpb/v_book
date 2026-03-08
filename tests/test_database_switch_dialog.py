@@ -5,7 +5,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from app.infra.db_path_resolver import SETTINGS_KEY_ACTIVE_DB_PATH, get_supported_schema_version
+from app.infra.db_path_resolver import (
+    SETTINGS_KEY_ACTIVE_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_REASON,
+    get_supported_schema_version,
+)
 from app.infra.settings import SettingsService
 from app.ui.database_switch_dialog import DatabaseSwitchDialog
 
@@ -82,3 +87,31 @@ def test_switch_dialog_persists_selected_db_and_restarts(qtbot, tmp_path):
 
     assert settings.get_string(SETTINGS_KEY_ACTIVE_DB_PATH, "") == str(target_db.resolve())
     assert restarted == [target_db.resolve()]
+
+
+def test_switch_dialog_clears_deferred_db_guard(qtbot, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.set_value(SETTINGS_KEY_DEFERRED_DB_PATH, str(tmp_path / "legacy.db"))
+    settings.set_value(SETTINGS_KEY_DEFERRED_DB_REASON, "legacy db deferred")
+    settings.sync()
+
+    schema_version = get_supported_schema_version()
+    current_db = _create_db(tmp_path / "current.db", schema_version)
+    target_db = _create_db(tmp_path / "target.db", schema_version)
+
+    dialog = DatabaseSwitchDialog(
+        current_db_path=current_db,
+        settings=settings,
+        restart_callback=lambda _path: True,
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    dialog.browse_radio.setChecked(True)
+    dialog.browse_edit.setText(str(target_db))
+    dialog._on_switch_and_restart()
+
+    assert settings.get_string(SETTINGS_KEY_DEFERRED_DB_PATH, "") == ""
+    assert settings.get_string(SETTINGS_KEY_DEFERRED_DB_REASON, "") == ""

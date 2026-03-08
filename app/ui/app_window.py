@@ -612,6 +612,7 @@ class AppWindow(QMainWindow):
     def _run_startup_flows(self) -> None:
         """Handle first-run flow and optional command-line startup actions."""
         self._maybe_show_first_run_wizard()
+        self._maybe_offer_deferred_database_reconnect()
         for action in self._startup_actions:
             if action == "open_resources":
                 self.open_resources_manager()
@@ -636,6 +637,66 @@ class AppWindow(QMainWindow):
         )
         if result == 0:
             self._show_nav_status("First-run setup skipped. You can open it later from Tools.")
+
+    def _maybe_offer_deferred_database_reconnect(self) -> None:
+        import os
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        deferred_path = str(self.settings.get_string("app/deferred_startup_db_path", "") or "").strip()
+        if not deferred_path:
+            return
+
+        from app.infra.db_path_resolver import discover_baseline_db_path, inspect_db_path
+        from PyQt6.QtWidgets import QMessageBox
+
+        deferred = Path(deferred_path).expanduser().resolve()
+        info = inspect_db_path(deferred)
+        baseline = discover_baseline_db_path()
+        lines = [
+            "HDLE opened with the default local DB to avoid blocking startup on a large legacy database.",
+            "",
+            f"Deferred DB: {deferred}",
+        ]
+        if info.exists and info.schema_version is not None:
+            lines.append(
+                f"Deferred DB schema: {info.schema_version} (app supports {info.supported_schema_version})"
+            )
+        if info.exists:
+            lines.append(f"Deferred DB size: {info.size_bytes / (1024 * 1024 * 1024):.2f} GB")
+        if baseline is not None:
+            baseline_info = inspect_db_path(baseline)
+            baseline_schema = (
+                str(baseline_info.schema_version)
+                if baseline_info.schema_version is not None
+                else "unknown"
+            )
+            lines.extend(
+                [
+                    "",
+                    f"Recommended quick-pick baseline: {baseline}",
+                    f"Baseline schema: {baseline_schema}",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "Open Switch Database now to connect a migrated DB explicitly.",
+            ]
+        )
+        answer = QMessageBox.question(
+            self,
+            "Database Startup Guard",
+            "\n".join(lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.open_database_switch_dialog()
+        else:
+            self._show_nav_status(
+                "Running on default local DB. Use Tools -> Switch Database to connect a migrated database."
+            )
 
     def _collect_shortcut_conflicts(self) -> Dict[str, List[str]]:
         by_shortcut: Dict[str, List[str]] = {}

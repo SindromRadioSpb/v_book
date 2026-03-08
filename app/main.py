@@ -39,6 +39,12 @@ def resolve_db_path(cli_db_path: str | None, *, settings=None):
     return _resolve_db_path_impl(cli_db_path, settings=settings)
 
 
+def choose_startup_db_path(cli_db_path: str | None, *, settings=None):
+    from app.infra.db_path_resolver import choose_startup_db_path as _choose_startup_db_path_impl
+
+    return _choose_startup_db_path_impl(cli_db_path, settings=settings)
+
+
 def get_default_db_path(*, settings=None) -> Path:
     from app.infra.db_path_resolver import get_default_db_path as _get_default_db_path_impl
 
@@ -993,10 +999,11 @@ def main():
 
     # Resolve database path with deterministic precedence:
     # CLI --db-path > ENV HDLE_DB_PATH (existing file) > settings > default.
-    resolved_db = resolve_db_path(
+    startup_db = choose_startup_db_path(
         args.db_path,
         settings=settings,
     )
+    resolved_db = startup_db.resolved
     db_path = Path(resolved_db.path).resolve()
 
     # Setup logging
@@ -1007,6 +1014,12 @@ def main():
     logger.info(f"App directory: {app_dir}")
     logger.info(f"Database: {db_path}")
     logger.info(f"Database source: {resolved_db.source}")
+    if startup_db.deferred_original_path is not None:
+        logger.warning(
+            "Startup DB deferred: opening default DB instead of legacy settings DB %s. Reason: %s",
+            startup_db.deferred_original_path,
+            startup_db.deferred_reason,
+        )
     logger.info("=" * 60)
 
     app_lock = None

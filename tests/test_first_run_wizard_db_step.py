@@ -6,7 +6,12 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app.infra.db_path_resolver import SETTINGS_KEY_ACTIVE_DB_PATH, get_supported_schema_version
+from app.infra.db_path_resolver import (
+    SETTINGS_KEY_ACTIVE_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_REASON,
+    get_supported_schema_version,
+)
 from app.infra.settings import SettingsService
 from app.ui.first_run_wizard import FirstRunWizardDialog
 
@@ -58,3 +63,31 @@ def test_first_run_wizard_db_step_saves_selected_path(qtbot, tmp_path):
 
     assert dialog._apply_database_selection() is True
     assert settings.get_string(SETTINGS_KEY_ACTIVE_DB_PATH, "") == str(selected_db.resolve())
+
+
+def test_first_run_wizard_clears_deferred_db_guard_on_selection(qtbot, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.sync()
+
+    manifest_path = tmp_path / "resource_manifest.json"
+    _write_manifest(manifest_path)
+    settings.set_value("resources/manifest_path", str(manifest_path))
+    settings.set_value("resources/data_root", str(tmp_path / "hdle_data"))
+    settings.set_value(SETTINGS_KEY_DEFERRED_DB_PATH, str(tmp_path / "legacy.db"))
+    settings.set_value(SETTINGS_KEY_DEFERRED_DB_REASON, "legacy db deferred")
+    settings.sync()
+
+    schema_version = get_supported_schema_version()
+    selected_db = _create_db(tmp_path / "selected.db", schema_version)
+
+    dialog = FirstRunWizardDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.db_browse_radio.setChecked(True)
+    dialog.db_path_edit.setText(str(selected_db))
+
+    assert dialog._apply_database_selection() is True
+    assert settings.get_string(SETTINGS_KEY_DEFERRED_DB_PATH, "") == ""
+    assert settings.get_string(SETTINGS_KEY_DEFERRED_DB_REASON, "") == ""

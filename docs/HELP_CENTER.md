@@ -111,6 +111,7 @@ First-run wizard:
 Working DB selection:
 
 - startup precedence: `--db-path` -> `HDLE_DB_PATH` -> `app/active_db_path` -> default `%LOCALAPPDATA%\HDLE\hdle.db`;
+- premium startup guard: a huge legacy DB from `app/active_db_path` may be deferred to the default local DB if opening it would require heavy backup + migration before UI startup;
 - switch dialog supports default DB, existing DB file, and local baseline quick-pick when available;
 - switching DB requires restart.
 

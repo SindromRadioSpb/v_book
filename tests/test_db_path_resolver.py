@@ -105,3 +105,73 @@ def test_discover_baseline_db_path_returns_existing_candidate(tmp_path, monkeypa
 
     discovered = resolver.discover_baseline_db_path()
     assert discovered == baseline_db.resolve()
+
+
+def _create_db_with_schema(path: Path, schema_version: int) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
+            (str(schema_version),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def test_choose_startup_db_path_defers_huge_legacy_settings_db(tmp_path, monkeypatch):
+    settings_db = _create_db_with_schema(tmp_path / "legacy.db", schema_version=32)
+    with settings_db.open("ab") as fh:
+        fh.write(b"x" * 32)
+    settings = _SettingsStub({resolver.SETTINGS_KEY_ACTIVE_DB_PATH: str(settings_db)})
+
+    class _MutableSettings(_SettingsStub):
+        def remove(self, key: str) -> None:
+            self.values.pop(key, None)
+
+        def set_value(self, key: str, value) -> None:
+            self.values[key] = value
+
+        def sync(self) -> None:
+            return None
+
+    settings = _MutableSettings({resolver.SETTINGS_KEY_ACTIVE_DB_PATH: str(settings_db)})
+    _ResourcePathsStub._root = tmp_path / "appdata"
+    monkeypatch.setattr(resolver, "STARTUP_DEFER_SIZE_THRESHOLD_BYTES", 1)
+    monkeypatch.setattr(resolver, "get_supported_schema_version", lambda: 35)
+
+    decision = resolver.choose_startup_db_path(
+        None,
+        env={},
+        settings=settings,
+        resource_paths_cls=_ResourcePathsStub,
+    )
+
+    assert decision.resolved.source == "DEFAULT_DEFERRED"
+    assert decision.resolved.path == (tmp_path / "appdata" / "hdle.db").resolve()
+    assert decision.deferred_original_path == settings_db.resolve()
+    assert settings.values.get(resolver.SETTINGS_KEY_ACTIVE_DB_PATH) is None
+    assert settings.values[resolver.SETTINGS_KEY_DEFERRED_DB_PATH] == str(settings_db.resolve())
+
+
+def test_choose_startup_db_path_keeps_explicit_cli_override(tmp_path, monkeypatch):
+    cli_db = _create_db_with_schema(tmp_path / "cli.db", schema_version=32)
+    _ResourcePathsStub._root = tmp_path / "appdata"
+    monkeypatch.setattr(resolver, "STARTUP_DEFER_SIZE_THRESHOLD_BYTES", 1)
+    monkeypatch.setattr(resolver, "get_supported_schema_version", lambda: 35)
+
+    decision = resolver.choose_startup_db_path(
+        str(cli_db),
+        env={},
+        settings=_SettingsStub({}),
+        resource_paths_cls=_ResourcePathsStub,
+    )
+
+    assert decision.resolved.source == "CLI"
+    assert decision.resolved.path == cli_db.resolve()
+    assert decision.deferred_original_path is None

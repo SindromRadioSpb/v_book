@@ -395,6 +395,28 @@ Operational recommendation:
 - for deterministic install smoke, launch the installed app at least once with explicit `--db-path` to a known-good migrated DB
 - if the default runtime DB is large and behind on schema, migrate it offline before final installer sign-off
 
+Premium startup recommendation for heavy DB deployments:
+
+- the installed app should reach the main window on a light local DB first
+- it must not silently auto-attach a stale heavy settings DB before the UI appears
+- if startup detects a large legacy settings DB behind current schema, defer it and fall back to the local default DB
+- after the UI is visible, offer explicit reconnect/switch instead of blocking startup on backup+migration
+
+Recommended reconnect target for release smoke:
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+
+Required validation before reconnecting a heavy/baseline DB:
+
+```powershell
+python -c "import sqlite3; p=r'J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db'; c=sqlite3.connect(p); print({'schema_version': c.execute(\"SELECT value FROM schema_meta WHERE key='schema_version'\").fetchone()[0], 'quick_check': c.execute('PRAGMA quick_check').fetchone()[0]})"
+```
+
+Pass criteria:
+
+- `schema_version = 35`
+- `quick_check = ok`
+
 ### Test on Clean Windows VM (Critical)
 
 **Why:** Ensures app works without Python/dependencies installed.

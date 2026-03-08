@@ -24,6 +24,26 @@ Database path resolution order is:
 
 The selected source is logged on startup (`CLI|ENV|SETTINGS|DEFAULT`).
 
+### Startup guard for huge legacy settings DBs
+
+Premium startup policy adds one bounded exception for `SETTINGS` only:
+
+- if the saved DB is older than the current app schema,
+- and the DB is large enough to make backup + migration a poor first-visible startup path,
+
+HDLE starts on the default local DB instead.
+
+Behavior:
+
+- explicit `CLI` and `ENV` selections are never overridden;
+- the deferred settings DB is preserved for later reconnect;
+- the app offers explicit reconnect after UI startup through `Switch Database`.
+
+Deferred state keys:
+
+- `app/deferred_startup_db_path`
+- `app/deferred_startup_db_reason`
+
 ## First-run wizard
 
 Wizard step **Working database** provides:
@@ -33,6 +53,7 @@ Wizard step **Working database** provides:
 - `Use Hebrew Wikipedia Baseline (processed)` (only when available locally)
 
 When database choice differs from the current runtime DB, wizard offers restart.
+Explicit selection in the wizard clears any deferred-startup DB guard.
 
 ## In-app switching
 
@@ -51,6 +72,7 @@ Schema safeguards:
 
 - block switching to DB with newer schema than app supports,
 - warn when selected DB schema is older and migrations may run.
+- explicit switching also clears any deferred-startup DB guard.
 
 ## Hebrew Wikipedia baseline (processed)
 

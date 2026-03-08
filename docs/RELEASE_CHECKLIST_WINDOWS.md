@@ -115,6 +115,8 @@ ISCC.exe installer\installer.iss
 - [ ] DB created at `%LOCALAPPDATA%\HDLE\hdle.db`
 - [ ] Logs created at `%LOCALAPPDATA%\HDLE\logs\`
 - [ ] No errors in logs
+- [ ] First launch reaches the main window without auto-attaching a stale heavy settings DB before UI appears
+- [ ] If a large legacy settings DB is deferred, startup still opens on the local default DB and explains that explicit reconnect is available
 
 **Active runtime DB gate:**
 - [ ] Log confirms the actual active DB path
@@ -143,6 +145,14 @@ Required:
 Decision rule:
 - [ ] if startup delay is caused by first-run migration of a huge existing DB, treat it as runtime DB readiness work, not as proof that the packaged binaries are broken
 - [ ] for deterministic install smoke, launch once with explicit `--db-path` to a known-good migrated DB
+- [ ] premium sign-off requires one successful launch without CLI overrides and without implicit startup migration of a stale heavy settings DB
+
+Known-good reconnect target for release smoke:
+
+- [ ] `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+- [ ] Verify before reconnect:
+  - `schema_version = 35`
+  - `PRAGMA quick_check = ok`
 
 ### 3. Basic Functionality Test
 
