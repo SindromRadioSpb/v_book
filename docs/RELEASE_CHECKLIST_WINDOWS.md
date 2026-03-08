@@ -15,6 +15,18 @@ This checklist ensures that the Windows installer works correctly on clean syste
 
 ## Build Steps
 
+### 0. Recovery Tooling Precheck
+
+- [ ] If release baseline DB recovery is needed, use:
+  - `C:\msys64\ucrt64\bin\sqlite3.exe`
+- [ ] Verify selected sqlite3 supports `.recover`:
+  ```powershell
+  & "C:\msys64\ucrt64\bin\sqlite3.exe" -version
+  cmd /c "echo .help | C:\msys64\ucrt64\bin\sqlite3.exe"
+  ```
+- [ ] Do not use older sqlite3 binaries that fail with:
+  - `unknown command or invalid arguments: "recover"`
+
 ### 1. Build Standalone Executable
 
 ```powershell
@@ -30,6 +42,15 @@ cd J:\Project_Vibe\V_book
 - [ ] Build metadata generated (commit/dirty/built_at)
 - [ ] `powershell -ExecutionPolicy Bypass -File scripts\verify_frozen_health.ps1` passes
 - [ ] `build\verify\build_meta_dist.txt` exists and commit matches target release SHA
+
+**Additional frozen runtime gates:**
+- [ ] `.\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --mode import --out "build\verify_dist\probe_import_dist.json"` passes
+- [ ] `build\verify_dist\import_dist.json` confirms `checks.onnxruntime_import.helper_path` points to `HDLE_ONNX_Probe.exe`
+- [ ] `build\verify_dist\health_dist.json` reports:
+  - `frozen_onnx_probe.status = ok`
+  - `bootstrap:pronunciation.status = ok`
+  - `bootstrap:sentence_niqqud.status = ok`
+- [ ] `--self-check import` and `--self-check health` do not crash with `UnicodeEncodeError`
 
 ### 2. Build Installer
 
@@ -60,6 +81,10 @@ ISCC.exe installer\installer.iss
 - [ ] Follow wizard (accept defaults)
 - [ ] Installation completes successfully
 
+**Installed binary freshness gate:**
+- [ ] Installed `HDLE_Premium.exe` timestamp matches the latest build
+- [ ] Installed `HDLE_ONNX_Probe.exe` timestamp matches the latest build
+
 **Verify installation:**
 - [ ] Installed to `C:\Program Files\HDLE\`
 - [ ] Start menu shortcut: Start → HDLE Premium
@@ -72,6 +97,15 @@ ISCC.exe installer\installer.iss
 - [ ] App launches (may take 10-20s on first run)
 - [ ] Help → About HDLE Premium shows version + commit + dirty + built_at
 
+**Installed self-check gates:**
+- [ ] `HDLE_Premium.exe --self-check import --self-check-out ...` succeeds
+- [ ] `HDLE_Premium.exe --self-check health --db-path "<known-good migrated db>" --self-check-out ...` succeeds
+- [ ] No `UnicodeEncodeError` window/dialog appears during self-check
+- [ ] Installed health JSON reports:
+  - `frozen_onnx_probe.status = ok`
+  - `bootstrap:pronunciation.status = ok`
+  - `bootstrap:sentence_niqqud.status = ok`
+
 **Stanza models download (if internet available):**
 - [ ] Check logs for model download messages
 - [ ] Models stored in: `%LOCALAPPDATA%\HDLE\models\`
@@ -81,6 +115,34 @@ ISCC.exe installer\installer.iss
 - [ ] DB created at `%LOCALAPPDATA%\HDLE\hdle.db`
 - [ ] Logs created at `%LOCALAPPDATA%\HDLE\logs\`
 - [ ] No errors in logs
+
+**Active runtime DB gate:**
+- [ ] Log confirms the actual active DB path
+- [ ] Log confirms `Database source`
+- [ ] Log confirms current schema version
+- [ ] If startup is slow, distinguish packaged-app failure from long first-run migration/backup of an existing large DB
+
+### 2A. Runtime DB Readiness Gate
+
+Before final sign-off, inspect the DB that the installed app opens without CLI overrides.
+
+Commands:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\HDLE\logs\hdle.log" -Tail 80
+```
+
+If this deployment uses a custom app root, inspect that concrete log path instead.
+
+Required:
+- [ ] log shows `Database: ...`
+- [ ] log shows `Database source: ...`
+- [ ] log shows current schema version
+- [ ] no stale `app_instance.lock` / `migrate.lock` loop remains
+
+Decision rule:
+- [ ] if startup delay is caused by first-run migration of a huge existing DB, treat it as runtime DB readiness work, not as proof that the packaged binaries are broken
+- [ ] for deterministic install smoke, launch once with explicit `--db-path` to a known-good migrated DB
 
 ### 3. Basic Functionality Test
 
@@ -106,6 +168,11 @@ ISCC.exe installer\installer.iss
 - [ ] Export completes
 - [ ] Open XLSX in Excel
 - [ ] Verify sheets: Dictionary, Statistics
+
+**Pronunciation smoke:**
+- [ ] Open Health Check
+- [ ] Verify `Pronunciation Bootstrap` is `ok`
+- [ ] Verify `Sentence Niqqud Bootstrap` is `ok`
 
 ### 4. Crash Recovery Test
 

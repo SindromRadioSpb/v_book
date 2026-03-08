@@ -206,6 +206,20 @@ def test_main_self_check_path_skips_heavy_ui_imports(monkeypatch):
     assert captured["payload"]["ok"] is True
 
 
+def test_emit_self_check_writes_utf8_file_and_ascii_console(tmp_path: Path, monkeypatch):
+    payload = {"message": "שלום", "ok": True}
+    out_path = tmp_path / "self_check.json"
+    captured = {}
+
+    monkeypatch.setattr(builtins, "print", lambda text: captured.setdefault("console", text))
+
+    main._emit_self_check(payload, str(out_path))
+
+    assert "\\u05e9\\u05dc\\u05d5\\u05dd" in captured["console"]
+    written = out_path.read_text(encoding="utf-8")
+    assert "שלום" in written
+
+
 def test_import_self_check_uses_frozen_onnx_helper(monkeypatch):
     real_import = importlib.import_module
     imported = []

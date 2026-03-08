@@ -78,12 +78,13 @@ def _redact_value(value: str, *, keep_prefix: int = 3, keep_suffix: int = 2) -> 
 
 
 def _emit_self_check(payload: dict[str, Any], out_path: str | None = None) -> None:
-    text_payload = json.dumps(payload, ensure_ascii=False, indent=2)
+    file_payload = json.dumps(payload, ensure_ascii=False, indent=2)
     if out_path:
         out_file = Path(out_path).expanduser().resolve()
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text(text_payload + "\n", encoding="utf-8")
-    print(text_payload)
+        out_file.write_text(file_payload + "\n", encoding="utf-8")
+    console_payload = json.dumps(payload, ensure_ascii=True, indent=2)
+    print(console_payload)
 
 
 def _is_phonikud_subprocess_script(script: str) -> bool:
@@ -1103,4 +1104,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

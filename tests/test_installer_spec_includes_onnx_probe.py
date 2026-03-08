@@ -9,3 +9,4 @@ def test_installer_spec_declares_onnx_probe_executable():
     assert "name='HDLE_ONNX_Probe'" in content
     assert "probe_a = Analysis(" in content
     assert "probe_a.scripts" in content
+    assert "'huggingface_hub'" in content

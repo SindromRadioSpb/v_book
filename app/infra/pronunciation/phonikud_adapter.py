@@ -335,6 +335,26 @@ class PhonikudAdapter:
     def _resolve_probe_script(self) -> Path:
         return Path(__file__).resolve().parents[3] / "app" / "tools" / "onnx_probe.py"
 
+    @staticmethod
+    def _is_frozen_windows_runtime() -> bool:
+        return os.name == "nt" and bool(getattr(sys, "frozen", False))
+
+    def _resolve_frozen_probe_executable(self) -> Optional[Path]:
+        if not self._is_frozen_windows_runtime():
+            return None
+        try:
+            exe_root = Path(sys.executable).resolve().parent
+        except Exception:
+            return None
+        candidates = (
+            exe_root / "HDLE_ONNX_Probe.exe",
+            exe_root / "_internal" / "HDLE_ONNX_Probe.exe",
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
     def _run_local_probe(
         self,
         *,
@@ -342,35 +362,43 @@ class PhonikudAdapter:
         timeout_ms: int,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, object]:
-        script_path = self._resolve_probe_script()
-        if not script_path.exists():
-            return {
-                "ok": False,
-                "mode": mode,
-                "stage": "import",
-                "error": f"ONNX probe script not found: {script_path}",
-                "details": "Local health-check helper is missing.",
-                "timed_out": False,
-                "cancelled": False,
-                "timeout_ms": int(timeout_ms),
-            }
-
-        cmd = [
-            sys.executable,
-            str(script_path),
-            "--mode",
-            mode,
-            "--timeout-ms",
-            str(int(timeout_ms)),
-        ]
+        helper_path = self._resolve_frozen_probe_executable()
+        script_path = None if helper_path is not None else self._resolve_probe_script()
+        if helper_path is not None:
+            cmd = [
+                str(helper_path),
+                "--mode",
+                mode,
+                "--timeout-ms",
+                str(int(timeout_ms)),
+            ]
+        else:
+            if script_path is None or not script_path.exists():
+                missing_target = helper_path or script_path or Path("HDLE_ONNX_Probe.exe")
+                return {
+                    "ok": False,
+                    "mode": mode,
+                    "stage": "import",
+                    "error": f"ONNX probe helper not found: {missing_target}",
+                    "details": "Local health-check helper is missing.",
+                    "timed_out": False,
+                    "cancelled": False,
+                    "timeout_ms": int(timeout_ms),
+                }
+            cmd = [
+                sys.executable,
+                str(script_path),
+                "--mode",
+                mode,
+                "--timeout-ms",
+                str(int(timeout_ms)),
+            ]
         model_path = self._sanitize_model_path(self.model_path_effective)
         if model_path:
             cmd.extend(["--model-path", model_path])
 
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
-        env["HF_HUB_OFFLINE"] = "1"
-        env["TRANSFORMERS_OFFLINE"] = "1"
         env["HF_HUB_DISABLE_TELEMETRY"] = "1"
         env.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 

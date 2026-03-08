@@ -64,6 +64,28 @@ If not in PATH, you can compile manually:
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
 ```
 
+### 5. sqlite3 CLI for baseline DB recovery
+
+If prebuild/release work requires recovering a corrupted baseline DB with
+`scripts/repair_db_corruption.py`, use the known-good sqlite3 CLI:
+
+- `C:\msys64\ucrt64\bin\sqlite3.exe`
+
+Verified on `2026-03-08`:
+
+- version `3.51.2`
+- supports `.recover`
+
+Do not use an arbitrary older `sqlite3.exe` just because it is first in `PATH`.
+Some binaries fail the recovery pipeline because `.recover` is missing.
+
+Recommended verification:
+
+```powershell
+& "C:\msys64\ucrt64\bin\sqlite3.exe" -version
+cmd /c "echo .help | C:\msys64\ucrt64\bin\sqlite3.exe"
+```
+
 ---
 
 ## Build Process
@@ -159,6 +181,56 @@ Expected:
 - `build\verify\import_dist.json` and `build\verify\health_dist.json` contain `build.version`, `build.commit`, `build.dirty`, `build.built_at_utc`
 - `build\verify\build_meta_dist.txt` exists and matches the expected commit for the release candidate
 
+**Frozen runtime gates (required before release):**
+
+Run these exact checks on the built `dist` payload:
+
+```powershell
+.\dist\HDLE_Premium\HDLE_Premium.exe --self-check import --self-check-out "J:\Project_Vibe\V_book\build\verify_dist\import_dist.json"
+.\dist\HDLE_Premium\HDLE_Premium.exe --self-check health --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_dist\health_dist.json"
+.\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --mode import --out "J:\Project_Vibe\V_book\build\verify_dist\probe_import_dist.json"
+```
+
+Required pass criteria:
+
+- `onnxruntime_import.ok = true`
+- `checks.onnxruntime_import.helper_path` points to `HDLE_ONNX_Probe.exe`
+- `frozen_onnx_probe.status = ok`
+- `bootstrap:pronunciation.status = ok`
+- `bootstrap:sentence_niqqud.status = ok`
+
+This is mandatory after any change touching:
+
+- `app/infra/pronunciation/phonikud_adapter.py`
+- `app/main.py`
+- `app/tools/onnx_probe.py`
+- `hdle_premium_installer.spec`
+
+Reason:
+
+- the frozen runtime can pass in dev but still fail in the installer if:
+  - bundled helper path resolution is wrong,
+  - `huggingface_hub` is missing from packaging,
+  - ONNX helper/runtime contract drifts from self-check expectations.
+
+**Windows console encoding gate (required before release):**
+
+`--self-check` output must remain ASCII-safe on Windows consoles with `cp1251`.
+
+Pass criteria:
+
+- `HDLE_Premium.exe --self-check import ...`
+- `HDLE_Premium.exe --self-check health ...`
+
+must not crash with:
+
+- `UnicodeEncodeError: 'charmap' codec can't encode characters ...`
+
+Contract:
+
+- JSON written to output files stays UTF-8
+- console output must remain ASCII-safe
+
 **Troubleshooting:**
 - If app crashes immediately, check `%LOCALAPPDATA%\HDLE\logs\` for error messages
 - If DLL errors appear, rebuild with `--clean` flag
@@ -234,6 +306,94 @@ installer\output\HDLE_Premium_Setup.exe
    - Database: `%LOCALAPPDATA%\HDLE\hdle.db`
    - Logs: `%LOCALAPPDATA%\HDLE\logs\`
    - Backups: `%LOCALAPPDATA%\HDLE\backups\`
+
+6. **Verify installed runtime is actually updated:**
+   - Do not assume silent reinstall replaced the binaries.
+   - Compare installed timestamps against the freshly built artifacts:
+
+   ```powershell
+   Get-Item .\dist\HDLE_Premium\HDLE_Premium.exe | Select-Object FullName,Length,LastWriteTime
+   Get-Item "M:\Soft\HDLE\HDLE_Premium.exe" | Select-Object FullName,Length,LastWriteTime
+   Get-Item "M:\Soft\HDLE\HDLE_ONNX_Probe.exe" | Select-Object FullName,Length,LastWriteTime
+   ```
+
+   Required:
+   - installed `HDLE_Premium.exe` timestamp matches the latest build wave
+   - installed `HDLE_ONNX_Probe.exe` timestamp matches the latest build wave
+
+7. **Verify installed self-check on the real installation path:**
+
+   ```powershell
+   M:\Soft\HDLE\HDLE_Premium.exe --self-check import --self-check-out "J:\Project_Vibe\V_book\build\verify_installed\import_installed.json"
+   M:\Soft\HDLE\HDLE_Premium.exe --self-check health --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_installed\health_installed.json"
+   M:\Soft\HDLE\HDLE_ONNX_Probe.exe --mode import --out "J:\Project_Vibe\V_book\build\verify_installed\probe_import_installed.json"
+   ```
+
+   Required:
+   - no `UnicodeEncodeError` dialog/window
+   - `import_installed.json` exists and contains current `build.built_at_utc`
+   - `health_installed.json` reports:
+     - `frozen_onnx_probe.status = ok`
+     - `bootstrap:pronunciation.status = ok`
+     - `bootstrap:sentence_niqqud.status = ok`
+
+8. **Verify installer really deployed the latest binaries:**
+
+   If tests still show old behavior, do not assume the code fix failed. First verify
+   that the install directory actually updated.
+
+   ```powershell
+   Get-Item .\dist\HDLE_Premium\HDLE_Premium.exe | Select-Object FullName,Length,LastWriteTime
+   Get-Item "M:\Soft\HDLE\HDLE_Premium.exe" | Select-Object FullName,Length,LastWriteTime
+   Get-Item "M:\Soft\HDLE\HDLE_ONNX_Probe.exe" | Select-Object FullName,Length,LastWriteTime
+   ```
+
+   If installed timestamps do not match the latest build wave:
+
+   ```powershell
+   .\installer\output\HDLE_Premium_Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="M:\Soft\HDLE" /LOG="J:\Project_Vibe\V_book\build\logs\installer_reinstall.log"
+   Get-Content "J:\Project_Vibe\V_book\build\logs\installer_reinstall.log" -Tail 200
+   ```
+
+   Release rule:
+
+   - do not debug stale installed binaries as if they were current
+   - first confirm installer deployment actually replaced `HDLE_Premium.exe` and `HDLE_ONNX_Probe.exe`
+
+### Step 2A: Runtime DB Readiness Gate
+
+Before treating installer smoke as passed, verify which DB the installed app will open by default.
+
+Important:
+
+- the installed app may open a large runtime DB from settings instead of the release baseline DB
+- in this cycle the active installed DB was:
+  - `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
+- that DB was still on `schema_version = 32`, so normal startup entered a long migration path before the UI appeared
+
+Required checks:
+
+```powershell
+Get-Content "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\logs\hdle.log" -Tail 80
+```
+
+Look for:
+
+- `Database: ...`
+- `Database source: ...`
+- `Current schema version: ...`
+
+Release rule:
+
+- if installed startup uses an old large DB that still needs migration, do not classify "app does not open" as a packaging regression until that migration path is resolved
+- first distinguish:
+  - frozen packaging/runtime failure
+  - versus long first-run migration/backup of the active runtime DB
+
+Operational recommendation:
+
+- for deterministic install smoke, launch the installed app at least once with explicit `--db-path` to a known-good migrated DB
+- if the default runtime DB is large and behind on schema, migrate it offline before final installer sign-off
 
 ### Test on Clean Windows VM (Critical)
 

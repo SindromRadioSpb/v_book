@@ -263,3 +263,48 @@ def test_phonikud_adapter_retries_probe_once_after_timeout(monkeypatch, tmp_path
     assert calls == [adapter._HEALTH_TIMEOUT_MS, adapter._HEALTH_RETRY_TIMEOUT_MS]
     assert report.status == "ok"
     assert report.mode == "real_inference"
+
+
+def test_phonikud_adapter_uses_frozen_helper_for_onnx_health_check(monkeypatch, tmp_path):
+    model_path = tmp_path / "phonikud-1.0.int8.onnx"
+    model_path.write_text("x", encoding="utf-8")
+    helper_path = tmp_path / "HDLE_ONNX_Probe.exe"
+    helper_path.write_text("stub", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path=str(model_path), enabled=True)
+    monkeypatch.setattr(adapter, "_is_frozen_windows_runtime", lambda: True)
+    monkeypatch.setattr(adapter, "_resolve_frozen_probe_executable", lambda: helper_path)
+
+    captured = {}
+
+    class _FakeProc:
+        def __init__(self):
+            self._done = True
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+        def communicate(self, timeout=1):
+            _ = timeout
+            return ('{"ok": true, "mode": "probe", "sample_output": "\\u05e9\\u05b8\\u05c1\\u05dc\\u05d5\\u05b9\\u05dd"}', "")
+
+        def kill(self):
+            return None
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
+        return _FakeProc()
+
+    monkeypatch.setattr("app.infra.pronunciation.phonikud_adapter.subprocess.Popen", _fake_popen)
+
+    report = adapter.health_check(["שלום"])
+
+    assert captured["cmd"][0] == str(helper_path)
+    assert "--mode" in captured["cmd"]
+    assert "HF_HUB_OFFLINE" not in captured["env"]
+    assert "TRANSFORMERS_OFFLINE" not in captured["env"]
+    assert captured["env"]["HF_HUB_DISABLE_TELEMETRY"] == "1"
+    assert report.status == "ok"
+    assert report.mode == "real_inference"

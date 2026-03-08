@@ -94,6 +94,7 @@ a = Analysis(
         'app.infra.pronunciation.phonikud_adapter',
         'phonikud',
         'phonikud_onnx',
+        'huggingface_hub',
         'onnxruntime.capi.onnxruntime_pybind11_state',
         'app.services.audio_usage_tracker',
 
@@ -167,6 +168,7 @@ probe_a = Analysis(
     datas=[],
     hiddenimports=[
         'phonikud_onnx',
+        'huggingface_hub',
         'onnxruntime',
         'onnxruntime.capi.onnxruntime_pybind11_state',
         'app.infra.resource_paths',

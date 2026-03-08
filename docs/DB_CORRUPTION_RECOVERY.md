@@ -73,6 +73,30 @@ Artifacts:
 - `--fts-rebuild`:
   full FTS repopulation after salvage (can be long on hewiki scale).
 
+### Known-good sqlite3 CLI for `.recover`
+
+For this workspace, use:
+
+- `C:\msys64\ucrt64\bin\sqlite3.exe`
+
+Verified on `2026-03-08`:
+
+- version `3.51.2`
+- `.help` includes `.recover`
+
+Do not assume any `sqlite3.exe` on the machine is suitable. Older binaries may
+exist and fail with:
+
+- `Error: unknown command or invalid arguments: "recover"`
+
+Example:
+
+```powershell
+python scripts/repair_db_corruption.py `
+  --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" `
+  --sqlite3-bin "C:\msys64\ucrt64\bin\sqlite3.exe"
+```
+
 ## Benchmark Integration
 
 Benchmark now fails fast on corruption and prints remediation command:
@@ -118,3 +142,9 @@ Important operational note:
   - `<db>.db-shm`
 - Keeping stale WAL/SHM next to a newly replaced DB can trigger false
   `database disk image is malformed` errors.
+
+Additional release note from `2026-03-08`:
+
+- Recovery of the release baseline DB succeeded only after switching from an
+  older `sqlite3.exe` without `.recover` support to:
+  `C:\msys64\ucrt64\bin\sqlite3.exe`
