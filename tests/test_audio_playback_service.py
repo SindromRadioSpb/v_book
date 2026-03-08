@@ -11,7 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import AudioAsset
+from app.services.audio_cache_key_service import AudioCacheKeyService
 from app.services.audio_playback_service import AudioPlaybackService
 
 
@@ -100,6 +102,59 @@ def test_resolve_ready_path_returns_none_when_file_missing(monkeypatch):
             session.commit()
 
             assert AudioPlaybackService.resolve_ready_path(session, lang="he", norm_text="missing_file") is None
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_resolve_ready_path_ignores_stale_norm_match_when_source_text_changes(monkeypatch):
+    temp_dir = _workspace_temp_dir("audio_playback_hash_guard_")
+    engine = create_engine(f"sqlite:///{temp_dir / 'audio.db'}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+        monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_dir)
+        cache_keys = AudioCacheKeyService()
+
+        rel = Path("audio/mock_local_audio/he/stale.wav")
+        abs_path = temp_dir / rel
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_path.write_bytes(b"RIFF")
+
+        with Session(engine) as session:
+            old_text = "שלום בית"
+            norm_text = normalize_for_tm("he", old_text, "surface").norm
+            old_payload = {
+                "text": old_text,
+                "token_text": old_text,
+                "ssml": "",
+                "mode": "none",
+                "is_valid": True,
+                "qc_flag": None,
+            }
+            speech_hash = cache_keys.build_speech_hash(
+                src_lang="he",
+                source_text=old_text,
+                source_norm=norm_text,
+                pronunciation_payload=old_payload,
+            )
+            _insert_asset(
+                session,
+                lang="he",
+                norm_text=norm_text,
+                rel_path=str(rel).replace("\\", "/"),
+            )
+            row = session.query(AudioAsset).filter_by(lang="he", norm_text=norm_text).one()
+            row.speech_hash = speech_hash
+            row.input_hash = "legacy-input"
+            session.commit()
+
+            resolved = AudioPlaybackService.resolve_ready_path(
+                session,
+                lang="he",
+                norm_text=norm_text,
+                source_text="שלום בַיִת",
+            )
+            assert resolved is None
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)

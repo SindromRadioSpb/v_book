@@ -196,6 +196,25 @@ Then:
 - project-owned rows referencing audio are removed
 - re-import can reuse audio only if the effective synthesis input is identical
 
+### Implemented bounded hardening
+
+Current implementation now enforces this with two runtime guards:
+
+- `speech_hash`
+  - pronunciation-aware identity of the current spoken payload
+  - used to reject stale playback fallback for rows whose `norm_text` still
+    matches but pronunciation state has changed
+- `input_hash`
+  - exact provider/request cache identity
+  - used to prevent false cache hits when provider/voice/speed/format request
+    parameters or pronunciation payload changed
+
+Compatibility boundary:
+
+- `audio_asset` row uniqueness still uses the legacy weak key for now
+- old rows remain readable, but they are no longer considered valid cache hits
+  for new requests unless the new hash matches
+
 ## D. Recommended pronunciation concept
 
 ### Lexical pronunciation

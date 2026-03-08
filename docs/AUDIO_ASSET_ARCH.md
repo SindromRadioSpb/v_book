@@ -14,6 +14,27 @@ Hard rules:
 `audio_asset` canonical key:
 
 - `(lang, norm_text, voice_id, speed, provider)` unique.
+- bounded compatibility note:
+  - weak row identity is still the legacy unique key above
+  - cache validity is now guarded by hashes below
+
+Content-addressed cache guards:
+
+- `speech_hash`
+  - provider-agnostic hash of the current effective spoken payload
+  - includes sanitized source text + pronunciation overlay state + SSML payload
+- `input_hash`
+  - provider/request-specific hash
+  - includes `speech_hash` + provider id + voice id + speed + output format +
+    sample rate + optional provider model version
+
+Operational rule:
+
+- ready audio may be reused only when `input_hash` matches the current request
+- playback fallback by current source item must prefer rows whose `speech_hash`
+  matches the current pronunciation-aware payload
+- legacy rows without matching hash are treated as stale and must not block
+  regeneration
 
 Persisted status contract in DB:
 
@@ -27,6 +48,7 @@ Runtime-only stage contract:
 Main fields:
 
 - `asset_status`, `audio_rel_path`, `duration_ms`, `sha256`, `error_text`, timestamps.
+- `speech_hash`, `input_hash`
 
 ## Resource system and installer contract
 
@@ -192,6 +214,8 @@ Deterministic regenerate/playback contract:
 - playback resolver chooses latest ready by `updated_at DESC, asset_id DESC`;
 - provider switch sequence (`google -> mms -> google`) must play the final regenerate result.
 - `force regenerate` on the same provider writes a fresh asset path and updates row pointer to avoid stale file locks/cache.
+- pronunciation or SSML changes must invalidate previous cache reuse even when
+  `norm_text` stays the same.
 
 Playback state machine:
 

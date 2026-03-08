@@ -23,6 +23,7 @@ from app.infra.resource_paths import ResourcePaths
 from app.infra.sa_models import AudioAsset
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
+from app.services.audio_cache_key_service import AudioCacheKeyService
 from app.services.audio_usage_tracker import AudioUsageTracker
 from app.services.pronunciation_quality_service import PronunciationQualityService
 from app.services.pronunciation_service import PronunciationService
@@ -60,6 +61,7 @@ class AudioGenerationService:
     ):
         self.settings = settings or SettingsService.get_instance()
         self.audio_asset_service = audio_asset_service or AudioAssetService()
+        self.audio_cache_keys = AudioCacheKeyService()
         self.audio_provider_config = AudioProviderConfigManager(settings=self.settings)
         self.pronunciation_service = PronunciationService()
         register_default_audio_providers()
@@ -174,50 +176,29 @@ class AudioGenerationService:
                 result_parts.append(part)
         return "".join(result_parts) if changed else source_text
 
-    def _prepare_pronunciation_payload(
-        self,
-        session: Session,
-        *,
-        src_lang: str,
-        source_text: str,
-        source_norm: str,
-    ) -> Dict[str, str]:
-        try:
-            applied = self.pronunciation_service.apply_to_text(
-                session=session,
-                src_lang=src_lang,
-                source_text=source_text,
-                source_norm=source_norm,
-            )
-        except Exception:
-            return {
-                "text": source_text,
-                "token_text": source_text,
-                "ssml": "",
-                "mode": "none",
-                "is_valid": True,
-                "qc_flag": None,
-            }
-        return {
-            "text": applied.text or source_text,
-            "token_text": applied.token_text or source_text,
-            "ssml": applied.ssml or "",
-            "mode": applied.mode or "none",
-            "is_valid": bool(getattr(applied, "is_valid", True)),
-            "qc_flag": getattr(applied, "qc_flag", None),
-        }
+    @staticmethod
+    def _provider_model_version(provider) -> str:
+        getter = getattr(provider, "get_model_version", None)
+        if callable(getter):
+            try:
+                return str(getter() or "").strip()
+            except Exception:
+                return ""
+        return ""
 
     @staticmethod
     def _asset_rel_path(
         *,
         provider_id: str,
         src_lang: str,
-        source_norm: str,
+        input_hash: str,
         voice_id: str,
         speed: float,
         generation_tag: Optional[str] = None,
     ) -> str:
-        digest = hashlib.sha256(f"{src_lang}|{source_norm}|{voice_id}|{speed:.2f}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(
+            f"{src_lang}|{input_hash}|{voice_id}|{speed:.2f}".encode("utf-8")
+        ).hexdigest()[:20]
         safe_provider = provider_id.replace("/", "_").replace("\\", "_")
         safe_lang = src_lang.replace("/", "_").replace("\\", "_")
         if generation_tag:
@@ -248,14 +229,13 @@ class AudioGenerationService:
         session: Session,
         *,
         src_lang: str,
-        source_norm: str,
+        input_hash: str,
     ) -> bool:
-        status_map = self.audio_asset_service.bulk_get_status_any(
+        return self.audio_asset_service.has_ready_input_hash(
             session=session,
             lang=src_lang,
-            norm_texts=[source_norm],
+            input_hash=input_hash,
         )
-        return status_map.get(source_norm) == "ready"
 
     def generate_one(
         self,
@@ -276,13 +256,6 @@ class AudioGenerationService:
         if not source_text or not source_norm_clean or not source_lang_clean:
             return {"ok": False, "status": "failed", "provider_id": None, "error": "invalid source payload"}
 
-        if not force_regenerate and self._has_ready_asset(
-            session,
-            src_lang=source_lang_clean,
-            source_norm=source_norm_clean,
-        ):
-            return {"ok": True, "status": "skipped", "provider_id": None, "error": None}
-
         global_voice_id, global_speed = self._resolve_voice_speed()
         provider_chain = self._resolve_provider_chain(provider_mode)
         if not provider_chain:
@@ -294,6 +267,8 @@ class AudioGenerationService:
                 voice_id=global_voice_id,
                 speed=global_speed,
                 provider="none",
+                speech_hash=None,
+                input_hash=None,
                 status="failed",
                 error_text=last_error,
             )
@@ -306,11 +281,17 @@ class AudioGenerationService:
         failed_recorded = False
         app_dir = _get_app_dir()
         source_char_count = len(source_text)
-        pronunciation_payload = self._prepare_pronunciation_payload(
+        pronunciation_payload = self.audio_cache_keys.prepare_pronunciation_payload(
             session=session,
             src_lang=source_lang_clean,
             source_text=source_text,
             source_norm=source_norm_clean,
+        )
+        speech_hash = self.audio_cache_keys.build_speech_hash(
+            src_lang=source_lang_clean,
+            source_text=source_text,
+            source_norm=source_norm_clean,
+            pronunciation_payload=pronunciation_payload,
         )
 
         for provider_id in provider_chain:
@@ -326,6 +307,22 @@ class AudioGenerationService:
             provider_speed = global_speed
             if abs(provider_speed - 1.0) < 1e-6:
                 provider_speed = max(0.5, min(2.0, float(provider_cfg.speech_rate or 1.0)))
+            input_hash = self.audio_cache_keys.build_input_hash(
+                speech_hash=speech_hash,
+                provider_id=provider_id,
+                voice_id=provider_voice_id,
+                speed=provider_speed,
+                audio_format=provider_cfg.audio_format,
+                sample_rate_hz=int(provider_cfg.sample_rate_hz),
+                provider_model_version=self._provider_model_version(provider),
+            )
+
+            if not force_regenerate and self._has_ready_asset(
+                session,
+                src_lang=source_lang_clean,
+                input_hash=input_hash,
+            ):
+                return {"ok": True, "status": "skipped", "provider_id": provider_id, "error": None}
 
             if source_char_count > int(provider_cfg.max_chars_per_request):
                 last_error = (
@@ -339,6 +336,8 @@ class AudioGenerationService:
                     voice_id=provider_voice_id,
                     speed=provider_speed,
                     provider=provider_id,
+                    speech_hash=speech_hash,
+                    input_hash=input_hash,
                     status="failed",
                     error_text=last_error[:1000],
                 )
@@ -362,6 +361,8 @@ class AudioGenerationService:
                             voice_id=provider_voice_id,
                             speed=provider_speed,
                             provider=provider_id,
+                            speech_hash=speech_hash,
+                            input_hash=input_hash,
                             status="failed",
                             error_text=last_error[:1000],
                         )
@@ -385,6 +386,8 @@ class AudioGenerationService:
                             voice_id=provider_voice_id,
                             speed=provider_speed,
                             provider=provider_id,
+                            speech_hash=speech_hash,
+                            input_hash=input_hash,
                             status="failed",
                             error_text=str(last_error)[:1000],
                         )
@@ -440,6 +443,8 @@ class AudioGenerationService:
                     voice_id=provider_voice_id,
                     speed=provider_speed,
                     provider=provider_id,
+                    speech_hash=speech_hash,
+                    input_hash=input_hash,
                     status="failed",
                     error_text=last_error[:1000],
                 )
@@ -460,7 +465,7 @@ class AudioGenerationService:
             rel_path = self._asset_rel_path(
                 provider_id=provider_id,
                 src_lang=source_lang_clean,
-                source_norm=source_norm_clean,
+                input_hash=input_hash,
                 voice_id=provider_voice_id,
                 speed=provider_speed,
                 generation_tag=generation_tag,
@@ -477,6 +482,8 @@ class AudioGenerationService:
                 voice_id=provider_voice_id,
                 speed=provider_speed,
                 provider=provider_id,
+                speech_hash=speech_hash,
+                input_hash=input_hash,
                 status="ready",
                 audio_rel_path=safe_rel,
                 error_text=None,
@@ -523,6 +530,8 @@ class AudioGenerationService:
                 voice_id=global_voice_id,
                 speed=global_speed,
                 provider="none",
+                speech_hash=speech_hash,
+                input_hash=None,
                 status="failed",
                 error_text=last_error[:1000],
             )

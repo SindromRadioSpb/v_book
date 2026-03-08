@@ -9,9 +9,11 @@ from pathlib import Path
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import AudioAsset
+from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.sa_models import AudioAsset, PronunciationEntry
 from app.services.audio_generation_service import AudioGenerationService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.services.pronunciation_service import PronunciationService
 
 
 class _DummySettings:
@@ -223,6 +225,87 @@ def test_force_regenerate_same_provider_rewrites_asset_path(monkeypatch):
                 norm_text="shalom",
             )
             assert resolved == second_abs
+    finally:
+        engine.dispose()
+        shutil.rmtree(temp_audio_dir, ignore_errors=True)
+
+
+def test_pronunciation_change_invalidates_audio_cache_without_force_regenerate(monkeypatch):
+    temp_audio_dir = _workspace_temp_dir("audio_pron_cache_invalidate_")
+    db_path = temp_audio_dir / "audio_pron_cache_invalidate.db"
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+        PronunciationEntry.__table__.create(engine, checkfirst=True)
+        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+
+        service = AudioGenerationService(settings=_DummySettings())
+        pron = PronunciationService()
+        source_text = "שלום בית"
+        source_norm = normalize_for_tm("he", source_text, "surface").norm
+        token_norm = normalize_for_tm("he", "בית", "surface").norm
+
+        with Session(engine) as session:
+            first = service.generate_one(
+                session,
+                src_text=source_text,
+                src_lang="he",
+                source_norm=source_norm,
+                provider_mode="force:mock_local_audio",
+                force_regenerate=False,
+                trace_id="t-audio-pron-1",
+            )
+            session.commit()
+            assert first["ok"] is True
+            row_first = session.execute(
+                select(AudioAsset).where(
+                    AudioAsset.lang == "he",
+                    AudioAsset.norm_text == source_norm,
+                    AudioAsset.provider == "mock_local_audio",
+                )
+            ).scalar_one()
+            first_hash = row_first.speech_hash
+            first_rel = str(row_first.audio_rel_path or "")
+            assert first_hash
+            assert first_rel
+
+            pron.upsert_entry(
+                session,
+                lang="he",
+                src_norm=token_norm,
+                niqqud_text="בַיִת",
+                ipa=None,
+                source="manual",
+                is_override=True,
+                notes=None,
+            )
+            session.commit()
+
+            second = service.generate_one(
+                session,
+                src_text=source_text,
+                src_lang="he",
+                source_norm=source_norm,
+                provider_mode="force:mock_local_audio",
+                force_regenerate=False,
+                trace_id="t-audio-pron-2",
+            )
+            session.commit()
+            assert second["ok"] is True
+            assert second["status"] == "ready"
+
+            row_second = session.execute(
+                select(AudioAsset).where(
+                    AudioAsset.lang == "he",
+                    AudioAsset.norm_text == source_norm,
+                    AudioAsset.provider == "mock_local_audio",
+                )
+            ).scalar_one()
+            assert row_second.speech_hash
+            assert row_second.input_hash
+            assert row_second.speech_hash != first_hash
+            assert str(row_second.audio_rel_path or "") != first_rel
     finally:
         engine.dispose()
         shutil.rmtree(temp_audio_dir, ignore_errors=True)

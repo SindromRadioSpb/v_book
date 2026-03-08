@@ -836,6 +836,8 @@ class AudioAsset(Base):
     voice_id = Column(String, nullable=False, default="default")
     speed = Column(Float, nullable=False, default=1.0)
     provider = Column(String, nullable=False, default="none")
+    speech_hash = Column(String)
+    input_hash = Column(String)
     asset_status = Column(String, nullable=False, default="missing")
     audio_rel_path = Column(Text)
     duration_ms = Column(Integer)

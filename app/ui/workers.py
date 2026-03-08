@@ -3956,9 +3956,11 @@ class AudioQueuePopulateWorker(QThread):
             from sqlalchemy import select as _sel, desc as _desc
             from app.infra.sa_models import AudioAsset as _AA
             from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+            from app.services.audio_cache_key_service import AudioCacheKeyService
 
             _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
-            norm_to_specs: Dict[str, List] = {}
+            speech_hash_to_specs: Dict[str, List] = {}
+            cache_keys = AudioCacheKeyService()
             for spec in specs:
                 if not spec.snapshot_hebrew or spec.audio_asset_id is not None:
                     continue
@@ -3967,23 +3969,36 @@ class AudioQueuePopulateWorker(QThread):
                     norm = _ntm("he", spec.snapshot_hebrew, kind_str).norm or spec.snapshot_hebrew
                 except Exception:
                     norm = spec.snapshot_hebrew
-                if norm:
-                    norm_to_specs.setdefault(norm, []).append(spec)
+                if not norm:
+                    continue
+                payload = cache_keys.prepare_pronunciation_payload(
+                    session=session,
+                    src_lang="he",
+                    source_text=spec.snapshot_hebrew,
+                    source_norm=norm,
+                )
+                speech_hash = cache_keys.build_speech_hash(
+                    src_lang="he",
+                    source_text=spec.snapshot_hebrew,
+                    source_norm=norm,
+                    pronunciation_payload=payload,
+                )
+                speech_hash_to_specs.setdefault(speech_hash, []).append(spec)
 
-            if not norm_to_specs:
+            if not speech_hash_to_specs:
                 return
 
             rows = session.execute(
-                _sel(_AA.norm_text, _AA.asset_id)
+                _sel(_AA.speech_hash, _AA.asset_id)
                 .where(_AA.lang == "he")
-                .where(_AA.norm_text.in_(list(norm_to_specs.keys())))
+                .where(_AA.speech_hash.in_(list(speech_hash_to_specs.keys())))
                 .where(_AA.asset_status == "ready")
                 .where(_AA.audio_rel_path.isnot(None))
                 .order_by(_desc(_AA.asset_id))  # highest asset_id = most recent
             ).all()
 
-            for norm_text, asset_id in rows:
-                for spec in norm_to_specs.get(norm_text, []):
+            for speech_hash, asset_id in rows:
+                for spec in speech_hash_to_specs.get(speech_hash, []):
                     if spec.audio_asset_id is None:  # first-win per spec
                         spec.audio_asset_id = asset_id
                         spec.audio_status = "ready"

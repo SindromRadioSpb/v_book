@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.infra.resource_paths import ResourcePaths
 from app.infra.sa_models import AudioAsset
+from app.services.audio_cache_key_service import AudioCacheKeyService
 
 
 def _get_app_dir() -> Path:
@@ -21,6 +22,8 @@ def _get_app_dir() -> Path:
 
 class AudioPlaybackService:
     """Resolve ready audio asset path for UI playback controls."""
+
+    _cache_keys = AudioCacheKeyService()
 
     @staticmethod
     def _launch_external(path: Path) -> None:
@@ -93,6 +96,7 @@ class AudioPlaybackService:
             try:
                 lang = str(item.get("src_lang") or "").strip()
                 norm_text = str(item.get("src_norm") or "").strip()
+                src_text = str(item.get("src_text") or "").strip()
             except Exception:
                 continue
             if not lang or not norm_text:
@@ -101,6 +105,7 @@ class AudioPlaybackService:
                 session,
                 lang=lang,
                 norm_text=norm_text,
+                source_text=src_text or None,
             )
             if path:
                 resolved.append((path, item))
@@ -112,20 +117,37 @@ class AudioPlaybackService:
         *,
         lang: str,
         norm_text: str,
+        source_text: Optional[str] = None,
     ) -> Optional[Path]:
-        stmt = (
-            select(AudioAsset)
-            .where(
-                and_(
-                    AudioAsset.lang == lang,
-                    AudioAsset.norm_text == norm_text,
-                    AudioAsset.asset_status == "ready",
-                    AudioAsset.audio_rel_path.is_not(None),
-                )
+        speech_hash = None
+        if source_text:
+            payload = AudioPlaybackService._cache_keys.prepare_pronunciation_payload(
+                session=session,
+                src_lang=lang,
+                source_text=source_text,
+                source_norm=norm_text,
             )
-            .order_by(desc(AudioAsset.updated_at), desc(AudioAsset.asset_id))
-            .limit(1)
-        )
+            speech_hash = AudioPlaybackService._cache_keys.build_speech_hash(
+                src_lang=lang,
+                source_text=source_text,
+                source_norm=norm_text,
+                pronunciation_payload=payload,
+            )
+
+        filters = [
+            AudioAsset.lang == lang,
+            AudioAsset.asset_status == "ready",
+            AudioAsset.audio_rel_path.is_not(None),
+        ]
+        if speech_hash:
+            filters.append(AudioAsset.speech_hash == speech_hash)
+        else:
+            filters.append(AudioAsset.norm_text == norm_text)
+
+        stmt = select(AudioAsset).where(and_(*filters)).order_by(
+            desc(AudioAsset.updated_at),
+            desc(AudioAsset.asset_id),
+        ).limit(1)
         row = session.execute(stmt).scalar_one_or_none()
         if not row or not row.audio_rel_path:
             return None
