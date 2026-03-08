@@ -43,14 +43,14 @@ class EditMetadataDialog(QDialog):
 
     def __init__(self, doc_name: str, tag: str, link_url: str, level: str, topic: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Edit Metadata вЂ” {doc_name}")
+        self.setWindowTitle(f"Edit Metadata - {doc_name}")
         self.setMinimumWidth(480)
         layout = QVBoxLayout()
 
         form = QFormLayout()
 
         self.tag_edit = QLineEdit(tag or "")
-        self.tag_edit.setPlaceholderText("e.g. grammar, vocab, reading")
+        self.tag_edit.setPlaceholderText("e.g. grammar, vocab, reading (comma-separated)")
         self.tag_edit.setMaxLength(200)
         form.addRow("Tag:", self.tag_edit)
 

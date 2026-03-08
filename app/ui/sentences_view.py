@@ -155,7 +155,32 @@ class SentencesView(QWidget):
         self._current_dtos: List[SentenceDTO] = []
 
         self._init_ui()
+        self._restore_view_state()
         self._reload()
+
+    def _settings_key(self, suffix: str) -> str:
+        return f"sentences_view/project_{self.project_id}/{suffix}"
+
+    def _restore_view_state(self) -> None:
+        saved_doc_id = self.settings.get_string(self._settings_key("doc_filter_id"), "").strip()
+        saved_doc_name = self.settings.get_string(self._settings_key("doc_filter_name"), "").strip()
+        try:
+            self._doc_filter = int(saved_doc_id) if saved_doc_id else None
+        except ValueError:
+            self._doc_filter = None
+        self.doc_filter_label.setText(saved_doc_name or "All Documents")
+        if self._doc_filter is None:
+            self.doc_filter_label.setText("All Documents")
+
+    def _save_view_state(self) -> None:
+        self.settings.set_value(
+            self._settings_key("doc_filter_id"),
+            "" if self._doc_filter is None else str(int(self._doc_filter)),
+        )
+        self.settings.set_value(
+            self._settings_key("doc_filter_name"),
+            self.doc_filter_label.text().strip() or "All Documents",
+        )
 
     # ------------------------------------------------------------------
     # UI setup
@@ -478,6 +503,7 @@ class SentencesView(QWidget):
         doc_id, doc_name = dialog.selected_document()
         self._doc_filter = doc_id
         self.doc_filter_label.setText(doc_name or "All Documents")
+        self._save_view_state()
         self.current_page = 1
         self._reload()
 
@@ -487,6 +513,7 @@ class SentencesView(QWidget):
         self.text_search_edit.blockSignals(False)
         self._doc_filter = None
         self.doc_filter_label.setText("All Documents")
+        self._save_view_state()
         self.current_page = 1
         self._reload()
 

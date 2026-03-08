@@ -303,6 +303,45 @@ def test_picker_fts_path_returns_matching_docs(fts_engine):
     assert all("wiki_article" in dto.file_name for dto in page)
 
 
+def test_picker_fts_path_also_falls_back_to_like_for_hebrew_titles(fts_engine):
+    """Hebrew file names must remain searchable even if FTS tokenization is not enough."""
+    svc = DocumentService()
+    with Session(fts_engine) as session:
+        project_id, _ = _seed(session, count=10)
+        corpus_id = session.execute(
+            text("SELECT corpus_id FROM source_corpus WHERE project_id=:p"),
+            {"p": project_id},
+        ).scalar()
+        new_doc = SourceDocument(
+            corpus_id=corpus_id,
+            file_path="/wiki/axiom",
+            file_name="אקסיומה",
+            file_ext=".wiki",
+            file_size_bytes=42,
+            sha256="sha_axioma_001",
+            imported_at="2026-03-08T00:00:00Z",
+            status="imported",
+        )
+        session.add(new_doc)
+        session.commit()
+
+        page = svc.fetch_project_documents_page(
+            session,
+            project_id,
+            search_query="אקסיומה",
+            limit=20,
+            offset=0,
+        )
+        total = svc.get_project_documents_total_count(
+            session,
+            project_id,
+            search_query="אקסיומה",
+        )
+
+    assert total >= 1
+    assert any(dto.file_name == "אקסיומה" for dto in page)
+
+
 def test_picker_fts_is_available_returns_true(fts_engine):
     """_is_document_name_fts_available returns True when table exists."""
     svc = DocumentService()

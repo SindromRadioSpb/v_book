@@ -8,6 +8,7 @@ All DB operations are short-transaction, WAL-safe.
 """
 import logging
 import re
+from collections import Counter
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
@@ -45,6 +46,7 @@ _MAX_TAG_LEN = 200
 _MAX_TOPIC_LEN = 500
 _MAX_URL_LEN = 2000
 _TAG_SEARCH_PREFIX = "tag:"
+_TAG_SPLIT_RE = re.compile(r"[,;\n\r]+")
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +82,10 @@ def validate_link_url(url: Optional[str]) -> Optional[str]:
 
 
 def validate_tag(tag: Optional[str]) -> Optional[str]:
-    """Trim and validate tag length."""
+    """Trim, canonicalize, and validate tag length."""
     if tag is None:
         return None
-    tag = tag.strip()
+    tag = canonicalize_tag_text(tag)
     if not tag:
         return None
     if len(tag) > _MAX_TAG_LEN:
@@ -113,6 +115,46 @@ def validate_topic(topic: Optional[str]) -> Optional[str]:
     if len(topic) > _MAX_TOPIC_LEN:
         raise ValueError(f"topic too long ({len(topic)} > {_MAX_TOPIC_LEN})")
     return topic
+
+
+def split_tag_tokens(raw_tag: Optional[str]) -> List[str]:
+    """Return normalized tag tokens from a raw metadata string.
+
+    Supported separators are explicit: comma, semicolon, newline. Whitespace-only
+    splitting is intentionally not used because multi-word tags are valid.
+    """
+    text = str(raw_tag or "").strip()
+    if not text:
+        return []
+    parts = _TAG_SPLIT_RE.split(text)
+    tokens: List[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        token = re.sub(r"\s+", " ", part.strip())
+        if not token:
+            continue
+        norm = token.casefold()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        tokens.append(token)
+    if tokens:
+        return tokens
+    collapsed = re.sub(r"\s+", " ", text)
+    return [collapsed] if collapsed else []
+
+
+def canonicalize_tag_text(raw_tag: Optional[str]) -> Optional[str]:
+    """Persist tags in a stable comma-separated format."""
+    tokens = split_tag_tokens(raw_tag)
+    if not tokens:
+        return None
+    return ", ".join(tokens)
+
+
+def parse_tag_filter_input(raw_value: Optional[str]) -> List[str]:
+    """Parse tag filter input using the same explicit separators as storage."""
+    return split_tag_tokens(raw_value)
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +274,13 @@ class DocumentService:
                         "  WHERE document_name_fts MATCH :_fts_term"
                         ")"
                     ).bindparams(_fts_term=fts_term),
-                )
+                ),
+                select(SourceDocument.doc_id)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.file_name.ilike(f"%{query}%"),
+                ),
             ]
         else:
             # --- LIKE fallback (pre-migration 027 or test env without FTS table) ------
@@ -270,11 +318,71 @@ class DocumentService:
 
         return union(*selectors).subquery("project_doc_match_ids")
 
+    def _apply_project_picker_filters(
+        self,
+        stmt,
+        *,
+        project_id: int,
+        document_filter: Optional[str] = None,
+        document_id: Optional[int] = None,
+        tag_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        tag_match_mode: str = "any",
+        session: Optional[Session] = None,
+    ):
+        """Apply explicit picker filters with deterministic AND semantics."""
+        stmt = (
+            stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == int(project_id))
+        )
+
+        document_filter_clean = (document_filter or "").strip()
+        if document_filter_clean:
+            doc_ids_subquery = self._build_project_picker_doc_ids_subquery(
+                project_id,
+                search_query=document_filter_clean,
+                session=session,
+            )
+            stmt = stmt.join(
+                doc_ids_subquery,
+                SourceDocument.doc_id == doc_ids_subquery.c.doc_id,
+            )
+
+        if document_id is not None:
+            stmt = stmt.where(SourceDocument.doc_id == int(document_id))
+
+        tag_tokens = parse_tag_filter_input(tag_filter)
+        if tag_tokens:
+            predicates = [SourceDocument.tag.ilike(f"%{token}%") for token in tag_tokens]
+            stmt = stmt.where(SourceDocument.tag.is_not(None))
+            if str(tag_match_mode or "any").strip().lower() == "all":
+                for predicate in predicates:
+                    stmt = stmt.where(predicate)
+            else:
+                stmt = stmt.where(or_(*predicates))
+
+        topic_filter_clean = (topic_filter or "").strip()
+        if topic_filter_clean:
+            stmt = stmt.where(SourceDocument.topic.ilike(f"%{topic_filter_clean}%"))
+
+        level_filter_clean = validate_level(level_filter) if level_filter is not None else None
+        if level_filter_clean:
+            stmt = stmt.where(SourceDocument.level == level_filter_clean)
+
+        return stmt
+
     def build_project_documents_query(
         self,
         project_id: int,
         *,
         search_query: Optional[str] = None,
+        document_filter: Optional[str] = None,
+        document_id: Optional[int] = None,
+        tag_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
         session: Optional[Session] = None,
@@ -284,8 +392,17 @@ class DocumentService:
         session is optional but strongly recommended: when provided, enables the
         FTS5 fast path for file_name search (PERF-SCALE PATCH-D).
         """
+        explicit_filters_active = any(
+            (
+                (document_filter or "").strip(),
+                document_id is not None,
+                (tag_filter or "").strip(),
+                (topic_filter or "").strip(),
+                (level_filter or "").strip(),
+            )
+        )
         query = (search_query or "").strip()
-        if query:
+        if query and not explicit_filters_active:
             doc_ids_subquery = self._build_project_picker_doc_ids_subquery(
                 project_id,
                 search_query=query,
@@ -296,9 +413,23 @@ class DocumentService:
                 SourceDocument.doc_id == doc_ids_subquery.c.doc_id,
             )
         else:
+            stmt = select(SourceDocument)
+
+        if explicit_filters_active:
+            stmt = self._apply_project_picker_filters(
+                stmt,
+                project_id=project_id,
+                document_filter=document_filter,
+                document_id=document_id,
+                tag_filter=tag_filter,
+                topic_filter=topic_filter,
+                level_filter=level_filter,
+                tag_match_mode=tag_match_mode,
+                session=session,
+            )
+        elif not query:
             stmt = (
-                select(SourceDocument)
-                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
                 .where(SourceCorpus.project_id == int(project_id))
             )
 
@@ -311,10 +442,25 @@ class DocumentService:
         project_id: int,
         *,
         search_query: Optional[str] = None,
+        document_filter: Optional[str] = None,
+        document_id: Optional[int] = None,
+        tag_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        tag_match_mode: str = "any",
     ) -> int:
         """Return project-scoped count for document picker search."""
+        explicit_filters_active = any(
+            (
+                (document_filter or "").strip(),
+                document_id is not None,
+                (tag_filter or "").strip(),
+                (topic_filter or "").strip(),
+                (level_filter or "").strip(),
+            )
+        )
         query = (search_query or "").strip()
-        if query:
+        if query and not explicit_filters_active:
             doc_ids_subquery = self._build_project_picker_doc_ids_subquery(
                 project_id,
                 search_query=query,
@@ -322,12 +468,24 @@ class DocumentService:
             )
             stmt = select(func.count()).select_from(doc_ids_subquery)
         else:
-            stmt = (
-                select(func.count(SourceDocument.doc_id))
-                .select_from(SourceDocument)
-                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                .where(SourceCorpus.project_id == int(project_id))
-            )
+            stmt = select(func.count(SourceDocument.doc_id)).select_from(SourceDocument)
+            if explicit_filters_active:
+                stmt = self._apply_project_picker_filters(
+                    stmt,
+                    project_id=project_id,
+                    document_filter=document_filter,
+                    document_id=document_id,
+                    tag_filter=tag_filter,
+                    topic_filter=topic_filter,
+                    level_filter=level_filter,
+                    tag_match_mode=tag_match_mode,
+                    session=session,
+                )
+            else:
+                stmt = (
+                    stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(SourceCorpus.project_id == int(project_id))
+                )
 
         return int(session.execute(stmt).scalar() or 0)
 
@@ -337,6 +495,12 @@ class DocumentService:
         project_id: int,
         *,
         search_query: Optional[str] = None,
+        document_filter: Optional[str] = None,
+        document_id: Optional[int] = None,
+        tag_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
         limit: int = 25,
@@ -346,6 +510,12 @@ class DocumentService:
         stmt = self.build_project_documents_query(
             project_id,
             search_query=search_query,
+            document_filter=document_filter,
+            document_id=document_id,
+            tag_filter=tag_filter,
+            topic_filter=topic_filter,
+            level_filter=level_filter,
+            tag_match_mode=tag_match_mode,
             sort_by=sort_by,
             sort_dir=sort_dir,
             session=session,
@@ -353,6 +523,41 @@ class DocumentService:
         stmt = stmt.limit(max(1, int(limit))).offset(max(0, int(offset)))
         docs = session.execute(stmt).scalars().all()
         return [self._to_dto(d) for d in docs]
+
+    def get_project_frequent_tags(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        limit: int = 5,
+    ) -> List[str]:
+        """Return most frequent normalized tag tokens for a project."""
+        rows = (
+            session.execute(
+                select(SourceDocument.tag, func.count(SourceDocument.doc_id))
+                .select_from(SourceDocument)
+                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                .where(
+                    SourceCorpus.project_id == int(project_id),
+                    SourceDocument.tag.is_not(None),
+                    func.trim(SourceDocument.tag) != "",
+                )
+                .group_by(SourceDocument.tag)
+            )
+            .all()
+        )
+        counter: Counter[str] = Counter()
+        display_map: Dict[str, str] = {}
+        for raw_tag, row_count in rows:
+            for token in split_tag_tokens(raw_tag):
+                norm = token.casefold()
+                display_map.setdefault(norm, token)
+                counter[norm] += int(row_count or 0)
+        top = sorted(
+            counter.items(),
+            key=lambda item: (-item[1], display_map[item[0]].casefold()),
+        )[: max(1, int(limit))]
+        return [display_map[norm] for norm, _count in top]
 
     def build_documents_query(
         self,

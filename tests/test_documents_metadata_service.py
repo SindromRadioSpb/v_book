@@ -74,6 +74,20 @@ class TestTagValidation:
         with pytest.raises(ValueError, match="too long"):
             validate_tag("x" * 201)
 
+    def test_comma_separated_tags_are_canonicalized_and_deduped(self):
+        from app.services.document_service import validate_tag
+        assert validate_tag(" test_tag , tag 2, test_tag ") == "test_tag, tag 2"
+
+
+class TestTagParsingHelpers:
+    def test_split_tag_tokens_supports_explicit_separators(self):
+        from app.services.document_service import split_tag_tokens
+        assert split_tag_tokens("test_tag, tag 2;tag 3") == ["test_tag", "tag 2", "tag 3"]
+
+    def test_split_tag_tokens_does_not_split_multi_word_tag_by_space(self):
+        from app.services.document_service import split_tag_tokens
+        assert split_tag_tokens("daily life") == ["daily life"]
+
 
 class TestLevelValidation:
     def test_valid_levels(self):

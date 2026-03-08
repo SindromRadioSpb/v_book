@@ -907,6 +907,7 @@ class ProjectDocumentsPageWorker(QThread):
     """
 
     page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
+    frequent_tags_loaded = pyqtSignal(int, list)  # request_id, tags(List[str])
     error = pyqtSignal(int, str)              # request_id, message
     status = pyqtSignal(int, str)             # request_id, status text
 
@@ -916,6 +917,12 @@ class ProjectDocumentsPageWorker(QThread):
         request_id: int,
         project_id: int,
         search_query: Optional[str],
+        document_filter: Optional[str] = None,
+        document_id: Optional[int] = None,
+        tag_filter: Optional[str] = None,
+        topic_filter: Optional[str] = None,
+        level_filter: Optional[str] = None,
+        tag_match_mode: str = "any",
         page_size: int,
         page_index: int,
     ):
@@ -923,6 +930,12 @@ class ProjectDocumentsPageWorker(QThread):
         self.request_id = int(request_id)
         self.project_id = int(project_id)
         self.search_query = (search_query or "").strip() or None
+        self.document_filter = (document_filter or "").strip() or None
+        self.document_id = int(document_id) if document_id is not None else None
+        self.tag_filter = (tag_filter or "").strip() or None
+        self.topic_filter = (topic_filter or "").strip() or None
+        self.level_filter = (level_filter or "").strip() or None
+        self.tag_match_mode = str(tag_match_mode or "any").strip().lower() or "any"
         self.page_size = max(1, int(page_size))
         self.page_index = max(1, int(page_index))
         self._cancelled = False
@@ -947,26 +960,55 @@ class ProjectDocumentsPageWorker(QThread):
                     session,
                     self.project_id,
                     search_query=self.search_query,
+                    document_filter=self.document_filter,
+                    document_id=self.document_id,
+                    tag_filter=self.tag_filter,
+                    topic_filter=self.topic_filter,
+                    level_filter=self.level_filter,
+                    tag_match_mode=self.tag_match_mode,
                 )
 
                 if self._cancelled:
                     return
 
                 offset = (self.page_index - 1) * self.page_size
-                sort_by = "file_name" if self.search_query else "doc_id"
-                sort_dir = "asc" if self.search_query else "desc"
+                any_filter = any(
+                    (
+                        self.search_query,
+                        self.document_filter,
+                        self.document_id is not None,
+                        self.tag_filter,
+                        self.topic_filter,
+                        self.level_filter,
+                    )
+                )
+                sort_by = "file_name" if any_filter else "doc_id"
+                sort_dir = "asc" if any_filter else "desc"
                 rows = doc_service.fetch_project_documents_page(
                     session,
                     self.project_id,
                     search_query=self.search_query,
+                    document_filter=self.document_filter,
+                    document_id=self.document_id,
+                    tag_filter=self.tag_filter,
+                    topic_filter=self.topic_filter,
+                    level_filter=self.level_filter,
+                    tag_match_mode=self.tag_match_mode,
                     sort_by=sort_by,
                     sort_dir=sort_dir,
                     limit=self.page_size,
                     offset=offset,
                 )
 
+                frequent_tags = doc_service.get_project_frequent_tags(
+                    session,
+                    self.project_id,
+                    limit=5,
+                )
+
                 if self._cancelled:
                     return
+                self.frequent_tags_loaded.emit(self.request_id, frequent_tags)
                 self.page_loaded.emit(self.request_id, int(total_count), rows)
         except Exception as e:
             logger.exception("Project documents page worker error")

@@ -69,9 +69,14 @@ For large projects, Sentences uses a searchable document picker instead of loadi
 
 - Entry point: `Sentences -> Document -> Select...`
 - Supports:
-  - title search,
-  - numeric document ID search,
-  - tag search,
+  - separate `Document`, `Document ID`, `Tags`, `Topic`, and `Level` filters,
+  - partial title search,
+  - exact numeric document ID lookup,
+  - partial tag search (including comma-separated multi-tag input),
+  - topic narrowing,
+  - exact level filter,
+  - top-5 frequent tag quick chips,
+  - active-filter chips for transparent filter state,
   - server-side paging.
 - Quick actions:
   - `Select` to apply document filter,
