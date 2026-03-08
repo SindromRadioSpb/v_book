@@ -41,6 +41,15 @@ logger = logging.getLogger(__name__)
 class TranslationAdminService:
     """Service for TM entry administration."""
 
+    _TM_GLOBAL_PROPAGATE_FIELDS = [
+        "translation",
+        "status",
+        "origin",
+        "confidence",
+        "is_noise",
+        "noise_reason",
+    ]
+
     # SQL injection prevention: allowlist of sortable columns
     SORT_COLUMNS = {
         "tm_id": TMEntry.tm_id,
@@ -82,6 +91,34 @@ class TranslationAdminService:
             UserDictionaryItem.kind == TMEntry.kind,
             UserDictionaryItem.src_norm == TMEntry.src_norm,
         )
+
+    def _deferred_tm_global_sync(
+        self,
+        session: Session,
+        entries: List[TMEntry],
+        *,
+        force_global_update: bool = False,
+    ) -> None:
+        """Link entries first, then propagate once per touched TMGlobal row."""
+        tm_global_service = TMGlobalService()
+        touched_tm_global_ids: set[int] = set()
+
+        for entry in entries:
+            global_row = tm_global_service.upsert_and_link(
+                session,
+                entry,
+                immediate_propagate=False,
+                force_global_update=force_global_update,
+            )
+            touched_tm_global_ids.add(global_row.tm_global_id)
+
+        session.flush()
+        for tm_global_id in sorted(touched_tm_global_ids):
+            tm_global_service.propagate_to_entries(
+                session=session,
+                tm_global_id=tm_global_id,
+                fields=list(self._TM_GLOBAL_PROPAGATE_FIELDS),
+            )
 
     def _ud_marker_sort_expression(self):
         """Sortable rank for UD marker column: 0=none, 1=saved."""
@@ -888,8 +925,7 @@ class TranslationAdminService:
                 count += 1
 
             session.flush()
-            for entry in entries:
-                TMGlobalService().upsert_and_link(session, entry)
+            self._deferred_tm_global_sync(session, entries)
 
         self._commit_serialized_write(
             session,
@@ -1091,8 +1127,7 @@ class TranslationAdminService:
                 logger.info("Synced is_noise to %s term clusters", len(cluster_ids_to_update))
 
             session.flush()
-            for entry in entries:
-                TMGlobalService().upsert_and_link(session, entry)
+            self._deferred_tm_global_sync(session, entries)
 
         self._commit_serialized_write(
             session,

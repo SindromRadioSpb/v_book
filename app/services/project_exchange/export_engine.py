@@ -267,6 +267,9 @@ class ProjectExportEngine:
             ensure_fts_tables(payload_conn, schema="main", rebuild=False)
             logger.info("Ensured FTS tables exist in payload DB")
 
+            self._materialize_project_sentence_ids(payload_conn, project_id)
+            logger.info("Materialized valid sentence ids for project export")
+
             # Copy data table by table
             table_counts = {}
             export_order = [t for t in TABLE_INSERT_ORDER if not options.include_snapshots and t != "project_snapshot" or options.include_snapshots]
@@ -313,6 +316,32 @@ class ProjectExportEngine:
         finally:
             payload_conn.set_progress_handler(None, 0)
             payload_conn.close()
+
+    @staticmethod
+    def _materialize_project_sentence_ids(
+        payload_conn: sqlite3.Connection,
+        project_id: int,
+    ) -> None:
+        """Materialize valid project sentence ids once for export-side FK filters."""
+        payload_conn.execute("DROP TABLE IF EXISTS temp_project_sentence_ids")
+        payload_conn.execute(
+            """
+            CREATE TEMP TABLE temp_project_sentence_ids (
+                sentence_id INTEGER PRIMARY KEY
+            )
+            """
+        )
+        payload_conn.execute(
+            """
+            INSERT INTO temp_project_sentence_ids (sentence_id)
+            SELECT ds.sentence_id
+            FROM host.document_sentence ds
+            JOIN host.source_document sd ON sd.doc_id = ds.doc_id
+            JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
+            WHERE sc.project_id = ?
+            """,
+            (project_id,),
+        )
 
     def _export_table(
         self,
@@ -391,13 +420,8 @@ class ProjectExportEngine:
                 WHERE s.project_id = ?
                   AND (
                     s.sample_sentence_id IS NULL
-                    OR EXISTS (
-                        SELECT 1
-                        FROM host.document_sentence ds
-                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
-                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
-                        WHERE ds.sentence_id = s.sample_sentence_id
-                          AND sc.project_id = s.project_id
+                    OR s.sample_sentence_id IN (
+                        SELECT sentence_id FROM temp_project_sentence_ids
                     )
                   )
             """,
@@ -408,13 +432,8 @@ class ProjectExportEngine:
                 WHERE s.project_id = ?
                   AND (
                     s.sample_sentence_id IS NULL
-                    OR EXISTS (
-                        SELECT 1
-                        FROM host.document_sentence ds
-                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
-                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
-                        WHERE ds.sentence_id = s.sample_sentence_id
-                          AND sc.project_id = s.project_id
+                    OR s.sample_sentence_id IN (
+                        SELECT sentence_id FROM temp_project_sentence_ids
                     )
                   )
             """,
@@ -427,13 +446,8 @@ class ProjectExportEngine:
                 WHERE s.project_id = ?
                   AND (
                     s.sample_sentence_id IS NULL
-                    OR EXISTS (
-                        SELECT 1
-                        FROM host.document_sentence ds
-                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
-                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
-                        WHERE ds.sentence_id = s.sample_sentence_id
-                          AND sc.project_id = s.project_id
+                    OR s.sample_sentence_id IN (
+                        SELECT sentence_id FROM temp_project_sentence_ids
                     )
                   )
             """,
@@ -444,13 +458,8 @@ class ProjectExportEngine:
                 WHERE s.project_id = ?
                   AND (
                     s.sample_sentence_id IS NULL
-                    OR EXISTS (
-                        SELECT 1
-                        FROM host.document_sentence ds
-                        JOIN host.source_document sd ON sd.doc_id = ds.doc_id
-                        JOIN host.source_corpus sc ON sc.corpus_id = sd.corpus_id
-                        WHERE ds.sentence_id = s.sample_sentence_id
-                          AND sc.project_id = s.project_id
+                    OR s.sample_sentence_id IN (
+                        SELECT sentence_id FROM temp_project_sentence_ids
                     )
                   )
             """,

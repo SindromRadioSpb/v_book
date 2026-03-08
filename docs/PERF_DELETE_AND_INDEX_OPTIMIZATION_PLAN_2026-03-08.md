@@ -146,6 +146,56 @@ Bad:
 - commit inside per-row loops
 - commit after every entity mutation in heavy paths
 
+## Lifecycle and Cache Requirements Folded Into This Plan
+
+The following requirements are approved inputs for the next performance patches
+and are architectural constraints, not optional suggestions.
+
+### RQ-01. Project-owned data must be deleted strictly
+
+Project-owned rows must not survive as pseudo-cache after document/project
+delete:
+
+- `source_document`
+- `document_text`
+- `document_sentence`
+- `sentence_pronunciation`
+- `lemma*`
+- `ngram*`
+- project-scoped term/TM/dictionary processing rows
+
+### RQ-02. Global cache is allowed only for deterministic artifacts
+
+`audio_asset` may remain global only as a deterministic reusable cache layer.
+It must not behave like hidden project residue.
+
+### RQ-03. Audio cache must move toward content-addressed keys
+
+Future cache keys must be derived from effective synthesis input, not weak UI
+labels or project identity.
+
+Required key components for the future implementation:
+
+- language
+- normalized/effective synthesis text
+- pronunciation or SSML payload hash
+- provider id
+- voice id
+- speed
+- output format
+- relevant model/provider version
+
+### RQ-04. Sentence-level pronunciation remains project-owned
+
+`sentence_pronunciation` must stay sentence/project-owned. If future reuse is
+needed, it must happen through a separate global cache keyed by derivation
+input, not by turning sentence-owned rows into a pseudo-global layer.
+
+### RQ-05. Persisted UI entity references must be validated on restore
+
+Any saved UI state that points to database entities must be validated when a
+project view is reopened. Stale IDs must be cleared instead of silently reused.
+
 ## Next Patch Series
 
 ### PATCH-01
@@ -175,17 +225,48 @@ Files:
 
 ### PATCH-03
 
-Further perf hardening candidates:
+Completed in the previous iteration:
 
-- audit `project_exchange/export_engine.py` for repeated correlated `EXISTS`
-- audit large translation/admin bulk paths for unnecessary per-row commits
-- convert additional heavy maintenance paths to explicit set-based SQL where justified
+- add the missing FK-related indexes
+- harden `reprocess_document()` old-sentence cleanup path
+
+### PATCH-04
+
+Project exchange export-path hardening:
+
+- audit `project_exchange/export_engine.py` repeated correlated `EXISTS`
+- materialize valid project sentence IDs once per payload build
+- replace repeated per-row sentence ownership checks with lookups against the
+  materialized set
+- preserve export correctness for nullable `sample_sentence_id`
+
+Files:
+
+- `app/services/project_exchange/export_engine.py`
+- `tests/test_project_exchange.py`
+- this plan doc if findings change
+
+### PATCH-05
+
+Translation/admin bulk-write hardening:
+
+- audit bulk status/noise mutation paths for eager per-entry propagation
+- keep one serialized write per user action
+- defer TMGlobal propagation until all touched entries are linked
+- propagate once per touched `tm_global_id` in deterministic order
+- avoid row-by-row post-flush propagation storms in bulk operations
+
+Files:
+
+- `app/services/translation_admin_service.py`
+- targeted TM bulk regression tests
+- this plan doc if findings change
 
 ## Immediate Priority Order
 
-1. add the missing FK-related indexes
-2. fix `reprocess_document()` old-sentence cleanup path
-3. audit export/translation bulk paths
+1. implement `PATCH-04` export-path materialization
+2. implement `PATCH-05` deferred bulk TM propagation
+3. strengthen global audio cache key in a later bounded patch
 
 ## Risk Notes
 

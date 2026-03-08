@@ -245,3 +245,35 @@ For large SQLite corpora:
 3. Strengthen audio cache key with effective pronunciation/synthesis hash.
 4. Validate persisted UI entity filters on restore.
 5. Never reuse project-owned sentence-level pronunciation rows across projects.
+
+## Approved Requirements For Next Iteration
+
+These recommendations are now promoted to requirements for the next bounded
+performance iteration.
+
+### Requirement A. Export/import and maintenance paths must respect ownership
+
+Any export, import, delete, reset, or backfill path must preserve the ownership
+split:
+
+- project-owned sentence/document data is copied or deleted only with the
+  owning project
+- global cache rows are never treated as a substitute for missing project-owned
+  rows
+
+### Requirement B. Performance optimizations must not weaken lifecycle rules
+
+When replacing ORM loops with set-based SQL or explicit cleanup:
+
+- do not reintroduce hidden reuse of project-owned rows
+- do not keep stale entity references alive only because they are fast to reuse
+- keep deterministic ordering and one bounded transaction per user action
+
+### Requirement C. Future audio-cache hardening stays in scope
+
+The next patch series may optimize other heavy paths first, but the future
+`audio_asset` change is now a tracked requirement, not an optional idea:
+
+- keep `audio_asset` global
+- strengthen it with an effective synthesis input hash
+- never treat sentence-owned pronunciation rows as globally reusable data

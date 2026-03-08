@@ -861,5 +861,77 @@ def test_export_import_roundtrip_preserves_tm_global_link(populated_project, tem
             conn.close()
 
 
+def test_export_filters_cross_project_sample_sentence_refs(populated_project, temp_db):
+    """Export must drop sample_sentence references that point to another project."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        conn.execute(
+            """
+            INSERT INTO dict_project (project_id, library_id, name, src_lang, tgt_lang, nlp_engine)
+            VALUES (2, 1, 'Other Project', 'he', 'ru', 'stanza')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO source_corpus (corpus_id, project_id, name)
+            VALUES (2, 2, 'Other Corpus')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO source_document (doc_id, corpus_id, file_path, file_name, file_ext, sha256, status)
+            VALUES (101, 2, '/test/other.txt', 'other.txt', 'txt', ?, 'processed')
+            """,
+            ("b" * 64,),
+        )
+        conn.execute(
+            """
+            INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
+            VALUES (101, 101, 0, 'Other project sentence')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO lemma_project_stat (project_id, lemma_id, freq_abs, sample_sentence_id)
+            VALUES (1, 1, 10, 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO lemma_project_stat (project_id, lemma_id, freq_abs, sample_sentence_id)
+            VALUES (1, 2, 5, 101)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "sample_sentence_filter_bundle.hdleproj"
+
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        extract_dir = Path(tmpdir) / "extract"
+        _manifest, payload_path = bundle_format.read_bundle(bundle_path, extract_dir)
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            rows = payload_conn.execute(
+                """
+                SELECT lemma_id, sample_sentence_id
+                FROM lemma_project_stat
+                ORDER BY lemma_id
+                """
+            ).fetchall()
+            assert rows == [(1, 1)]
+        finally:
+            payload_conn.close()
+
+
 # More integration tests would go here (FTS5 population, self-ref handling, etc.)
 # Skipped for brevity - the structure follows the same pattern
