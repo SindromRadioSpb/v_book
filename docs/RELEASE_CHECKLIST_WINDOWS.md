@@ -43,6 +43,13 @@ cd J:\Project_Vibe\V_book
 - [ ] `powershell -ExecutionPolicy Bypass -File scripts\verify_frozen_health.ps1` passes
 - [ ] `build\verify\build_meta_dist.txt` exists and commit matches target release SHA
 
+**Required model staging gate:**
+- [ ] Required offline niqqud model exists at:
+  - `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\models\phonikud\phonikud-1.0.int8.onnx`
+- [ ] `rebuild.ps1` stages it into:
+  - `installer\resources\local_models\phonikud\phonikud-1.0.int8.onnx`
+- [ ] Staged model path remains git-ignored and is not committed to the repo
+
 **Additional frozen runtime gates:**
 - [ ] `.\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --mode import --out "build\verify_dist\probe_import_dist.json"` passes
 - [ ] `build\verify_dist\import_dist.json` confirms `checks.onnxruntime_import.helper_path` points to `HDLE_ONNX_Probe.exe`
@@ -105,6 +112,7 @@ ISCC.exe installer\installer.iss
   - `frozen_onnx_probe.status = ok`
   - `bootstrap:pronunciation.status = ok`
   - `bootstrap:sentence_niqqud.status = ok`
+  - `report.overall = ok`
 
 **Stanza models download (if internet available):**
 - [ ] Check logs for model download messages
@@ -117,6 +125,7 @@ ISCC.exe installer\installer.iss
 - [ ] No errors in logs
 - [ ] First launch reaches the main window without auto-attaching a stale heavy settings DB before UI appears
 - [ ] If a large legacy settings DB is deferred, startup still opens on the local default DB and explains that explicit reconnect is available
+- [ ] If the heavy runtime DB is already migrated and healthy, opening it from settings does not block the window from appearing in a reasonable time
 
 **Active runtime DB gate:**
 - [ ] Log confirms the actual active DB path

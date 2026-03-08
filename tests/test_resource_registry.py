@@ -64,3 +64,34 @@ def test_resource_manifest_parsing_and_status(monkeypatch, tmp_path):
     status_corrupted = registry.get_status("nikud_pronunciation_model")
     assert status_corrupted.state == "corrupted"
 
+
+def test_resource_status_uses_bundled_fallback_when_custom_data_root_missing(monkeypatch, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.sync()
+
+    data_root = tmp_path / "custom_data"
+    bundled_root = tmp_path / "installed_app" / "resources"
+    bundled_model = bundled_root / "models" / "phonikud" / "phonikud-1.0.int8.onnx"
+    bundled_model.parent.mkdir(parents=True, exist_ok=True)
+    bundled_model.write_bytes(b"bundled-model")
+    checksum = hashlib.sha256(b"bundled-model").hexdigest()
+
+    manifest_path = tmp_path / "resource_manifest.json"
+    _write_manifest(manifest_path, checksum)
+
+    settings.set_value("resources/manifest_path", str(manifest_path))
+    settings.set_value("resources/data_root", str(data_root))
+    settings.sync()
+    monkeypatch.delenv("HDLE_DATA_ROOT", raising=False)
+    monkeypatch.setattr(
+        "app.services.resources.resource_registry.ResourcePaths.resolve_bundled_resources_root",
+        lambda: bundled_root,
+    )
+
+    registry = ResourceRegistry(settings=settings)
+    status = registry.get_status("nikud_pronunciation_model")
+
+    assert status.state == "installed"
+    assert status.install_paths == [bundled_model]

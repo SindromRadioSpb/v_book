@@ -98,6 +98,7 @@ verify_*.py
 
 # Installer output
 installer/output/
+installer/resources/local_models/phonikud/
 
 # Reference corpora data files (keep scripts, not data)
 ref_corpora/hewiki/

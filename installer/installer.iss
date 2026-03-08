@@ -72,8 +72,11 @@ Name: "runhealth"; Description: "Run Health Check after installation"; Flags: un
 ; Path is relative to project root (one level up from installer folder)
 Source: "..\dist\HDLE_Premium\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
 
-; Optional local models package (if prepared externally before installer build).
-Source: "..\installer\resources\local_models\*"; DestDir: "{localappdata}\HDLE\models"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: localmodels
+; Required bundled pronunciation model for premium offline niqqud flows.
+Source: "..\installer\resources\local_models\phonikud\*"; DestDir: "{app}\resources\models\phonikud"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: core
+
+; Optional extra local models package (required phonikud model already ships in core).
+Source: "..\installer\resources\local_models\*"; DestDir: "{localappdata}\HDLE\models"; Excludes: "phonikud\*"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: localmodels
 
 ; Optional baseline bundle package (if prepared externally before installer build).
 Source: "..\installer\resources\baseline\*.hdleproj"; DestDir: "{localappdata}\HDLE\datasets\baseline"; Flags: ignoreversion skipifsourcedoesntexist; Components: baseline

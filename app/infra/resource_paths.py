@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,18 @@ class ResourcePaths:
 
     SETTINGS_KEY_DATA_ROOT = "resources/data_root"
     ENV_KEY_DATA_ROOT = "HDLE_DATA_ROOT"
+
+    @classmethod
+    def resolve_app_root(cls) -> Path:
+        """Resolve runtime application root for bundled read-only resources."""
+        if bool(getattr(sys, "frozen", False)):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parents[2]
+
+    @classmethod
+    def resolve_bundled_resources_root(cls) -> Path:
+        """Resolve bundled resource root inside the installed app payload."""
+        return cls.resolve_app_root() / "resources"
 
     @classmethod
     def _default_data_root(cls) -> Path:
@@ -85,4 +98,3 @@ class ResourcePaths:
             logs_root=logs,
             backups_root=backups,
         )
-

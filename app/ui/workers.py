@@ -8,6 +8,8 @@ from datetime import datetime
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from app.domain.normalization.normalizer import normalize_for_tm
+
 logger = logging.getLogger(__name__)
 
 
@@ -1100,6 +1102,7 @@ class DictionarySearchWorker(QThread):
         offset: int = 0,
         sort_column: str = "freq_abs",
         sort_direction: str = "desc",
+        include_total_count: bool = True,
     ):
         super().__init__()
         self.project_id = project_id
@@ -1108,6 +1111,7 @@ class DictionarySearchWorker(QThread):
         self.offset = offset
         self.sort_column = sort_column
         self.sort_direction = sort_direction
+        self.include_total_count = bool(include_total_count)
         self._cancelled = False
 
     def run(self):
@@ -1139,15 +1143,16 @@ class DictionarySearchWorker(QThread):
 
                 self.results_ready.emit(rows)
 
-                # Get total count in the second stage to keep first-page UX responsive.
-                total_count = dict_service.count_lemmas(
-                    session,
-                    project_id=self.project_id,
-                    filters=self.filters,
-                )
+                if self.include_total_count:
+                    # Get total count in the second stage to keep first-page UX responsive.
+                    total_count = dict_service.count_lemmas(
+                        session,
+                        project_id=self.project_id,
+                        filters=self.filters,
+                    )
 
-                if not self._cancelled:
-                    self.count_ready.emit(total_count)
+                    if not self._cancelled:
+                        self.count_ready.emit(total_count)
 
         except Exception as e:
             logger.exception("Dictionary search error")
@@ -1164,7 +1169,8 @@ class TermsSearchWorker(QThread):
     Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
     """
 
-    results_ready = pyqtSignal(list, int)  # (clusters: List[TermCluster], total_count: int)
+    results_ready = pyqtSignal(list)  # clusters: List[TermCluster]
+    count_ready = pyqtSignal(int)     # total_count
     error = pyqtSignal(str)
 
     def __init__(
@@ -1175,6 +1181,7 @@ class TermsSearchWorker(QThread):
         offset: int = 0,
         sort_column: str = "freq_abs",  # preset name, actually
         sort_direction: str = "desc",
+        include_total_count: bool = True,
     ):
         super().__init__()
         self.project_id = project_id
@@ -1183,6 +1190,7 @@ class TermsSearchWorker(QThread):
         self.offset = offset
         self.sort_column = sort_column  # For Terms, this is "preset" name
         self.sort_direction = sort_direction
+        self.include_total_count = bool(include_total_count)
         self._cancelled = False
 
     def run(self):
@@ -1214,7 +1222,11 @@ class TermsSearchWorker(QThread):
                 if self._cancelled:
                     return
 
-                # Get total count
+                self.results_ready.emit(clusters)
+
+                if self._cancelled or not self.include_total_count:
+                    return
+
                 total_count = term_service.count_term_clusters(
                     session,
                     project_id=self.project_id,
@@ -1225,7 +1237,7 @@ class TermsSearchWorker(QThread):
                 )
 
                 if not self._cancelled:
-                    self.results_ready.emit(clusters, total_count)
+                    self.count_ready.emit(total_count)
 
         except Exception as e:
             logger.exception("Terms search error")
@@ -1233,6 +1245,127 @@ class TermsSearchWorker(QThread):
 
     def cancel(self):
         """Cancel the search."""
+        self._cancelled = True
+
+
+class CrossViewOverlayWorker(QThread):
+    """Resolve cross-view study/audio/pronunciation overlays off the UI thread."""
+
+    results_ready = pyqtSignal(dict)  # {item_id: overlay_payload}
+    error = pyqtSignal(str)
+
+    def __init__(self, rows: List[Dict[str, Any]]):
+        super().__init__()
+        self.rows = list(rows or [])
+        self._cancelled = False
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.user_dictionary_service import UserDictionaryService
+
+            db_service = DBService.get_instance()
+            user_dict_service = UserDictionaryService()
+
+            prepared_rows: List[Dict[str, Any]] = []
+            payloads: List[Dict[str, Any]] = []
+            raw_norm_pairs: List[Tuple[str, str]] = []
+
+            for raw in self.rows:
+                if self._cancelled:
+                    return
+                item_id = int(raw.get("item_id") or 0)
+                kind = str(raw.get("kind") or "").strip()
+                src_text = str(raw.get("src_text") or "").strip()
+                norm_hint = str(raw.get("norm_text") or "").strip()
+                if item_id <= 0 or not kind or not src_text:
+                    continue
+                try:
+                    src_norm = normalize_for_tm("he", src_text, kind).norm or norm_hint
+                except Exception:
+                    src_norm = norm_hint
+                src_norm = (src_norm or "").strip()
+                try:
+                    raw_src_norm = normalize_for_tm("he", src_text, "surface").norm or norm_hint
+                except Exception:
+                    raw_src_norm = norm_hint
+                raw_src_norm = (raw_src_norm or "").strip()
+                if not src_norm:
+                    continue
+                prepared_rows.append(
+                    {
+                        "item_id": item_id,
+                        "kind": kind,
+                        "src_text": src_text,
+                        "src_norm": src_norm,
+                        "raw_src_norm": raw_src_norm,
+                    }
+                )
+                payloads.append(
+                    {
+                        "src_lang": "he",
+                        "tgt_lang": "ru",
+                        "kind": kind,
+                        "src_text": src_text,
+                        "src_norm": src_norm,
+                        "raw_src_norm": raw_src_norm,
+                    }
+                )
+                if raw_src_norm:
+                    raw_norm_pairs.append(("he", raw_src_norm))
+
+            if self._cancelled:
+                return
+            if not prepared_rows:
+                self.results_ready.emit({})
+                return
+
+            with db_service.get_read_session() as session:
+                overlay_map = user_dict_service.resolve_cross_view_status(session, payloads)
+                pronunciation_map = user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
+
+            results: Dict[int, Dict[str, Any]] = {}
+            for row in prepared_rows:
+                if self._cancelled:
+                    return
+                canonical_hash = user_dict_service.build_canonical_hash(
+                    "he",
+                    "ru",
+                    row["kind"],
+                    row["src_norm"],
+                )
+                overlay = dict(overlay_map.get(canonical_hash) or {})
+                if not overlay:
+                    overlay = {
+                        "in_user_dictionary_count": 0,
+                        "study_tooltip": None,
+                        "study_state": None,
+                        "study_due_human": None,
+                        "last_grade": None,
+                        "last_graded_at": None,
+                        "translation_tier": None,
+                        "audio_status": None,
+                        "pronunciation_text": None,
+                        "pronunciation_source": None,
+                        "pronunciation_confidence": None,
+                        "pronunciation_qc": None,
+                    }
+                row_pron = pronunciation_map.get(("he", row["raw_src_norm"]))
+                if row_pron:
+                    overlay["pronunciation_text"] = row_pron.get("pronunciation_text")
+                    overlay["pronunciation_source"] = row_pron.get("pronunciation_source")
+                    overlay["pronunciation_confidence"] = row_pron.get("pronunciation_confidence")
+                    overlay["pronunciation_qc"] = row_pron.get("pronunciation_qc")
+                results[int(row["item_id"])] = overlay
+
+            if not self._cancelled:
+                self.results_ready.emit(results)
+
+        except Exception as e:
+            logger.exception("Cross-view overlay worker error")
+            self.error.emit(str(e))
+
+    def cancel(self):
         self._cancelled = True
 
 

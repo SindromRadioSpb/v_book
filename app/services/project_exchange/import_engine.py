@@ -119,6 +119,8 @@ class ProjectImportEngine:
             payload_conn = sqlite3.connect(str(payload_path))
             payload_conn.execute("PRAGMA foreign_keys = ON")
 
+            self._preflight_payload_document_uniqueness(payload_conn)
+
             offsets = self._compute_offsets(host_conn, payload_conn, cancel_check=cancel_check)
 
             # Transactional import
@@ -506,6 +508,42 @@ class ProjectImportEngine:
                 raise ValueError(f"Project name '{original_name}' already exists")
 
         return original_name
+
+    def _preflight_payload_document_uniqueness(self, payload_conn: sqlite3.Connection) -> None:
+        """Reject bundles that contain duplicate documents for the same corpus/content key."""
+        try:
+            rows = payload_conn.execute(
+                """
+                SELECT
+                    corpus_id,
+                    sha256,
+                    COUNT(*) AS dup_count,
+                    GROUP_CONCAT(doc_id, ', ') AS doc_ids
+                FROM source_document
+                WHERE COALESCE(TRIM(sha256), '') <> ''
+                GROUP BY corpus_id, sha256
+                HAVING COUNT(*) > 1
+                ORDER BY dup_count DESC, corpus_id ASC
+                LIMIT 5
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+
+        if not rows:
+            return
+
+        samples = []
+        for corpus_id, sha256, dup_count, doc_ids in rows:
+            samples.append(
+                f"corpus_id={int(corpus_id)} sha256={str(sha256)[:12]}... "
+                f"count={int(dup_count)} doc_ids=[{doc_ids}]"
+            )
+        raise ValueError(
+            "Bundle contains duplicate source documents with the same (corpus_id, sha256) key. "
+            "Import stopped before writing to the host DB. "
+            f"Examples: {'; '.join(samples)}"
+        )
 
     def _compute_offsets(
         self,

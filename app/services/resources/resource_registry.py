@@ -112,6 +112,25 @@ class ResourceRegistry:
         target_dir = base / subdir
         return [target_dir / name for name in entry.filenames]
 
+    def resolve_bundled_install_paths(self, entry: ResourceEntry) -> List[Path]:
+        bundled_root = ResourcePaths.resolve_bundled_resources_root()
+        subdir = Path(entry.local_install_subdir or ".")
+        target_dir = bundled_root / subdir
+        return [target_dir / name for name in entry.filenames]
+
+    def resolve_candidate_install_path_sets(self, entry: ResourceEntry) -> List[List[Path]]:
+        candidates: List[List[Path]] = []
+
+        primary = self.resolve_install_paths(entry)
+        if primary:
+            candidates.append(primary)
+
+        bundled = self.resolve_bundled_install_paths(entry)
+        if bundled and bundled != primary:
+            candidates.append(bundled)
+
+        return candidates
+
     def get_status(self, resource_id: str) -> ResourceStatus:
         entry = self.get_entry(resource_id)
         if entry is None:
@@ -122,28 +141,35 @@ class ResourceRegistry:
                 install_paths=[],
             )
 
-        install_paths = self.resolve_install_paths(entry)
-        if not install_paths:
+        candidate_sets = self.resolve_candidate_install_path_sets(entry)
+        if not candidate_sets:
             return ResourceStatus(entry.id, "not_configured", "No target filenames configured.", [])
 
-        missing = [path for path in install_paths if not path.exists()]
-        if missing:
+        install_paths = candidate_sets[0]
+        resolved_paths: List[Path] | None = None
+        for path_set in candidate_sets:
+            if all(path.exists() for path in path_set):
+                resolved_paths = path_set
+                break
+
+        if resolved_paths is None:
             if entry.payload_kind == "downloadable" and not entry.download_url:
                 msg = "Download URL is not configured."
                 return ResourceStatus(entry.id, "not_configured", msg, install_paths)
-            return ResourceStatus(entry.id, "missing", "Resource files are missing.", install_paths)
+            flattened = [path for path_set in candidate_sets for path in path_set]
+            return ResourceStatus(entry.id, "missing", "Resource files are missing.", flattened)
 
-        if entry.checksum and len(install_paths) == 1:
-            actual = self._sha256(install_paths[0])
+        if entry.checksum and len(resolved_paths) == 1:
+            actual = self._sha256(resolved_paths[0])
             if actual.lower() != entry.checksum.lower():
                 return ResourceStatus(
                     entry.id,
                     "corrupted",
                     "Checksum mismatch detected.",
-                    install_paths,
+                    resolved_paths,
                 )
 
-        return ResourceStatus(entry.id, "installed", "Resource is installed.", install_paths)
+        return ResourceStatus(entry.id, "installed", "Resource is installed.", resolved_paths)
 
     def get_all_statuses(self) -> List[ResourceStatus]:
         return [self.get_status(entry.id) for entry in self.list_entries()]
@@ -177,4 +203,3 @@ class ResourceRegistry:
                     break
                 digest.update(chunk)
         return digest.hexdigest()
-

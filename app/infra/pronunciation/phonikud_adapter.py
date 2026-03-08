@@ -87,16 +87,24 @@ class PhonikudAdapter:
         return resolved or ""
 
     def _resolve_model_path(self) -> Optional[str]:
-        direct = self._expand_model_candidate(self.model_path)
+        direct = self._first_existing_model_candidate([self.model_path])
         if direct:
             return direct
-        env_candidate = self._expand_model_candidate(os.getenv("PHONIKUD_MODEL_PATH") or "")
+        env_candidate = self._first_existing_model_candidate([os.getenv("PHONIKUD_MODEL_PATH") or ""])
         if env_candidate:
             return env_candidate
-        settings_candidate = self._expand_model_candidate(self._load_settings_model_path())
+        settings_candidate = self._first_existing_model_candidate([self._load_settings_model_path()])
         if settings_candidate:
             return settings_candidate
-        return self._discover_default_model_path()
+        discovered = self._discover_default_model_path()
+        if discovered:
+            return discovered
+
+        for fallback in (self.model_path, os.getenv("PHONIKUD_MODEL_PATH") or "", self._load_settings_model_path()):
+            cleaned = self._sanitize_model_path(fallback)
+            if cleaned:
+                return cleaned
+        return None
 
     @staticmethod
     def _load_settings_model_path() -> str:
@@ -121,19 +129,30 @@ class PhonikudAdapter:
             except Exception:
                 return None
 
+    @staticmethod
+    def _resolve_bundled_models_root() -> Path:
+        return ResourcePaths.resolve_bundled_resources_root() / "models"
+
     def _discover_default_model_path(self) -> Optional[str]:
-        models_root = self._resolve_models_root()
-        if models_root is None:
-            return None
-        models_dir = models_root / "phonikud"
-        if not models_dir.exists():
-            return None
-        preferred = sorted(models_dir.glob("*int8.onnx"))
-        if preferred:
-            return str(preferred[0])
-        regular = sorted(models_dir.glob("*.onnx"))
-        if regular:
-            return str(regular[0])
+        for models_root in (self._resolve_models_root(), self._resolve_bundled_models_root()):
+            if models_root is None:
+                continue
+            models_dir = models_root / "phonikud"
+            if not models_dir.exists():
+                continue
+            preferred = sorted(models_dir.glob("*int8.onnx"))
+            if preferred:
+                return str(preferred[0])
+            regular = sorted(models_dir.glob("*.onnx"))
+            if regular:
+                return str(regular[0])
+        return None
+
+    def _first_existing_model_candidate(self, values: List[str]) -> Optional[str]:
+        for value in values:
+            candidate = self._expand_model_candidate(value)
+            if candidate and Path(candidate).exists():
+                return candidate
         return None
 
     def model_path_safe(self) -> str:

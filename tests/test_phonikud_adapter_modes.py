@@ -164,6 +164,19 @@ def test_phonikud_adapter_discovers_default_model_in_resolved_models_root(tmp_pa
     assert adapter._discover_default_model_path() == str(preferred)
 
 
+def test_phonikud_adapter_discovers_bundled_model_when_data_root_missing(tmp_path, monkeypatch):
+    bundled_root = tmp_path / "installed_app" / "resources" / "models" / "phonikud"
+    bundled_root.mkdir(parents=True, exist_ok=True)
+    preferred = bundled_root / "phonikud-1.0.int8.onnx"
+    preferred.write_text("x", encoding="utf-8")
+
+    adapter = PhonikudAdapter(model_path="", enabled=True)
+    monkeypatch.setattr(adapter, "_resolve_models_root", lambda: tmp_path / "missing_models")
+    monkeypatch.setattr(adapter, "_resolve_bundled_models_root", lambda: bundled_root.parent)
+
+    assert adapter._discover_default_model_path() == str(preferred)
+
+
 def test_phonikud_adapter_fallback_details_include_resolved_models_root(monkeypatch, tmp_path):
     class _FakeModule:
         @staticmethod

@@ -32,6 +32,7 @@ from app.ui.workers import (
     BatchGenerateAudioWorker,
     TermsSearchWorker,
     UserDictionaryBulkAddWorker,
+    CrossViewOverlayWorker,
 )
 from app.services.db_service import DBService
 from app.services.tm_global_service import TMGlobalService
@@ -56,6 +57,7 @@ class TermsView(QWidget):
         self.translation_worker: Optional[TranslationResolveWorker] = None
         self.batch_translate_worker: Optional[BatchTranslateWorker] = None
         self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
+        self.overlay_worker: Optional[CrossViewOverlayWorker] = None
 
         # Pagination state
         self.current_page = 1
@@ -65,6 +67,9 @@ class TermsView(QWidget):
         self._search_request_seq = 0
         self._active_search_seq = 0
         self._search_retry_pending = False
+        self._overlay_request_seq = 0
+        self._active_overlay_seq = 0
+        self._pending_overlay_clusters = None
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(300)
@@ -264,13 +269,13 @@ class TermsView(QWidget):
         pagination_layout = QHBoxLayout()
 
         # First/Prev buttons
-        self.first_btn = QPushButton("«")
+        self.first_btn = QPushButton("В«")
         self.first_btn.setToolTip("First page")
         self.first_btn.setMaximumWidth(40)
         self.first_btn.clicked.connect(self.on_first_page)
         pagination_layout.addWidget(self.first_btn)
 
-        self.prev_btn = QPushButton("‹")
+        self.prev_btn = QPushButton("вЂ№")
         self.prev_btn.setToolTip("Previous page (Ctrl+Left)")
         self.prev_btn.setMaximumWidth(40)
         self.prev_btn.clicked.connect(self.on_prev_page)
@@ -290,13 +295,13 @@ class TermsView(QWidget):
         pagination_layout.addWidget(self.page_count_label)
 
         # Next/Last buttons
-        self.next_btn = QPushButton("›")
+        self.next_btn = QPushButton("вЂє")
         self.next_btn.setToolTip("Next page (Ctrl+Right)")
         self.next_btn.setMaximumWidth(40)
         self.next_btn.clicked.connect(self.on_next_page)
         pagination_layout.addWidget(self.next_btn)
 
-        self.last_btn = QPushButton("»")
+        self.last_btn = QPushButton("В»")
         self.last_btn.setToolTip("Last page")
         self.last_btn.setMaximumWidth(40)
         self.last_btn.clicked.connect(self.on_last_page)
@@ -305,7 +310,7 @@ class TermsView(QWidget):
         pagination_layout.addSpacing(20)
 
         # Range label
-        self.range_label = QLabel("Showing 0–0 of 0")
+        self.range_label = QLabel("Showing 0вЂ“0 of 0")
         pagination_layout.addWidget(self.range_label)
 
         pagination_layout.addSpacing(20)
@@ -436,7 +441,7 @@ class TermsView(QWidget):
         self.current_page = 1
         self._search_timer.start()
 
-    def perform_search(self):
+    def perform_search(self, *, include_total_count: bool = True, preserve_existing_state: bool = False):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
@@ -448,6 +453,9 @@ class TermsView(QWidget):
         self._search_retry_pending = False
         self._search_request_seq += 1
         request_seq = self._search_request_seq
+        preserved_state = self._snapshot_cluster_state() if preserve_existing_state else {}
+        if include_total_count:
+            self.total_count = 0
 
         # Build filters
         filters = self.build_filters()
@@ -458,11 +466,20 @@ class TermsView(QWidget):
             filters=filters,
             limit=self.page_size,
             offset=self.current_offset,
+            include_total_count=include_total_count,
         )
         self._active_search_seq = request_seq
 
         self.search_worker.results_ready.connect(
-            lambda clusters, total_count, seq=request_seq: self.on_search_results(clusters, total_count, seq)
+            lambda clusters, seq=request_seq, preserved=preserved_state, recount=include_total_count: self.on_search_results(
+                clusters,
+                seq,
+                preserved_state=preserved,
+                include_total_count=recount,
+            )
+        )
+        self.search_worker.count_ready.connect(
+            lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
         )
         self.search_worker.error.connect(
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
@@ -485,7 +502,14 @@ class TermsView(QWidget):
             self._search_retry_pending = False
             QTimer.singleShot(0, self.perform_search)
 
-    def on_search_results(self, clusters: list, total_count: int, request_seq: Optional[int] = None):
+    def on_search_results(
+        self,
+        clusters: list,
+        request_seq: Optional[int] = None,
+        *,
+        preserved_state: Optional[dict] = None,
+        include_total_count: bool = True,
+    ):
         """Handle search results from worker."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -495,23 +519,22 @@ class TermsView(QWidget):
             )
             return
 
-        # Update total count
-        self.total_count = total_count
+        translation_results = self._rehydrate_cluster_state(clusters, preserved_state or {})
 
-        self._apply_study_overlays(clusters)
-
-        # Update model with clusters
         self.terms_model.update_clusters(clusters)
+        self.terms_model.translation_results = translation_results
 
-        # Update status
-        if total_count == 0:
+        if include_total_count and self.total_count == 0:
             self.status_label.setText("No term clusters found")
         else:
             start = self.current_offset + 1
-            end = min(self.current_offset + len(clusters), total_count)
-            self.status_label.setText(f"Showing {start}–{end} of {total_count:,} term clusters")
+            if include_total_count:
+                end = self.current_offset + len(clusters)
+                self.status_label.setText(f"Loaded {start}-{end} term clusters (counting total...)")
+            else:
+                end = min(self.current_offset + len(clusters), self.total_count)
+                self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} term clusters")
 
-        # Update pagination controls
         self.update_pagination_controls()
 
         # Load last extraction info (only need session briefly)
@@ -521,8 +544,151 @@ class TermsView(QWidget):
         except Exception as e:
             logger.exception("Failed to load last extraction info")
 
-        # Start translation worker
+        self.start_overlay_worker(clusters, request_seq)
         self.start_translation_worker(clusters)
+
+    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+        """Handle deferred total-count result from worker."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale terms count: seq=%s active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
+        self.total_count = int(total_count or 0)
+        if self.total_count == 0:
+            self.status_label.setText("No term clusters found")
+        else:
+            start = self.current_offset + 1
+            end = min(self.current_offset + len(self.terms_model.clusters), self.total_count)
+            self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} term clusters")
+        self.update_pagination_controls()
+
+    def _snapshot_cluster_state(self) -> dict[int, dict]:
+        snapshot: dict[int, dict] = {}
+        for row, cluster in enumerate(getattr(self.terms_model, "clusters", []) or []):
+            cluster_id = int(getattr(cluster, "cluster_id", 0) or 0)
+            if cluster_id <= 0:
+                continue
+            snapshot[cluster_id] = {
+                "translation": getattr(cluster, "translation", None),
+                "translation_status": getattr(cluster, "translation_status", None),
+                "in_user_dictionary_count": getattr(cluster, "in_user_dictionary_count", 0),
+                "study_tooltip": getattr(cluster, "study_tooltip", None),
+                "study_state": getattr(cluster, "study_state", None),
+                "study_due_human": getattr(cluster, "study_due_human", None),
+                "last_grade": getattr(cluster, "last_grade", None),
+                "last_graded_at": getattr(cluster, "last_graded_at", None),
+                "translation_tier": getattr(cluster, "translation_tier", None),
+                "audio_status": getattr(cluster, "audio_status", None),
+                "pronunciation_text": getattr(cluster, "pronunciation_text", None),
+                "pronunciation_source": getattr(cluster, "pronunciation_source", None),
+                "pronunciation_confidence": getattr(cluster, "pronunciation_confidence", None),
+                "pronunciation_qc": getattr(cluster, "pronunciation_qc", None),
+                "translation_result": self.terms_model.translation_results.get(row),
+            }
+        return snapshot
+
+    def _rehydrate_cluster_state(self, clusters: list, preserved_state: dict[int, dict]) -> dict[int, object]:
+        translation_results: dict[int, object] = {}
+        if not preserved_state:
+            return translation_results
+        for row, cluster in enumerate(clusters):
+            payload = preserved_state.get(int(getattr(cluster, "cluster_id", 0) or 0))
+            if not payload:
+                continue
+            for field, value in payload.items():
+                if field == "translation_result":
+                    continue
+                setattr(cluster, field, value)
+            if payload.get("translation_result") is not None:
+                translation_results[row] = payload["translation_result"]
+        return translation_results
+
+    def start_overlay_worker(self, clusters: list, request_seq: Optional[int] = None) -> None:
+        if not clusters:
+            return
+        if self.overlay_worker and self.overlay_worker.isRunning():
+            self.overlay_worker.cancel()
+            if not self.overlay_worker.wait(100):
+                self._pending_overlay_clusters = clusters
+                return
+        self._overlay_request_seq += 1
+        seq = self._overlay_request_seq
+        rows = [
+            {
+                "item_id": int(cluster.cluster_id),
+                "kind": "term_cluster",
+                "src_text": cluster.representative_he,
+                "norm_text": cluster.norm_text or "",
+            }
+            for cluster in clusters
+        ]
+        self.overlay_worker = CrossViewOverlayWorker(rows)
+        self._active_overlay_seq = seq
+        self.overlay_worker.results_ready.connect(
+            lambda payload, overlay_seq=seq, search_seq=request_seq: self.on_overlay_results(
+                payload,
+                overlay_seq,
+                request_seq=search_seq,
+            )
+        )
+        self.overlay_worker.error.connect(
+            lambda error_msg, overlay_seq=seq: self.on_overlay_error(error_msg, overlay_seq)
+        )
+        self.overlay_worker.finished.connect(
+            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(worker, overlay_seq)
+        )
+        self.overlay_worker.start()
+
+    def _on_overlay_worker_finished(self, worker, overlay_seq: int) -> None:
+        if worker is self.overlay_worker:
+            self.overlay_worker = None
+        worker.deleteLater()
+        if self._pending_overlay_clusters:
+            pending = self._pending_overlay_clusters
+            self._pending_overlay_clusters = None
+            QTimer.singleShot(0, lambda: self.start_overlay_worker(pending))
+
+    def on_overlay_results(self, overlay_map: dict, overlay_seq: int, *, request_seq: Optional[int] = None) -> None:
+        if overlay_seq != self._active_overlay_seq:
+            return
+        if request_seq is not None and request_seq != self._active_search_seq:
+            return
+        if not overlay_map:
+            return
+        changed_rows = []
+        for row, cluster in enumerate(self.terms_model.clusters):
+            payload = overlay_map.get(int(getattr(cluster, "cluster_id", 0) or 0))
+            if not payload:
+                continue
+            changed_rows.append(row)
+            for field in (
+                "in_user_dictionary_count",
+                "study_tooltip",
+                "study_state",
+                "study_due_human",
+                "last_grade",
+                "last_graded_at",
+                "translation_tier",
+                "audio_status",
+                "pronunciation_text",
+                "pronunciation_source",
+                "pronunciation_confidence",
+                "pronunciation_qc",
+            ):
+                setattr(cluster, field, payload.get(field))
+        if changed_rows:
+            top = self.terms_model.index(min(changed_rows), 0)
+            bottom = self.terms_model.index(max(changed_rows), self.terms_model.columnCount() - 1)
+            self.terms_model.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
+
+    def on_overlay_error(self, error_msg: str, overlay_seq: int) -> None:
+        if overlay_seq != self._active_overlay_seq:
+            return
+        logger.warning("Terms overlay worker error: %s", error_msg)
 
     def _apply_study_overlays(self, clusters: list) -> None:
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
@@ -619,32 +785,32 @@ class TermsView(QWidget):
         """Navigate to first page."""
         if self.current_page != 1:
             self.current_page = 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_prev_page(self):
         """Navigate to previous page."""
         if self.current_page > 1:
             self.current_page -= 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_next_page(self):
         """Navigate to next page."""
         if self.current_page < self.total_pages:
             self.current_page += 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_last_page(self):
         """Navigate to last page."""
         total = self.total_pages
         if self.current_page != total:
             self.current_page = total
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_page_changed(self, page: int):
         """Handle page number change from spinbox."""
         if page != self.current_page:
             self.current_page = page
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_page_size_changed(self, size_str: str):
         """Handle page size change (Task 15: supports 'All (N)' format)."""
@@ -658,6 +824,13 @@ class TermsView(QWidget):
             self.page_size = new_size
             self.settings.set_value("terms_view/page_size", self.page_size)
             self.current_page = 1  # Reset to first page
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
+
+    def refresh_current_page_after_operation(self) -> None:
+        """Refresh visible rows without forcing expensive recount or blanking visible state."""
+        try:
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
+        except TypeError:
             self.perform_search()
 
     def update_pagination_controls(self):
@@ -681,11 +854,11 @@ class TermsView(QWidget):
 
         # Update range label
         if self.total_count == 0:
-            self.range_label.setText("Showing 0–0 of 0")
+            self.range_label.setText("Showing 0вЂ“0 of 0")
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
-            self.range_label.setText(f"Showing {start}–{end} of {self.total_count:,}")
+            self.range_label.setText(f"Showing {start}вЂ“{end} of {self.total_count:,}")
 
         # Task 15: Add "All (N)" page size option if safe
         self._update_page_size_combo()
@@ -752,7 +925,7 @@ class TermsView(QWidget):
         self.progress_bar.setRange(0, 0)  # Indeterminate
         self.status_label.setText("Extracting terms...")
 
-        # PERF-SCALE PATCH-K: throttle check — block concurrent term extraction.
+        # PERF-SCALE PATCH-K: throttle check вЂ” block concurrent term extraction.
         from app.services.pipeline_throttler import PipelineThrottler
         if not PipelineThrottler.instance().check_and_warn(
             "term_extract", parent=self,
@@ -925,7 +1098,7 @@ class TermsView(QWidget):
                 if existing:
                     # Update existing
                     existing.translation = translation_value
-                    existing.status = "approved"  # User edit → approved
+                    existing.status = "approved"  # User edit в†’ approved
                     existing.origin = "user_edit"
                     existing.updated_at = datetime.now()
                 else:
@@ -938,7 +1111,7 @@ class TermsView(QWidget):
                         src_text=cluster.representative_he,
                         src_norm=src_norm,
                         translation=translation_value,
-                        status="approved",  # User edit → approved
+                        status="approved",  # User edit в†’ approved
                         origin="user_edit",
                         source_ref="terms_view_inline_edit",
                         cluster_id=cluster.cluster_id,  # Link to source for is_noise sync
@@ -1101,7 +1274,7 @@ class TermsView(QWidget):
         if self.batch_audio_worker:
             self.batch_audio_worker.deleteLater()
             self.batch_audio_worker = None
-        self.perform_search()
+        self.refresh_current_page_after_operation()
 
     def _on_generate_audio_error(self, error_msg: str, progress_dialog: BatchProgressDialogV3):
         progress_dialog.reject()
@@ -1211,7 +1384,7 @@ class TermsView(QWidget):
             src_text=str(first.get("src_text") or ""),
         )
         if changed:
-            self.perform_search()
+            self.refresh_current_page_after_operation()
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected rows scope."""
@@ -1224,7 +1397,7 @@ class TermsView(QWidget):
         else:
             changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
         if changed:
-            self.perform_search()
+            self.refresh_current_page_after_operation()
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
@@ -1280,11 +1453,11 @@ class TermsView(QWidget):
         # Check if multiple rows selected
         if len(selected_rows) > 1:
             # Bulk operations
-            mark_valid_bulk_action = QAction(f"✓ Mark Selected as Valid ({len(selected_rows)} rows)", self)
+            mark_valid_bulk_action = QAction(f"вњ“ Mark Selected as Valid ({len(selected_rows)} rows)", self)
             mark_valid_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(False))
             menu.addAction(mark_valid_bulk_action)
 
-            mark_noise_bulk_action = QAction(f"✗ Mark Selected as Noise ({len(selected_rows)} rows)", self)
+            mark_noise_bulk_action = QAction(f"вњ— Mark Selected as Noise ({len(selected_rows)} rows)", self)
             mark_noise_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(True))
             menu.addAction(mark_noise_bulk_action)
         else:
@@ -1292,11 +1465,11 @@ class TermsView(QWidget):
             current_is_noise = cluster.is_noise == 1 if cluster.is_noise is not None else False
 
             if current_is_noise:
-                mark_valid_action = QAction("✓ Mark as Valid (remove from noise)", self)
+                mark_valid_action = QAction("вњ“ Mark as Valid (remove from noise)", self)
                 mark_valid_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, False))
                 menu.addAction(mark_valid_action)
             else:
-                mark_noise_action = QAction("✗ Mark as Noise", self)
+                mark_noise_action = QAction("вњ— Mark as Noise", self)
                 mark_noise_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, True))
                 menu.addAction(mark_noise_action)
 
@@ -1825,7 +1998,7 @@ class TermsView(QWidget):
         progress_dialog.accept()
 
         # Refresh table to show new translations
-        self.perform_search()
+        self.refresh_current_page_after_operation()
 
         # Clean up worker
         if self.batch_translate_worker:

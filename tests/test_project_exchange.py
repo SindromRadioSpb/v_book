@@ -196,6 +196,64 @@ def test_import_cancel_returns_cancelled_report(populated_project, temp_db):
     assert "cancel" in (report.error_message or "").lower()
 
 
+def test_import_rejects_duplicate_source_document_natural_keys(populated_project, temp_db):
+    """Import should fail early with actionable error for duplicate (corpus_id, sha256) rows."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        payload_path = Path(tmpdir) / "duplicate_payload.db"
+        bundle_path = Path(tmpdir) / "duplicate_docs_bundle.hdleproj"
+
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            payload_conn.execute(
+                """
+                CREATE TABLE source_document (
+                    doc_id INTEGER PRIMARY KEY,
+                    corpus_id INTEGER NOT NULL,
+                    file_path TEXT,
+                    file_name TEXT,
+                    file_ext TEXT,
+                    sha256 TEXT,
+                    status TEXT
+                )
+                """
+            )
+            payload_conn.executemany(
+                """
+                INSERT INTO source_document (doc_id, corpus_id, file_path, file_name, file_ext, sha256, status)
+                VALUES (?, ?, ?, ?, 'txt', ?, 'ready')
+                """,
+                [
+                    (1, 10, "/tmp/a.txt", "a.txt", "a" * 64),
+                    (2, 10, "/tmp/b.txt", "b.txt", "a" * 64),
+                ],
+            )
+            payload_conn.commit()
+        finally:
+            payload_conn.close()
+
+        manifest = ManifestInfo(
+            bundle_format_version=BUNDLE_FORMAT_VERSION,
+            app_version="1.0.0",
+            schema_version=35,
+            project_name="Duplicate Docs Bundle",
+            project_src_lang="he",
+            project_tgt_lang="ru",
+            exported_at="2026-03-08T00:00:00Z",
+            table_counts={"source_document": 2},
+        )
+        bundle_format.create_bundle(payload_path, manifest, bundle_path)
+
+        import_engine = ProjectImportEngine()
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Duplicate Docs Import"),
+        )
+
+    assert report.success is False
+    assert "duplicate source documents" in (report.error_message or "").lower()
+    assert "(corpus_id, sha256)" in (report.error_message or "")
+
+
 def test_import_cancel_after_partial_commit_cleans_rows(populated_project, temp_db, monkeypatch):
     """If cancel happens after early committed tables, cleanup must remove partial rows."""
     with tempfile.TemporaryDirectory() as tmpdir:

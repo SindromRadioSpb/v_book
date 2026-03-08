@@ -67,12 +67,49 @@ try {
     New-Item -ItemType Directory -Force -Path "installer\output" | Out-Null
     "test" | Out-File $testFile -ErrorAction Stop
     Remove-Item $testFile -ErrorAction Stop
-    Write-Host "[OK] installer\output\ is writable" -ForegroundColor Green
+Write-Host "[OK] installer\output\ is writable" -ForegroundColor Green
 } catch {
     Write-Host "[FAIL] Cannot write to installer\output\" -ForegroundColor Red
     Write-Host "Check permissions and antivirus exclusions" -ForegroundColor Yellow
     exit 1
 }
+
+function Resolve-RequiredPhonikudModelPath {
+    $candidates = @()
+
+    if ($env:HDLE_REQUIRED_PHONIKUD_MODEL_PATH) {
+        $candidates += $env:HDLE_REQUIRED_PHONIKUD_MODEL_PATH
+    }
+    $candidates += @(
+        "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\models\phonikud\phonikud-1.0.int8.onnx",
+        "installer\resources\local_models\phonikud\phonikud-1.0.int8.onnx"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        $resolved = Resolve-Path -Path $candidate -ErrorAction SilentlyContinue
+        if ($resolved) {
+            return $resolved.Path
+        }
+    }
+    return $null
+}
+
+Write-Host "Staging required Phonikud ONNX model..." -ForegroundColor Yellow
+$stagedPhonikudDir = "installer\resources\local_models\phonikud"
+New-Item -ItemType Directory -Force -Path $stagedPhonikudDir | Out-Null
+$requiredPhonikudModel = Resolve-RequiredPhonikudModelPath
+if (-not $requiredPhonikudModel) {
+    Write-Host "[FAIL] Required Phonikud model not found." -ForegroundColor Red
+    Write-Host "Set HDLE_REQUIRED_PHONIKUD_MODEL_PATH or place phonikud-1.0.int8.onnx at:" -ForegroundColor Yellow
+    Write-Host "  M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\models\phonikud\phonikud-1.0.int8.onnx" -ForegroundColor Yellow
+    exit 1
+}
+$stagedPhonikudPath = Join-Path $stagedPhonikudDir "phonikud-1.0.int8.onnx"
+if ((Resolve-Path -Path $requiredPhonikudModel).Path -ne (Resolve-Path -Path $stagedPhonikudPath -ErrorAction SilentlyContinue | ForEach-Object { $_.Path })) {
+    Copy-Item -Path $requiredPhonikudModel -Destination $stagedPhonikudPath -Force
+}
+Write-Host "[OK] Phonikud model staged: $stagedPhonikudPath" -ForegroundColor Green
 
 Write-Host "Generating build metadata..." -ForegroundColor Yellow
 python scripts/generate_build_meta.py

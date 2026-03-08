@@ -46,6 +46,7 @@ from app.ui.workers import (
     DictionarySearchWorker,
     UserDictionaryBulkAddWorker,
     BatchGenerateAudioWorker,
+    CrossViewOverlayWorker,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ class DictionaryView(QWidget):
         self.audio_playback_service = AudioPlaybackService()
         self.user_dict_service = UserDictionaryService()
         self.translation_worker: Optional[TranslationResolveWorker] = None
+        self.overlay_worker: Optional[CrossViewOverlayWorker] = None
         self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
         self.settings = SettingsService.get_instance()
 
@@ -154,6 +156,9 @@ class DictionaryView(QWidget):
         self._translation_request_seq = 0
         self._active_translation_seq = 0
         self._pending_translation_lemmas: Optional[List[LemmaStats]] = None
+        self._overlay_request_seq = 0
+        self._active_overlay_seq = 0
+        self._pending_overlay_lemmas: Optional[List[LemmaStats]] = None
         self.sort_column = str(self.settings.get_string("dictionary_view/sort_column", "freq_abs") or "freq_abs")
         self.sort_direction = str(self.settings.get_string("dictionary_view/sort_direction", "desc") or "desc")
         saved_pos = self.settings.get_json("dictionary_view/pos_filter", None)
@@ -439,7 +444,7 @@ class DictionaryView(QWidget):
         self.current_page = 1
         self.perform_search()
 
-    def perform_search(self):
+    def perform_search(self, *, include_total_count: bool = True, preserve_existing_state: bool = False):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
@@ -455,7 +460,9 @@ class DictionaryView(QWidget):
         filters = self.build_filters()
         self._search_request_seq += 1
         request_seq = self._search_request_seq
-        self.total_count = 0
+        preserved_state = self._snapshot_lemma_state() if preserve_existing_state else {}
+        if include_total_count:
+            self.total_count = 0
 
         # Create and start worker
         self.search_worker = DictionarySearchWorker(
@@ -465,11 +472,17 @@ class DictionaryView(QWidget):
             offset=self.current_offset,
             sort_column=self.sort_column,
             sort_direction=self.sort_direction,
+            include_total_count=include_total_count,
         )
         self._active_search_seq = request_seq
 
         self.search_worker.results_ready.connect(
-            lambda rows, seq=request_seq: self.on_search_results(rows, seq)
+            lambda rows, seq=request_seq, preserved=preserved_state, recount=include_total_count: self.on_search_results(
+                rows,
+                seq,
+                preserved_state=preserved,
+                include_total_count=recount,
+            )
         )
         self.search_worker.count_ready.connect(
             lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
@@ -496,7 +509,14 @@ class DictionaryView(QWidget):
             self._search_retry_pending = False
             QTimer.singleShot(0, self.perform_search)
 
-    def on_search_results(self, rows: list, request_seq: Optional[int] = None):
+    def on_search_results(
+        self,
+        rows: list,
+        request_seq: Optional[int] = None,
+        *,
+        preserved_state: Optional[dict] = None,
+        include_total_count: bool = True,
+    ):
         """Handle page rows from worker (count arrives asynchronously)."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -524,24 +544,25 @@ class DictionaryView(QWidget):
             )
             lemmas.append(lemma_dto)
 
+        translation_results = self._rehydrate_lemma_state(lemmas, preserved_state or {})
+
         # Show base rows first for fast first-page UX.
         self.lemma_model.update_lemmas(lemmas)
+        self.lemma_model.translation_results = translation_results
         if not lemmas:
             self.status_label.setText("No lemmas found")
         else:
             start = self.current_offset + 1
-            end = self.current_offset + len(lemmas)
-            self.status_label.setText(f"Loaded {start}-{end} lemmas (counting total...)")
+            if include_total_count:
+                end = self.current_offset + len(lemmas)
+                self.status_label.setText(f"Loaded {start}-{end} lemmas (counting total...)")
+            else:
+                end = min(self.current_offset + len(lemmas), self.total_count)
+                self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} lemmas")
 
         self.update_pagination_controls()
 
-        # Stage 2: expensive overlays after first paint.
-        QTimer.singleShot(
-            0,
-            lambda seq=request_seq, payload=lemmas: self._apply_study_overlays_stage2(payload, seq),
-        )
-
-        # Start translation worker.
+        self.start_overlay_worker(lemmas, request_seq)
         self.start_translation_worker(lemmas)
 
     def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
@@ -563,18 +584,145 @@ class DictionaryView(QWidget):
             self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} lemmas")
         self.update_pagination_controls()
 
-    def _apply_study_overlays_stage2(self, lemmas: List[LemmaStats], request_seq: Optional[int]) -> None:
-        """Attach overlay metadata without delaying initial table render."""
-        if request_seq is not None and request_seq != self._active_search_seq:
-            return
+    def _snapshot_lemma_state(self) -> dict[int, dict]:
+        snapshot: dict[int, dict] = {}
+        for row, lemma in enumerate(getattr(self.lemma_model, "lemmas", []) or []):
+            lemma_id = int(getattr(lemma, "lemma_id", 0) or 0)
+            if lemma_id <= 0:
+                continue
+            snapshot[lemma_id] = {
+                "translation": getattr(lemma, "translation", None),
+                "status": getattr(lemma, "status", None),
+                "in_user_dictionary_count": getattr(lemma, "in_user_dictionary_count", 0),
+                "study_tooltip": getattr(lemma, "study_tooltip", None),
+                "study_state": getattr(lemma, "study_state", None),
+                "study_due_human": getattr(lemma, "study_due_human", None),
+                "last_grade": getattr(lemma, "last_grade", None),
+                "last_graded_at": getattr(lemma, "last_graded_at", None),
+                "translation_tier": getattr(lemma, "translation_tier", None),
+                "audio_status": getattr(lemma, "audio_status", None),
+                "pronunciation_text": getattr(lemma, "pronunciation_text", None),
+                "pronunciation_source": getattr(lemma, "pronunciation_source", None),
+                "pronunciation_confidence": getattr(lemma, "pronunciation_confidence", None),
+                "pronunciation_qc": getattr(lemma, "pronunciation_qc", None),
+                "translation_result": self.lemma_model.translation_results.get(row),
+            }
+        return snapshot
+
+    def _rehydrate_lemma_state(self, lemmas: List[LemmaStats], preserved_state: dict[int, dict]) -> dict[int, object]:
+        translation_results: dict[int, object] = {}
+        if not preserved_state:
+            return translation_results
+        for row, lemma in enumerate(lemmas):
+            payload = preserved_state.get(int(getattr(lemma, "lemma_id", 0) or 0))
+            if not payload:
+                continue
+            for field in (
+                "translation",
+                "status",
+                "in_user_dictionary_count",
+                "study_tooltip",
+                "study_state",
+                "study_due_human",
+                "last_grade",
+                "last_graded_at",
+                "translation_tier",
+                "audio_status",
+                "pronunciation_text",
+                "pronunciation_source",
+                "pronunciation_confidence",
+                "pronunciation_qc",
+            ):
+                setattr(lemma, field, payload.get(field))
+            if payload.get("translation_result") is not None:
+                translation_results[row] = payload["translation_result"]
+        return translation_results
+
+    def start_overlay_worker(self, lemmas: List[LemmaStats], request_seq: Optional[int] = None):
+        """Resolve heavy study overlays off the UI thread."""
         if not lemmas:
             return
-        self._apply_study_overlays(lemmas)
+
+        if self.overlay_worker and self.overlay_worker.isRunning():
+            self.overlay_worker.cancel()
+            if not self.overlay_worker.wait(100):
+                self._pending_overlay_lemmas = lemmas
+                return
+
+        self._overlay_request_seq += 1
+        seq = self._overlay_request_seq
+        rows = [
+            {
+                "item_id": int(lemma.lemma_id),
+                "kind": "lemma",
+                "src_text": lemma.lemma_text,
+                "norm_text": lemma.norm_text or "",
+            }
+            for lemma in lemmas
+        ]
+        self.overlay_worker = CrossViewOverlayWorker(rows)
+        self._active_overlay_seq = seq
+        self.overlay_worker.results_ready.connect(
+            lambda payload, overlay_seq=seq, search_seq=request_seq: self.on_overlay_results(
+                payload,
+                overlay_seq,
+                request_seq=search_seq,
+            )
+        )
+        self.overlay_worker.error.connect(
+            lambda error_msg, overlay_seq=seq: self.on_overlay_error(error_msg, overlay_seq)
+        )
+        self.overlay_worker.finished.connect(
+            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(worker, overlay_seq)
+        )
+        self.overlay_worker.start()
+
+    def _on_overlay_worker_finished(self, worker, overlay_seq: int):
+        if worker is self.overlay_worker:
+            self.overlay_worker = None
+        worker.deleteLater()
+        if self._pending_overlay_lemmas:
+            pending = self._pending_overlay_lemmas
+            self._pending_overlay_lemmas = None
+            QTimer.singleShot(0, lambda: self.start_overlay_worker(pending))
+
+    def on_overlay_results(self, overlay_map: dict, overlay_seq: int, *, request_seq: Optional[int] = None) -> None:
+        if overlay_seq != self._active_overlay_seq:
+            return
         if request_seq is not None and request_seq != self._active_search_seq:
             return
-        top = self.lemma_model.index(0, 0)
-        bottom = self.lemma_model.index(len(lemmas) - 1, self.lemma_model.columnCount() - 1)
-        self.lemma_model.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
+        if not overlay_map:
+            return
+        changed_rows: List[int] = []
+        for row, lemma in enumerate(self.lemma_model.lemmas):
+            payload = overlay_map.get(int(getattr(lemma, "lemma_id", 0) or 0))
+            if not payload:
+                continue
+            changed_rows.append(row)
+            for field in (
+                "in_user_dictionary_count",
+                "study_tooltip",
+                "study_state",
+                "study_due_human",
+                "last_grade",
+                "last_graded_at",
+                "translation_tier",
+                "audio_status",
+                "pronunciation_text",
+                "pronunciation_source",
+                "pronunciation_confidence",
+                "pronunciation_qc",
+            ):
+                setattr(lemma, field, payload.get(field))
+        if changed_rows:
+            top = self.lemma_model.index(min(changed_rows), 0)
+            bottom = self.lemma_model.index(max(changed_rows), self.lemma_model.columnCount() - 1)
+            self.lemma_model.dataChanged.emit(top, bottom, [Qt.ItemDataRole.DisplayRole])
+
+    def on_overlay_error(self, error_msg: str, overlay_seq: int) -> None:
+        if overlay_seq != self._active_overlay_seq:
+            return
+        logger.warning("Dictionary overlay worker error: %s", error_msg)
 
     def _apply_study_overlays(self, lemmas: List[LemmaStats]) -> None:
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
@@ -672,32 +820,32 @@ class DictionaryView(QWidget):
         """Navigate to first page."""
         if self.current_page != 1:
             self.current_page = 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_prev_page(self):
         """Navigate to previous page."""
         if self.current_page > 1:
             self.current_page -= 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_next_page(self):
         """Navigate to next page."""
         if self.current_page < self.total_pages:
             self.current_page += 1
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_last_page(self):
         """Navigate to last page."""
         total = self.total_pages
         if self.current_page != total:
             self.current_page = total
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_page_changed(self, page: int):
         """Handle page number change from spinbox."""
         if page != self.current_page:
             self.current_page = page
-            self.perform_search()
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
 
     def on_page_size_changed(self, size_str: str):
         """Handle page size change (Task 15: supports 'All (N)' format)."""
@@ -711,6 +859,14 @@ class DictionaryView(QWidget):
             self.page_size = new_size
             self.settings.set_value("dictionary_view/page_size", self.page_size)
             self.current_page = 1  # Reset to first page
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
+
+    def refresh_current_page_after_operation(self) -> None:
+        """Refresh visible rows without forcing expensive recount or wiping visible state."""
+        try:
+            self.perform_search(include_total_count=False, preserve_existing_state=True)
+        except TypeError:
+            # Test doubles may still provide the legacy no-arg signature.
             self.perform_search()
 
     def update_pagination_controls(self):
@@ -1174,7 +1330,7 @@ class DictionaryView(QWidget):
             src_text=str(first.get("src_text") or ""),
         )
         if changed:
-            self.perform_search()
+            self.refresh_current_page_after_operation()
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected rows scope."""
@@ -1187,7 +1343,7 @@ class DictionaryView(QWidget):
         else:
             changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
         if changed:
-            self.perform_search()
+            self.refresh_current_page_after_operation()
 
     def on_context_menu(self, pos):
         """M7 P1: Show context menu with 'Why?' action."""
@@ -1803,7 +1959,7 @@ class DictionaryView(QWidget):
             QMessageBox.information(self, "Translation Complete", msg)
 
         # Refresh lemmas to show updated translations
-        self.perform_search()
+        self.refresh_current_page_after_operation()
 
         # Re-evaluate button state and clean up worker
         self.on_selection_changed()
@@ -1893,5 +2049,5 @@ class DictionaryView(QWidget):
     def refresh(self):
         """Refresh lemma data from database."""
         logger.info("Refreshing dictionary view")
-        self.perform_search()
+        self.refresh_current_page_after_operation()
 

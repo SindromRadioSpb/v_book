@@ -235,6 +235,30 @@ Contract:
 - If app crashes immediately, check `%LOCALAPPDATA%\HDLE\logs\` for error messages
 - If DLL errors appear, rebuild with `--clean` flag
 
+### Step 2A: Stage Required Phonikud ONNX Model
+
+Premium installer builds must bundle the required offline niqqud model.
+Do not commit the binary into git. Treat it as a staged build input.
+
+`rebuild.ps1` stages the required model automatically before the build:
+
+- preferred override: `HDLE_REQUIRED_PHONIKUD_MODEL_PATH`
+- default known-good source:
+  - `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\models\phonikud\phonikud-1.0.int8.onnx`
+
+Staging target:
+
+- `installer\resources\local_models\phonikud\phonikud-1.0.int8.onnx`
+
+That staging path is intentionally git-ignored. It is a release artifact, not a source-controlled asset.
+
+Required verification:
+
+```powershell
+Test-Path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\models\phonikud\phonikud-1.0.int8.onnx"
+Get-ChildItem installer\resources\local_models\phonikud
+```
+
 ### Step 3: Build Installer with Inno Setup
 
 Once the standalone executable is verified, create the installer.
