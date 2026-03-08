@@ -18,9 +18,13 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QListWidget,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
     QSpinBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QTimer
+from PyQt6.QtCore import QItemSelectionModel, QModelIndex, Qt, pyqtSignal, QMimeData, QTimer
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
 from app.services.db_service import DBService
@@ -30,7 +34,7 @@ from app.services.document_service import DocumentService, validate_link_url, VA
 from app.infra.settings import SettingsService
 from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
-from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker
+from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker, DocumentDeleteWorker
 from app.ui.dialogs import show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
@@ -89,6 +93,51 @@ class EditMetadataDialog(QDialog):
             self.link_edit.text().strip() or None,
             level_text if level_text != "(none)" else None,
             self.topic_edit.text().strip() or None,
+        )
+
+
+class DeleteDocumentsConfirmDialog(QDialog):
+    """Scrollable confirmation dialog for destructive document deletion."""
+
+    def __init__(self, doc_names: List[str], parent=None):
+        super().__init__(parent)
+        self.doc_names = list(doc_names)
+        self.setWindowTitle("Confirm Delete")
+        self.resize(520, 420)
+
+        layout = QVBoxLayout(self)
+        summary = QLabel(self._summary_text())
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+
+        names_list = QListWidget()
+        names_list.addItems(self.doc_names)
+        names_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        layout.addWidget(names_list, 1)
+
+        warning = QLabel(
+            "This action permanently deletes the selected documents and their derived sentence data."
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.Cancel)
+        yes_button = buttons.button(QDialogButtonBox.StandardButton.Yes)
+        if yes_button is not None:
+            yes_button.setText("Delete")
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button is not None:
+            cancel_button.setText("Cancel")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _summary_text(self) -> str:
+        if len(self.doc_names) == 1:
+            return f"Delete the selected document?\n\nFile Name: {self.doc_names[0]}"
+        return (
+            f"Delete {len(self.doc_names)} selected documents?\n\n"
+            "The following File Name values will be permanently removed:"
         )
 
 
@@ -155,6 +204,8 @@ class DocumentsView(QWidget):
         self.current_worker = None
         self.process_worker = None
         self.documents_worker: Optional[DocumentsPageWorker] = None
+        self.delete_worker: Optional[DocumentDeleteWorker] = None
+        self.delete_progress: Optional[QProgressDialog] = None
 
         self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
@@ -910,6 +961,102 @@ class DocumentsView(QWidget):
             self.process_btn.setEnabled(False)
             self.reprocess_btn.setEnabled(False)
 
+    def _selected_document_rows(self) -> list[int]:
+        """Return selected model rows in stable visual order."""
+        return sorted({idx.row() for idx in self.docs_table.selectionModel().selectedRows()})
+
+    def _selected_document_payload(self) -> tuple[list[int], list[str]]:
+        """Return selected document IDs and file names in table order."""
+        doc_ids: list[int] = []
+        doc_names: list[str] = []
+        for row in self._selected_document_rows():
+            dto = self._docs_model.get_dto(row)
+            if dto is None:
+                continue
+            doc_ids.append(int(dto.doc_id))
+            doc_names.append(str(dto.file_name))
+        return doc_ids, doc_names
+
+    def _confirm_delete_documents(self, doc_names: List[str]) -> bool:
+        """Show destructive confirmation dialog with the full File Name list."""
+        if not doc_names:
+            return False
+        dialog = DeleteDocumentsConfirmDialog(doc_names, self)
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def _cleanup_delete_worker(self) -> None:
+        if self.delete_progress is not None:
+            self.delete_progress.close()
+            self.delete_progress.deleteLater()
+            self.delete_progress = None
+        if self.delete_worker is not None:
+            self.delete_worker.deleteLater()
+            self.delete_worker = None
+
+    def _start_delete_documents(self, doc_ids: List[int], doc_names: List[str]) -> None:
+        """Run document deletion in background and refresh once on completion."""
+        if self.delete_worker and self.delete_worker.isRunning():
+            show_warning(self, "Delete In Progress", "Document deletion is already running.")
+            return
+
+        self.delete_btn.setEnabled(False)
+        self.delete_progress = QProgressDialog("Deleting documents...", "", 0, max(1, len(doc_ids)), self)
+        self.delete_progress.setWindowTitle("Delete Documents")
+        self.delete_progress.setCancelButton(None)
+        self.delete_progress.setMinimumDuration(0)
+        self.delete_progress.setModal(True)
+        self.delete_progress.show()
+
+        worker = DocumentDeleteWorker(doc_ids)
+        self.delete_worker = worker
+        worker.progress.connect(self._on_delete_progress)
+        worker.finished.connect(lambda result: self._on_delete_finished(result, doc_names))
+        worker.error.connect(self._on_delete_error)
+        worker.start()
+
+    def _on_delete_progress(self, current: int, total: int, file_name: str) -> None:
+        if self.delete_progress is None:
+            return
+        self.delete_progress.setMaximum(max(1, int(total)))
+        self.delete_progress.setValue(int(current))
+        self.delete_progress.setLabelText(f"Deleting {file_name} ({current}/{total})")
+
+    def _on_delete_finished(self, result: dict, doc_names: List[str]) -> None:
+        self._cleanup_delete_worker()
+        deleted = int(result.get("deleted", 0) or 0)
+        failed = int(result.get("failed", 0) or 0)
+        self.load_documents()
+        if failed:
+            show_error(
+                self,
+                "Delete Failed",
+                f"Deleted: {deleted}\nFailed: {failed}\n\nCheck logs for details.",
+            )
+            return
+        if deleted == 1 and doc_names:
+            show_info(self, "Success", f"Document deleted: {doc_names[0]}")
+            return
+        show_info(self, "Success", f"Successfully deleted {deleted} document(s)")
+
+    def _on_delete_error(self, message: str) -> None:
+        self._cleanup_delete_worker()
+        self.on_selection_changed()
+        show_error(self, "Delete Failed", f"Failed to delete document(s): {message}")
+
+    def _sync_context_selection(self, position) -> None:
+        """Right-click on an unselected row should target that row, not stale selection."""
+        index = self.docs_table.indexAt(position)
+        if not index.isValid():
+            return
+        selection_model = self.docs_table.selectionModel()
+        if selection_model.isRowSelected(index.row(), QModelIndex()):
+            return
+        selection_model.select(
+            index,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+        )
+        self.docs_table.setCurrentIndex(index)
+
     def on_process(self):
         """Process selected documents with NLP."""
         # PERF-SCALE PATCH-J: hard block for reference corpus — CLI only.
@@ -1133,11 +1280,11 @@ class DocumentsView(QWidget):
 
     def on_view_text(self):
         """View document text."""
-        selected_indexes = self.docs_table.selectionModel().selectedRows()
-        if not selected_indexes:
+        selected_rows = self._selected_document_rows()
+        if not selected_rows:
             return
 
-        row = min(idx.row() for idx in selected_indexes)
+        row = selected_rows[0]
         dto = self._docs_model.get_dto(row)
         if dto is None:
             return
@@ -1157,143 +1304,34 @@ class DocumentsView(QWidget):
             show_error(self, "Error", f"Failed to view text: {e}")
 
     def on_delete(self):
-        """Delete selected document(s) - supports single and bulk deletion."""
-        # Block for reference corpus (safety check, UI should prevent this)
+        """Delete selected document(s) via background worker."""
         if self.is_reference_corpus:
-            from app.domain.exceptions import ReferenceCorpusReadonlyError
             show_error(
                 self,
                 "Reference Corpus",
                 "Cannot delete documents from reference corpus.\n\n"
-                "Reference corpora are read-only for document operations."
+                "Reference corpora are read-only for document operations.",
             )
             return
 
-        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
-        if not selected_rows:
+        doc_ids, doc_names = self._selected_document_payload()
+        if not doc_ids:
             return
 
-        # Collect document IDs and names
-        doc_ids = []
-        doc_names = []
-        for row in sorted(selected_rows):
-            dto = self._docs_model.get_dto(row)
-            if dto is None:
-                continue
-            doc_ids.append(dto.doc_id)
-            doc_names.append(dto.file_name)
+        if not self._confirm_delete_documents(doc_names):
+            return
 
-        # Confirmation dialog (single vs multiple)
-        from PyQt6.QtWidgets import QMessageBox
-        if len(doc_ids) == 1:
-            message = f"Delete document '{doc_names[0]}'?"
-        else:
-            message = f"Delete {len(doc_ids)} documents?\n\n"
-            if len(doc_names) <= 5:
-                message += "Documents:\n" + "\n".join(f"вЂў {name}" for name in doc_names)
-            else:
-                message += "Documents:\n" + "\n".join(f"вЂў {name}" for name in doc_names[:5])
-                message += f"\n... and {len(doc_names) - 5} more"
-
-        reply = QMessageBox.question(
-            self,
-            "Confirm Delete",
-            message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                from app.domain.exceptions import ReferenceCorpusReadonlyError
-
-                with self.db_service.get_session() as session:
-                    if len(doc_ids) == 1:
-                        # Single document delete
-                        if self.ingest_service.delete_document(session, doc_ids[0]):
-                            logger.info(f"Deleted document ID {doc_ids[0]}")
-                            show_info(self, "Success", f"Document deleted: {doc_names[0]}")
-                        else:
-                            show_error(self, "Error", "Document not found")
-                    else:
-                        # Bulk delete
-                        success_count, error_count = self.ingest_service.bulk_delete(session, doc_ids)
-
-                        # Show summary
-                        if error_count == 0:
-                            show_info(
-                                self,
-                                "Success",
-                                f"Successfully deleted {success_count} document(s)"
-                            )
-                        else:
-                            show_error(
-                                self,
-                                "Partial Success",
-                                f"Deleted: {success_count}\n"
-                                f"Failed: {error_count}\n\n"
-                                f"Check logs for details."
-                            )
-
-                    # Reload documents list
-                    self.load_documents()
-
-            except ReferenceCorpusReadonlyError as e:
-                logger.warning(f"Attempted to delete from reference corpus: {e}")
-                show_error(
-                    self,
-                    "Reference Corpus",
-                    f"Cannot delete documents from reference corpus.\n\n{str(e)}"
-                )
-            except Exception as e:
-                logger.exception("Failed to delete document(s)")
-                show_error(self, "Error", f"Failed to delete: {e}")
-
-    def eventFilter(self, obj, event):
-        """Handle F2 key to start editing File Name column (PATCH-G: QTableView)."""
-        if obj == self.docs_table and event.type() == event.Type.KeyPress:
-            from PyQt6.QtGui import QKeyEvent
-            if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_F2:
-                selected_indexes = self.docs_table.selectionModel().selectedRows()
-                if selected_indexes:
-                    row = min(idx.row() for idx in selected_indexes)
-                    index = self._docs_model.index(row, self.COL_NAME)
-                    self.docs_table.setCurrentIndex(index)
-                    self.docs_table.edit(index)
-                    return True
-
-        return super().eventFilter(obj, event)
-
-    def _on_rename_committed(self, doc_id: int, new_file_name: str):
-        """Handle rename committed from DocumentsTableModel (PATCH-G: replaces on_cell_changed)."""
-        try:
-            with self.db_service.get_session() as session:
-                from app.infra.sa_models import SourceDocument
-                doc = session.get(SourceDocument, doc_id)
-                if not doc:
-                    raise Exception(f"Document with ID {doc_id} not found")
-                if new_file_name == doc.file_name:
-                    return
-                self.ingest_service.rename_document(session, doc_id, new_file_name)
-                logger.info("Renamed document %d: ‘%s’ → ‘%s’", doc_id, doc.file_name, new_file_name)
-                self.load_documents()
-        except ValueError as e:
-            logger.warning("Document rename validation failed: %s", e)
-            show_error(self, "Rename Failed", str(e))
-            self.load_documents()
-        except Exception as e:
-            logger.exception("Failed to rename document")
-            show_error(self, "Rename Failed", f"Failed to rename document: {e}")
-            self.load_documents()
+        self._start_delete_documents(doc_ids, doc_names)
 
     def show_context_menu(self, position):
         """Show context menu with Rename, Edit Metadata, View Text, and Delete options."""
-        selected_rows = {idx.row() for idx in self.docs_table.selectionModel().selectedRows()}
+        self._sync_context_selection(position)
+        selected_rows = set(self._selected_document_rows())
         if not selected_rows:
             return
 
         row = min(selected_rows)
 
-        from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
 
         # Single-selection actions
@@ -1358,6 +1396,18 @@ class DocumentsView(QWidget):
         except Exception as e:
             logger.exception("Failed to update metadata")
             show_error(self, "Error", f"Failed to save metadata: {e}")
+
+    def _on_rename_committed(self, doc_id: int, new_name: str) -> None:
+        """Persist inline rename from the table model and refresh the current page."""
+        try:
+            with self.db_service.get_session() as session:
+                self.ingest_service.rename_document(session, int(doc_id), str(new_name))
+            self.load_documents()
+        except ValueError as e:
+            show_error(self, "Validation Error", str(e))
+        except Exception as e:
+            logger.exception("Failed to rename document")
+            show_error(self, "Rename Failed", f"Failed to rename document: {e}")
 
     def start_rename(self, row):
         """Start editing the File Name column for a specific row (PATCH-G: QTableView)."""

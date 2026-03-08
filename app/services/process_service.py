@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.infra.sa_models import (
     SourceDocument,
@@ -476,44 +476,67 @@ class ProcessService:
 
             logger.info(f"Removing statistics for document {doc_id} (project {project_id})")
 
-            # Get all doc-level stats for this document
-            stmt = select(LemmaDocStat).where(LemmaDocStat.doc_id == doc_id)
-            doc_stats = session.execute(stmt).scalars().all()
-
-            if not doc_stats:
+            doc_stats_count = int(
+                session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM lemma_doc_stat "
+                        "WHERE project_id = :pid AND doc_id = :doc_id"
+                    ),
+                    {"pid": project_id, "doc_id": int(doc_id)},
+                ).scalar()
+                or 0
+            )
+            if doc_stats_count <= 0:
                 logger.info("No statistics to remove")
                 return True
 
-            # For each lemma, subtract from project stats
-            for doc_stat in doc_stats:
-                # Get project stat
-                proj_stmt = select(LemmaProjectStat).where(
-                    LemmaProjectStat.project_id == project_id,
-                    LemmaProjectStat.lemma_id == doc_stat.lemma_id,
-                )
-                proj_stat = session.execute(proj_stmt).scalar_one_or_none()
-
-                if proj_stat:
-                    # Subtract frequency
-                    proj_stat.freq_abs -= doc_stat.freq_abs
-                    proj_stat.doc_freq -= 1
-                    proj_stat.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-                    # If frequency reaches zero, delete project stat
-                    if proj_stat.freq_abs <= 0 or proj_stat.doc_freq <= 0:
-                        session.delete(proj_stat)
-                        logger.debug(f"Deleted project stat for lemma {doc_stat.lemma_id} (zero frequency)")
-
-                # Delete doc-level stat
-                session.delete(doc_stat)
-
-            session.flush()
+            updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            params = {
+                "pid": int(project_id),
+                "doc_id": int(doc_id),
+                "updated_at": updated_at,
+            }
+            session.execute(
+                text(
+                    "UPDATE lemma_project_stat "
+                    "SET freq_abs = freq_abs - ("
+                    "  SELECT lds.freq_abs FROM lemma_doc_stat lds "
+                    "  WHERE lds.project_id = :pid "
+                    "    AND lds.doc_id = :doc_id "
+                    "    AND lds.lemma_id = lemma_project_stat.lemma_id"
+                    "), "
+                    "doc_freq = doc_freq - 1, "
+                    "updated_at = :updated_at "
+                    "WHERE project_id = :pid "
+                    "AND EXISTS ("
+                    "  SELECT 1 FROM lemma_doc_stat lds "
+                    "  WHERE lds.project_id = :pid "
+                    "    AND lds.doc_id = :doc_id "
+                    "    AND lds.lemma_id = lemma_project_stat.lemma_id"
+                    ")"
+                ),
+                params,
+            )
+            session.execute(
+                text(
+                    "DELETE FROM lemma_doc_stat "
+                    "WHERE project_id = :pid AND doc_id = :doc_id"
+                ),
+                params,
+            )
+            session.execute(
+                text(
+                    "DELETE FROM lemma_project_stat "
+                    "WHERE project_id = :pid AND (freq_abs <= 0 OR doc_freq <= 0)"
+                ),
+                params,
+            )
 
             # Delete lemmas that no longer have any project stats
             # (orphaned lemmas)
             self._cleanup_orphaned_lemmas(session, project_id)
 
-            logger.info(f"Removed statistics for {len(doc_stats)} lemmas")
+            logger.info(f"Removed statistics for {doc_stats_count} lemmas")
             return True
 
         except Exception as e:
@@ -531,34 +554,36 @@ class ProcessService:
         Returns:
             Number of lemmas deleted
         """
-        # Find lemmas without project stats
-        from sqlalchemy import and_, exists
-
-        stmt = select(Lemma).where(
-            Lemma.project_id == project_id,
-            ~exists(
-                select(1).where(
-                    and_(
-                        LemmaProjectStat.project_id == project_id,
-                        LemmaProjectStat.lemma_id == Lemma.lemma_id,
-                    )
-                )
-            ),
+        orphan_count = int(
+            session.execute(
+                text(
+                    "SELECT COUNT(*) FROM lemma l "
+                    "WHERE l.project_id = :pid "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM lemma_project_stat lps "
+                    "  WHERE lps.project_id = :pid AND lps.lemma_id = l.lemma_id"
+                    ")"
+                ),
+                {"pid": int(project_id)},
+            ).scalar()
+            or 0
         )
+        if orphan_count <= 0:
+            return 0
 
-        orphaned_lemmas = session.execute(stmt).scalars().all()
-
-        count = 0
-        for lemma in orphaned_lemmas:
-            session.delete(lemma)
-            count += 1
-            logger.debug(f"Deleted orphaned lemma: {lemma.lemma_text}")
-
-        if count > 0:
-            session.flush()
-            logger.info(f"Cleaned up {count} orphaned lemmas")
-
-        return count
+        session.execute(
+            text(
+                "DELETE FROM lemma "
+                "WHERE project_id = :pid "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM lemma_project_stat lps "
+                "  WHERE lps.project_id = :pid AND lps.lemma_id = lemma.lemma_id"
+                ")"
+            ),
+            {"pid": int(project_id)},
+        )
+        logger.info(f"Cleaned up {orphan_count} orphaned lemmas")
+        return orphan_count
 
     def reprocess_document(
         self,

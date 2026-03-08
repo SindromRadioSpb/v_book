@@ -63,20 +63,41 @@ except Exception as e:
 - Single: "Delete document 'file.txt'?"
 - Multiple: "Delete 5 documents?\n\nDocuments:\n• file1.txt\n• file2.txt\n..."
 
+### 5. ❌ Processed documents could hang on delete after NLP
+**Root cause on live DB:**
+- deleting `source_document` cascaded into `document_sentence`
+- each deleted sentence triggered SQLite FK `SET NULL` checks on:
+  - `lemma_project_stat.sample_sentence_id`
+  - `ngram_project_stat.sample_sentence_id`
+  - `term_card.pinned_sentence_id`
+  - `term_cluster.pinned_example_sent_id`
+- on the reference-sized DB these checks degenerated into repeated full-table scans because the FK target columns are not indexed
+
+**After:**
+- document delete now follows the same fast-delete principle as project delete:
+  - ensure FTS tables exist
+  - switch `PRAGMA foreign_keys=OFF` on the active sqlite connection
+  - explicitly null surviving sentence references once
+  - explicitly delete leaf rows (`sentence_pronunciation`, `lemma_doc_stat`, `document_text`, `document_sentence`)
+  - explicitly delete `source_document`
+- processed-document stats cleanup still runs first, so lemma/project counters remain correct
+
 ## Features
 
 ### Single Document Deletion
 1. Select one document
 2. Click "Delete" button
-3. Confirm: "Delete document 'filename.txt'?"
-4. Success message: "Document deleted: filename.txt"
+3. Confirm in a dedicated dialog showing the selected **File Name**
+4. Deletion runs in a background worker (no UI freeze)
+5. Success message: "Document deleted: filename.txt"
 
 ### Bulk Document Deletion
 1. Select multiple documents (Ctrl+Click or Shift+Click)
-2. Click "Delete" button
-3. Confirm: "Delete N documents?" with list (up to 5 shown)
-4. Success summary: "Successfully deleted N document(s)"
-5. Partial success: "Deleted: X\nFailed: Y\n\nCheck logs for details."
+2. Trigger delete either from the button or right-click context menu
+3. Confirm in a dedicated dialog with the full selected **File Name** list
+4. Deletion runs in a background worker with progress
+5. Success summary: "Successfully deleted N document(s)"
+6. Failure summary: "Deleted: X\nFailed: Y\n\nCheck logs for details."
 
 ### Reference Corpus Protection
 - Delete button **disabled** for reference corpus
@@ -135,18 +156,22 @@ except Exception as e:
 - `delete_document(session, doc_id)` - Single document
 - `bulk_delete(session, doc_ids)` - Multiple documents
 - Both check for reference corpus and raise `ReferenceCorpusReadonlyError`
+- Physical delete path avoids expensive FK cascade scans on processed documents
 
 **Frontend (DocumentsView):**
 - Collects all selected document IDs
-- Uses bulk_delete for efficiency (single transaction per document)
-- Shows progress and summary
+- Uses row-based ExtendedSelection (single, adjacent, non-adjacent)
+- Uses one background delete worker per user action
+- Uses one bulk_delete transaction per delete request
+- Shows a full file-name confirmation list plus progress and summary
 - Graceful error handling
 
 **Safety Layers:**
 1. UI blocks Delete button for reference corpus
 2. `on_delete()` has safety check at start
 3. `IngestService.delete_document()` validates corpus type
-4. Database constraints prevent orphaned records (CASCADE)
+4. Processed-document delete uses explicit child cleanup plus fast source-document removal
+5. Project/document counters remain correct because `remove_document_stats()` runs before physical delete
 
 ## Code Changes
 
@@ -174,6 +199,17 @@ except Exception as e:
 - Syntax check: PASSED
 - bulk_delete presence: VERIFIED
 - ReferenceCorpusReadonlyError handling: VERIFIED
+- processed-document delete with `document_sentence` + `sample_sentence_id` references: VERIFIED
+
+**Live DB evidence (`hewiki_gpu_processing test.db`):**
+- test file: `E:\andasai_mechonot\Подготовка к экзамену\Материаловедение\124-203 для программы.docx`
+- after mock NLP:
+  - `525` sentences
+  - `2642` `lemma_doc_stat`
+  - `2642` `lemma_project_stat`
+- after fix:
+  - `delete_document`: about `0.204s`
+  - post-delete counts: `source_document=0`, `document_sentence=0`, `document_text=0`, `lemma_doc_stat=0`, `lemma_project_stat=0`, `lemma=0`
 
 ## Migration Notes
 
@@ -190,7 +226,5 @@ except Exception as e:
 
 Potential improvements (not implemented):
 - Undo delete (30-second grace period)
-- Progress bar for large bulk deletes (>100 documents)
-- Context menu "Delete" action
 - Keyboard shortcut (Delete key)
 - Bulk delete warning threshold ("Are you sure you want to delete 500 documents?")

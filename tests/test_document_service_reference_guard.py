@@ -259,12 +259,13 @@ def test_delete_document_allows_normal_project(
     session.add(doc)
     session.commit()
     session.refresh(doc)
+    doc_id = int(doc.doc_id)
 
     # Delete should succeed
-    result = ingest_service.delete_document(session, doc.doc_id)
+    result = ingest_service.delete_document(session, doc_id)
 
     assert result is True
 
     # Verify document deleted
     session.expire_all()
-    assert session.get(SourceDocument, doc.doc_id) is None
+    assert session.get(SourceDocument, doc_id) is None

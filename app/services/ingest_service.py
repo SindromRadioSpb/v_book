@@ -2,14 +2,16 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import bindparam, delete, select, text
 
 from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus, DictProject
+from app.infra.db_retry import with_retry_on_locked
 from app.infra.util.hashing import sha256_file
 from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor, pptx_extractor
+from app.infra.fts_manager import ensure_fts_tables
 from app.services.db_service import DBService
 from app.domain.exceptions import ReferenceCorpusReadonlyError
 from app.infra.security import (
@@ -296,6 +298,184 @@ class IngestService:
         doc_text = session.get(DocumentText, doc_id)
         return doc_text.raw_text if doc_text else None
 
+    def _load_documents_for_delete(self, session: Session, doc_ids: List[int]) -> List[SourceDocument]:
+        """Load target documents once and preserve caller order."""
+        ordered_ids = [int(doc_id) for doc_id in doc_ids]
+        if not ordered_ids:
+            return []
+        rows = (
+            session.execute(
+                select(SourceDocument)
+                .where(SourceDocument.doc_id.in_(ordered_ids))
+            )
+            .scalars()
+            .all()
+        )
+        docs_by_id = {int(doc.doc_id): doc for doc in rows}
+        return [docs_by_id[doc_id] for doc_id in ordered_ids if doc_id in docs_by_id]
+
+    def _ensure_documents_are_mutable(
+        self,
+        session: Session,
+        docs: List[SourceDocument],
+    ) -> None:
+        """Raise when any selected document belongs to a reference corpus."""
+        for doc in docs:
+            corpus = session.get(SourceCorpus, doc.corpus_id)
+            if not corpus:
+                continue
+            project = session.get(DictProject, corpus.project_id)
+            if project and project.is_general_corpus == 1:
+                raise ReferenceCorpusReadonlyError(
+                    f"Cannot delete documents from reference corpus '{project.name}'. "
+                    f"Reference corpora are read-only for document operations."
+                )
+
+    def _delete_documents_atomic(
+        self,
+        session: Session,
+        docs: List[SourceDocument],
+        *,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Tuple[int, int]:
+        """Delete documents in one transaction without expensive FK cascade scans."""
+        if not docs:
+            return 0, 0
+
+        self._ensure_documents_are_mutable(session, docs)
+        doc_infos = [
+            {
+                "doc_id": int(doc.doc_id),
+                "file_name": str(doc.file_name or f"Document {doc.doc_id}"),
+                "status": str(doc.status or "imported"),
+            }
+            for doc in docs
+        ]
+        doc_ids = [info["doc_id"] for info in doc_infos]
+        total = len(docs)
+        process_service = None
+        raw_conn = None
+
+        # End the read-only implicit transaction before toggling FK mode.
+        session.rollback()
+
+        try:
+            raw_conn = session.connection().connection.driver_connection
+            ensure_fts_tables(raw_conn, schema="main", rebuild=False)
+            raw_conn.execute("PRAGMA foreign_keys=OFF")
+
+            for idx, info in enumerate(doc_infos, start=1):
+                if progress_callback:
+                    progress_callback(idx, total, info["file_name"])
+                if info["status"] == "processed":
+                    if process_service is None:
+                        from app.services.process_service import ProcessService
+                        process_service = ProcessService()
+                    if not process_service.remove_document_stats(session, info["doc_id"]):
+                        raise RuntimeError(
+                            f"Failed to remove statistics for document "
+                            f"{info['doc_id']} ({info['file_name']})"
+                        )
+
+            ids_param = bindparam("doc_ids", expanding=True)
+            params = {"doc_ids": doc_ids}
+            sentence_ids_sql = (
+                "SELECT sentence_id FROM document_sentence WHERE doc_id IN :doc_ids"
+            )
+
+            session.execute(
+                text("UPDATE run_error SET doc_id = NULL WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text(
+                    "UPDATE user_dictionary_item SET origin_doc_id = NULL "
+                    "WHERE origin_doc_id IN :doc_ids"
+                ).bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text("DELETE FROM task_queue WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+
+            # Clear sentence references once, then remove sentence rows with FK=OFF.
+            session.execute(
+                text(
+                    "UPDATE lemma_project_stat SET sample_sentence_id = NULL "
+                    f"WHERE sample_sentence_id IN ({sentence_ids_sql})"
+                ).bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text(
+                    "UPDATE ngram_project_stat SET sample_sentence_id = NULL "
+                    f"WHERE sample_sentence_id IN ({sentence_ids_sql})"
+                ).bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text(
+                    "UPDATE term_card SET pinned_sentence_id = NULL "
+                    f"WHERE pinned_sentence_id IN ({sentence_ids_sql})"
+                ).bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text(
+                    "UPDATE term_cluster SET pinned_example_sent_id = NULL "
+                    f"WHERE pinned_example_sent_id IN ({sentence_ids_sql})"
+                ).bindparams(ids_param),
+                params,
+            )
+
+            session.execute(
+                text(
+                    f"DELETE FROM sentence_pronunciation "
+                    f"WHERE sentence_id IN ({sentence_ids_sql})"
+                ).bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text("DELETE FROM ngram_doc_stat WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text("DELETE FROM lemma_doc_stat WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text("DELETE FROM document_text WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                text("DELETE FROM document_sentence WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                params,
+            )
+            session.execute(
+                delete(SourceDocument)
+                .where(SourceDocument.doc_id.in_(doc_ids))
+                .execution_options(synchronize_session=False)
+            )
+            session.expunge_all()
+            with_retry_on_locked(
+                session.commit,
+                max_retries=4,
+                rollback_callback=session.rollback,
+            )
+            logger.info("Deleted %d document(s) in one transaction", total)
+            return total, 0
+        except Exception:
+            logger.exception("Fast document delete failed for doc_ids=%s", doc_ids)
+            session.rollback()
+            return 0, total
+        finally:
+            if raw_conn is not None:
+                try:
+                    raw_conn.execute("PRAGMA foreign_keys=ON")
+                except Exception:
+                    logger.warning("Failed to restore PRAGMA foreign_keys=ON after document delete")
+
     def delete_document(self, session: Session, doc_id: int) -> bool:
         """
         Delete a document with delta statistics update.
@@ -318,38 +498,26 @@ class IngestService:
         doc = session.get(SourceDocument, doc_id)
         if not doc:
             return False
-
-        # GUARD: Prevent deleting documents from reference corpus
-        corpus = session.get(SourceCorpus, doc.corpus_id)
-        if corpus:
-            project = session.get(DictProject, corpus.project_id)
-            if project and project.is_general_corpus == 1:
-                raise ReferenceCorpusReadonlyError(
-                    f"Cannot delete documents from reference corpus '{project.name}'. "
-                    f"Reference corpora are read-only for document operations."
-                )
-
+        doc_name = str(doc.file_name or f"Document {doc_id}")
         try:
-            # M4: Remove statistics first (delta subtraction)
-            if doc.status == 'processed':
-                from app.services.process_service import ProcessService
-                process_service = ProcessService()
-                if not process_service.remove_document_stats(session, doc_id):
-                    logger.warning(f"Failed to remove stats for document {doc_id}, continuing with delete")
-                    # Continue anyway - better to delete than leave inconsistent state
-
-            # Delete document (cascades to related records)
-            session.delete(doc)
-            session.commit()
-            logger.info(f"Deleted document ID: {doc_id} ({doc.file_name})")
-            return True
-
+            success_count, _error_count = self._delete_documents_atomic(session, [doc])
+            logger.info("Deleted document ID: %s (%s)", doc_id, doc_name)
+            return success_count == 1
+        except ReferenceCorpusReadonlyError:
+            session.rollback()
+            raise
         except Exception as e:
             logger.exception(f"Failed to delete document {doc_id}")
             session.rollback()
             return False
 
-    def bulk_delete(self, session: Session, doc_ids: List[int]) -> Tuple[int, int]:
+    def bulk_delete(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        *,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Tuple[int, int]:
         """
         Delete multiple documents with delta statistics.
 
@@ -360,19 +528,17 @@ class IngestService:
         Returns:
             Tuple of (success_count, error_count)
         """
-        success = 0
-        errors = 0
-
-        logger.info(f"Bulk deleting {len(doc_ids)} documents")
-
-        for doc_id in doc_ids:
-            if self.delete_document(session, doc_id):
-                success += 1
-            else:
-                errors += 1
-
-        logger.info(f"Bulk delete complete: {success} succeeded, {errors} failed")
-        return success, errors
+        docs = self._load_documents_for_delete(session, doc_ids)
+        missing_count = max(0, len([int(doc_id) for doc_id in doc_ids]) - len(docs))
+        logger.info("Bulk deleting %d document(s)", len(docs))
+        success, errors = self._delete_documents_atomic(
+            session,
+            docs,
+            progress_callback=progress_callback,
+        )
+        total_errors = int(errors) + int(missing_count)
+        logger.info("Bulk delete complete: %d succeeded, %d failed", success, total_errors)
+        return success, total_errors
 
     def rename_document(
         self,

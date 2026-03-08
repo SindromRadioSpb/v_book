@@ -1042,6 +1042,46 @@ class ProjectDeleteWorker(QThread):
             self.error.emit(str(e))
 
 
+class DocumentDeleteWorker(QThread):
+    """Background worker for document deletion in Documents view."""
+
+    progress = pyqtSignal(int, int, str)  # current, total, file_name
+    finished = pyqtSignal(dict)  # {deleted, failed, total}
+    error = pyqtSignal(str)
+
+    def __init__(self, doc_ids: List[int]):
+        super().__init__()
+        self.doc_ids = [int(doc_id) for doc_id in doc_ids]
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.ingest_service import IngestService
+
+            db = DBService.get_instance()
+            service = IngestService()
+            with db.get_session() as session:
+                deleted_count, error_count = service.bulk_delete(
+                    session,
+                    self.doc_ids,
+                    progress_callback=lambda current, total, file_name: self.progress.emit(
+                        int(current),
+                        int(total),
+                        str(file_name),
+                    ),
+                )
+            self.finished.emit(
+                {
+                    "deleted": int(deleted_count),
+                    "failed": int(error_count),
+                    "total": len(self.doc_ids),
+                }
+            )
+        except Exception as e:
+            logger.exception("Document deletion failed")
+            self.error.emit(str(e))
+
+
 class DictionarySearchWorker(QThread):
     """Worker for searching lemmas with pagination (non-blocking).
 
