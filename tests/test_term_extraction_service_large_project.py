@@ -209,3 +209,83 @@ def test_extract_terms_for_project_small_pipeline(monkeypatch, tmp_path: Path):
     assert len(ngram_count) == 1
     assert len(cluster_count) == 1
     assert len(member_count) == 1
+    assert cluster_count[0].source_kinds == "ngram"
+    assert member_count[0].member_doc_freq == 1
+
+
+def test_cluster_terms_backfills_canonical_and_preserves_source_kinds(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(DBService, "_instance", SimpleNamespace())
+    engine = create_engine(f"sqlite:///{tmp_path / 'term_cluster.db'}")
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+    Ngram.__table__.create(engine, checkfirst=True)
+    NgramProjectStat.__table__.create(engine, checkfirst=True)
+    TermCluster.__table__.create(engine, checkfirst=True)
+    TermClusterMember.__table__.create(engine, checkfirst=True)
+
+    monkeypatch.setattr(
+        "app.services.term_extraction_service.classify_phrase",
+        lambda _text: SimpleNamespace(
+            entity_class="WORD_HE",
+            is_noise=False,
+            noise_reason=None,
+            norm_text="alpha_beta",
+        ),
+    )
+
+    service = TermExtractionService()
+
+    with Session(engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        project = DictProject(library_id=lib.library_id, name="project", src_lang="he", tgt_lang="ru", nlp_engine="mock")
+        session.add(project)
+        session.flush()
+
+        ng1 = Ngram(
+            project_id=project.project_id,
+            n=2,
+            surface_text="alpha beta",
+            he_canonical=None,
+            lemma_phrase="alpha beta",
+            source_kind="ngram",
+            pos_pattern="NOUN|NOUN",
+        )
+        ng2 = Ngram(
+            project_id=project.project_id,
+            n=2,
+            surface_text="alpha beta",
+            he_canonical="alpha_beta",
+            lemma_phrase="alpha beta",
+            source_kind="np",
+            pos_pattern="NOUN|NOUN",
+        )
+        session.add_all([ng1, ng2])
+        session.flush()
+        session.add_all(
+            [
+                NgramProjectStat(project_id=project.project_id, ngram_id=ng1.ngram_id, freq_abs=4, doc_freq=2),
+                NgramProjectStat(project_id=project.project_id, ngram_id=ng2.ngram_id, freq_abs=3, doc_freq=1),
+            ]
+        )
+        session.commit()
+
+        clusters_created = service._cluster_terms(session, int(project.project_id))
+        session.commit()
+
+        clusters = session.execute(select(TermCluster)).scalars().all()
+        members = session.execute(select(TermClusterMember)).scalars().all()
+        refreshed_ng1 = session.get(Ngram, ng1.ngram_id)
+
+    engine.dispose()
+
+    assert clusters_created == 1
+    assert refreshed_ng1 is not None
+    assert refreshed_ng1.he_canonical == "alpha_beta"
+    assert len(clusters) == 1
+    assert clusters[0].source_kinds == "ngram,np"
+    assert clusters[0].freq_abs == 7
+    assert clusters[0].doc_freq == 2
+    assert len(members) == 2
+    assert sorted(member.member_doc_freq for member in members) == [1, 2]

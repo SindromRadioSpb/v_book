@@ -4,7 +4,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 from collections import Counter
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, and_, or_, text
+from sqlalchemy import select, func, and_, or_, text, bindparam
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
@@ -661,6 +661,151 @@ class TermExtractionService:
             min_freq=min_freq,
         )
 
+    def _ensure_cluster_canonical_keys(self, session: Session, project_id: int) -> int:
+        """Backfill missing canonical keys so clustering can stream deterministically."""
+        stmt = (
+            select(Ngram.ngram_id, Ngram.surface_text, Ngram.lemma_phrase)
+            .where(
+                and_(
+                    Ngram.project_id == project_id,
+                    or_(Ngram.he_canonical.is_(None), Ngram.he_canonical == ""),
+                )
+            )
+            .order_by(Ngram.ngram_id.asc())
+        )
+        updates = []
+        for ngram_id, surface_text, lemma_phrase in session.execute(stmt):
+            updates.append(
+                {
+                    "u_ngram_id": int(ngram_id),
+                    "u_he_canonical": get_cluster_key(surface_text, lemma_phrase),
+                }
+            )
+
+        if not updates:
+            return 0
+
+        update_stmt = (
+            Ngram.__table__.update()
+            .where(Ngram.ngram_id == bindparam("u_ngram_id"))
+            .values(he_canonical=bindparam("u_he_canonical"))
+        )
+        session.execute(update_stmt, updates)
+        session.flush()
+        logger.info("Backfilled %d missing ngram canonical keys", len(updates))
+        return len(updates)
+
+    def _iter_cluster_key_batches(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        batch_size: int = 500,
+    ) -> Iterable[List[str]]:
+        """Yield canonical keys in deterministic batches for bounded clustering."""
+        last_key: Optional[str] = None
+        while True:
+            stmt = (
+                select(Ngram.he_canonical)
+                .where(
+                    and_(
+                        Ngram.project_id == project_id,
+                        Ngram.he_canonical.is_not(None),
+                        Ngram.he_canonical != "",
+                    )
+                )
+                .distinct()
+                .order_by(Ngram.he_canonical.asc())
+                .limit(batch_size)
+            )
+            if last_key is not None:
+                stmt = stmt.where(Ngram.he_canonical > last_key)
+
+            canonical_keys = [str(value) for value in session.execute(stmt).scalars().all()]
+            if not canonical_keys:
+                return
+
+            yield canonical_keys
+            last_key = canonical_keys[-1]
+
+    def _insert_cluster_from_members(
+        self,
+        session: Session,
+        project_id: int,
+        canonical_key: str,
+        members: List[dict],
+        classification_stats: dict,
+    ) -> int:
+        """Insert one cluster and its members from pre-fetched member rows."""
+        if not members:
+            return 0
+
+        total_freq = sum(int(member["freq_abs"] or 0) for member in members)
+        total_doc_freq = max(int(member["doc_freq"] or 0) for member in members)
+
+        pmis = [member["pmi_cache"] for member in members if member["pmi_cache"] is not None]
+        llrs = [member["llr_cache"] for member in members if member["llr_cache"] is not None]
+        dices = [member["dice_cache"] for member in members if member["dice_cache"] is not None]
+        tscores = [member["tscore_cache"] for member in members if member["tscore_cache"] is not None]
+
+        terms_for_rep = [
+            {"surface_text": str(member["surface_text"]), "freq_abs": int(member["freq_abs"] or 0)}
+            for member in members
+        ]
+        representative_he = choose_representative_term(terms_for_rep)
+        representative_lemma = next(
+            (str(member["lemma_phrase"]) for member in members if member["lemma_phrase"]),
+            None,
+        )
+        source_kinds = sorted(
+            {
+                str(member["source_kind"])
+                for member in members
+                if member["source_kind"]
+            }
+        )
+
+        classification = classify_phrase(representative_he)
+        classification_stats["classes"][classification.entity_class] += 1
+        if classification.is_noise:
+            classification_stats["noise"] += 1
+
+        cluster_result = session.execute(
+            TermCluster.__table__.insert().values(
+                project_id=project_id,
+                canonical_key=canonical_key,
+                representative_he=representative_he,
+                representative_lemma=representative_lemma,
+                freq_abs=total_freq,
+                doc_freq=total_doc_freq,
+                members_count=len(members),
+                best_pmi=max(pmis) if pmis else None,
+                best_llr=max(llrs) if llrs else None,
+                best_dice=max(dices) if dices else None,
+                best_tscore=max(tscores) if tscores else None,
+                source_kinds=",".join(source_kinds) if source_kinds else None,
+                entity_class=classification.entity_class,
+                is_noise=1 if classification.is_noise else 0,
+                noise_reason=classification.noise_reason,
+                norm_text=classification.norm_text,
+            )
+        )
+        cluster_id = int(cluster_result.inserted_primary_key[0])
+
+        session.execute(
+            TermClusterMember.__table__.insert(),
+            [
+                {
+                    "cluster_id": cluster_id,
+                    "ngram_id": int(member["ngram_id"]),
+                    "member_freq_abs": int(member["freq_abs"] or 0),
+                    "member_doc_freq": int(member["doc_freq"] or 0),
+                }
+                for member in members
+            ],
+        )
+        return 1
+
     def _cluster_terms(self, session: Session, project_id: int) -> int:
         """
         Cluster terms by canonical key (M5.1).
@@ -670,96 +815,69 @@ class TermExtractionService:
         """
         logger.info("Clustering terms by canonical key")
 
-        # Get all ngrams for project
-        stmt = select(Ngram, NgramProjectStat).join(NgramProjectStat).where(
-            Ngram.project_id == project_id
-        )
-        results = session.execute(stmt).all()
+        self._ensure_cluster_canonical_keys(session, project_id)
 
-        # Group by canonical key
-        clusters_data = {}  # canonical_key -> list[(ngram, stat)]
-
-        for ngram, stat in results:
-            canonical = ngram.he_canonical
-            if not canonical:
-                canonical = get_cluster_key(ngram.surface_text, ngram.lemma_phrase)
-
-            if canonical not in clusters_data:
-                clusters_data[canonical] = []
-
-            clusters_data[canonical].append((ngram, stat))
-
-        # Create clusters
         clusters_created = 0
-        classification_stats = {'noise': 0, 'classes': Counter()}
+        classification_stats = {"noise": 0, "classes": Counter()}
 
-        for canonical_key, members in clusters_data.items():
-            # Aggregate stats
-            total_freq = sum(stat.freq_abs for _, stat in members)
-
-            # DocFreq: Maximum doc_freq among cluster members
-            # This gives a conservative (lower-bound) estimate of documents containing the term
-            # NOTE: Exact count would require ngram_doc_stat table, which is not populated
-            # For variants of same term, max is typically accurate since they appear in similar contexts
-            total_doc_freq = max(stat.doc_freq for _, stat in members)
-
-            # Get best scores
-            pmis = [stat.pmi_cache for _, stat in members if stat.pmi_cache is not None]
-            llrs = [stat.llr_cache for _, stat in members if stat.llr_cache is not None]
-            dices = [stat.dice_cache for _, stat in members if stat.dice_cache is not None]
-            tscores = [stat.tscore_cache for _, stat in members if stat.tscore_cache is not None]
-
-            best_pmi = max(pmis) if pmis else None
-            best_llr = max(llrs) if llrs else None
-            best_dice = max(dices) if dices else None
-            best_tscore = max(tscores) if tscores else None
-
-            # Choose representative term
-            terms_for_rep = [
-                {'surface_text': ng.surface_text, 'freq_abs': st.freq_abs}
-                for ng, st in members
-            ]
-            representative_he = choose_representative_term(terms_for_rep)
-            representative_lemma = members[0][0].lemma_phrase  # Use first lemma
-
-            # Classify the cluster (Task 11: Entity Classification)
-            classification = classify_phrase(representative_he)
-            classification_stats['classes'][classification.entity_class] += 1
-            if classification.is_noise:
-                classification_stats['noise'] += 1
-
-            # Create cluster with classification
-            cluster = TermCluster(
-                project_id=project_id,
-                canonical_key=canonical_key,
-                representative_he=representative_he,
-                representative_lemma=representative_lemma,
-                freq_abs=total_freq,
-                doc_freq=total_doc_freq,
-                members_count=len(members),
-                best_pmi=best_pmi,
-                best_llr=best_llr,
-                best_dice=best_dice,
-                best_tscore=best_tscore,
-                source_kinds='ngram',
-                entity_class=classification.entity_class,
-                is_noise=1 if classification.is_noise else 0,
-                noise_reason=classification.noise_reason,
-                norm_text=classification.norm_text,
-            )
-            session.add(cluster)
-            session.flush()
-
-            # Create cluster members
-            for ngram, stat in members:
-                member = TermClusterMember(
-                    cluster_id=cluster.cluster_id,
-                    ngram_id=ngram.ngram_id,
-                    member_freq_abs=stat.freq_abs,
+        for canonical_keys in self._iter_cluster_key_batches(session, project_id):
+            stmt = (
+                select(
+                    Ngram.ngram_id.label("ngram_id"),
+                    Ngram.surface_text.label("surface_text"),
+                    Ngram.lemma_phrase.label("lemma_phrase"),
+                    Ngram.he_canonical.label("he_canonical"),
+                    Ngram.source_kind.label("source_kind"),
+                    NgramProjectStat.freq_abs.label("freq_abs"),
+                    NgramProjectStat.doc_freq.label("doc_freq"),
+                    NgramProjectStat.pmi_cache.label("pmi_cache"),
+                    NgramProjectStat.llr_cache.label("llr_cache"),
+                    NgramProjectStat.dice_cache.label("dice_cache"),
+                    NgramProjectStat.tscore_cache.label("tscore_cache"),
                 )
-                session.add(member)
+                .join(
+                    NgramProjectStat,
+                    and_(
+                        NgramProjectStat.ngram_id == Ngram.ngram_id,
+                        NgramProjectStat.project_id == Ngram.project_id,
+                    ),
+                )
+                .where(
+                    and_(
+                        Ngram.project_id == project_id,
+                        Ngram.he_canonical.in_(canonical_keys),
+                    )
+                )
+                .order_by(Ngram.he_canonical.asc(), Ngram.ngram_id.asc())
+            )
+            rows = [dict(row) for row in session.execute(stmt).mappings()]
 
-            clusters_created += 1
+            current_key: Optional[str] = None
+            current_members: List[dict] = []
+            for row in rows:
+                canonical_key = str(row["he_canonical"])
+                if current_key is None:
+                    current_key = canonical_key
+                if canonical_key != current_key:
+                    clusters_created += self._insert_cluster_from_members(
+                        session,
+                        project_id,
+                        current_key,
+                        current_members,
+                        classification_stats,
+                    )
+                    current_members = []
+                    current_key = canonical_key
+                current_members.append(row)
+
+            if current_key is not None and current_members:
+                clusters_created += self._insert_cluster_from_members(
+                    session,
+                    project_id,
+                    current_key,
+                    current_members,
+                    classification_stats,
+                )
 
         session.flush()
 

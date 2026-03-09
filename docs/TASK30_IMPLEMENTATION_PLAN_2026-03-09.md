@@ -186,6 +186,37 @@ Validation:
   `generator_mode` and persists the effective `phonikud_version` after real
   inference, not the stale pre-generation fallback mode.
 
+### PATCH-05: Large-project clustering streaming
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `app/services/term_extraction_service.py`
+- `tests/test_term_extraction_service_large_project.py`
+
+Goals:
+
+- Remove full-project `.all()` materialization from `_cluster_terms()`.
+- Keep clustering deterministic by batching on `he_canonical`.
+- Backfill missing `he_canonical` values for legacy rows before batched reads.
+- Preserve correct member metadata while clustering mixed `ngram` / `np` inputs.
+
+Expected effect:
+
+- Lower peak memory pressure during cluster creation on large projects.
+- Safer clustering on projects that contain both legacy rows and new extraction output.
+- Correct `source_kinds` and `member_doc_freq` persistence in cluster rows.
+
+Validation:
+
+- New targeted clustering regression in
+  `tests/test_term_extraction_service_large_project.py`.
+- Read-only batch probe on the approved hewiki DB confirmed deterministic
+  canonical-key paging without destructive writes.
+- Result: implemented; `_cluster_terms()` now clusters in canonical-key batches
+  and no longer builds an in-memory map for the full project.
+
 ## Out of scope for PATCH-01
 
 - Full dual-DB reference/user overlay architecture.
@@ -212,6 +243,8 @@ python scripts\collect_queryplan_evidence.py --db-path "J:\Project_Vibe\V_book\r
 - Term extraction no longer clears existing terms before the collect phase succeeds.
 - Term extraction no longer materializes full processed-document and sentence ORM
   collections during extraction.
+- Term clustering no longer materializes the full project result set before inserts.
+- Term clustering now persists mixed `source_kinds` and `member_doc_freq` correctly.
 - New targeted tests cover lifecycle and stale-result behavior.
 - New targeted tests cover bounded term extraction ordering and minimal pipeline behavior.
 - Existing touched-path regressions pass on local temp-root-safe pytest runs.
