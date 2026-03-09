@@ -60,7 +60,7 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
         "timestamp_utc": "2026-03-09T04:00:00+00:00",
         "scenario": "extract_terms",
         "overall_status": "pass",
-        "config": {"doc_limit": 30},
+        "config": {"doc_limit": 30, "tier": "smoke", "recommended_wall_budget_sec": 300},
         "db": {
             "base_sandbox_db": "base.db",
             "source_db": "source.db",
@@ -109,3 +109,5 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
     assert "Overall wall total" in text
     assert "reused existing file" in text
     assert "reused sandbox file" in text
+    assert "Tier: `smoke`" in text
+    assert "Recommended wall budget: `300 s`" in text

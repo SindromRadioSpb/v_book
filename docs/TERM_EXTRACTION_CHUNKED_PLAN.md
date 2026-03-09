@@ -134,6 +134,13 @@ Interpretation:
   even with both reuse modes enabled, so the older successful `257.680 s` stage
   artifact remains the best completed large-slice reference for `6000` docs
 
+Suggested benchmark tiers for repeatable task30 runs:
+
+- `smoke`: `doc_limit=30`, wall budget `300 s`
+- `medium`: `doc_limit=1000`, wall budget `600 s`
+- `large`: `doc_limit=2000`, wall budget `900 s`
+- `ceiling`: `doc_limit=6000`, wall budget `1800 s`
+
 ## Remaining follow-ups
 
 ### Follow-up A: richer extraction progress UI

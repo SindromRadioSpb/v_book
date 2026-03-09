@@ -322,6 +322,8 @@ Result:
 - New `--reuse-working-db` mode allows repeated runs directly against an
   existing disposable sandbox DB at `--db-path`, skipping the temp working-copy
   clone entirely.
+- New `--tier` presets make repeated task30 runs reproducible without manually
+  remembering slice sizes and recommended wall-clock budgets.
 
 Known evidence:
 
@@ -351,6 +353,13 @@ Known evidence:
   `reuse_base_copy=true` and `reuse_working_db=true`, so the older successful
   `257.680 s` stage artifact remains the best completed large-slice reference
   for `6000` docs.
+
+Recommended task30 benchmark tiers:
+
+- `smoke`: `doc_limit=30`, recommended wall budget `300 s`
+- `medium`: `doc_limit=1000`, recommended wall budget `600 s`
+- `large`: `doc_limit=2000`, recommended wall budget `900 s`
+- `ceiling`: `doc_limit=6000`, recommended wall budget `1800 s`
 
 ## Out of scope for PATCH-01
 

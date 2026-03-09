@@ -33,6 +33,28 @@ DEFAULT_SOURCE_DB = (
 DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
 DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"
 DEFAULT_TEMP_ROOT = r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
+BENCH_TIER_PRESETS: dict[str, dict[str, Any]] = {
+    "smoke": {
+        "doc_limit": 30,
+        "recommended_wall_budget_sec": 300,
+        "description": "Small validation slice for quick repeated checks.",
+    },
+    "medium": {
+        "doc_limit": 1000,
+        "recommended_wall_budget_sec": 600,
+        "description": "Completed large bounded slice validated on this machine.",
+    },
+    "large": {
+        "doc_limit": 2000,
+        "recommended_wall_budget_sec": 900,
+        "description": "In-place sandbox tier with reusable working DB.",
+    },
+    "ceiling": {
+        "doc_limit": 6000,
+        "recommended_wall_budget_sec": 1800,
+        "description": "Reference ceiling tier; may still exceed local wall budget.",
+    },
+}
 
 
 def _utc_now() -> datetime:
@@ -178,6 +200,31 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError("--doc-limit must be > 0")
     if args.lemma_limit <= 0 or args.term_limit <= 0 or args.sentence_limit <= 0:
         raise ValueError("--lemma-limit/--term-limit/--sentence-limit must be > 0")
+
+
+def resolve_tier_preset(args: argparse.Namespace, raw_argv: list[str] | None = None) -> dict[str, Any]:
+    """Resolve optional benchmark tier without breaking explicit CLI overrides."""
+    tier_name = str(getattr(args, "tier", "") or "").strip().lower()
+    if not tier_name:
+        return {
+            "name": None,
+            "doc_limit": int(args.doc_limit),
+            "recommended_wall_budget_sec": None,
+            "description": "",
+        }
+
+    preset = BENCH_TIER_PRESETS[tier_name]
+    raw_argv = raw_argv or []
+    explicit_doc_limit = any(str(part).startswith("--doc-limit") for part in raw_argv)
+    if not explicit_doc_limit:
+        args.doc_limit = int(preset["doc_limit"])
+
+    return {
+        "name": tier_name,
+        "doc_limit": int(args.doc_limit),
+        "recommended_wall_budget_sec": int(preset["recommended_wall_budget_sec"]),
+        "description": str(preset["description"]),
+    }
 
 
 def _configure_google_cloud_translate(key_path: Path) -> None:
@@ -1022,6 +1069,12 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
         f"- Bench project: `{bench_info.get('bench_project_id', 'n/a')}` "
         f"(`{bench_info.get('bench_project_name', 'n/a')}`)"
     )
+    if report["config"].get("tier"):
+        lines.append(f"- Tier: `{report['config']['tier']}`")
+    if report["config"].get("recommended_wall_budget_sec") is not None:
+        lines.append(
+            f"- Recommended wall budget: `{int(report['config']['recommended_wall_budget_sec'])} s`"
+        )
     lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
     lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
     lines.append("")
@@ -1068,6 +1121,7 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--copy-target", action="store_true")
         cmd_parser.add_argument("--reuse-base-copy", action="store_true")
         cmd_parser.add_argument("--reuse-working-db", action="store_true")
+        cmd_parser.add_argument("--tier", choices=tuple(BENCH_TIER_PRESETS.keys()))
         cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
         cmd_parser.add_argument("--source-project-id", type=int, default=1)
         cmd_parser.add_argument("--bench-project-name", default=DEFAULT_PROJECT_NAME)
@@ -1108,7 +1162,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(argv: list[str] | None = None) -> int:
+    raw_argv = list(argv or [])
     args = _build_parser().parse_args(argv)
+    tier = resolve_tier_preset(args, raw_argv)
     paths = build_artifact_file_paths(Path(args.output_dir))
     _setup_logging(paths["latest_log"])
 
@@ -1126,6 +1182,8 @@ def run(argv: list[str] | None = None) -> int:
             "copy_target": bool(args.copy_target),
             "reuse_base_copy": bool(args.reuse_base_copy),
             "reuse_working_db": bool(args.reuse_working_db),
+            "tier": tier["name"],
+            "recommended_wall_budget_sec": tier["recommended_wall_budget_sec"],
             "bench_project_name": str(args.bench_project_name),
             "temp_root": str(args.temp_root),
         },
