@@ -205,10 +205,13 @@ def _configure_google_cloud_tts(key_path: Path) -> None:
     register_default_audio_providers()
 
 
-def _prepare_base_sandbox(base_db: Path, source_db: Path) -> None:
+def _prepare_base_sandbox(base_db: Path, source_db: Path, *, reuse_existing: bool = False) -> bool:
     base_db.parent.mkdir(parents=True, exist_ok=True)
+    if reuse_existing and base_db.exists() and base_db.is_file():
+        return False
     # Refresh canonical sandbox base from local writable corpus copy.
     _sqlite_backup(source_db, base_db)
+    return True
 
 
 @contextmanager
@@ -220,8 +223,9 @@ def _working_db_copy(base_db: Path, temp_root: Path):
         ignore_cleanup_errors=True,
     ) as temp_dir:
         run_db = Path(temp_dir) / "pipeline_work.db"
+        t0 = time.perf_counter()
         _sqlite_backup(base_db, run_db)
-        yield run_db
+        yield run_db, round(time.perf_counter() - t0, 3)
 
 
 def _select_source_doc_ids(session, source_project_id: int, doc_limit: int) -> list[int]:
@@ -987,6 +991,11 @@ def _run_stage(name: str, fn) -> dict[str, Any]:
 def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     db_info = report.get("db") or {}
     bench_info = report.get("bench") or {}
+    timings = report.get("timings") or {}
+    stage_total = round(
+        sum(float(stage.get("duration_sec", 0.0) or 0.0) for stage in report.get("stages", [])),
+        3,
+    )
     lines: list[str] = []
     lines.append("# Pipeline Benchmark Report (PATCH-05)")
     lines.append("")
@@ -996,6 +1005,8 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- Base sandbox DB: `{db_info.get('base_sandbox_db', 'n/a')}`")
     lines.append(f"- Source DB: `{db_info.get('source_db', 'n/a')}`")
     lines.append(f"- Working DB (temp): `{db_info.get('working_db', 'n/a')}`")
+    if timings.get("base_copy_reused"):
+        lines.append("- Base sandbox copy: `reused existing file`")
     lines.append("")
     lines.append("## Bench Slice")
     lines.append("")
@@ -1009,6 +1020,16 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     )
     lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
     lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
+    lines.append("")
+    lines.append("## Timing Breakdown")
+    lines.append("")
+    lines.append(f"- Base sandbox copy: `{float(timings.get('base_copy_sec', 0.0)):.3f} s`")
+    lines.append(f"- Working DB copy: `{float(timings.get('working_copy_sec', 0.0)):.3f} s`")
+    lines.append(f"- DB initialize: `{float(timings.get('db_initialize_sec', 0.0)):.3f} s`")
+    lines.append(f"- Bench slice clone: `{float(timings.get('slice_clone_sec', 0.0)):.3f} s`")
+    lines.append(f"- Pre-stage overhead total: `{float(timings.get('pre_stage_overhead_sec', 0.0)):.3f} s`")
+    lines.append(f"- Stage wall total: `{stage_total:.3f} s`")
+    lines.append(f"- Overall wall total: `{float(timings.get('overall_wall_sec', 0.0)):.3f} s`")
     lines.append("")
     lines.append("## Stage Summary")
     lines.append("")
@@ -1041,6 +1062,7 @@ def _build_parser() -> argparse.ArgumentParser:
     def _add_common_arguments(cmd_parser: argparse.ArgumentParser) -> None:
         cmd_parser.add_argument("--db-path", required=True, default=DEFAULT_SANDBOX_DB)
         cmd_parser.add_argument("--copy-target", action="store_true")
+        cmd_parser.add_argument("--reuse-base-copy", action="store_true")
         cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
         cmd_parser.add_argument("--source-project-id", type=int, default=1)
         cmd_parser.add_argument("--bench-project-name", default=DEFAULT_PROJECT_NAME)
@@ -1090,25 +1112,28 @@ def run(argv: list[str] | None = None) -> int:
         "scenario": args.scenario,
         "overall_status": "error",
         "build_meta": _load_build_meta(),
-            "config": {
-                "doc_limit": int(args.doc_limit),
-                "overwrite": int(args.overwrite),
-                "lemma_limit": int(args.lemma_limit),
-                "term_limit": int(args.term_limit),
-                "sentence_limit": int(args.sentence_limit),
-                "copy_target": bool(args.copy_target),
-                "bench_project_name": str(args.bench_project_name),
-                "temp_root": str(args.temp_root),
-            },
+        "config": {
+            "doc_limit": int(args.doc_limit),
+            "overwrite": int(args.overwrite),
+            "lemma_limit": int(args.lemma_limit),
+            "term_limit": int(args.term_limit),
+            "sentence_limit": int(args.sentence_limit),
+            "copy_target": bool(args.copy_target),
+            "reuse_base_copy": bool(args.reuse_base_copy),
+            "bench_project_name": str(args.bench_project_name),
+            "temp_root": str(args.temp_root),
+        },
         "db": {},
         "bench": {},
         "stages": [],
+        "timings": {},
         "artifacts": {
             "latest_log": str(paths["latest_log"].resolve()),
             "metrics_json": str(paths["metrics_json"].resolve()),
             "report_md": str(paths["report_md"].resolve()),
         },
     }
+    overall_t0 = time.perf_counter()
 
     try:
         _validate_runtime_contract(args)
@@ -1117,9 +1142,19 @@ def run(argv: list[str] | None = None) -> int:
         base_db = Path(args.db_path).expanduser().resolve()
         temp_root = Path(args.temp_root).expanduser().resolve()
         _cleanup_temp_root(temp_root)
-        _prepare_base_sandbox(base_db, source_db)
+        t0 = time.perf_counter()
+        base_copy_performed = _prepare_base_sandbox(
+            base_db,
+            source_db,
+            reuse_existing=bool(args.reuse_base_copy),
+        )
+        report["timings"]["base_copy_sec"] = (
+            round(time.perf_counter() - t0, 3) if base_copy_performed else 0.0
+        )
+        report["timings"]["base_copy_reused"] = not base_copy_performed
 
-        with _working_db_copy(base_db, temp_root) as working_db:
+        with _working_db_copy(base_db, temp_root) as (working_db, working_copy_sec):
+            report["timings"]["working_copy_sec"] = float(working_copy_sec)
             report["db"] = {
                 "source_db": str(source_db),
                 "base_sandbox_db": str(base_db),
@@ -1127,22 +1162,27 @@ def run(argv: list[str] | None = None) -> int:
                 "safety": {
                     "copy_target": bool(args.copy_target),
                     "forbidden_m_path_enforced": True,
+                    "base_copy_reused": bool(report["timings"]["base_copy_reused"]),
                 },
             }
 
             _reset_db_service()
             from app.services.db_service import DBService
 
+            t0 = time.perf_counter()
             DBService.initialize(working_db)
+            report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
             db_service = DBService.get_instance()
 
             with db_service.get_session() as session:
+                t0 = time.perf_counter()
                 bench = _clone_slice_into_bench_project(
                     session,
                     source_project_id=int(args.source_project_id),
                     bench_project_name=str(args.bench_project_name),
                     doc_limit=int(args.doc_limit),
                 )
+                report["timings"]["slice_clone_sec"] = round(time.perf_counter() - t0, 3)
                 report["bench"] = bench
 
             planned_stages: list[str]
@@ -1236,6 +1276,13 @@ def run(argv: list[str] | None = None) -> int:
                 if report["stages"] and all(stage.get("status") == "ok" for stage in report["stages"])
                 else "fail"
             )
+            report["timings"]["pre_stage_overhead_sec"] = round(
+                float(report["timings"].get("base_copy_sec", 0.0))
+                + float(report["timings"].get("working_copy_sec", 0.0))
+                + float(report["timings"].get("db_initialize_sec", 0.0))
+                + float(report["timings"].get("slice_clone_sec", 0.0)),
+                3,
+            )
 
     except Exception as exc:
         report["overall_status"] = "fail"
@@ -1248,6 +1295,7 @@ def run(argv: list[str] | None = None) -> int:
         )
         LOG.exception("Pipeline benchmark failed")
     finally:
+        report["timings"]["overall_wall_sec"] = round(time.perf_counter() - overall_t0, 3)
         try:
             _reset_db_service()
         except Exception:

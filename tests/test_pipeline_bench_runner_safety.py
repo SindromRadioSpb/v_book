@@ -52,3 +52,58 @@ def test_doc_slice_ordering_is_stable() -> None:
     mod = _load_module()
     sliced = mod.deterministic_slice_doc_ids([9, 1, 7, 1, 5, 3], 4)
     assert sliced == [1, 3, 5, 7]
+
+
+def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
+    mod = _load_module()
+    report = {
+        "timestamp_utc": "2026-03-09T04:00:00+00:00",
+        "scenario": "extract_terms",
+        "overall_status": "pass",
+        "config": {"doc_limit": 30},
+        "db": {
+            "base_sandbox_db": "base.db",
+            "source_db": "source.db",
+            "working_db": "working.db",
+        },
+        "bench": {
+            "source_project_id": 1,
+            "source_project_name": "Source",
+            "bench_project_id": 2,
+            "bench_project_name": "Bench",
+            "selected_source_doc_ids": [1, 2, 3],
+        },
+        "stages": [
+            {
+                "name": "extract_terms",
+                "status": "ok",
+                "duration_sec": 12.5,
+                "rows_processed": {"lemma": 10, "term": 5, "sentence": 3},
+                "errors_count": 0,
+            }
+        ],
+        "timings": {
+            "base_copy_sec": 1.1,
+            "working_copy_sec": 2.2,
+            "db_initialize_sec": 0.3,
+            "slice_clone_sec": 4.4,
+            "pre_stage_overhead_sec": 8.0,
+            "overall_wall_sec": 21.1,
+            "base_copy_reused": True,
+        },
+        "artifacts": {
+            "latest_log": "bench.log",
+            "metrics_json": "bench.json",
+            "report_md": "bench.md",
+        },
+    }
+    md_path = tmp_path / "report.md"
+
+    mod._write_markdown_report(report, md_path)
+    text = md_path.read_text(encoding="utf-8")
+
+    assert "## Timing Breakdown" in text
+    assert "Pre-stage overhead total" in text
+    assert "Stage wall total" in text
+    assert "Overall wall total" in text
+    assert "reused existing file" in text

@@ -43,6 +43,7 @@ def test_parser_defaults_for_all_scenario() -> None:
     assert args.lemma_limit == 1000
     assert args.term_limit == 1000
     assert args.sentence_limit == 1000
+    assert args.reuse_base_copy is False
     assert args.temp_root == r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 
 

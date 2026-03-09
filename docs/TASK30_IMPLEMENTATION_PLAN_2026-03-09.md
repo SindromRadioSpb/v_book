@@ -292,27 +292,54 @@ Result:
 
 ### PATCH-08: Pipeline benchmark refresh for chunked extraction
 
-Status: in progress
+Status: implemented on 2026-03-09
 
 Files:
 
-- `scripts/benchmarks/bench_reference_pipeline.py` (verification only if needed)
-- `build/logs/pipeline_bench_*`
-- perf docs / task docs as needed
+- `scripts/benchmarks/bench_reference_pipeline.py`
+- `tests/test_pipeline_bench_runner_safety.py`
+- `tests/test_pipeline_bench_argparse.py`
+- `build/logs/task30/pipeline_bench_*`
+- task docs as needed
 
 Goals:
 
 - Refresh apples-to-apples `extract_terms` benchmarks after chunked staging lands.
 - Separate stage time from harness copy/bootstrap overhead in recorded evidence.
 
-Known evidence so far:
+Result:
+
+- Benchmark harness now records explicit timing breakdown for:
+  - base sandbox copy
+  - working DB copy
+  - DB initialize
+  - bench slice clone
+  - pre-stage overhead total
+  - stage wall total
+  - overall wall total
+- New `--reuse-base-copy` mode allows repeated runs against an existing local
+  sandbox base DB without re-copying the source DB first.
+
+Known evidence:
 
 - On `2026-03-09`, bounded sandbox benchmark against
   `hewiki_gpu_processing test.db` produced:
   - `doc_limit=30`: `extract_terms = 13.960 s`
   - `doc_limit=6000`: `extract_terms = 257.680 s`
+- On `2026-03-09`, refreshed harness evidence with explicit timing breakdown
+  produced:
+  - `doc_limit=1000`, `reuse_base_copy=true`
+  - `working_copy = 295.783 s`
+  - `slice_clone = 91.022 s`
+  - `pre_stage_overhead = 388.572 s`
+  - `extract_terms stage = 164.555 s`
+  - `overall wall = 554.462 s`
 - These figures already confirm the live cost scales with the extraction stage,
-  not only with harness startup overhead.
+  but also that local sandbox-copy overhead is substantial on this machine.
+- Attempted refreshed `doc_limit=6000` runs still exceeded a `1200 s`
+  wall-clock budget on this machine even after reusing the base sandbox copy, so
+  the older successful `257.680 s` stage artifact remains the best completed
+  large-slice reference for `6000` docs.
 
 ## Out of scope for PATCH-01
 
