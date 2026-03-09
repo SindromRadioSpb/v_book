@@ -1,6 +1,6 @@
 """Term Extraction Service (M5 Base + M5.1 Clustering)."""
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -14,6 +14,7 @@ from app.infra.sa_models import (
     NgramComponent,
     DocumentSentence,
     Lemma,
+    LemmaProjectStat,
     SourceDocument,
     SourceCorpus,
     TermCluster,
@@ -170,22 +171,48 @@ class TermExtractionService:
             if not project:
                 raise ValueError(f"Project {project_id} not found")
 
-            # Clear existing if overwrite
-            if overwrite:
-                self._clear_existing_terms(session, project_id)
-
-            # Extract n-grams
+            # Read/compute first, then perform one bounded write phase.
+            ngram_counts = Counter()
+            ngram_doc_freq = Counter()
+            ngram_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
             ngrams_extracted = 0
             if enable_ngrams:
-                ngrams_extracted = self._extract_ngrams(
+                ngram_counts, ngram_doc_freq, ngram_meta = self._collect_ngrams(
                     session, project_id, ngram_ns, min_freq
                 )
 
-            # Extract NP chunks (M5.3)
+            np_counts = Counter()
+            np_doc_freq = Counter()
+            np_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
             np_chunks_extracted = 0
             if include_np:
-                np_chunks_extracted = self._extract_np_chunks(
+                np_counts, np_doc_freq, np_meta = self._collect_np_chunks(
                     session, project_id, np_max_len, min_freq
+                )
+
+            # Clear existing only after read phase succeeded, so overwrite keeps
+            # rollback safety if collection fails on large projects.
+            if overwrite:
+                self._clear_existing_terms(session, project_id)
+
+            if enable_ngrams:
+                ngrams_extracted = self._store_ngrams(
+                    session,
+                    project_id,
+                    ngram_counts=ngram_counts,
+                    ngram_doc_freq=ngram_doc_freq,
+                    ngram_meta=ngram_meta,
+                    min_freq=min_freq,
+                )
+
+            if include_np:
+                np_chunks_extracted = self._store_np_chunks(
+                    session,
+                    project_id,
+                    np_counts=np_counts,
+                    np_doc_freq=np_doc_freq,
+                    np_meta=np_meta,
+                    min_freq=min_freq,
                 )
 
             # Cluster terms
@@ -245,33 +272,39 @@ class TermExtractionService:
         session.flush()
         logger.info(f"Cleared existing terms for project {project_id}")
 
-    def _extract_ngrams(
+    def _iter_processed_doc_ids(self, session: Session, project_id: int) -> Iterable[int]:
+        """Yield processed document ids without materializing the whole project."""
+        stmt = (
+            select(SourceDocument.doc_id)
+            .join(SourceCorpus)
+            .where(
+                and_(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.status == 'processed'
+                )
+            )
+            .order_by(SourceDocument.doc_id.asc())
+        )
+        return session.execute(stmt).scalars()
+
+    def _iter_sentence_texts_for_doc(self, session: Session, doc_id: int) -> Iterable[str]:
+        """Yield sentence texts for one document without ORM object hydration."""
+        stmt = (
+            select(DocumentSentence.text)
+            .where(DocumentSentence.doc_id == doc_id)
+            .order_by(DocumentSentence.sent_index.asc())
+        )
+        return session.execute(stmt).scalars()
+
+    def _collect_ngrams(
         self,
         session: Session,
         project_id: int,
         ngram_ns: Tuple[int, ...],
         min_freq: int
-    ) -> int:
-        """
-        Extract n-grams from processed documents.
-
-        Returns:
-            Number of unique n-grams extracted
-        """
+    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        """Collect n-gram counts from processed documents without writing."""
         logger.info(f"Extracting n-grams (sizes: {ngram_ns})")
-
-        # Get all processed documents for project
-        stmt = select(SourceDocument).join(SourceCorpus).where(
-            and_(
-                SourceCorpus.project_id == project_id,
-                SourceDocument.status == 'processed'
-            )
-        )
-        docs = session.execute(stmt).scalars().all()
-
-        if not docs:
-            logger.warning(f"No processed documents found for project {project_id}")
-            return 0
 
         # Get project to check which engine was used
         project = session.get(DictProject, project_id)
@@ -284,20 +317,16 @@ class TermExtractionService:
         ngram_counts = Counter()
         ngram_doc_freq = Counter()
         ngram_meta = {}  # (surface, n) -> {lemma_phrase, pos_pattern}
+        docs_found = False
 
-        for doc in docs:
-            # Get sentences for document
-            sent_stmt = select(DocumentSentence).where(
-                DocumentSentence.doc_id == doc.doc_id
-            )
-            sentences = session.execute(sent_stmt).scalars().all()
-
+        for doc_id in self._iter_processed_doc_ids(session, project_id):
+            docs_found = True
             # Track ngrams seen in this doc
             doc_ngrams_seen = set()
 
-            for sent in sentences:
+            for sent_text in self._iter_sentence_texts_for_doc(session, doc_id):
                 # Re-parse sentence with NLP to get tokens
-                nlp_sentences = engine.process(sent.text)
+                nlp_sentences = engine.process(sent_text)
 
                 if not nlp_sentences:
                     continue
@@ -335,7 +364,69 @@ class TermExtractionService:
                                 'pos_pattern': ng['pos_pattern'],
                             }
 
-        # Filter by min_freq and store in DB
+        if not docs_found:
+            logger.warning(f"No processed documents found for project {project_id}")
+            return Counter(), Counter(), {}
+
+        return ngram_counts, ngram_doc_freq, ngram_meta
+
+    def _build_lemma_freq_map(
+        self,
+        session: Session,
+        project_id: int,
+        lemma_texts: Set[str],
+    ) -> Dict[str, int]:
+        """Fetch required lemma frequencies once to avoid per-row lookups."""
+        if not lemma_texts:
+            return {}
+
+        stmt = (
+            select(Lemma.lemma_text, LemmaProjectStat.freq_abs)
+            .join(
+                LemmaProjectStat,
+                and_(
+                    LemmaProjectStat.lemma_id == Lemma.lemma_id,
+                    LemmaProjectStat.project_id == Lemma.project_id,
+                ),
+            )
+            .where(
+                Lemma.project_id == project_id,
+                Lemma.lemma_text.in_(sorted(lemma_texts)),
+            )
+        )
+        return {
+            str(lemma_text): int(freq_abs or 0)
+            for lemma_text, freq_abs in session.execute(stmt).all()
+        }
+
+    def _store_ngrams(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        ngram_counts: Counter,
+        ngram_doc_freq: Counter,
+        ngram_meta: Dict[Tuple[str, int], Dict[str, str]],
+        min_freq: int,
+    ) -> int:
+        """Store precomputed n-gram counters in one bounded write phase."""
+        if not ngram_counts:
+            return 0
+
+        bigram_lemma_texts: Set[str] = set()
+        for (surface_text, n), freq in ngram_counts.items():
+            if freq < min_freq:
+                continue
+            meta = ngram_meta.get((surface_text, n)) or {}
+            if n != 2:
+                continue
+            lemmas = str(meta.get('lemma_phrase') or "").split()
+            if len(lemmas) == 2:
+                bigram_lemma_texts.update(lemmas)
+
+        lemma_freq_map = self._build_lemma_freq_map(session, project_id, bigram_lemma_texts)
+        total_tokens = self._get_total_tokens(session, project_id) if bigram_lemma_texts else 1
+
         ngrams_stored = 0
         for (surface_text, n), freq in ngram_counts.items():
             if freq < min_freq:
@@ -368,9 +459,8 @@ class TermExtractionService:
                 lemmas = meta['lemma_phrase'].split()
                 if len(lemmas) == 2:
                     l1, l2 = lemmas
-                    c_x = self._get_lemma_freq(session, project_id, l1)
-                    c_y = self._get_lemma_freq(session, project_id, l2)
-                    total_tokens = self._get_total_tokens(session, project_id)
+                    c_x = lemma_freq_map.get(l1, 1)
+                    c_y = lemma_freq_map.get(l2, 1)
 
                     measures = compute_all_measures(freq, c_x, c_y, total_tokens)
                 else:
@@ -397,33 +487,35 @@ class TermExtractionService:
         logger.info(f"Stored {ngrams_stored} n-grams (min_freq={min_freq})")
         return ngrams_stored
 
-    def _extract_np_chunks(
+    def _extract_ngrams(
+        self,
+        session: Session,
+        project_id: int,
+        ngram_ns: Tuple[int, ...],
+        min_freq: int
+    ) -> int:
+        """Compatibility wrapper for tests/older callers."""
+        ngram_counts, ngram_doc_freq, ngram_meta = self._collect_ngrams(
+            session, project_id, ngram_ns, min_freq
+        )
+        return self._store_ngrams(
+            session,
+            project_id,
+            ngram_counts=ngram_counts,
+            ngram_doc_freq=ngram_doc_freq,
+            ngram_meta=ngram_meta,
+            min_freq=min_freq,
+        )
+
+    def _collect_np_chunks(
         self,
         session: Session,
         project_id: int,
         np_max_len: int,
         min_freq: int
-    ) -> int:
-        """
-        Extract NP chunks from processed documents (M5.3).
-
-        Returns:
-            Number of unique NP chunks extracted
-        """
+    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        """Collect NP chunks from processed documents without writing."""
         logger.info(f"Extracting NP chunks (max_len={np_max_len})")
-
-        # Get all processed documents for project
-        stmt = select(SourceDocument).join(SourceCorpus).where(
-            and_(
-                SourceCorpus.project_id == project_id,
-                SourceDocument.status == 'processed'
-            )
-        )
-        docs = session.execute(stmt).scalars().all()
-
-        if not docs:
-            logger.warning(f"No processed documents found for project {project_id}")
-            return 0
 
         # Get project to check which engine was used
         project = session.get(DictProject, project_id)
@@ -436,20 +528,16 @@ class TermExtractionService:
         np_counts = Counter()
         np_doc_freq = Counter()
         np_meta = {}  # (surface, n) -> {lemma_phrase, pos_pattern}
+        docs_found = False
 
-        for doc in docs:
-            # Get sentences for document
-            sent_stmt = select(DocumentSentence).where(
-                DocumentSentence.doc_id == doc.doc_id
-            )
-            sentences = session.execute(sent_stmt).scalars().all()
-
+        for doc_id in self._iter_processed_doc_ids(session, project_id):
+            docs_found = True
             # Track NPs seen in this doc
             doc_nps_seen = set()
 
-            for sent in sentences:
+            for sent_text in self._iter_sentence_texts_for_doc(session, doc_id):
                 # Re-parse sentence with NLP to get tokens
-                nlp_sentences = engine.process(sent.text)
+                nlp_sentences = engine.process(sent_text)
 
                 if not nlp_sentences:
                     continue
@@ -489,7 +577,26 @@ class TermExtractionService:
                                 'pos_pattern': np['pos_pattern'],
                             }
 
-        # Filter by min_freq and store in DB
+        if not docs_found:
+            logger.warning(f"No processed documents found for project {project_id}")
+            return Counter(), Counter(), {}
+
+        return np_counts, np_doc_freq, np_meta
+
+    def _store_np_chunks(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        np_counts: Counter,
+        np_doc_freq: Counter,
+        np_meta: Dict[Tuple[str, int], Dict[str, str]],
+        min_freq: int,
+    ) -> int:
+        """Store precomputed NP counters in one bounded write phase."""
+        if not np_counts:
+            return 0
+
         nps_stored = 0
         for (surface_text, n), freq in np_counts.items():
             if freq < min_freq:
@@ -533,6 +640,26 @@ class TermExtractionService:
         session.flush()
         logger.info(f"Stored {nps_stored} NP chunks (min_freq={min_freq})")
         return nps_stored
+
+    def _extract_np_chunks(
+        self,
+        session: Session,
+        project_id: int,
+        np_max_len: int,
+        min_freq: int
+    ) -> int:
+        """Compatibility wrapper for tests/older callers."""
+        np_counts, np_doc_freq, np_meta = self._collect_np_chunks(
+            session, project_id, np_max_len, min_freq
+        )
+        return self._store_np_chunks(
+            session,
+            project_id,
+            np_counts=np_counts,
+            np_doc_freq=np_doc_freq,
+            np_meta=np_meta,
+            min_freq=min_freq,
+        )
 
     def _cluster_terms(self, session: Session, project_id: int) -> int:
         """

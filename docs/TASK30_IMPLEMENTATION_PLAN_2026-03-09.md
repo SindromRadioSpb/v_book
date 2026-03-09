@@ -35,10 +35,15 @@ It is intentionally patch-oriented and conservative.
 - `scripts/query_plan_audit.py` no longer reflects the real document picker service path.
 - Some older perf docs are stale compared to current code.
 
-### 3. Large-scale bottleneck is still term extraction aggregation
+### 3. Large-scale bottleneck is term extraction read/materialization pressure
 
-- `lemma_doc_stat` rollup remains the dominant large-project query risk.
-- `collect_queryplan_evidence.py` measured `extract_terms_lemma_rollup` at ~136s on the approved DB.
+- The confirmed live `TermExtractionService` path re-parses processed sentences and
+  previously materialized full processed-document and sentence ORM collections.
+- Bigram association scoring also repeated lemma-frequency lookups inside the
+  n-gram store loop.
+- `collect_queryplan_evidence.py` still captures a heavy diagnostic
+  `lemma_doc_stat` rollup, but that query is not the live caller for the current
+  extraction path.
 
 ### 4. Runtime readiness is inconsistent across feature families
 
@@ -112,37 +117,44 @@ Validation:
 - Result: implemented; refreshed artifacts include schema-aware outputs and
   live-service query-plan capture under `build/logs/task30/`.
 
-### PATCH-03: Large-project query path mitigation
+### PATCH-03: Large-project collect/store mitigation
 
-Status: planned follow-up
+Status: implemented on 2026-03-09
 
 Files:
 
 - `app/services/term_extraction_service.py`
-- `app/infra/migrations/*`
-- `tests/*perf*`
+- `tests/test_term_extraction_service_large_project.py`
 
 Goals:
 
-- Reduce or remove hot-path aggregation over `lemma_doc_stat` where feasible.
-- Introduce indexed/materialized helper strategy if direct query optimization is insufficient.
+- Keep overwrite rollback-safe by deferring destructive clears until the read
+  phase succeeds.
+- Stop materializing full processed-document and sentence ORM collections during
+  extraction.
+- Collapse repeated per-row lemma frequency lookups into one bounded prefetch for
+  bigram scoring.
 
 Current note:
 
-- The confirmed live `TermExtractionService` path in the current repo re-parses
-  processed sentences and does not directly execute the diagnostic
-  `lemma_doc_stat` rollup query collected in the evidence pack.
-- Do not land a production perf rewrite here until the caller and desired
-  replacement path are re-confirmed against the real extraction workflow.
+- This patch does not yet rewrite `_cluster_terms()` into a streaming path and
+  does not introduce new schema objects or migrations.
+- Materialized helper tables remain a separate follow-up only if real extraction
+  evidence still demands it after the bounded collect/store cleanup.
 
 Expected effect:
 
-- Significant reduction in term extraction tail latency on reference-scale projects.
+- Lower peak memory pressure during extraction on reference-scale projects.
+- Fewer repeated DB round-trips while storing scored bigrams.
+- Safer overwrite semantics if read/parse fails mid-run.
 
 Validation:
 
-- Query-plan evidence and bounded timing probes on the approved DB.
-- Regression tests for determinism and WAL safety.
+- New targeted tests for deferred overwrite ordering and a minimal
+  end-to-end extraction pipeline.
+- Non-destructive helper/collect probes on the approved DB.
+- Result: implemented; extraction now collects first, clears second, then stores
+  in one bounded write phase using lazy document/sentence iteration.
 
 ### PATCH-04: Readiness and health semantics cleanup
 
@@ -197,5 +209,9 @@ python scripts\collect_queryplan_evidence.py --db-path "J:\Project_Vibe\V_book\r
 - Translate Text dialog no longer force-terminates worker threads.
 - Query-plan/perf artifacts record approved DB identity more explicitly.
 - MT health no longer reports disabled providers as configured/active.
+- Term extraction no longer clears existing terms before the collect phase succeeds.
+- Term extraction no longer materializes full processed-document and sentence ORM
+  collections during extraction.
 - New targeted tests cover lifecycle and stale-result behavior.
+- New targeted tests cover bounded term extraction ordering and minimal pipeline behavior.
 - Existing touched-path regressions pass on local temp-root-safe pytest runs.
