@@ -86,9 +86,9 @@ Resume contract:
 - closing the Terms view requests cooperative extraction cancel instead of
   force-terminating the worker
 
-## Implemented convergence follow-up (2026-03-09)
+## Implemented convergence follow-ups (2026-03-09)
 
-First Terms/NLP convergence wave is now implemented.
+Two Terms/NLP convergence waves are now implemented.
 
 Delivered:
 
@@ -110,6 +110,22 @@ Delivered:
 - Terms progress dialog now consumes structured state for recent-activity
   logging, matching the NLP dialog pattern more closely
 
+Second wave delivered:
+
+- NLP and Terms now share one reusable staged-progress dialog foundation in
+  `app/ui/dialogs/staged_operation_progress_dialog.py`
+- the shared base owns:
+  - layout
+  - structured state rendering
+  - bounded recent-activity log
+  - elapsed/idle heartbeat
+  - pause/resume/cancel button lifecycle
+  - cooperative close behavior
+- operation-specific wording still lives in the NLP and Terms dialog wrappers,
+  so the visible UX stays stable while code drift is reduced
+- direct Qt dialog regressions now cover the real dialog classes, not only the
+  surrounding view wiring
+
 Validation:
 
 - targeted convergence regressions:
@@ -123,6 +139,16 @@ Validation:
     - no empty `phase` values remained
     - final completed state carried the aligned run metadata fields
     - cleanup deleted the temporary project successfully
+- targeted shared-dialog regressions:
+  - `28 passed in 93.79s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_shared_dialog.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_terms_nlp_shared_dialog.log`
+  - result: `OK`
+- approved DB app-open smoke:
+  - artifact:
+    `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
+  - confirmed `db_open ok` on the approved `hewiki_gpu_processing test.db`
 
 ## Bench evidence on approved DB
 
@@ -318,7 +344,6 @@ Further implementation plan for extract terms:
   `extract_terms` micro-optimization
 - the next meaningful production-scale extract-terms change should be tied to
   the future NLP checkpoint plan:
-  - align run-state vocabulary and progress UI semantics across NLP and terms
   - evaluate persisting token/POS snapshots during NLP processing to remove
     sentence re-parse from term extraction
 - until that convergence work is funded, the current staged extractor is the
@@ -328,17 +353,14 @@ Further implementation plan for extract terms:
 
 ### Follow-up A: NLP convergence and shared long-operation contract
 
-- keep the current Terms staged progress flow stable; the first semantic
-  alignment wave is now done
-- when checkpointed `process with NLP` lands, align:
-  - run-state vocabulary
-  - stage names
-  - progress payload fields
-  - pause/resume/cancel semantics
-  - cooperative close behavior
-- the remaining convergence question is now narrower:
-  decide later whether a shared reusable progress-dialog base is actually
-  warranted across NLP and Terms, or whether aligned semantics are sufficient
+- keep the shared staged dialog contract stable; the main UI convergence work is
+  now done
+- if a future divergence appears, prefer tightening shared helper methods or
+  structured state fields before introducing a second parallel dialog logic path
+- the next meaningful cross-feature convergence is no longer dialog reuse;
+  it is data-path reuse:
+  decide later whether NLP token/POS snapshots can replace sentence re-parse
+  inside term extraction
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 

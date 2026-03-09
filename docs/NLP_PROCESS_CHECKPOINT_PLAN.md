@@ -577,6 +577,47 @@ Validation:
     - no empty `phase` remained in the state stream
     - final completed term-extraction state carried the aligned metadata fields
 
+### PATCH-CONV-02: shared staged progress dialog foundation
+
+Status:
+
+- implemented on 2026-03-09
+
+Files:
+
+- `app/ui/dialogs/staged_operation_progress_dialog.py`
+- `app/ui/dialogs/nlp_process_progress_dialog.py`
+- `app/ui/dialogs/term_extraction_progress_dialog.py`
+- `tests/test_staged_operation_progress_dialogs.py`
+- docs
+
+Delivered in this wave:
+
+- NLP and Terms now share one staged-progress dialog foundation for:
+  - common layout
+  - structured state rendering
+  - bounded activity log
+  - heartbeat / elapsed / idle labels
+  - pause/resume/cancel button lifecycle
+  - cooperative close behavior
+- operation-specific wording remains local to each dialog class, so user-visible
+  text stays stable while the duplicated implementation is removed
+- direct Qt dialog regressions now cover the real dialog classes instead of
+  relying only on `DocumentsView` / `TermsView` wiring tests
+
+Validation:
+
+- targeted dialog/shared-base regressions:
+  - `28 passed in 93.79s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_shared_dialog.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_terms_nlp_shared_dialog.log`
+  - result: `OK`
+- approved DB app-open smoke:
+  - artifact:
+    `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
+  - confirmed `db_open ok` on the approved `hewiki_gpu_processing test.db`
+
 ## Non-negotiable invariants
 
 - reference corpora remain CLI-only for real NLP processing
@@ -592,6 +633,6 @@ Validation:
 
 When the NLP plan is implemented, the next convergence step for term extraction is:
 
-- align run-state vocabulary and progress dialog semantics between NLP and terms
+- keep the shared staged dialog contract stable across NLP and terms
 - then evaluate whether token/POS snapshots from NLP can replace sentence re-parse
   inside `TermExtractionService`

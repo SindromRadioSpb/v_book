@@ -973,3 +973,41 @@ Validation:
     - `saw_empty_phase=false`
     - completed state carried the aligned metadata fields
     - cleanup removed the temporary probe project
+
+## PATCH-CONV-02 implemented (2026-03-09)
+
+Files:
+
+- `app/ui/dialogs/staged_operation_progress_dialog.py`
+- `app/ui/dialogs/nlp_process_progress_dialog.py`
+- `app/ui/dialogs/term_extraction_progress_dialog.py`
+- `tests/test_staged_operation_progress_dialogs.py`
+- convergence/task docs as needed
+
+Result:
+
+- NLP and Terms staged long-operation dialogs now share one reusable base
+  implementation for:
+  - layout
+  - structured state rendering
+  - activity log
+  - heartbeat labels
+  - pause/resume/cancel lifecycle
+  - cooperative close behavior
+- operation-specific wording remains local to the NLP and Terms wrappers, so the
+  visible UX remains stable while duplicated dialog logic is removed
+- direct Qt regressions now cover the real dialog classes, not only the parent
+  view wiring
+
+Validation:
+
+- targeted shared-dialog regressions:
+  - `28 passed in 93.79s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_shared_dialog.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_terms_nlp_shared_dialog.log`
+  - result: `OK`
+- approved DB app-open smoke:
+  - artifact:
+    `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
+  - confirmed `db_open ok` on the approved DB
