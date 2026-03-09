@@ -19,6 +19,7 @@ from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+from app.ui.dialogs.term_extraction_progress_dialog import TermExtractionProgressDialog
 from app.ui.dialogs import show_batch_translate_dialog
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
@@ -54,6 +55,7 @@ class TermsView(QWidget):
         self.audio_playback_service = AudioPlaybackService()
         self.settings = SettingsService.get_instance()
         self.extract_worker = None
+        self.extract_progress_dialog: Optional[TermExtractionProgressDialog] = None
         self.translation_worker: Optional[TranslationResolveWorker] = None
         self.batch_translate_worker: Optional[BatchTranslateWorker] = None
         self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
@@ -955,14 +957,69 @@ class TermsView(QWidget):
         )
 
         self.extract_worker.progress.connect(self.on_extract_progress)
+        self.extract_worker.state_changed.connect(self.on_extract_state)
         self.extract_worker.finished.connect(self.on_extract_finished)
         self.extract_worker.error.connect(self.on_extract_error)
+        self.extract_progress_dialog = TermExtractionProgressDialog(parent=self, total_docs=0)
+        self.extract_progress_dialog.cancel_requested.connect(self.extract_worker.cancel)
+        self.extract_progress_dialog.pause_requested.connect(self.extract_worker.pause)
+        self.extract_progress_dialog.resume_requested.connect(self.extract_worker.resume)
+        self.extract_progress_dialog.show()
 
         self.extract_worker.start()
 
     def on_extract_progress(self, message: str):
         """Handle extraction progress updates."""
         self.status_label.setText(message)
+        if self.extract_progress_dialog:
+            self.extract_progress_dialog.append_activity(message)
+
+    def on_extract_state(self, state: dict):
+        """Handle structured extraction progress state."""
+        docs_total = max(0, int(state.get("docs_total") or 0))
+        docs_processed = max(0, int(state.get("docs_processed") or 0))
+        stage = str(state.get("stage") or state.get("message") or "Extracting terms...")
+
+        self.progress_bar.setVisible(True)
+        if docs_total > 0:
+            self.progress_bar.setRange(0, docs_total)
+            self.progress_bar.setValue(min(docs_processed, docs_total))
+        else:
+            self.progress_bar.setRange(0, 0)
+        self.status_label.setText(stage)
+
+        if self.extract_progress_dialog:
+            self.extract_progress_dialog.update_state(state)
+
+    def _finish_extract_dialog(self, *, accepted: bool, failed_message: Optional[str] = None) -> None:
+        dialog = self.extract_progress_dialog
+        if not dialog:
+            return
+        if failed_message:
+            dialog.set_failed(failed_message)
+            dialog.reject()
+        elif accepted:
+            dialog.accept()
+        else:
+            dialog.reject()
+        dialog.deleteLater()
+        self.extract_progress_dialog = None
+
+    def _cleanup_extract_worker(self) -> None:
+        if self.extract_worker:
+            self.extract_worker.deleteLater()
+            self.extract_worker = None
+
+    def _stop_extract_worker(self) -> None:
+        if self.extract_worker and self.extract_worker.isRunning():
+            logger.info("Stopping term extraction worker on close")
+            if self.extract_progress_dialog:
+                self.extract_progress_dialog.append_activity(
+                    "View is closing; cancellation requested."
+                )
+            self.extract_worker.cancel()
+            if not self.extract_worker.wait(100):
+                logger.info("Term extraction worker will finish cooperatively after close")
 
     def on_extract_finished(self, report):
         """Handle extraction completion."""
@@ -972,12 +1029,11 @@ class TermsView(QWidget):
         self.extract_btn.setEnabled(True)
         self.refresh_btn.setEnabled(True)
 
-        # Clean up worker properly
-        if self.extract_worker:
-            self.extract_worker.deleteLater()
-            self.extract_worker = None
-
         if report.success:
+            self.status_label.setText("Extraction complete")
+            if self.extract_progress_dialog:
+                self.extract_progress_dialog.set_completed()
+            self._finish_extract_dialog(accepted=True)
             msg = f"Term extraction successful!\n\n"
             msg += f"N-grams: {report.ngrams_extracted}\n"
             msg += f"NP chunks: {report.np_chunks_extracted}\n"
@@ -987,6 +1043,9 @@ class TermsView(QWidget):
             self.perform_search()
         elif getattr(report, "cancelled", False):
             self.status_label.setText("Extraction cancelled")
+            if self.extract_progress_dialog:
+                self.extract_progress_dialog.set_cancelled()
+            self._finish_extract_dialog(accepted=True)
             msg = (
                 "Term extraction was cancelled.\n\n"
                 f"Processed docs: {int(getattr(report, 'docs_processed', 0))} / "
@@ -995,7 +1054,14 @@ class TermsView(QWidget):
             )
             show_info(self, "Extraction Cancelled", msg)
         else:
+            self.status_label.setText("Extraction failed")
+            self._finish_extract_dialog(
+                accepted=False,
+                failed_message=str(getattr(report, "error_message", "") or "Unknown extraction error"),
+            )
             show_error(self, "Extraction Failed", report.error_message)
+
+        self._cleanup_extract_worker()
 
     def on_extract_error(self, error_msg: str):
         """Handle extraction error."""
@@ -1004,11 +1070,10 @@ class TermsView(QWidget):
         # Re-enable UI
         self.extract_btn.setEnabled(True)
         self.refresh_btn.setEnabled(True)
+        self.status_label.setText("Extraction failed")
 
-        # Clean up worker properly
-        if self.extract_worker:
-            self.extract_worker.deleteLater()
-            self.extract_worker = None
+        self._finish_extract_dialog(accepted=False, failed_message=error_msg)
+        self._cleanup_extract_worker()
 
         show_error(self, "Error", error_msg)
 
@@ -2157,12 +2222,7 @@ class TermsView(QWidget):
                 logger.info("Terms translation worker will finish cooperatively after close")
 
         # Stop extraction worker
-        if self.extract_worker and self.extract_worker.isRunning():
-            logger.info("Stopping term extraction worker on close")
-            self.extract_worker.quit()
-            self.extract_worker.wait(1000)  # Wait up to 1 second
-            if self.extract_worker.isRunning():
-                self.extract_worker.terminate()
+        self._stop_extract_worker()
 
         # Save header state (column order, widths, sort)
         self.table_layout_controller.save_now()

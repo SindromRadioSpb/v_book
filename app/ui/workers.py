@@ -260,6 +260,7 @@ class ProjectTermExtractionWorker(QThread):
     finished = pyqtSignal(object)  # ExtractReport
     error = pyqtSignal(str)
     progress = pyqtSignal(str)  # Progress message
+    state_changed = pyqtSignal(object)  # Structured extraction progress state
 
     def __init__(
         self,
@@ -315,6 +316,7 @@ class ProjectTermExtractionWorker(QThread):
                     np_max_len=self.np_max_len,
                     overwrite=self.overwrite,
                     progress_callback=lambda message: self.progress.emit(message),
+                    state_callback=lambda state: self.state_changed.emit(state),
                     cancel_check=lambda: self._cancel_requested,
                     pause_check=lambda: self._pause_requested,
                 )

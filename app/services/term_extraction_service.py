@@ -153,6 +153,7 @@ class TermExtractionService:
         overwrite: bool = True,
         batch_size: int = 200,
         progress_callback: Optional[Callable[[str], None]] = None,
+        state_callback: Optional[Callable[[dict], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         pause_check: Optional[Callable[[], bool]] = None,
         resume_latest: bool = True,
@@ -171,6 +172,7 @@ class TermExtractionService:
             overwrite: Clear existing ngrams before extraction
             batch_size: Number of processed docs to stage per commit
             progress_callback: Optional human-readable progress callback
+            state_callback: Optional structured progress callback
             cancel_check: Optional cooperative cancel callback
             pause_check: Optional cooperative pause callback
             resume_latest: Resume latest matching staged run when possible
@@ -204,6 +206,7 @@ class TermExtractionService:
             overwrite=overwrite,
             batch_size=batch_size,
             progress_callback=progress_callback,
+            state_callback=state_callback,
             cancel_check=cancel_check,
             pause_check=pause_check,
             resume_latest=resume_latest,
@@ -325,20 +328,76 @@ class TermExtractionService:
         overwrite: bool,
         batch_size: int,
         progress_callback: Optional[Callable[[str], None]],
+        state_callback: Optional[Callable[[dict], None]],
         cancel_check: Optional[Callable[[], bool]],
         pause_check: Optional[Callable[[], bool]],
         resume_latest: bool,
     ) -> ExtractReport:
         """Chunked staged extractor for large projects."""
 
-        def _emit(message: str) -> None:
-            logger.info(message)
-            if progress_callback:
-                progress_callback(message)
-
         run_id: Optional[int] = None
         total_docs = 0
         docs_processed = 0
+        run: Optional[TermExtractRun] = None
+
+        def _emit(
+            message: str,
+            *,
+            stage: Optional[str] = None,
+            phase: Optional[str] = None,
+            docs_done: Optional[int] = None,
+            docs_hint: Optional[int] = None,
+            chunks_done: Optional[int] = None,
+            chunks_hint: Optional[int] = None,
+            last_doc_id: Optional[int] = None,
+        ) -> None:
+            logger.info(message)
+            if progress_callback:
+                progress_callback(message)
+            if state_callback:
+                state_callback(
+                    {
+                        "message": message,
+                        "stage": stage or message,
+                        "phase": phase or "",
+                        "run_id": int(run_id) if run_id is not None else None,
+                        "docs_processed": int(
+                            docs_done
+                            if docs_done is not None
+                            else (
+                                int(getattr(run, "docs_processed", 0) or 0)
+                                if run is not None else docs_processed
+                            )
+                        ),
+                        "docs_total": int(
+                            docs_hint
+                            if docs_hint is not None
+                            else (
+                                int(getattr(run, "docs_total", 0) or 0)
+                                if run is not None else total_docs
+                            )
+                        ),
+                        "chunks_completed": int(
+                            chunks_done
+                            if chunks_done is not None
+                            else int(getattr(run, "chunks_completed", 0) or 0)
+                        ),
+                        "chunks_total": int(
+                            chunks_hint
+                            if chunks_hint is not None
+                            else int(getattr(run, "chunks_total", 0) or 0)
+                        ),
+                        "last_doc_id": (
+                            int(last_doc_id)
+                            if last_doc_id is not None
+                            else (
+                                int(getattr(run, "last_doc_id", 0))
+                                if run is not None and getattr(run, "last_doc_id", None) is not None
+                                else None
+                            )
+                        ),
+                    }
+                )
 
         try:
             project = session.get(DictProject, project_id)
@@ -348,7 +407,6 @@ class TermExtractionService:
             batch_size = max(1, int(batch_size or 1))
             total_docs = self._count_processed_docs(session, project_id)
 
-            run = None
             if resume_latest:
                 run = self._find_resumable_term_extract_run(
                     session,
@@ -385,7 +443,16 @@ class TermExtractionService:
                     docs_total=total_docs,
                     batch_size=batch_size,
                 )
-                _emit(f"Created term extraction run {run.run_id} for {total_docs} docs")
+                run_id = int(run.run_id)
+                _emit(
+                    f"Created term extraction run {run.run_id} for {total_docs} docs",
+                    stage="Preparing staged extraction",
+                    phase="prepare",
+                    docs_done=0,
+                    docs_hint=total_docs,
+                    chunks_done=0,
+                    chunks_hint=int(run.chunks_total or 0),
+                )
             else:
                 run.docs_total = int(total_docs)
                 run.chunks_total = self._estimate_term_extract_chunks(total_docs, batch_size)
@@ -394,9 +461,20 @@ class TermExtractionService:
                 run.error_message = None
                 run.updated_at = self._utc_now()
                 session.commit()
+                run_id = int(run.run_id)
                 _emit(
                     f"Resuming term extraction run {run.run_id} "
-                    f"at doc {int(run.docs_processed or 0)}/{int(run.docs_total or 0)}"
+                    f"at doc {int(run.docs_processed or 0)}/{int(run.docs_total or 0)}",
+                    stage="Resuming staged extraction",
+                    phase="prepare",
+                    docs_done=int(run.docs_processed or 0),
+                    docs_hint=int(run.docs_total or 0),
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=(
+                        int(run.last_doc_id)
+                        if run.last_doc_id is not None else None
+                    ),
                 )
 
             run_id = int(run.run_id)
@@ -415,6 +493,15 @@ class TermExtractionService:
                 run.finished_at = self._utc_now()
                 run.updated_at = run.finished_at
                 session.commit()
+                _emit(
+                    "No processed docs found; staged extraction completed immediately",
+                    stage="Completed",
+                    phase="completed",
+                    docs_done=0,
+                    docs_hint=0,
+                    chunks_done=0,
+                    chunks_hint=0,
+                )
                 return ExtractReport(
                     project_id=project_id,
                     ngrams_extracted=0,
@@ -436,10 +523,33 @@ class TermExtractionService:
             if run.status not in ("staged", "finalizing") and int(run.docs_processed or 0) < total_docs:
                 _emit(
                     f"Collecting staged counters for run {run_id}: "
-                    f"{docs_processed}/{total_docs} docs complete"
+                    f"{docs_processed}/{total_docs} docs complete",
+                    stage="Collecting staged counters",
+                    phase="collect",
+                    docs_done=docs_processed,
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=(
+                        int(run.last_doc_id)
+                        if run.last_doc_id is not None else None
+                    ),
                 )
                 while True:
                     if self._wait_if_paused(pause_check=pause_check, cancel_check=cancel_check):
+                        _emit(
+                            "Cancellation requested; keeping staged progress for resume",
+                            stage="Cancelled",
+                            phase="cancelled",
+                            docs_done=int(run.docs_processed or 0),
+                            docs_hint=total_docs,
+                            chunks_done=int(run.chunks_completed or 0),
+                            chunks_hint=int(run.chunks_total or 0),
+                            last_doc_id=(
+                                int(run.last_doc_id)
+                                if run.last_doc_id is not None else None
+                            ),
+                        )
                         return self._cancel_term_extract_run(
                             session,
                             run_id=run_id,
@@ -461,7 +571,14 @@ class TermExtractionService:
                     batch_total = self._estimate_term_extract_chunks(total_docs, batch_size)
                     _emit(
                         f"Collecting batch {batch_no}/{batch_total} "
-                        f"({len(doc_batch)} docs, up to doc {doc_batch[-1]})"
+                        f"({len(doc_batch)} docs, up to doc {doc_batch[-1]})",
+                        stage=f"Collecting batch {batch_no}/{batch_total}",
+                        phase="collect",
+                        docs_done=int(run.docs_processed or 0),
+                        docs_hint=total_docs,
+                        chunks_done=int(run.chunks_completed or 0),
+                        chunks_hint=batch_total,
+                        last_doc_id=int(doc_batch[-1]),
                     )
 
                     if enable_ngrams:
@@ -509,13 +626,43 @@ class TermExtractionService:
                     run.updated_at = self._utc_now()
                     session.commit()
                     docs_processed = int(run.docs_processed or 0)
+                    _emit(
+                        f"Staged {docs_processed}/{total_docs} docs for run {run_id}",
+                        stage=run.stage,
+                        phase="collect",
+                        docs_done=docs_processed,
+                        docs_hint=total_docs,
+                        chunks_done=int(run.chunks_completed or 0),
+                        chunks_hint=batch_total,
+                        last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                    )
 
                 run.status = "staged"
                 run.stage = "Staged counters ready"
                 run.updated_at = self._utc_now()
                 session.commit()
+                _emit(
+                    f"Staged counters are ready for run {run_id}",
+                    stage=run.stage,
+                    phase="staged",
+                    docs_done=int(run.docs_processed or 0),
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                )
 
             if cancel_check and cancel_check():
+                _emit(
+                    "Cancellation requested; staged progress saved before finalization",
+                    stage="Cancelled",
+                    phase="cancelled",
+                    docs_done=int(run.docs_processed or 0),
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                )
                 return self._cancel_term_extract_run(
                     session,
                     run_id=run_id,
@@ -531,7 +678,14 @@ class TermExtractionService:
 
             _emit(
                 "Finalizing staged counters into term tables "
-                "(cancel is deferred until finalization completes)"
+                "(cancel is deferred until finalization completes)",
+                stage="Finalizing staged counters",
+                phase="finalize",
+                docs_done=total_docs,
+                docs_hint=total_docs,
+                chunks_done=int(run.chunks_completed or 0),
+                chunks_hint=int(run.chunks_total or 0),
+                last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
             )
 
             self._clear_existing_terms(session, project_id)
@@ -577,7 +731,14 @@ class TermExtractionService:
 
             _emit(
                 f"Chunked term extraction complete: {ngrams_extracted} ngrams, "
-                f"{np_chunks_extracted} NP chunks, {clusters_created} clusters"
+                f"{np_chunks_extracted} NP chunks, {clusters_created} clusters",
+                stage="Completed",
+                phase="completed",
+                docs_done=int(run.docs_processed or 0),
+                docs_hint=total_docs,
+                chunks_done=int(run.chunks_completed or 0),
+                chunks_hint=int(run.chunks_total or 0),
+                last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
             )
 
             return ExtractReport(

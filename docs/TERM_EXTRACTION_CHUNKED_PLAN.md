@@ -74,9 +74,17 @@ Resume contract:
 ## Current UI behavior
 
 - Terms extraction remains worker-threaded
-- status text now receives stage messages from the chunked service
 - Terms confirmation dialog explicitly states that extraction is resumable
+- Terms now opens a dedicated staged-progress dialog with:
+  - doc progress bar
+  - chunk counters
+  - run id and last processed doc id
+  - recent activity log
+  - pause/resume/cancel controls
+- inline Terms status text still receives stage messages from the chunked service
 - if a staged run is cancelled, re-running extraction resumes it
+- closing the Terms view requests cooperative extraction cancel instead of
+  force-terminating the worker
 
 ## Bench evidence on approved DB
 

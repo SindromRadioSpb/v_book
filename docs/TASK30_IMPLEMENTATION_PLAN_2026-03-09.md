@@ -264,13 +264,14 @@ Validation:
 
 ### PATCH-07: Term extraction UI/worker progress integration
 
-Status: planned follow-up
+Status: implemented on 2026-03-09
 
 Files:
 
 - `app/ui/workers.py`
 - `app/ui/terms_view.py`
-- optional progress-dialog support files
+- `app/ui/dialogs/term_extraction_progress_dialog.py`
+- `tests/test_terms_extract_progress_ui.py`
 
 Goals:
 
@@ -278,11 +279,16 @@ Goals:
 - Add cooperative cancel/resume controls wired to the staged collect phase.
 - Keep Terms view responsive without relying on an indeterminate progress bar only.
 
-Current note:
+Result:
 
-- Backend chunking/resume is implemented first because it changes correctness and
-  large-project safety.
-- UI control wiring remains a follow-up so this patch series stays bounded.
+- Terms extraction now opens a dedicated staged-progress dialog with doc progress,
+  chunk counters, run id, last processed doc id, recent activity log, and
+  pause/resume/cancel controls.
+- `ProjectTermExtractionWorker` now emits structured extraction state in addition
+  to human-readable activity messages.
+- `TermsView.closeEvent()` no longer force-terminates extraction threads; it
+  requests cooperative cancel and lets the worker finish safely after the current
+  checkpoint if needed.
 
 ### PATCH-08: Pipeline benchmark refresh for chunked extraction
 
