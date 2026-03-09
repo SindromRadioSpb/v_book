@@ -311,12 +311,14 @@ Requirements:
 
 Status:
 
-- pending
+- implemented on 2026-03-09
 
 Files:
 
 - `app/services/process_service.py`
 - `scripts/process_reference_corpus.py`
+- `tests/test_process_batch_run_state.py`
+- `tests/test_reference_processing_guard.py`
 
 Requirements:
 
@@ -326,6 +328,55 @@ Requirements:
 - keep safe checkpoint boundaries at end-of-document or end-of-chunk only
 - add deterministic CLI resume flow for the new run state, but keep reference
   processing CLI-only
+
+Delivered in this wave:
+
+- `ProcessService.process_documents_batch()` now creates or resumes a batch-level
+  `processor_run` row instead of relying on transient loop counters only
+- structured `NLPProcessRunState` payloads are emitted for:
+  - `started`
+  - `resumed`
+  - `processing`
+  - `chunk_complete`
+  - `paused`
+  - `cancelled`
+  - `completed`
+- the batch run contract is now gated by:
+  - `params_hash`
+  - `source_label`
+  - `is_reprocess`
+  - full deterministic `doc_id ASC` slice identity via `doc_ids_hash`
+  - `doc_count`
+  - `first_doc_id`
+  - `last_doc_id`
+- resume keeps the original chunk contract from the persisted batch note, even
+  if the operator reruns the CLI with a different `--chunk-size`
+- `scripts/process_reference_corpus.py` now supports `--resume-latest` and
+  routes reference-scale processing through the batch run-state path
+- CLI logging is now stage-aware and throttled by run/chunk state instead of
+  emitting one free-form line per chunk loop iteration
+
+Validation:
+
+- targeted regressions:
+  - `34 passed in 121.83s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch02_final_candidate.log`
+- approved DB live resume proof:
+  - setup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_setup.log`
+  - resume artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_run.log`
+  - postcheck/cleanup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_postcheck.log`
+  - confirmed on `2026-03-09` against the approved
+    `hewiki_gpu_processing test.db`:
+    - initial controlled run created `run_id=387620`
+      with `status='cancelled'`, `docs_processed=1`, `chunks_completed=1`
+    - CLI `--resume-latest` reused the same `run_id=387620`
+    - the resumed run preserved the original chunk contract:
+      `chunks_total=2`, `chunks_completed=2`
+      even though the CLI rerun used the default `--chunk-size 50`
+    - cleanup removed all temporary `BENCH_NLP_CLI_%` projects afterward
 
 ### PATCH-NLP-03: regular-project progress UI
 
@@ -355,14 +406,18 @@ Status:
 Files:
 
 - `scripts/process_reference_corpus.py`
+- `app/services/process_service.py`
 - docs
 - tests
 
 Requirements:
 
-- add `--resume-run-id` or equivalent resume selection
-- add `--verify-only` / contract-check mode
-- refuse resume when `params_hash` or source identity changed
+- keep the implemented `--resume-latest` flow deterministic under explicit
+  operator selection
+- add `--resume-run-id` or equivalent explicit resume selection when multiple
+  incomplete runs exist
+- add `--verify-only` / contract-check mode for CLI preflight without writing
+- refuse explicit resume when `params_hash` or stored source identity changed
 - validate this behavior with temporary DB fixtures or controlled sandbox slices,
   not only against the already-processed approved DB
 

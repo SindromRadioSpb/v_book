@@ -1,11 +1,14 @@
 """Document processing service."""
+from dataclasses import asdict
 import inspect
 import logging
 import json
 import hashlib
+import math
+import time
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, text, update
@@ -21,6 +24,7 @@ from app.infra.sa_models import (
     RunError,
     DictProject,
 )
+from app.domain.dto import NLPProcessRunState
 from app.infra.nlp_engines.base import NLPEngine
 from app.infra.nlp_engines.stanza_engine import create_stanza_engine
 from app.domain.preprocessing import preprocess_text
@@ -90,6 +94,164 @@ class ProcessService:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
+    @staticmethod
+    def _build_doc_ids_hash(doc_ids: List[int]) -> str:
+        encoded = json.dumps([int(doc_id) for doc_id in doc_ids], separators=(",", ":")).encode(
+            "utf-8"
+        )
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    def _build_run_state_payload(
+        self,
+        run: ProcessorRun,
+        *,
+        phase: str,
+        message: Optional[str] = None,
+        doc_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        payload = asdict(
+            NLPProcessRunState(
+                run_id=int(run.run_id),
+                project_id=int(run.project_id),
+                status=str(run.status),
+                stage=run.stage,
+                docs_total=int(run.docs_total or 0),
+                docs_processed=int(run.docs_processed or 0),
+                docs_failed=int(run.docs_failed or 0),
+                chunks_total=int(run.chunks_total or 0),
+                chunks_completed=int(run.chunks_completed or 0),
+                last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                params_hash=run.params_hash,
+                error_message=run.error_message,
+            )
+        )
+        payload["phase"] = phase
+        if message is not None:
+            payload["message"] = message
+        if doc_name is not None:
+            payload["doc_name"] = doc_name
+        return payload
+
+    def _emit_run_state(
+        self,
+        state_callback: Optional[Callable[[dict[str, Any]], None]],
+        run: ProcessorRun,
+        *,
+        phase: str,
+        message: Optional[str] = None,
+        doc_name: Optional[str] = None,
+    ) -> None:
+        if state_callback is None:
+            return
+        state_callback(
+            self._build_run_state_payload(
+                run,
+                phase=phase,
+                message=message,
+                doc_name=doc_name,
+            )
+        )
+
+    @staticmethod
+    def _build_batch_run_note(
+        *,
+        doc_ids: List[int],
+        chunk_size: int,
+        source_label: str,
+        is_reprocess: bool,
+    ) -> str:
+        note = {
+            "kind": "batch_nlp",
+            "source": source_label,
+            "chunk_size": int(chunk_size),
+            "doc_count": len(doc_ids),
+            "first_doc_id": int(doc_ids[0]),
+            "last_doc_id": int(doc_ids[-1]),
+            "doc_ids_hash": ProcessService._build_doc_ids_hash(doc_ids),
+            "is_reprocess": bool(is_reprocess),
+        }
+        return json.dumps(note, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _parse_batch_run_note(note: Optional[str]) -> dict[str, Any]:
+        if not note:
+            return {}
+        try:
+            payload = json.loads(note)
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _find_batch_run_candidate(
+        self,
+        session: Session,
+        *,
+        project_id: int,
+        params_hash: str,
+        doc_ids: List[int],
+        source_label: str,
+        is_reprocess: bool,
+    ) -> Optional[ProcessorRun]:
+        candidates = (
+            session.query(ProcessorRun)
+            .filter(
+                ProcessorRun.project_id == project_id,
+                ProcessorRun.params_hash == params_hash,
+                ProcessorRun.status.in_(("running", "paused", "cancelled", "failed")),
+            )
+            .order_by(ProcessorRun.run_id.desc())
+            .limit(20)
+            .all()
+        )
+        for run in candidates:
+            note = self._parse_batch_run_note(run.note)
+            if note.get("kind") != "batch_nlp":
+                continue
+            if note.get("source") != source_label:
+                continue
+            if bool(note.get("is_reprocess")) != bool(is_reprocess):
+                continue
+            if int(note.get("doc_count") or 0) != len(doc_ids):
+                continue
+            if int(note.get("first_doc_id") or 0) != int(doc_ids[0]):
+                continue
+            if int(note.get("last_doc_id") or 0) != int(doc_ids[-1]):
+                continue
+            if str(note.get("doc_ids_hash") or "") != self._build_doc_ids_hash(doc_ids):
+                continue
+            if int((run.docs_processed or 0) + (run.docs_failed or 0)) >= int(run.docs_total or 0):
+                continue
+            return run
+        return None
+
+    def _resolve_project_id_for_docs(self, session: Session, doc_ids: List[int]) -> int:
+        doc = session.get(SourceDocument, int(doc_ids[0]))
+        if doc is None:
+            raise ValueError(f"Document {doc_ids[0]} not found")
+
+        from app.infra.sa_models import SourceCorpus
+
+        corpus = session.get(SourceCorpus, int(doc.corpus_id))
+        if corpus is None:
+            raise ValueError(f"Corpus {doc.corpus_id} not found for document {doc_ids[0]}")
+        project_id = int(corpus.project_id)
+
+        for doc_id in doc_ids[1:]:
+            other_doc = session.get(SourceDocument, int(doc_id))
+            if other_doc is None:
+                raise ValueError(f"Document {doc_id} not found")
+            other_corpus = session.get(SourceCorpus, int(other_doc.corpus_id))
+            if other_corpus is None:
+                raise ValueError(f"Corpus {other_doc.corpus_id} not found for document {doc_id}")
+            if int(other_corpus.project_id) != project_id:
+                raise ValueError("All documents in a batch run must belong to the same project")
+
+        return project_id
+
     def _start_processor_run(
         self,
         session: Session,
@@ -131,6 +293,8 @@ class ProcessService:
         use_gpu: bool = False,
         use_mock: bool = False,
         is_reprocess: bool = False,
+        track_run: bool = True,
+        batch_run_id: Optional[int] = None,
     ) -> bool:
         """
         Process a document with NLP pipeline.
@@ -151,6 +315,8 @@ class ProcessService:
             use_mock: Use mock engine instead of Stanza
             is_reprocess: Mark the run as a re-processing invocation for
                 params-hash/state tracking
+            track_run: Whether to create/update a dedicated per-document run row
+            batch_run_id: Optional batch-level run ID for shared error logging
 
         Returns:
             True if successful, False otherwise
@@ -177,18 +343,21 @@ class ProcessService:
             project.nlp_engine = engine.get_name()
             project.nlp_engine_version = engine.get_version()
 
-        run = self._start_processor_run(
-            session,
-            project_id=project_id,
-            engine=engine,
-            doc_id=doc_id,
-            use_gpu=use_gpu,
-            use_mock=use_mock,
-            is_reprocess=is_reprocess,
-        )
+        run = None
+        run_id = batch_run_id
+        if track_run:
+            run = self._start_processor_run(
+                session,
+                project_id=project_id,
+                engine=engine,
+                doc_id=doc_id,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                is_reprocess=is_reprocess,
+            )
 
-        # Task 12: Save IDs before try block to avoid lazy-load after error
-        run_id = run.run_id
+            # Task 12: Save IDs before try block to avoid lazy-load after error
+            run_id = run.run_id
         # doc_id already available as parameter
 
         try:
@@ -296,17 +465,18 @@ class ProcessService:
             session.commit()
 
             # Update run
-            run.status = 'ok'
-            run.stage = 'completed'
-            run.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            run.last_doc_id = doc_id
-            run.docs_processed = 1
-            run.docs_failed = 0
-            run.chunks_completed = 1
-            run.tokens_total = total_tokens
-            run.lemmas_total = len(lemma_counter)
-            run.error_message = None
-            session.commit()
+            if run is not None:
+                run.status = 'ok'
+                run.stage = 'completed'
+                run.finished_at = self._utc_now()
+                run.last_doc_id = doc_id
+                run.docs_processed = 1
+                run.docs_failed = 0
+                run.chunks_completed = 1
+                run.tokens_total = total_tokens
+                run.lemmas_total = len(lemma_counter)
+                run.error_message = None
+                session.commit()
 
             logger.info(f"Document {doc_id} processed successfully")
             return True
@@ -330,11 +500,11 @@ class ProcessService:
                 session.add(error)
 
                 # Re-fetch objects in clean state
-                run_obj = session.get(ProcessorRun, run_id)
-                if run_obj:
+                run_obj = session.get(ProcessorRun, run_id) if run_id is not None else None
+                if run is not None and run_obj:
                     run_obj.status = 'failed'
                     run_obj.stage = 'failed'
-                    run_obj.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                    run_obj.finished_at = self._utc_now()
                     run_obj.last_doc_id = doc_id
                     run_obj.docs_failed = 1
                     run_obj.error_message = error_msg
@@ -486,28 +656,285 @@ class ProcessService:
         doc_ids: List[int],
         use_gpu: bool = False,
         use_mock: bool = False,
+        *,
+        is_reprocess: bool = False,
+        chunk_size: int = 50,
+        chunk_sleep: float = 0.0,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
+        resume_latest: bool = False,
+        source_label: str = "batch",
     ) -> Tuple[int, int]:
         """
-        Process multiple documents.
+        Process multiple documents through a batch-level resumable run.
 
         Args:
             session: Database session
             doc_ids: List of document IDs
             use_gpu: Whether to use GPU
+            use_mock: Use mock engine instead of Stanza
+            is_reprocess: Whether this is a re-processing batch
+            chunk_size: Chunk size used for progress accounting and pause/cancel checkpoints
+            chunk_sleep: Optional sleep in seconds after each completed chunk
+            progress_callback: Optional callback(current, total, doc_name)
+            state_callback: Optional structured state callback(dict payload)
+            cancel_check: Optional cooperative cancel callback
+            pause_check: Optional cooperative pause callback
+            resume_latest: Resume latest matching incomplete batch run if possible
+            source_label: Batch source identifier for run-note routing
 
         Returns:
             Tuple of (success_count, error_count)
         """
+        ordered_ids = sorted({int(doc_id) for doc_id in doc_ids})
+        if not ordered_ids:
+            return 0, 0
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be >= 1")
+
+        project_id = self._resolve_project_id_for_docs(session, ordered_ids)
+        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=is_reprocess,
+        )
+        total_chunks = math.ceil(len(ordered_ids) / chunk_size)
+        effective_chunk_size = int(chunk_size)
+        run_note: dict[str, Any] = {}
+
+        run = None
+        if resume_latest:
+            run = self._find_batch_run_candidate(
+                session,
+                project_id=project_id,
+                params_hash=params_hash,
+                doc_ids=ordered_ids,
+                source_label=source_label,
+                is_reprocess=is_reprocess,
+            )
+
+        if run is None:
+            run = ProcessorRun(
+                project_id=project_id,
+                engine=engine.get_name(),
+                engine_version=engine.get_version(),
+                docs_total=len(ordered_ids),
+                docs_processed=0,
+                docs_failed=0,
+                chunks_total=total_chunks,
+                chunks_completed=0,
+                status="running",
+                stage="queued",
+                params_hash=params_hash,
+                note=self._build_batch_run_note(
+                    doc_ids=ordered_ids,
+                    chunk_size=chunk_size,
+                    source_label=source_label,
+                    is_reprocess=is_reprocess,
+                ),
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            run_note = self._parse_batch_run_note(run.note)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="started",
+                message="Created NLP batch run",
+            )
+        else:
+            run_note = self._parse_batch_run_note(run.note)
+            effective_chunk_size = max(1, int(run_note.get("chunk_size") or chunk_size))
+            run.status = "running"
+            run.stage = "resuming"
+            run.error_message = None
+            run.finished_at = None
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="resumed",
+                message="Resuming latest incomplete NLP batch run",
+            )
+
+        remaining_ids = [
+            doc_id
+            for doc_id in ordered_ids
+            if run.last_doc_id is None or int(doc_id) > int(run.last_doc_id)
+        ]
+        if not remaining_ids:
+            run.status = "ok"
+            run.stage = "completed_with_errors" if int(run.docs_failed or 0) > 0 else "completed"
+            run.finished_at = self._utc_now()
+            if int(run.docs_failed or 0) > 0:
+                run.error_message = (
+                    f"{int(run.docs_failed)} document(s) failed during batch processing"
+                )
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="completed",
+                message="No remaining documents for this batch run",
+            )
+            return 0, 0
+
         success = 0
         errors = 0
 
-        for doc_id in doc_ids:
-            if self.process_document(session, doc_id, use_gpu=use_gpu, use_mock=use_mock):
+        def _cancel_current_run(message: str) -> Tuple[int, int]:
+            run.status = "cancelled"
+            run.stage = "cancelled"
+            run.finished_at = self._utc_now()
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(state_callback, run, phase="cancelled", message=message)
+            return success, errors
+
+        for doc_id in remaining_ids:
+            if cancel_check and cancel_check():
+                return _cancel_current_run("Cancellation requested before next document")
+
+            if pause_check and pause_check():
+                run.status = "paused"
+                run.stage = "paused"
+                session.commit()
+                session.refresh(run)
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="paused",
+                    message="Paused at document checkpoint",
+                )
+                while pause_check and pause_check():
+                    if cancel_check and cancel_check():
+                        return _cancel_current_run(
+                            "Cancellation requested while paused at checkpoint"
+                        )
+                    time.sleep(0.1)
+                run.status = "running"
+                run.stage = "processing"
+                session.commit()
+                session.refresh(run)
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="resumed",
+                    message="Resumed NLP batch run",
+                )
+
+            with self.db_service.get_session() as doc_session:
+                doc = doc_session.get(SourceDocument, doc_id)
+                doc_name = doc.file_name if doc else f"Doc {doc_id}"
+                done_before = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+                if progress_callback:
+                    progress_callback(done_before + 1, int(run.docs_total or 0), doc_name)
+                if cancel_check and cancel_check():
+                    return _cancel_current_run(
+                        "Cancellation requested after progress update at document checkpoint"
+                    )
+                if pause_check and pause_check():
+                    run.status = "paused"
+                    run.stage = "paused"
+                    session.commit()
+                    session.refresh(run)
+                    self._emit_run_state(
+                        state_callback,
+                        run,
+                        phase="paused",
+                        message="Paused at document checkpoint",
+                    )
+                    while pause_check and pause_check():
+                        if cancel_check and cancel_check():
+                            return _cancel_current_run(
+                                "Cancellation requested while paused at checkpoint"
+                            )
+                        time.sleep(0.1)
+                    run.status = "running"
+                    run.stage = "processing"
+                    session.commit()
+                    session.refresh(run)
+                    self._emit_run_state(
+                        state_callback,
+                        run,
+                        phase="resumed",
+                        message="Resumed NLP batch run",
+                    )
+                ok = self.process_document(
+                    doc_session,
+                    doc_id,
+                    use_gpu=use_gpu,
+                    use_mock=use_mock,
+                    is_reprocess=is_reprocess,
+                    track_run=False,
+                    batch_run_id=int(run.run_id),
+                )
+
+            if ok:
                 success += 1
+                run.docs_processed = int(run.docs_processed or 0) + 1
             else:
                 errors += 1
+                run.docs_failed = int(run.docs_failed or 0) + 1
 
-        logger.info(f"Batch processing complete: {success} succeeded, {errors} failed")
+            docs_done = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+            run.last_doc_id = int(doc_id)
+            run.chunks_completed = docs_done // effective_chunk_size
+            run.stage = "processing"
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="processing",
+                message=f"Processed {doc_name}",
+                doc_name=doc_name,
+            )
+
+            if docs_done % effective_chunk_size == 0:
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="chunk_complete",
+                    message=(
+                        f"Completed chunk {int(run.chunks_completed or 0)}/"
+                        f"{int(run.chunks_total or 0)}"
+                    ),
+                )
+                if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
+                    time.sleep(chunk_sleep)
+
+        run.status = "ok"
+        run.stage = "completed_with_errors" if errors > 0 else "completed"
+        run.finished_at = self._utc_now()
+        run.chunks_completed = int(run.chunks_total or 0)
+        run.error_message = (
+            f"{errors} document(s) failed during batch processing"
+            if errors > 0
+            else None
+        )
+        session.commit()
+        session.refresh(run)
+        self._emit_run_state(
+            state_callback,
+            run,
+            phase="completed",
+            message="NLP batch run completed",
+        )
+
+        logger.info(
+            "Batch processing complete: %d succeeded, %d failed (run_id=%d)",
+            success,
+            errors,
+            int(run.run_id),
+        )
         return success, errors
 
     # ========================================================================

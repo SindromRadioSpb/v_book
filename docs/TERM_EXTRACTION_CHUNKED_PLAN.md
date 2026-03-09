@@ -292,6 +292,10 @@ Further implementation plan for extract terms:
 
 - keep the current Terms staged progress flow stable; do not reopen blind
   progress-UI refactors before NLP catches up
+- with `PATCH-NLP-02` now in place, the next convergence checkpoint is
+  `PATCH-NLP-03`:
+  regular-project NLP still needs extraction-grade progress UI and worker
+  lifecycle parity
 - when checkpointed `process with NLP` lands, align:
   - run-state vocabulary
   - stage names

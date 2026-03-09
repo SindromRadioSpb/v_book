@@ -138,6 +138,28 @@ def test_get_unprocessed_doc_ids():
         Path(db_path).unlink(missing_ok=True)
 
 
+def test_get_project_doc_ids_returns_full_deterministic_slice():
+    """All project docs should be returned in stable doc_id order."""
+    db_path = _make_db_with_docs()
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        with Session(engine) as session:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+            from process_reference_corpus import _get_project_doc_ids
+
+            ids = _get_project_doc_ids(session, project_id=42)
+
+        assert ids == [1, 2, 3, 4]
+        engine.dispose()
+    finally:
+        Path(db_path).unlink(missing_ok=True)
+
+
 def test_process_chunk_dry_run():
     """Dry-run must return (len(chunk), 0) without calling process_service."""
     from process_reference_corpus import _process_chunk  # noqa: F401 (already on path)

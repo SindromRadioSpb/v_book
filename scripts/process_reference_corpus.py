@@ -34,6 +34,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,6 +89,21 @@ def _get_unprocessed_doc_ids(session, project_id: int) -> list[int]:
     return [r[0] for r in rows]
 
 
+def _get_project_doc_ids(session, project_id: int) -> list[int]:
+    from sqlalchemy import text
+
+    rows = session.execute(
+        text(
+            "SELECT sd.doc_id FROM source_document sd"
+            " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+            " WHERE sc.project_id = :pid"
+            " ORDER BY sd.doc_id"
+        ),
+        {"pid": project_id},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def _process_chunk(
     db_service,
     process_service,
@@ -120,6 +136,48 @@ def _process_chunk(
                     pass
                 error += 1
     return success, error
+
+
+def _log_batch_state(state: dict[str, Any], tracker: dict[str, Any]) -> None:
+    phase = str(state.get("phase") or "")
+    run_id = state.get("run_id")
+    docs_processed = int(state.get("docs_processed") or 0)
+    docs_failed = int(state.get("docs_failed") or 0)
+    docs_total = int(state.get("docs_total") or 0)
+    chunks_completed = int(state.get("chunks_completed") or 0)
+    chunks_total = int(state.get("chunks_total") or 0)
+    last_doc_id = state.get("last_doc_id")
+    status = str(state.get("status") or "")
+    stage = str(state.get("stage") or "")
+    message = str(state.get("message") or "")
+
+    should_log = False
+    if tracker.get("run_id") != run_id:
+        should_log = True
+    elif phase in {"started", "resumed", "paused", "cancelled", "completed"}:
+        should_log = True
+    elif tracker.get("chunks_completed") != chunks_completed:
+        should_log = True
+
+    if not should_log:
+        return
+
+    logger.info(
+        "Run %s | phase=%s status=%s stage=%s | docs=%d/%d failed=%d | chunks=%d/%d | last_doc_id=%s | %s",
+        run_id,
+        phase,
+        status,
+        stage,
+        docs_processed + docs_failed,
+        docs_total,
+        docs_failed,
+        chunks_completed,
+        chunks_total,
+        last_doc_id if last_doc_id is not None else "-",
+        message,
+    )
+    tracker["run_id"] = run_id
+    tracker["chunks_completed"] = chunks_completed
 
 
 def main() -> None:
@@ -156,6 +214,11 @@ def main() -> None:
     parser.add_argument(
         "--dry-run", action="store_true",
         help="List what would be processed without writing",
+    )
+    parser.add_argument(
+        "--resume-latest",
+        action="store_true",
+        help="Resume the latest matching incomplete batch run when possible",
     )
     args = parser.parse_args()
 
@@ -212,14 +275,16 @@ def main() -> None:
                 )
 
             total_all, already_processed = _get_doc_counts(session, project_id)
-            doc_ids_all = _get_unprocessed_doc_ids(session, project_id)
+            project_doc_ids = _get_project_doc_ids(session, project_id)
+            remaining_doc_ids = _get_unprocessed_doc_ids(session, project_id)
 
         pct_done = already_processed / total_all * 100 if total_all else 0
         logger.info(
             "Total docs: %d | Already processed: %d (%.1f%%) | To process: %d",
-            total_all, already_processed, pct_done, len(doc_ids_all),
+            total_all, already_processed, pct_done, len(remaining_doc_ids),
         )
 
+        doc_ids_all = project_doc_ids if args.resume_latest else remaining_doc_ids
         if args.max_docs > 0:
             doc_ids_all = doc_ids_all[: args.max_docs]
         doc_ids_to_process = doc_ids_all
@@ -228,6 +293,13 @@ def main() -> None:
             logger.info("Nothing to process. Exiting.")
             return
 
+        if args.resume_latest:
+            logger.info(
+                "Resume contract slice: %d docs (remaining currently unprocessed: %d)",
+                len(doc_ids_to_process),
+                len(remaining_doc_ids),
+            )
+
         logger.info(
             "Processing %d docs | chunk=%d sleep=%.1fs mock=%s gpu=%s%s",
             len(doc_ids_to_process), args.chunk_size, args.chunk_sleep,
@@ -235,35 +307,34 @@ def main() -> None:
             " DRY-RUN" if args.dry_run else "",
         )
 
+        if args.dry_run:
+            total_success = len(doc_ids_to_process)
+            total_error = 0
+            chunks = [
+                doc_ids_to_process[i : i + args.chunk_size]
+                for i in range(0, len(doc_ids_to_process), args.chunk_size)
+            ]
+            for chunk_idx, chunk in enumerate(chunks, 1):
+                logger.info("[DRY-RUN] Chunk %d/%d | docs=%d | sample=%s", chunk_idx, len(chunks), len(chunk), chunk[:3])
+            logger.info("Finished. success=%d error=%d time=0.0s", total_success, total_error)
+            return
+
         process_service = ProcessService()
-        total_success = 0
-        total_error = 0
-        chunks = [
-            doc_ids_to_process[i : i + args.chunk_size]
-            for i in range(0, len(doc_ids_to_process), args.chunk_size)
-        ]
         start = time.monotonic()
+        state_tracker = {"run_id": None, "chunks_completed": None}
 
-        for chunk_idx, chunk in enumerate(chunks, 1):
-            ok, err = _process_chunk(
-                db_service, process_service, chunk, use_mock, use_gpu, args.dry_run
+        with db_service.get_session() as session:
+            total_success, total_error = process_service.process_documents_batch(
+                session,
+                doc_ids_to_process,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                chunk_size=args.chunk_size,
+                chunk_sleep=args.chunk_sleep,
+                state_callback=lambda state: _log_batch_state(state, state_tracker),
+                resume_latest=bool(args.resume_latest),
+                source_label="reference_cli",
             )
-            total_success += ok
-            total_error += err
-            elapsed = time.monotonic() - start
-            docs_done = total_success + total_error
-            rate = docs_done / elapsed if elapsed > 0 else 0
-            remaining = len(doc_ids_to_process) - docs_done
-            eta = remaining / rate if rate > 0 else float("inf")
-
-            logger.info(
-                "Chunk %d/%d | +%d ok +%d err | total %d/%d | %.1f doc/s | ETA %.0fs",
-                chunk_idx, len(chunks), ok, err,
-                docs_done, len(doc_ids_to_process), rate, eta,
-            )
-
-            if chunk_idx < len(chunks) and args.chunk_sleep > 0 and not args.dry_run:
-                time.sleep(args.chunk_sleep)
 
         logger.info(
             "Finished. success=%d error=%d time=%.1fs",

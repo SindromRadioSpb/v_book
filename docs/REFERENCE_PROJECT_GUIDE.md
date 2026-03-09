@@ -2,7 +2,7 @@
 
 **Scope:** HDLE Premium · PERF-SCALE PATCH-A
 **Audience:** System administrator / project owner
-**Last updated:** 2026-03-07
+**Last updated:** 2026-03-09
 
 ---
 
@@ -220,13 +220,22 @@ python scripts/process_reference_corpus.py `
     --max-docs 100
 ```
 
+### Resume the latest matching interrupted batch
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --resume-latest
+```
+
 ### How it differs from the UI worker
 
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
 | Session scope | One session per document | One session per document |
-| Run state | In-memory worker counters only; no durable resume ledger | Chunked console loop; restart can skip already processed docs, but there is still no durable run ledger yet |
-| Cancellation | No premium cancel/pause/resume flow in the current Documents UI | Ctrl-C safe (current doc rolls back) |
+| Run state | In-memory worker counters only; no durable resume ledger yet | DB-backed batch `processor_run` state with stage/chunk/doc counters and deterministic `--resume-latest` |
+| Cancellation | No premium cancel/pause/resume flow in the current Documents UI | Cooperative resume-at-checkpoint model; interrupted work can be resumed via `--resume-latest` when the contract still matches |
 | Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |
 | Suitable for 387 K docs | No | Yes |
 
@@ -338,7 +347,12 @@ python scripts/process_reference_corpus.py `
     --project-id 1 --db-path hdle_premium.db --no-mock 2>&1 | Select-String "ERROR"
 ```
 
-Resume is safe — the script skips already-processed documents on subsequent runs.
+Resume is safe:
+
+- the script still skips already-processed documents on fresh non-resume runs
+- `--resume-latest` reuses the latest matching incomplete batch run only if the
+  stored run contract still matches the deterministic source slice and NLP
+  parameters
 
 ---
 

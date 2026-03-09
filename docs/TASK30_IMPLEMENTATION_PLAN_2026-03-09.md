@@ -772,3 +772,69 @@ Validation:
   project:
   - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_probe.log`
   - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_cleanup_check.log`
+
+## PATCH-NLP-02 implemented (2026-03-09)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_process_batch_run_state.py`
+- `tests/test_reference_processing_guard.py`
+
+Result:
+
+- `process_documents_batch()` now persists a batch-level resumable NLP run
+  instead of relying on ephemeral loop counters only
+- structured batch state is now emitted for:
+  - `started`
+  - `resumed`
+  - `processing`
+  - `chunk_complete`
+  - `paused`
+  - `cancelled`
+  - `completed`
+- the batch resume contract is now deterministic and gated by:
+  - `params_hash`
+  - `source_label`
+  - `is_reprocess`
+  - `doc_count`
+  - `first_doc_id`
+  - `last_doc_id`
+  - full ordered-slice `doc_ids_hash`
+- CLI reference processing gained `--resume-latest` and now routes through the
+  same batch run-state path
+- resumed runs keep the original persisted chunk contract, even if the operator
+  reruns the CLI with a different `--chunk-size`
+
+Validation:
+
+- targeted regressions:
+  - `34 passed in 121.83s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch02_final_candidate.log`
+- approved DB live resume proof:
+  - setup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_setup.log`
+  - resume artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_run.log`
+  - postcheck/cleanup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch02_resume_final_postcheck.log`
+  - confirmed:
+    - initial controlled batch run cancelled after one processed document
+    - CLI `--resume-latest` reused the same `run_id=387620`
+    - final batch state on the approved DB was:
+      - `status='ok'`
+      - `stage='completed'`
+      - `docs_total=2`
+      - `docs_processed=2`
+      - `docs_failed=0`
+      - `chunks_total=2`
+      - `chunks_completed=2`
+    - cleanup removed all temporary `BENCH_NLP_CLI_%` projects
+
+Updated patch-order note:
+
+- the next NLP step is now `PATCH-NLP-03` premium regular-project progress UI
+  and worker lifecycle parity with staged `extract terms`
+- `PATCH-NLP-04` is narrowed to explicit resume selection and CLI verify mode,
+  because basic deterministic `--resume-latest` is already implemented
