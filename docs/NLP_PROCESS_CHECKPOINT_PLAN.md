@@ -87,9 +87,198 @@ The desired target is not a generic spinner. It should match the terms flow:
 - pause/resume/cancel buttons
 - cooperative close behavior
 
+## Pre-implementation audit refresh (2026-03-09)
+
+Before starting the next implementation wave, the following baseline was
+re-verified against the current repo state.
+This section is kept as the historical preflight captured before
+`PATCH-NLP-01`.
+
+### Docs re-read for this preflight
+
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+- `docs/PERF_SCALE_AUDIT_HEWIKI_2026-03-07.md`
+- `docs/PERF_IMPLEMENTATION_AUDIT.md`
+- `docs/PERFORMANCE_SLO.md`
+- `docs/TERM_EXTRACTION_CHUNKED_PLAN.md`
+
+### Baseline evidence
+
+- Targeted NLP/reference regression slice:
+  - `tests/test_task12_fts_nlp.py`
+  - `tests/test_reference_processing_guard.py`
+  - `tests/test_process_service_remove_document_stats.py`
+  - `tests/test_operations_center.py`
+  - `tests/test_pipeline_throttler.py`
+- Result:
+  - `47 passed in 38.94s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_prework.log`
+- Approved DB dry-run:
+  - `python scripts/process_reference_corpus.py --db-path "...hewiki_gpu_processing test.db" --project-id 1 --dry-run`
+  - artifact: `build/logs/nlp_prework/process_reference_corpus_dry_run.log`
+  - confirmed runtime state on `2026-03-09`:
+    - project is `is_general_corpus=1`
+    - `387639 / 387639` docs are already processed
+    - `To process: 0`
+
+### Additional confirmed corrections
+
+#### 5. Resume/checkpoint proof cannot rely on the approved DB alone
+
+Because the approved `hewiki_gpu_processing test.db` currently has no remaining
+unprocessed documents, new resume/cancel/checkpoint behavior must be validated
+through temporary DB fixtures or controlled sandbox slices, not by expecting a
+live interrupted run on that DB.
+
+#### 6. Migration/version truth is `schema_meta`, not `schema_version`
+
+The current migration system reads the version from:
+
+- `app/infra/db.py::DatabaseManager.apply_migrations()`
+- `schema_meta(key='schema_version')`
+
+Do not plan NLP migrations around a hypothetical `schema_version` table or
+`PRAGMA user_version`.
+
+#### 7. Preflight snapshot: legacy `processor_run` was still in its original narrow shape
+
+Current live schema and ORM confirm:
+
+- table: `processor_run`
+- columns:
+  - `run_id`
+  - `project_id`
+  - `started_at`
+  - `finished_at`
+  - `engine`
+  - `engine_version`
+  - `docs_processed`
+  - `tokens_total`
+  - `lemmas_total`
+  - `ngrams_total`
+  - `status`
+  - `note`
+- status constraint still allows only:
+  - `running`
+  - `ok`
+  - `failed`
+
+This means the foundation patch must explicitly account for the status
+constraint and for legacy-row compatibility during migration.
+
+#### 8. Crash recovery must move into the foundation wave
+
+`DBService.recover_from_crash()` currently only recovers:
+
+- `ProcessorRun.status == 'running'`
+
+If the new NLP run-state model introduces statuses such as staged, paused,
+finalizing, or cancelled, crash recovery cannot wait until a later patch; it
+must be updated in the same foundation wave as the schema/runtime change.
+
+## Implemented foundation wave (2026-03-09)
+
+### PATCH-NLP-00 status
+
+Implemented:
+
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- task30/extract-terms docs updated to remove stale assumptions before coding
+
+### PATCH-NLP-01 status
+
+Implemented:
+
+- `app/infra/migrations/037_nlp_run_state.sql`
+- `app/infra/sa_models.py`
+- `app/domain/dto.py`
+- `app/services/process_service.py`
+- `app/services/db_service.py`
+- `tests/test_process_run_state_foundation.py`
+
+Delivered in this wave:
+
+- `processor_run` now includes:
+  - `docs_total`
+  - `docs_failed`
+  - `chunks_total`
+  - `chunks_completed`
+  - `stage`
+  - `last_doc_id`
+  - `params_hash`
+  - `error_message`
+- `ProcessService.process_document()` now populates these fields for current
+  single-document processing runs
+- `reprocess_document()` keeps monkeypatch/backward-compatibility for tests and
+  overridden `process_document()` implementations
+- `DBService.recover_from_crash()` now also sets `stage='failed'` and
+  `error_message` on recovered running rows
+
+Validation:
+
+- targeted regressions:
+  - `29 passed in 80.68s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_foundation.log`
+- import smoke:
+  - `OK 37 True`
+  - artifact: `build/logs/nlp_prework/import_smoke_nlp_foundation.log`
+- approved DB migration evidence:
+  - artifact: `build/logs/nlp_prework/hewiki_apply_migrations_nlp_foundation.log`
+  - approved DB now at `schema_version=37`
+  - post-migration open check:
+    - artifact: `build/logs/nlp_prework/db_open_self_check_nlp_foundation_post_migration.json`
+    - `ok=true`, `elapsed_ms=12`
+  - non-blocking operational note:
+    - the migration log surfaced `Failed to unlock file: [Errno 13] Permission denied`
+    - no stale `migrate.lock` remained afterward
+    - post-migration DB open succeeded, so this is a known Windows lock-cleanup
+      warning, not a blocking migration failure
+- approved DB CLI dry-run after migration:
+  - artifact: `build/logs/nlp_prework/process_reference_corpus_dry_run_post037.log`
+  - script still reports `Current schema version: 37` and exits with
+    `Nothing to process. Exiting.`
+- approved DB live controlled probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_probe.log`
+  - temporary project + document processed successfully on the real DB
+  - resulting `processor_run` row had:
+    - `status='ok'`
+    - `stage='completed'`
+    - `docs_total=1`
+    - `docs_processed=1`
+    - `docs_failed=0`
+    - `chunks_total=1`
+    - `chunks_completed=1`
+    - `last_doc_id=<live doc id>`
+    - non-empty `params_hash`
+  - cleanup succeeded and left no `BENCH_NLP_FOUNDATION_%` projects:
+    - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_cleanup_check.log`
+
 ## Recommended patch series
 
-### PATCH-NLP-01: durable processor run state
+### PATCH-NLP-00: docs and contract alignment
+
+Status:
+
+- implemented on 2026-03-09
+
+Files:
+
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- task/plan docs as needed
+
+Requirements:
+
+- correct stale UI-vs-CLI processing assumptions
+- record baseline evidence and approved-DB limitations
+- keep the saved NLP plan synchronized with the real repo state before coding
+
+### PATCH-NLP-01: durable processor run state and crash recovery compatibility
+
+Status:
+
+- implemented on 2026-03-09
 
 Files:
 
@@ -97,10 +286,13 @@ Files:
 - `app/infra/sa_models.py`
 - `app/services/process_service.py`
 - `app/domain/dto.py`
+- `app/services/db_service.py`
 
 Requirements:
 
 - add staged/resumable run state for NLP processing
+- migrate from the current legacy `processor_run` shape without losing old rows
+- keep migration logic compatible with `schema_meta`
 - include:
   - `status`
   - `stage`
@@ -112,8 +304,14 @@ Requirements:
   - `chunks_completed`
   - `params_hash`
   - `error_message`
+- update crash recovery in the same patch so unfinished staged runs are not left
+  in an impossible state after restart
 
 ### PATCH-NLP-02: structured service callbacks
+
+Status:
+
+- pending
 
 Files:
 
@@ -126,8 +324,14 @@ Requirements:
 - preserve deterministic `doc_id ASC` ordering
 - expose cooperative `cancel_check` / `pause_check`
 - keep safe checkpoint boundaries at end-of-document or end-of-chunk only
+- add deterministic CLI resume flow for the new run state, but keep reference
+  processing CLI-only
 
 ### PATCH-NLP-03: regular-project progress UI
+
+Status:
+
+- pending
 
 Files:
 
@@ -144,32 +348,29 @@ Requirements:
 
 ### PATCH-NLP-04: CLI resume and verify contract
 
+Status:
+
+- pending
+
 Files:
 
 - `scripts/process_reference_corpus.py`
 - docs
+- tests
 
 Requirements:
 
 - add `--resume-run-id` or equivalent resume selection
 - add `--verify-only` / contract-check mode
 - refuse resume when `params_hash` or source identity changed
+- validate this behavior with temporary DB fixtures or controlled sandbox slices,
+  not only against the already-processed approved DB
 
-### PATCH-NLP-05: crash recovery and compatibility
+### PATCH-NLP-05: optional future staging/offline concept
 
-Files:
+Status:
 
-- `app/services/db_service.py`
-- `app/infra/sa_models.py`
-- tests
-
-Requirements:
-
-- update crash recovery for the new run-state model
-- keep legacy `processor_run` migration path explicit
-- ensure cancelled/staged runs are not incorrectly marked as hard failures
-
-### PATCH-NLP-06: optional future staging/offline concept
+- pending / only if product scope requires it
 
 Only if product requirements later demand detached/offline NLP processing:
 
@@ -185,6 +386,8 @@ Only if product requirements later demand detached/offline NLP processing:
 - resume must be deterministic and gated by run parameters
 - cancel must leave the DB consistent and resumable
 - no force-termination of NLP workers
+- implementation proof for resume/cancel must use controlled fixtures because
+  the approved DB is already fully processed
 
 ## Related follow-up for extract terms
 

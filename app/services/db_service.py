@@ -60,8 +60,9 @@ class DBService:
 
         Finds all ProcessorRun with status='running' and:
         1. Update status to 'failed'
-        2. Set finished_at to current time
-        3. Create RunError with reason 'Recovered after unclean shutdown'
+        2. Set stage/error_message to terminal recovery state
+        3. Set finished_at to current time
+        4. Create RunError with reason 'Recovered after unclean shutdown'
 
         Returns:
             Number of runs recovered
@@ -88,6 +89,11 @@ class DBService:
 
             for run in running_runs:
                 run.status = "failed"
+                run.stage = "failed"
+                if not getattr(run, "error_message", None):
+                    run.error_message = (
+                        "Process terminated unexpectedly - recovered on restart"
+                    )
                 run.finished_at = datetime.now(timezone.utc).strftime(
                     "%Y-%m-%dT%H:%M:%S.%fZ"
                 )

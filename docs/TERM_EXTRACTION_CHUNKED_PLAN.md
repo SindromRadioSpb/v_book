@@ -92,7 +92,7 @@ Target DB:
 
 - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - initial Task 30 audit schema: `35`
-- current schema after migration `036_term_extract_chunked`: `36`
+- current schema after migration `037_nlp_run_state`: `37`
 
 Artifacts:
 
@@ -288,11 +288,18 @@ Further implementation plan for extract terms:
 
 ## Remaining follow-ups
 
-### Follow-up A: richer extraction progress UI
+### Follow-up A: NLP convergence and shared long-operation contract
 
-- add cancel/resume controls in Terms UI
-- show doc progress and finalization stage explicitly
-- optional reuse of premium batch progress dialog with extraction-specific labels
+- keep the current Terms staged progress flow stable; do not reopen blind
+  progress-UI refactors before NLP catches up
+- when checkpointed `process with NLP` lands, align:
+  - run-state vocabulary
+  - stage names
+  - progress payload fields
+  - pause/resume/cancel semantics
+  - cooperative close behavior
+- only then evaluate whether a shared reusable progress-dialog base is actually
+  warranted across NLP and Terms
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 

@@ -489,14 +489,27 @@ class ProcessorRun(Base):
     finished_at = Column(String)
     engine = Column(String, nullable=False)
     engine_version = Column(String)
+    docs_total = Column(Integer, nullable=False, default=0)
     docs_processed = Column(Integer, nullable=False, default=0)
+    docs_failed = Column(Integer, nullable=False, default=0)
+    chunks_total = Column(Integer, nullable=False, default=0)
+    chunks_completed = Column(Integer, nullable=False, default=0)
     tokens_total = Column(Integer, nullable=False, default=0)
     lemmas_total = Column(Integer, nullable=False, default=0)
     ngrams_total = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="running")
+    stage = Column(String)
+    last_doc_id = Column(Integer)
+    params_hash = Column(String)
+    error_message = Column(Text)
     note = Column(Text)
 
-    __table_args__ = (CheckConstraint("status IN ('running','ok','failed')", name="ck_run_status"),)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running','paused','cancelled','ok','failed')",
+            name="ck_run_status",
+        ),
+    )
 
 
 class RunError(Base):

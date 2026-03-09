@@ -7,7 +7,7 @@ This plan is based on the approved Task 30 audit executed against:
 - DB path: `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - Verified runtime contract: `python -m app.main --db-path "<path above>"`
 - Verified schema version on target DB at initial Task 30 audit: `35`
-- Current schema version on the same DB after migration `036_term_extract_chunked`: `36`
+- Current schema version on the same DB after migration `037_nlp_run_state`: `37`
 
 This document records the implementation order for the confirmed findings only.
 It is intentionally patch-oriented and conservative.
@@ -698,3 +698,77 @@ Operational contract:
   - `verify_bench_fixture`
   - `refresh_bench_fixture` only if verify fails or the source contract changed
   - fixture-backed `extract_terms --reuse-bench-slice`
+
+## NLP pre-implementation preflight (2026-03-09)
+
+Before starting the next `process with NLP` implementation wave, the repo was
+re-audited against the current code and docs, with fresh baseline evidence.
+
+Confirmed evidence:
+
+- targeted regression slice:
+  - `tests/test_task12_fts_nlp.py`
+  - `tests/test_reference_processing_guard.py`
+  - `tests/test_process_service_remove_document_stats.py`
+  - `tests/test_operations_center.py`
+  - `tests/test_pipeline_throttler.py`
+- result:
+  - `47 passed in 38.94s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_prework.log`
+- live dry-run on the approved DB:
+  - artifact: `build/logs/nlp_prework/process_reference_corpus_dry_run.log`
+  - confirmed `387639 / 387639` docs already processed, `To process: 0`
+
+Planning corrections captured from this preflight:
+
+- resume/cancel/checkpoint proof for NLP cannot rely on the approved DB alone,
+  because it currently has no remaining work to process
+- the migration ledger is still `schema_meta(key='schema_version')`, not a
+  separate `schema_version` table
+- live `processor_run` remains in its legacy narrow shape and
+  `DBService.recover_from_crash()` still only understands `status='running'`
+- therefore the NLP foundation patch must include crash-recovery compatibility
+  in the same wave as the new staged/resumable run-state model
+- the saved/corrected plan now lives in `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+  and should be treated as the source of truth for the next NLP iteration
+
+## PATCH-NLP-01 implemented (2026-03-09)
+
+Files:
+
+- `app/infra/migrations/037_nlp_run_state.sql`
+- `app/infra/sa_models.py`
+- `app/domain/dto.py`
+- `app/services/process_service.py`
+- `app/services/db_service.py`
+- `tests/test_process_run_state_foundation.py`
+
+Result:
+
+- `processor_run` extended for foundational staged/resumable NLP state
+- `process_document()` now fills `stage`, `docs_total`, `docs_failed`,
+  `chunks_total`, `chunks_completed`, `last_doc_id`, `params_hash`,
+  `error_message`
+- crash recovery now marks recovered running rows with `stage='failed'` and
+  a terminal error message
+
+Validation:
+
+- targeted regressions:
+  - `29 passed in 80.68s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_foundation.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_nlp_foundation.log`
+- approved DB migration applied successfully:
+  - artifact: `build/logs/nlp_prework/hewiki_apply_migrations_nlp_foundation.log`
+  - approved DB current schema: `37`
+  - post-migration startup-compatible open:
+    - artifact: `build/logs/nlp_prework/db_open_self_check_nlp_foundation_post_migration.json`
+    - `ok=true`, `elapsed_ms=12`
+  - live CLI dry-run after migration:
+    - artifact: `build/logs/nlp_prework/process_reference_corpus_dry_run_post037.log`
+    - `Current schema version: 37`
+- approved DB live controlled probe succeeded and cleanup removed the temporary
+  project:
+  - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_probe.log`
+  - artifact: `build/logs/nlp_prework/hewiki_live_nlp_foundation_cleanup_check.log`

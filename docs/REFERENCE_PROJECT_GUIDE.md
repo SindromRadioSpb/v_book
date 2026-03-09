@@ -224,10 +224,10 @@ python scripts/process_reference_corpus.py `
 
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
-| Session scope | One session per run | One session per document |
-| WAL lock duration | Minutes to hours | Milliseconds per document |
-| Cancellable | Via Cancel button | Ctrl-C safe (current doc rolls back) |
-| Concurrent use of app | Blocked | Allowed (app remains responsive) |
+| Session scope | One session per document | One session per document |
+| Run state | In-memory worker counters only; no durable resume ledger | Chunked console loop; restart can skip already processed docs, but there is still no durable run ledger yet |
+| Cancellation | No premium cancel/pause/resume flow in the current Documents UI | Ctrl-C safe (current doc rolls back) |
+| Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |
 | Suitable for 387 K docs | No | Yes |
 
 ### Inter-chunk sleep

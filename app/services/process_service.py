@@ -1,6 +1,8 @@
 """Document processing service."""
+import inspect
 import logging
 import json
+import hashlib
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -69,12 +71,66 @@ class ProcessService:
             logger.info(f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}")
         return self._engine
 
+    def _build_run_params_hash(
+        self,
+        *,
+        engine: NLPEngine,
+        use_gpu: bool,
+        use_mock: bool,
+        is_reprocess: bool,
+    ) -> str:
+        payload = {
+            "contract": "process_document_v2",
+            "engine": engine.get_name(),
+            "engine_version": engine.get_version(),
+            "use_gpu": bool(use_gpu),
+            "use_mock": bool(use_mock),
+            "is_reprocess": bool(is_reprocess),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _start_processor_run(
+        self,
+        session: Session,
+        *,
+        project_id: int,
+        engine: NLPEngine,
+        doc_id: int,
+        use_gpu: bool,
+        use_mock: bool,
+        is_reprocess: bool,
+    ) -> ProcessorRun:
+        run = ProcessorRun(
+            project_id=project_id,
+            engine=engine.get_name(),
+            engine_version=engine.get_version(),
+            docs_total=1,
+            docs_processed=0,
+            docs_failed=0,
+            chunks_total=1,
+            chunks_completed=0,
+            status="running",
+            stage="processing",
+            last_doc_id=doc_id,
+            params_hash=self._build_run_params_hash(
+                engine=engine,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                is_reprocess=is_reprocess,
+            ),
+        )
+        session.add(run)
+        session.flush()
+        return run
+
     def process_document(
         self,
         session: Session,
         doc_id: int,
         use_gpu: bool = False,
         use_mock: bool = False,
+        is_reprocess: bool = False,
     ) -> bool:
         """
         Process a document with NLP pipeline.
@@ -92,6 +148,9 @@ class ProcessService:
             session: Database session
             doc_id: Document ID
             use_gpu: Whether to use GPU for NLP
+            use_mock: Use mock engine instead of Stanza
+            is_reprocess: Mark the run as a re-processing invocation for
+                params-hash/state tracking
 
         Returns:
             True if successful, False otherwise
@@ -118,14 +177,15 @@ class ProcessService:
             project.nlp_engine = engine.get_name()
             project.nlp_engine_version = engine.get_version()
 
-        run = ProcessorRun(
+        run = self._start_processor_run(
+            session,
             project_id=project_id,
-            engine=engine.get_name(),
-            engine_version=engine.get_version(),
-            status='running',
+            engine=engine,
+            doc_id=doc_id,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=is_reprocess,
         )
-        session.add(run)
-        session.flush()
 
         # Task 12: Save IDs before try block to avoid lazy-load after error
         run_id = run.run_id
@@ -237,10 +297,15 @@ class ProcessService:
 
             # Update run
             run.status = 'ok'
+            run.stage = 'completed'
             run.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            run.last_doc_id = doc_id
             run.docs_processed = 1
+            run.docs_failed = 0
+            run.chunks_completed = 1
             run.tokens_total = total_tokens
             run.lemmas_total = len(lemma_counter)
+            run.error_message = None
             session.commit()
 
             logger.info(f"Document {doc_id} processed successfully")
@@ -268,7 +333,11 @@ class ProcessService:
                 run_obj = session.get(ProcessorRun, run_id)
                 if run_obj:
                     run_obj.status = 'failed'
+                    run_obj.stage = 'failed'
                     run_obj.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                    run_obj.last_doc_id = doc_id
+                    run_obj.docs_failed = 1
+                    run_obj.error_message = error_msg
 
                 doc_obj = session.get(SourceDocument, doc_id)
                 if doc_obj:
@@ -719,7 +788,14 @@ class ProcessService:
             session.flush()
 
             # Process
-            success = self.process_document(session, doc_id, use_gpu=use_gpu, use_mock=use_mock)
+            process_kwargs = {
+                "use_gpu": use_gpu,
+                "use_mock": use_mock,
+            }
+            if "is_reprocess" in inspect.signature(self.process_document).parameters:
+                process_kwargs["is_reprocess"] = True
+
+            success = self.process_document(session, doc_id, **process_kwargs)
 
             if success:
                 logger.info(f"Document {doc_id} re-processed successfully")

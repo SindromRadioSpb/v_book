@@ -167,6 +167,24 @@ class ExtractReport:
 
 
 @dataclass
+class NLPProcessRunState:
+    """Structured NLP processing run state for staged/resumable flows."""
+
+    run_id: int
+    project_id: int
+    status: str
+    stage: Optional[str]
+    docs_total: int
+    docs_processed: int
+    docs_failed: int
+    chunks_total: int
+    chunks_completed: int
+    last_doc_id: Optional[int] = None
+    params_hash: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+@dataclass
 class ClusterStats:
     """Term cluster statistics (M5.1 + M5.4)."""
 
