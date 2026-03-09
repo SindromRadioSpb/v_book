@@ -35,6 +35,7 @@ from app.infra.settings import SettingsService
 from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker, DocumentDeleteWorker
+from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
 from app.ui.dialogs import show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,8 @@ class DocumentsView(QWidget):
 
         self.current_worker = None
         self.process_worker = None
+        self.process_progress_dialog: Optional[NLPProcessProgressDialog] = None
+        self._process_worker_active = False
         self.documents_worker: Optional[DocumentsPageWorker] = None
         self.delete_worker: Optional[DocumentDeleteWorker] = None
         self.delete_progress: Optional[QProgressDialog] = None
@@ -942,7 +945,9 @@ class DocumentsView(QWidget):
         selected_indexes = self.docs_table.selectionModel().selectedRows()
         has_selection = bool(selected_indexes)
         self.view_text_btn.setEnabled(has_selection)
-        self.delete_btn.setEnabled(has_selection and not self.is_reference_corpus)
+        self.delete_btn.setEnabled(
+            has_selection and not self.is_reference_corpus and not self._process_worker_active
+        )
 
         if has_selection:
             has_processed = False
@@ -955,8 +960,8 @@ class DocumentsView(QWidget):
                     has_processed = True
                 else:
                     has_unprocessed = True
-            self.process_btn.setEnabled(has_unprocessed)
-            self.reprocess_btn.setEnabled(has_processed)
+            self.process_btn.setEnabled(has_unprocessed and not self._process_worker_active)
+            self.reprocess_btn.setEnabled(has_processed and not self._process_worker_active)
         else:
             self.process_btn.setEnabled(False)
             self.reprocess_btn.setEnabled(False)
@@ -1146,36 +1151,115 @@ class DocumentsView(QWidget):
             ):
                 return
 
-            # Create worker
-            self.process_worker = ProcessWorker(
-                doc_ids=doc_ids,
+            self._start_process_worker(
+                doc_ids,
                 use_mock=use_mock,
-                use_gpu=use_gpu
+                use_gpu=use_gpu,
+                is_reprocess=False,
             )
-            self.process_worker.progress.connect(self.on_process_progress)
-            self.process_worker.finished.connect(self.on_process_finished)
-            self.process_worker.error.connect(self.on_process_error)
 
-            # Show progress
-            self.progress_bar.setMaximum(len(doc_ids))
-            self.progress_bar.setValue(0)
-            self.progress_bar.setVisible(True)
+    def _set_process_ui_busy(self, busy: bool) -> None:
+        self._process_worker_active = bool(busy)
+        if busy:
+            self.process_btn.setEnabled(False)
+            self.reprocess_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
+        else:
+            self.on_selection_changed()
 
-            # Start worker
-            self.process_worker.start()
+    def _start_process_worker(
+        self,
+        doc_ids: list[int],
+        *,
+        use_mock: bool,
+        use_gpu: bool,
+        is_reprocess: bool,
+    ) -> None:
+        if self.process_worker and self.process_worker.isRunning():
+            show_error(self, "Error", "Processing already in progress")
+            return
+
+        operation_label = "Re-processing" if is_reprocess else "Processing"
+
+        self.process_worker = ProcessWorker(
+            doc_ids=doc_ids,
+            use_mock=use_mock,
+            use_gpu=use_gpu,
+            is_reprocess=is_reprocess,
+        )
+        self.process_worker.progress.connect(self.on_process_progress)
+        self.process_worker.state_changed.connect(self.on_process_state)
+        self.process_worker.finished.connect(self.on_process_finished)
+        self.process_worker.error.connect(self.on_process_error)
+
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.deleteLater()
+            self.process_progress_dialog = None
+
+        self.process_progress_dialog = NLPProcessProgressDialog(
+            parent=self,
+            total_docs=len(doc_ids),
+            operation_label=operation_label,
+        )
+        self.process_progress_dialog.cancel_requested.connect(self.process_worker.cancel)
+        self.process_progress_dialog.pause_requested.connect(self.process_worker.pause)
+        self.process_progress_dialog.resume_requested.connect(self.process_worker.resume)
+        self.process_progress_dialog.show()
+
+        self.progress_bar.setMaximum(len(doc_ids))
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText(f"{operation_label} documents with NLP...")
+        self._set_process_ui_busy(True)
+        self.process_worker.start()
 
     def on_process_progress(self, current: int, total: int, doc_name: str):
         """Handle processing progress update."""
-        self.progress_bar.setValue(current)
-        self.status_label.setText(f"Processing {current}/{total}: {doc_name}")
+        self.progress_bar.setMaximum(max(1, total))
+        self.progress_bar.setValue(min(current, total))
+        self.status_label.setText(f"Starting {current}/{total}: {doc_name}")
 
-    def on_process_finished(self, success_count: int, error_count: int):
+    def on_process_state(self, state: dict):
+        """Handle structured NLP processing state."""
+        docs_processed = int(state.get("docs_processed") or 0)
+        docs_failed = int(state.get("docs_failed") or 0)
+        docs_total = int(state.get("docs_total") or 0)
+        docs_done = docs_processed + docs_failed
+        stage = str(state.get("message") or state.get("stage") or "Running NLP...")
+
+        if docs_total > 0:
+            self.progress_bar.setMaximum(docs_total)
+            self.progress_bar.setValue(min(docs_done, docs_total))
+        else:
+            self.progress_bar.setMaximum(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText(stage)
+
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.update_state(state)
+
+    def on_process_finished(self, result: dict):
         """Handle processing completion."""
         self.progress_bar.setVisible(False)
+        success_count = int(result.get("success_count") or 0)
+        error_count = int(result.get("error_count") or 0)
+        cancelled = bool(result.get("cancelled"))
+        operation_label = str(result.get("operation_label") or "Processing")
 
-        self.status_label.setText(
-            f"Processing complete: {success_count} succeeded, {error_count} failed"
-        )
+        if cancelled:
+            self.status_label.setText(
+                f"{operation_label} cancelled: {success_count} succeeded, {error_count} failed"
+            )
+            if self.process_progress_dialog is not None:
+                self.process_progress_dialog.set_cancelled()
+                self.process_progress_dialog.accept()
+        else:
+            self.status_label.setText(
+                f"{operation_label} complete: {success_count} succeeded, {error_count} failed"
+            )
+            if self.process_progress_dialog is not None:
+                self.process_progress_dialog.set_completed()
+                self.process_progress_dialog.accept()
 
         # Reload documents to show updated status
         self.load_documents()
@@ -1184,17 +1268,46 @@ class DocumentsView(QWidget):
         if success_count > 0:
             self.processing_completed.emit()
 
-        if error_count > 0:
+        if cancelled:
+            show_info(
+                self,
+                f"{operation_label} Cancelled",
+                f"{operation_label} stopped at a safe checkpoint.\n\n"
+                f"Succeeded: {success_count}\n"
+                f"Failed: {error_count}",
+            )
+        elif error_count > 0:
             show_warning(
                 self,
-                "Processing Warnings",
+                f"{operation_label} Warnings",
                 f"{error_count} document(s) failed to process. Check logs for details."
             )
+
+        self._cleanup_process_worker()
 
     def on_process_error(self, error_msg: str):
         """Handle processing error."""
         self.progress_bar.setVisible(False)
-        show_error(self, "Processing Error", error_msg)
+        operation_label = (
+            self.process_progress_dialog.operation_label
+            if self.process_progress_dialog is not None
+            else "Processing"
+        )
+        self.status_label.setText(f"{operation_label} failed")
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.set_failed(error_msg)
+            self.process_progress_dialog.accept()
+        show_error(self, f"{operation_label} Error", error_msg)
+        self._cleanup_process_worker()
+
+    def _cleanup_process_worker(self) -> None:
+        self._set_process_ui_busy(False)
+        if self.process_worker is not None:
+            self.process_worker.deleteLater()
+            self.process_worker = None
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.deleteLater()
+            self.process_progress_dialog = None
 
     def on_reprocess(self):
         """Re-process selected documents with NLP (M4: Live Update)."""
@@ -1259,24 +1372,12 @@ class DocumentsView(QWidget):
             ):
                 return
 
-            # Create worker (same as process, will handle reprocessing automatically)
-            self.process_worker = ProcessWorker(
-                doc_ids=doc_ids,
+            self._start_process_worker(
+                doc_ids,
                 use_mock=use_mock,
                 use_gpu=use_gpu,
-                is_reprocess=True  # Flag to indicate reprocessing
+                is_reprocess=True,
             )
-            self.process_worker.progress.connect(self.on_process_progress)
-            self.process_worker.finished.connect(self.on_process_finished)
-            self.process_worker.error.connect(self.on_process_error)
-
-            # Show progress
-            self.progress_bar.setMaximum(len(doc_ids))
-            self.progress_bar.setValue(0)
-            self.progress_bar.setVisible(True)
-
-            # Start worker
-            self.process_worker.start()
 
     def on_view_text(self):
         """View document text."""
@@ -1305,6 +1406,10 @@ class DocumentsView(QWidget):
 
     def on_delete(self):
         """Delete selected document(s) via background worker."""
+        if self.process_worker and self.process_worker.isRunning():
+            show_error(self, "Processing In Progress", "Cannot delete documents while NLP processing is running.")
+            return
+
         if self.is_reference_corpus:
             show_error(
                 self,
@@ -1510,12 +1615,7 @@ class DocumentsView(QWidget):
                 self.current_worker.terminate()
 
         # Stop process worker if running
-        if self.process_worker and self.process_worker.isRunning():
-            logger.info("Stopping process worker on close")
-            self.process_worker.quit()
-            self.process_worker.wait(1000)
-            if self.process_worker.isRunning():
-                self.process_worker.terminate()
+        self._stop_process_worker()
 
         # Stop documents page worker if running
         if self.documents_worker and self.documents_worker.isRunning():
@@ -1528,4 +1628,23 @@ class DocumentsView(QWidget):
         self.table_layout_controller.save_now()
 
         super().closeEvent(event)
+
+    def _stop_process_worker(self) -> None:
+        """Request cooperative stop for NLP processing worker."""
+        if not self.process_worker:
+            return
+
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.append_activity(
+                "View is closing; requesting cooperative cancellation."
+            )
+
+        if self.process_worker.isRunning():
+            logger.info("Stopping process worker on close")
+            self.process_worker.cancel()
+            if not self.process_worker.wait(100):
+                logger.info("Process worker will finish cooperatively after close")
+                return
+
+        self._cleanup_process_worker()
 

@@ -234,8 +234,8 @@ python scripts/process_reference_corpus.py `
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
 | Session scope | One session per document | One session per document |
-| Run state | In-memory worker counters only; no durable resume ledger yet | DB-backed batch `processor_run` state with stage/chunk/doc counters and deterministic `--resume-latest` |
-| Cancellation | No premium cancel/pause/resume flow in the current Documents UI | Cooperative resume-at-checkpoint model; interrupted work can be resumed via `--resume-latest` when the contract still matches |
+| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters and deterministic `--resume-latest` |
+| Cancellation | Regular-project UI now has pause/resume/cancel at document checkpoints, but reference corpora must still use the CLI path | Cooperative resume-at-checkpoint model; interrupted work can be resumed via `--resume-latest` when the contract still matches |
 | Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |
 | Suitable for 387 K docs | No | Yes |
 

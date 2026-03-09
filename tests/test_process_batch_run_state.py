@@ -318,3 +318,42 @@ def test_batch_run_does_not_resume_when_doc_ids_hash_changes(monkeypatch) -> Non
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+
+
+def test_batch_reprocess_uses_batch_run_without_extra_per_doc_runs(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=2)
+            for doc_id in doc_ids:
+                ok = service.process_document(session, doc_id, use_mock=True, track_run=False)
+                assert ok is True
+
+        with db.get_session() as session:
+            ok_2, err_2 = service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                is_reprocess=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+
+        assert (ok_2, err_2) == (2, 0)
+        assert len(runs) == 1
+        assert runs[0].status == "ok"
+        assert runs[0].docs_total == 2
+        assert runs[0].docs_processed == 2
+        assert runs[0].chunks_total == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)

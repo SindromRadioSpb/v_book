@@ -867,15 +867,25 @@ class ProcessService:
                         phase="resumed",
                         message="Resumed NLP batch run",
                     )
-                ok = self.process_document(
-                    doc_session,
-                    doc_id,
-                    use_gpu=use_gpu,
-                    use_mock=use_mock,
-                    is_reprocess=is_reprocess,
-                    track_run=False,
-                    batch_run_id=int(run.run_id),
-                )
+                if is_reprocess:
+                    ok = self.reprocess_document(
+                        doc_session,
+                        doc_id,
+                        use_gpu=use_gpu,
+                        use_mock=use_mock,
+                        track_run=False,
+                        batch_run_id=int(run.run_id),
+                    )
+                else:
+                    ok = self.process_document(
+                        doc_session,
+                        doc_id,
+                        use_gpu=use_gpu,
+                        use_mock=use_mock,
+                        is_reprocess=is_reprocess,
+                        track_run=False,
+                        batch_run_id=int(run.run_id),
+                    )
 
             if ok:
                 success += 1
@@ -1157,6 +1167,8 @@ class ProcessService:
         doc_id: int,
         use_gpu: bool = False,
         use_mock: bool = False,
+        track_run: bool = True,
+        batch_run_id: Optional[int] = None,
     ) -> bool:
         """
         Re-process a document with automatic delta statistics update.
@@ -1174,6 +1186,8 @@ class ProcessService:
             doc_id: Document ID to reprocess
             use_gpu: Whether to use GPU
             use_mock: Use mock engine instead of Stanza
+            track_run: Whether to create/update a dedicated per-document run row
+            batch_run_id: Optional batch-level run ID for shared error logging
 
         Returns:
             True if successful, False otherwise
@@ -1221,6 +1235,10 @@ class ProcessService:
             }
             if "is_reprocess" in inspect.signature(self.process_document).parameters:
                 process_kwargs["is_reprocess"] = True
+            if "track_run" in inspect.signature(self.process_document).parameters:
+                process_kwargs["track_run"] = track_run
+            if "batch_run_id" in inspect.signature(self.process_document).parameters:
+                process_kwargs["batch_run_id"] = batch_run_id
 
             success = self.process_document(session, doc_id, **process_kwargs)
 

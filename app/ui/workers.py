@@ -104,8 +104,11 @@ class ProcessWorker(QThread):
     """Worker thread for NLP document processing."""
 
     progress = pyqtSignal(int, int, str)  # current, total, doc_name
-    finished = pyqtSignal(int, int)  # success_count, error_count
+    state_changed = pyqtSignal(object)  # Structured NLP batch progress state
+    finished = pyqtSignal(object)  # {success_count, error_count, cancelled, ...}
     error = pyqtSignal(str)
+    paused = pyqtSignal()
+    resumed = pyqtSignal()
 
     def __init__(self, doc_ids: List[int], use_mock: bool = True, use_gpu: bool = False, is_reprocess: bool = False):
         super().__init__()
@@ -113,6 +116,19 @@ class ProcessWorker(QThread):
         self.use_mock = use_mock
         self.use_gpu = use_gpu
         self.is_reprocess = is_reprocess
+        self._cancel_requested = False
+        self._pause_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def pause(self) -> None:
+        self._pause_requested = True
+        self.paused.emit()
+
+    def resume(self) -> None:
+        self._pause_requested = False
+        self.resumed.emit()
 
     def run(self):
         """Run the processing pipeline."""
@@ -127,51 +143,43 @@ class ProcessWorker(QThread):
             db_service = DBService.get_instance()
             process_service = ProcessService()
 
-            success_count = 0
-            error_count = 0
+            last_state: Dict[str, Any] = {}
 
-            # Task 12: Per-document session isolation to prevent session contamination
-            for idx, doc_id in enumerate(self.doc_ids):
-                # Fresh session for each document
-                with db_service.get_session() as session:
-                    try:
-                        # Get document name for progress
-                        from app.infra.sa_models import SourceDocument
-                        doc = session.get(SourceDocument, doc_id)
-                        doc_name = doc.file_name if doc else f"Doc {doc_id}"
+            with db_service.get_session() as session:
+                success_count, error_count = process_service.process_documents_batch(
+                    session,
+                    self.doc_ids,
+                    use_gpu=self.use_gpu,
+                    use_mock=self.use_mock,
+                    is_reprocess=self.is_reprocess,
+                    progress_callback=lambda current, total, doc_name: self.progress.emit(
+                        current, total, doc_name
+                    ),
+                    state_callback=lambda state: self._on_state_changed(state, last_state),
+                    cancel_check=lambda: self._cancel_requested,
+                    pause_check=lambda: self._pause_requested,
+                    resume_latest=True,
+                    source_label="documents_ui",
+                )
 
-                        self.progress.emit(idx + 1, len(self.doc_ids), doc_name)
-
-                        # Process or re-process document
-                        if self.is_reprocess:
-                            # M4: Re-process with delta statistics
-                            success = process_service.reprocess_document(
-                                session,
-                                doc_id,
-                                use_gpu=self.use_gpu,
-                                use_mock=self.use_mock
-                            )
-                        else:
-                            # Normal processing
-                            success = process_service.process_document(
-                                session,
-                                doc_id,
-                                use_gpu=self.use_gpu,
-                                use_mock=self.use_mock
-                            )
-
-                        if success:
-                            success_count += 1
-                        else:
-                            error_count += 1
-
-                    except Exception as doc_error:
-                        logger.exception(f"Error processing document {doc_id}")
-                        error_count += 1
-                        # Session auto-closes and rolls back via context manager
-                        # Continue with next document in fresh session
-
-            self.finished.emit(success_count, error_count)
+            self.finished.emit(
+                {
+                    "success_count": int(success_count),
+                    "error_count": int(error_count),
+                    "cancelled": bool(
+                        last_state.get("phase") == "cancelled"
+                        or last_state.get("status") == "cancelled"
+                    ),
+                    "run_id": last_state.get("run_id"),
+                    "docs_total": int(last_state.get("docs_total") or len(self.doc_ids)),
+                    "docs_processed": int(last_state.get("docs_processed") or 0),
+                    "docs_failed": int(last_state.get("docs_failed") or 0),
+                    "chunks_total": int(last_state.get("chunks_total") or 0),
+                    "chunks_completed": int(last_state.get("chunks_completed") or 0),
+                    "stage": last_state.get("stage"),
+                    "operation_label": "Re-processing" if self.is_reprocess else "Processing",
+                }
+            )
 
         except Exception as e:
             logger.exception("Process worker error")
@@ -180,6 +188,11 @@ class ProcessWorker(QThread):
             self.error.emit(error_msg)
         finally:
             OperationsCenter.instance().unregister(op_id)
+
+    def _on_state_changed(self, state: Dict[str, Any], sink: Dict[str, Any]) -> None:
+        sink.clear()
+        sink.update(state)
+        self.state_changed.emit(dict(state))
 
     def _make_user_friendly_error(self, error: str) -> str:
         """Convert technical error to user-friendly message."""

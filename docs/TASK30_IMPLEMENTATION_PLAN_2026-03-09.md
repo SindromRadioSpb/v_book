@@ -838,3 +838,58 @@ Updated patch-order note:
   and worker lifecycle parity with staged `extract terms`
 - `PATCH-NLP-04` is narrowed to explicit resume selection and CLI verify mode,
   because basic deterministic `--resume-latest` is already implemented
+
+## PATCH-NLP-03 implemented (2026-03-09)
+
+Files:
+
+- `app/services/process_service.py`
+- `app/ui/workers.py`
+- `app/ui/documents_view.py`
+- `app/ui/dialogs/nlp_process_progress_dialog.py`
+- `tests/test_documents_process_progress_ui.py`
+- `tests/test_task12_fts_nlp.py`
+- `tests/test_process_batch_run_state.py`
+
+Result:
+
+- regular-project `Process with NLP` and `Re-process` now use the same staged
+  batch run-state contract as the new NLP foundation:
+  - structured state
+  - cooperative pause/resume/cancel
+  - deterministic `resume_latest`
+- `reprocess_document()` now supports batch-run routing without creating extra
+  per-document run rows during staged re-processing
+- `DocumentsView` now opens a dedicated NLP progress dialog with:
+  - run id
+  - doc progress
+  - chunk progress
+  - last processed doc id
+  - elapsed / last activity
+  - recent activity log
+  - pause/resume/cancel controls
+- `DocumentsView.closeEvent()` no longer force-terminates the process worker; it
+  requests cooperative cancellation and waits briefly for a safe checkpoint
+
+Validation:
+
+- targeted regressions:
+  - `40 passed in 55.33s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch03_ui_candidate.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_nlp_patch03_ui.log`
+  - result: `OK`
+- approved DB live worker probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_nlp_patch03_ui_probe.log`
+  - confirmed on the real approved DB:
+    - temporary regular project processed successfully via `ProcessWorker`
+    - the same project then re-processed successfully via `ProcessWorker`
+    - both batch runs persisted correct `processor_run` rows
+    - cleanup removed the temporary project afterward
+
+Updated patch-order note:
+
+- `PATCH-NLP-04` is now the next NLP step:
+  explicit CLI resume selection and verify-only contract
+- `PATCH-NLP-05` remains optional future offline/staging scope only if product
+  requirements later demand detached processing

@@ -382,13 +382,16 @@ Validation:
 
 Status:
 
-- pending
+- implemented on 2026-03-09
 
 Files:
 
+- `app/ui/dialogs/nlp_process_progress_dialog.py`
 - `app/ui/workers.py`
 - `app/ui/documents_view.py`
-- `app/ui/dialogs/nlp_process_progress_dialog.py`
+- `tests/test_documents_process_progress_ui.py`
+- `tests/test_task12_fts_nlp.py`
+- `tests/test_process_batch_run_state.py`
 
 Requirements:
 
@@ -396,6 +399,58 @@ Requirements:
 - add `pause/resume/cancel`
 - mirror the staged extraction progress dialog contract
 - keep all UI mutations on the main thread
+
+Delivered in this wave:
+
+- `ProcessWorker` now routes both regular processing and re-processing through
+  `ProcessService.process_documents_batch()` with:
+  - structured `state_changed`
+  - cooperative `cancel()/pause()/resume()`
+  - `resume_latest=True`
+  - `source_label='documents_ui'`
+- `reprocess_document()` was extended so batch re-processing can reuse the same
+  resumable run-state contract without creating extra per-document run rows
+- added dedicated `NLPProcessProgressDialog` with:
+  - stage label
+  - run id
+  - doc progress
+  - chunk progress
+  - last processed doc id
+  - elapsed / last activity
+  - bounded recent activity log
+  - pause/resume/cancel controls
+- `DocumentsView` now:
+  - opens the new dialog for both `Process with NLP` and `Re-process`
+  - updates inline progress/status from structured state
+  - disables conflicting process/delete actions while the worker is active
+  - requests cooperative cancellation on close instead of calling `terminate()`
+
+Validation:
+
+- targeted regressions:
+  - `40 passed in 55.33s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch03_ui_candidate.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_nlp_patch03_ui.log`
+  - result: `OK`
+- approved DB live regular-project probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_nlp_patch03_ui_probe.log`
+  - confirmed on the approved `hewiki_gpu_processing test.db`:
+    - temporary regular project was created on the live DB
+    - `ProcessWorker` completed a batch `process` run with:
+      - `run_id=387616`
+      - `status='ok'`
+      - `stage='completed'`
+      - `docs_total=2`
+      - `docs_processed=2`
+    - the same temp project then completed a batch `reprocess` run with:
+      - `run_id=387617`
+      - `status='ok'`
+      - `stage='completed'`
+      - `docs_total=2`
+      - `docs_processed=2`
+      - persisted note `is_reprocess=true`
+    - cleanup succeeded and left no `BENCH_NLP_UI_%` projects behind
 
 ### PATCH-NLP-04: CLI resume and verify contract
 

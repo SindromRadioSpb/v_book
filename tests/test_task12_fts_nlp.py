@@ -40,11 +40,15 @@ class TestCodeImports:
             "ProcessService should have process_document method"
 
     def test_workers_import(self):
-        """Test ProcessWorker with per-document session isolation."""
+        """Test ProcessWorker staged/batch signals exist."""
         from app.ui.workers import ProcessWorker
 
         # Verify class exists
         assert hasattr(ProcessWorker, 'run'), "ProcessWorker should have run method"
+        assert hasattr(ProcessWorker, 'state_changed'), "ProcessWorker should expose structured state"
+        assert hasattr(ProcessWorker, 'pause'), "ProcessWorker should support pause"
+        assert hasattr(ProcessWorker, 'resume'), "ProcessWorker should support resume"
+        assert hasattr(ProcessWorker, 'cancel'), "ProcessWorker should support cancel"
 
 
 class TestFTSManagerBasics:
@@ -134,30 +138,23 @@ class TestProcessRollbackPattern:
             "process_document should re-fetch run using saved run_id"
 
 
-class TestWorkerSessionIsolation:
-    """Test session isolation pattern in ProcessWorker."""
+class TestWorkerBatchContract:
+    """Test staged batch routing in ProcessWorker."""
 
-    def test_per_document_session_pattern(self):
-        """Verify per-document session pattern in ProcessWorker.run()."""
+    def test_process_worker_uses_batch_service(self):
+        """Verify ProcessWorker routes through process_documents_batch()."""
         from app.ui.workers import ProcessWorker
         import inspect
 
         # Get run method source
         source = inspect.getsource(ProcessWorker.run)
 
-        # Verify session is created inside document loop
-        assert "for idx, doc_id in enumerate(self.doc_ids):" in source, \
-            "ProcessWorker should loop over doc_ids"
-        assert "with db_service.get_session() as session:" in source, \
-            "ProcessWorker should create session with context manager"
-
-        # Verify session is inside the loop (indentation pattern)
-        lines = source.split('\n')
-        for_idx = next(i for i, line in enumerate(lines) if 'for idx, doc_id in enumerate' in line)
-        session_idx = next(i for i, line in enumerate(lines) if 'with db_service.get_session()' in line)
-
-        assert session_idx > for_idx, \
-            "Session creation should be INSIDE the document loop (per-document isolation)"
+        assert "process_documents_batch(" in source, \
+            "ProcessWorker should route through ProcessService.process_documents_batch"
+        assert "resume_latest=True" in source, \
+            "ProcessWorker should auto-resume the latest matching batch run"
+        assert "state_callback=lambda state: self._on_state_changed(state, last_state)" in source, \
+            "ProcessWorker should forward structured state from the batch service"
 
 
 class TestDiagnosticScript:
