@@ -248,15 +248,56 @@ python scripts/process_reference_corpus.py `
     --verify-only
 ```
 
+### Audit sentence snapshot coverage without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --backfill-snapshots `
+    --coverage-only
+```
+
+### Backfill sentence snapshots for already processed docs
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --backfill-snapshots `
+    --chunk-size 50
+```
+
+### Verify a snapshot-backfill resume contract without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --backfill-snapshots `
+    --resume-run-id 387620 `
+    --verify-only
+```
+
 ### How it differs from the UI worker
 
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
 | Session scope | One session per document | One session per document |
-| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters, deterministic `--resume-latest`, explicit `--resume-run-id`, and `--verify-only` preflight |
+| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters, deterministic `--resume-latest`, explicit `--resume-run-id`, and `--verify-only` preflight for both processing and snapshot-backfill runs |
 | Cancellation | Regular-project UI now has pause/resume/cancel at document checkpoints, but reference corpora must still use the CLI path | Cooperative resume-at-checkpoint model; interrupted work can be resumed only when the stored contract still matches and the persisted run is in `paused`, `cancelled`, or `failed` state |
+| Coverage audit | Not exposed for reference corpora | `--backfill-snapshots --coverage-only` gives a read-only snapshot coverage report before any backfill write |
 | Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |
 | Suitable for 387 K docs | No | Yes |
+
+### Snapshot backfill notes
+
+- This mode is intended for legacy processed corpora that predate migration
+  `038_sentence_nlp_snapshot`.
+- The run contract stays deterministic by scanning the full processed-doc slice
+  and only creating missing snapshot rows per document.
+- Backfill is designed to enrich `sentence_nlp_snapshot` only; it does not
+  re-run full NLP processing and does not rewrite lemma or term data.
 
 ### Inter-chunk sleep
 

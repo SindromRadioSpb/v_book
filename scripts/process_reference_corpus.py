@@ -26,6 +26,16 @@ Process with Stanza + GPU, chunk 25, max 500:
 Dry run:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 --dry-run
+
+Coverage-only snapshot audit:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --backfill-snapshots --coverage-only
+
+Backfill snapshots for already processed docs:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --backfill-snapshots --chunk-size 50
 """
 from __future__ import annotations
 
@@ -102,6 +112,98 @@ def _get_project_doc_ids(session, project_id: int) -> list[int]:
         {"pid": project_id},
     ).fetchall()
     return [r[0] for r in rows]
+
+
+def _get_processed_doc_ids(session, project_id: int) -> list[int]:
+    from sqlalchemy import text
+
+    rows = session.execute(
+        text(
+            "SELECT sd.doc_id FROM source_document sd"
+            " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+            " WHERE sc.project_id = :pid"
+            "   AND sd.status = 'processed'"
+            " ORDER BY sd.doc_id"
+        ),
+        {"pid": project_id},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _get_missing_snapshot_doc_ids(session, project_id: int) -> list[int]:
+    from sqlalchemy import text
+
+    rows = session.execute(
+        text(
+            "WITH snapshot_counts AS ("
+            "  SELECT ds.doc_id, COUNT(*) AS snapshot_count"
+            "  FROM sentence_nlp_snapshot sns"
+            "  JOIN document_sentence ds ON ds.sentence_id = sns.sentence_id"
+            "  GROUP BY ds.doc_id"
+            ") "
+            "SELECT sd.doc_id FROM source_document sd"
+            " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+            " LEFT JOIN snapshot_counts snap ON snap.doc_id = sd.doc_id"
+            " WHERE sc.project_id = :pid"
+            "   AND sd.status = 'processed'"
+            "   AND COALESCE(sd.sentence_count, 0) > 0"
+            "   AND COALESCE(snap.snapshot_count, 0) < COALESCE(sd.sentence_count, 0)"
+            " ORDER BY sd.doc_id"
+        ),
+        {"pid": project_id},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _get_snapshot_coverage(session, project_id: int) -> dict[str, Any]:
+    from sqlalchemy import text
+
+    row = session.execute(
+        text(
+            "WITH processed_docs AS ("
+            "  SELECT sd.doc_id, COALESCE(sd.sentence_count, 0) AS sentence_count"
+            "  FROM source_document sd"
+            "  JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+            "  WHERE sc.project_id = :pid AND sd.status = 'processed'"
+            "), snapshot_counts AS ("
+            "  SELECT ds.doc_id, COUNT(*) AS snapshot_count"
+            "  FROM sentence_nlp_snapshot sns"
+            "  JOIN document_sentence ds ON ds.sentence_id = sns.sentence_id"
+            "  GROUP BY ds.doc_id"
+            ") "
+            "SELECT "
+            "  COUNT(pd.doc_id) AS processed_docs,"
+            "  COALESCE(SUM(pd.sentence_count), 0) AS sentence_count_total,"
+            "  COALESCE(SUM(COALESCE(snap.snapshot_count, 0)), 0) AS snapshot_count_total,"
+            "  SUM(CASE WHEN pd.sentence_count > 0 AND COALESCE(snap.snapshot_count, 0) >= pd.sentence_count THEN 1 ELSE 0 END) AS fully_covered_docs,"
+            "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) = 0 THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
+            "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) > 0 AND COALESCE(snap.snapshot_count, 0) < pd.sentence_count THEN 1 ELSE 0 END) AS partial_snapshot_docs "
+            "FROM processed_docs pd "
+            "LEFT JOIN snapshot_counts snap ON snap.doc_id = pd.doc_id"
+        ),
+        {"pid": project_id},
+    ).mappings().one()
+
+    processed_docs = int(row["processed_docs"] or 0)
+    sentence_count_total = int(row["sentence_count_total"] or 0)
+    snapshot_count_total = int(row["snapshot_count_total"] or 0)
+    fully_covered_docs = int(row["fully_covered_docs"] or 0)
+    return {
+        "processed_docs": processed_docs,
+        "sentence_count_total": sentence_count_total,
+        "snapshot_count_total": snapshot_count_total,
+        "fully_covered_docs": fully_covered_docs,
+        "zero_snapshot_docs": int(row["zero_snapshot_docs"] or 0),
+        "partial_snapshot_docs": int(row["partial_snapshot_docs"] or 0),
+        "sentence_snapshot_coverage_pct": (
+            round(snapshot_count_total / sentence_count_total * 100.0, 4)
+            if sentence_count_total else None
+        ),
+        "doc_full_coverage_pct": (
+            round(fully_covered_docs / processed_docs * 100.0, 4)
+            if processed_docs else None
+        ),
+    }
 
 
 def _process_chunk(
@@ -254,6 +356,16 @@ def main() -> None:
         action="store_true",
         help="Validate the deterministic batch contract without writing to the DB",
     )
+    parser.add_argument(
+        "--backfill-snapshots",
+        action="store_true",
+        help="Backfill sentence_nlp_snapshot rows for already processed docs",
+    )
+    parser.add_argument(
+        "--coverage-only",
+        action="store_true",
+        help="Report sentence snapshot coverage for the selected project and exit",
+    )
     args = parser.parse_args()
 
     if not args.project_id and not args.project_name:
@@ -262,6 +374,10 @@ def main() -> None:
         parser.error("--resume-latest and --resume-run-id are mutually exclusive")
     if args.verify_only and args.dry_run:
         parser.error("--verify-only and --dry-run are mutually exclusive")
+    if args.coverage_only and args.verify_only:
+        parser.error("--coverage-only and --verify-only are mutually exclusive")
+    if args.coverage_only and args.dry_run:
+        parser.error("--coverage-only and --dry-run are mutually exclusive")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
         parser.error("--resume-run-id must be >= 1")
 
@@ -317,28 +433,77 @@ def main() -> None:
             total_all, already_processed = _get_doc_counts(session, project_id)
             project_doc_ids = _get_project_doc_ids(session, project_id)
             remaining_doc_ids = _get_unprocessed_doc_ids(session, project_id)
+            processed_doc_ids = _get_processed_doc_ids(session, project_id)
+            missing_snapshot_doc_ids = _get_missing_snapshot_doc_ids(session, project_id)
+            snapshot_coverage = _get_snapshot_coverage(session, project_id)
 
         pct_done = already_processed / total_all * 100 if total_all else 0
         logger.info(
             "Total docs: %d | Already processed: %d (%.1f%%) | To process: %d",
             total_all, already_processed, pct_done, len(remaining_doc_ids),
         )
+        logger.info(
+            "Sentence snapshot coverage | processed_docs=%d fully_covered_docs=%d zero_snapshot_docs=%d partial_snapshot_docs=%d sentence_coverage=%s%% doc_coverage=%s%%",
+            snapshot_coverage["processed_docs"],
+            snapshot_coverage["fully_covered_docs"],
+            snapshot_coverage["zero_snapshot_docs"],
+            snapshot_coverage["partial_snapshot_docs"],
+            snapshot_coverage["sentence_snapshot_coverage_pct"]
+            if snapshot_coverage["sentence_snapshot_coverage_pct"] is not None
+            else "-",
+            snapshot_coverage["doc_full_coverage_pct"]
+            if snapshot_coverage["doc_full_coverage_pct"] is not None
+            else "-",
+        )
+
+        if args.coverage_only:
+            logger.info(
+                "Coverage-only mode complete | project_id=%d missing_snapshot_docs=%d",
+                project_id,
+                len(missing_snapshot_doc_ids),
+            )
+            return
 
         wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
-        doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
+        mode_label = "reference_processing"
+        source_label = "reference_cli"
+        if args.backfill_snapshots:
+            mode_label = "snapshot_backfill"
+            source_label = "snapshot_backfill_cli"
+            doc_ids_all = processed_doc_ids
+        else:
+            doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
         if args.max_docs > 0:
             doc_ids_all = doc_ids_all[: args.max_docs]
         doc_ids_to_process = doc_ids_all
+
+        if args.backfill_snapshots and not wants_resume and not missing_snapshot_doc_ids:
+            logger.info("No sentence snapshot backfill needed. Exiting.")
+            return
 
         if not doc_ids_to_process:
             logger.info("Nothing to process. Exiting.")
             return
 
         if wants_resume:
+            if args.backfill_snapshots:
+                logger.info(
+                    "Resume contract slice: %d processed docs (currently missing snapshots: %d)",
+                    len(doc_ids_to_process),
+                    len(missing_snapshot_doc_ids),
+                )
+            else:
+                logger.info(
+                    "Resume contract slice: %d docs (remaining currently unprocessed: %d)",
+                    len(doc_ids_to_process),
+                    len(remaining_doc_ids),
+                )
+        elif args.backfill_snapshots:
+            selected_doc_ids = set(doc_ids_to_process)
             logger.info(
-                "Resume contract slice: %d docs (remaining currently unprocessed: %d)",
+                "Snapshot backfill candidate docs in current slice: %d of %d processed docs",
+                len([doc_id for doc_id in missing_snapshot_doc_ids if doc_id in selected_doc_ids]),
                 len(doc_ids_to_process),
-                len(remaining_doc_ids),
             )
 
         action_label = "Processing"
@@ -346,6 +511,12 @@ def main() -> None:
             action_label = "Verifying"
         elif args.dry_run:
             action_label = "Planning"
+        if args.backfill_snapshots:
+            action_label = {
+                "Verifying": "Verifying snapshot backfill",
+                "Planning": "Planning snapshot backfill",
+                "Processing": "Backfilling snapshots",
+            }[action_label]
 
         logger.info(
             "%s %d docs | chunk=%d sleep=%.1fs mock=%s gpu=%s%s",
@@ -381,9 +552,10 @@ def main() -> None:
                     doc_ids_to_process,
                     use_gpu=use_gpu,
                     use_mock=use_mock,
-                    source_label="reference_cli",
+                    source_label=source_label,
                     resume_latest=bool(args.resume_latest),
                     resume_run_id=args.resume_run_id,
+                    contract="snapshot_backfill_v1" if args.backfill_snapshots else "process_document_v2",
                 )
             _log_batch_verification(report)
             if not report.get("ok"):
@@ -391,18 +563,32 @@ def main() -> None:
             return
 
         with db_service.get_session() as session:
-            total_success, total_error = process_service.process_documents_batch(
-                session,
-                doc_ids_to_process,
-                use_gpu=use_gpu,
-                use_mock=use_mock,
-                chunk_size=args.chunk_size,
-                chunk_sleep=args.chunk_sleep,
-                state_callback=lambda state: _log_batch_state(state, state_tracker),
-                resume_latest=bool(args.resume_latest),
-                resume_run_id=args.resume_run_id,
-                source_label="reference_cli",
-            )
+            if args.backfill_snapshots:
+                total_success, total_error = process_service.backfill_sentence_snapshots_batch(
+                    session,
+                    doc_ids_to_process,
+                    use_gpu=use_gpu,
+                    use_mock=use_mock,
+                    chunk_size=args.chunk_size,
+                    chunk_sleep=args.chunk_sleep,
+                    state_callback=lambda state: _log_batch_state(state, state_tracker),
+                    resume_latest=bool(args.resume_latest),
+                    resume_run_id=args.resume_run_id,
+                    source_label=source_label,
+                )
+            else:
+                total_success, total_error = process_service.process_documents_batch(
+                    session,
+                    doc_ids_to_process,
+                    use_gpu=use_gpu,
+                    use_mock=use_mock,
+                    chunk_size=args.chunk_size,
+                    chunk_sleep=args.chunk_sleep,
+                    state_callback=lambda state: _log_batch_state(state, state_tracker),
+                    resume_latest=bool(args.resume_latest),
+                    resume_run_id=args.resume_run_id,
+                    source_label=source_label,
+                )
 
         logger.info(
             "Finished. success=%d error=%d time=%.1fs",

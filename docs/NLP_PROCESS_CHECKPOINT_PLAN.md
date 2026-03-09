@@ -750,11 +750,63 @@ Decision after audit:
   blocker is absence of snapshots on legacy processed corpora, not mismatch of
   existing snapshots
 
-Recommended next patch series:
+## PATCH-NLP-BF-01 implemented (2026-03-10)
 
-- `PATCH-NLP-BF-01`: CLI-first chunked snapshot backfill for already processed
-  docs that still lack `sentence_nlp_snapshot` rows
-- `PATCH-NLP-BF-02`: resumable run-state/reporting for that backfill path,
-  reusing the current batch NLP state contract where practical
-- `PATCH-NLP-BF-03`: optional admin/report command for coverage-only audit once
-  the backfill path exists
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+- `docs/TERM_EXTRACTION_CHUNKED_PLAN.md`
+- `docs/TASK30_IMPLEMENTATION_PLAN_2026-03-09.md`
+
+Delivered:
+
+- new CLI mode `--backfill-snapshots` for already processed project documents
+  that still lack `sentence_nlp_snapshot` rows
+- new read-only audit mode `--coverage-only`
+- backfill reuses the current DB-backed batch `processor_run` contract instead
+  of introducing a second run-ledger model
+- deterministic resume contract stays based on the full processed-doc slice,
+  not the shrinking "still missing" subset, so interrupted runs remain
+  resumable even after some docs become covered
+- backfill writes only missing `sentence_nlp_snapshot` rows
+- backfill does not change document NLP status, lemma tables, or term tables
+- the same `--resume-latest`, `--resume-run-id`, and `--verify-only`
+  mechanisms now also work for snapshot-backfill runs through the explicit
+  `snapshot_backfill_v1` contract
+
+Validation:
+
+- targeted backfill + CLI regressions:
+  - `29 passed in 158.98s`
+  - artifact: `build/logs/nlp_backfill/pytest_snapshot_backfill.log`
+- import smoke:
+  - artifact: `build/logs/nlp_backfill/import_smoke_snapshot_backfill.log`
+  - result: `OK`
+- live approved dev/test DB probe:
+  - coverage-only artifact:
+    `build/logs/nlp_backfill/live_cli_probe_coverage.log`
+  - backfill artifact:
+    `build/logs/nlp_backfill/live_cli_probe_backfill.log`
+  - post-check artifact:
+    `build/logs/nlp_backfill/live_cli_probe_postcheck.log`
+  - confirmed on
+    `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`:
+    - temporary processed docs started at `0.0%` snapshot coverage
+    - backfill created `4` sentence snapshots for `2` docs
+    - cleanup removed the temporary project and left no leftovers
+
+Current next step after implementation:
+
+- do not add freshness/version gating yet
+- first measure how much legacy coverage improves after operators actually run
+  backfill on long-lived processed projects
+- if fallback reparsing remains significant after backfill adoption, only then
+  evaluate:
+  - freshness/version gates
+  - backfill reporting/export wrappers
+  - broader snapshot integrity checks

@@ -1119,3 +1119,64 @@ Validation:
     - temporary processed doc produced `2` snapshots
     - deleting the temporary project left `orphan_after=0`
     - no project leftovers remained
+
+## Snapshot backfill follow-up implemented (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+- `docs/TERM_EXTRACTION_CHUNKED_PLAN.md`
+- task30 docs as needed
+
+Result:
+
+- the coverage audit outcome was acted on directly:
+  legacy processed docs can now be enriched through a dedicated CLI-first
+  snapshot backfill path instead of waiting for a future full reprocess
+- `process_reference_corpus.py` now supports:
+  - `--backfill-snapshots`
+  - `--coverage-only`
+  - snapshot-backfill `--verify-only`
+- `ProcessService` now reuses the current batch `processor_run` model for
+  resumable snapshot backfill via the explicit `snapshot_backfill_v1` contract
+- the deterministic resume slice is the full processed-doc set for the project,
+  not the shrinking "still missing snapshots" subset
+- backfill only writes missing `sentence_nlp_snapshot` rows and does not touch:
+  - document NLP status
+  - lemma tables
+  - term tables
+
+Validation:
+
+- targeted regressions:
+  - `29 passed in 158.98s`
+  - artifact: `build/logs/nlp_backfill/pytest_snapshot_backfill.log`
+- import smoke:
+  - artifact: `build/logs/nlp_backfill/import_smoke_snapshot_backfill.log`
+  - result: `OK`
+- live approved dev/test DB probe:
+  - setup artifact:
+    `build/logs/nlp_backfill/live_cli_probe_setup.log`
+  - coverage-only artifact:
+    `build/logs/nlp_backfill/live_cli_probe_coverage.log`
+  - backfill artifact:
+    `build/logs/nlp_backfill/live_cli_probe_backfill.log`
+  - post-check artifact:
+    `build/logs/nlp_backfill/live_cli_probe_postcheck.log`
+  - confirmed:
+    - temporary processed docs started at `0.0%` coverage
+    - the run created `4` sentence snapshots for `2` docs
+    - cleanup left no temporary project leftovers
+
+Current next step:
+
+- do not introduce freshness/version gating yet
+- first measure coverage after operators run the new backfill path on legacy
+  long-lived projects
+- only then decide whether a separate freshness/integrity hardening patch is
+  warranted

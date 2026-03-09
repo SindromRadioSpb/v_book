@@ -88,9 +88,10 @@ class ProcessService:
         use_gpu: bool,
         use_mock: bool,
         is_reprocess: bool,
+        contract: str = "process_document_v2",
     ) -> str:
         payload = {
-            "contract": "process_document_v2",
+            "contract": str(contract or "process_document_v2"),
             "engine": engine.get_name(),
             "engine_version": engine.get_version(),
             "use_gpu": bool(use_gpu),
@@ -282,6 +283,7 @@ class ProcessService:
         source_label: str = "batch",
         resume_latest: bool = False,
         resume_run_id: Optional[int] = None,
+        contract: str = "process_document_v2",
     ) -> dict[str, Any]:
         """Validate a batch NLP run contract without mutating the DB."""
         if resume_latest and resume_run_id is not None:
@@ -298,6 +300,7 @@ class ProcessService:
             use_gpu=use_gpu,
             use_mock=use_mock,
             is_reprocess=is_reprocess,
+            contract=contract,
         )
         report: dict[str, Any] = {
             "ok": False,
@@ -411,6 +414,26 @@ class ProcessService:
         snapshot.payload_json = serialize_nlp_sentences(nlp_sentences)
         snapshot.token_count = count_snapshot_tokens(nlp_sentences)
         return int(snapshot.token_count or 0)
+
+    def _record_batch_run_error(
+        self,
+        session: Session,
+        *,
+        run_id: Optional[int],
+        doc_id: Optional[int],
+        stage: str,
+        message: str,
+    ) -> None:
+        if run_id is None:
+            return
+        session.add(
+            RunError(
+                run_id=int(run_id),
+                doc_id=int(doc_id) if doc_id is not None else None,
+                stage=str(stage or "batch"),
+                message=str(message or "")[:500],
+            )
+        )
 
     def _start_processor_run(
         self,
@@ -815,6 +838,362 @@ class ProcessService:
 
         session.flush()
         logger.debug(f"Updated statistics for {len(lemma_counter)} lemmas")
+
+    def _backfill_sentence_nlp_snapshots_for_document(
+        self,
+        session: Session,
+        doc_id: int,
+        *,
+        engine: NLPEngine,
+        batch_run_id: Optional[int] = None,
+    ) -> tuple[bool, str]:
+        """Persist missing sentence snapshots for one already-processed document."""
+        logger.info("Backfilling sentence snapshots for document %s...", doc_id)
+
+        try:
+            doc = session.get(SourceDocument, int(doc_id))
+            if doc is None:
+                raise ValueError(f"Document not found: {doc_id}")
+            if str(doc.status or "") != "processed":
+                return True, "Skipped non-processed document"
+
+            stmt = (
+                select(DocumentSentence, SentenceNLPSnapshot)
+                .outerjoin(
+                    SentenceNLPSnapshot,
+                    SentenceNLPSnapshot.sentence_id == DocumentSentence.sentence_id,
+                )
+                .where(DocumentSentence.doc_id == int(doc_id))
+                .order_by(DocumentSentence.sent_index.asc())
+            )
+            rows = session.execute(stmt).all()
+            if not rows:
+                return True, "No document_sentence rows to backfill"
+
+            missing_count = 0
+            token_total = 0
+            for sent_row, snapshot in rows:
+                if snapshot is not None:
+                    continue
+                missing_count += 1
+                token_total += self._upsert_sentence_nlp_snapshot(
+                    session,
+                    sentence_row=sent_row,
+                    engine=engine,
+                    nlp_sentences=engine.process(str(sent_row.text or "")),
+                )
+
+            session.commit()
+            if missing_count == 0:
+                return True, "Snapshots already present"
+            return True, (
+                f"Backfilled {missing_count} sentence snapshot(s)"
+                f" ({token_total} token(s))"
+            )
+        except Exception as exc:
+            logger.exception("Failed to backfill sentence snapshots for document %s", doc_id)
+            session.rollback()
+            try:
+                self._record_batch_run_error(
+                    session,
+                    run_id=batch_run_id,
+                    doc_id=doc_id,
+                    stage="snapshot_backfill",
+                    message=str(exc),
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+            return False, str(exc)
+
+    def backfill_sentence_snapshots_batch(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        use_gpu: bool = False,
+        use_mock: bool = False,
+        *,
+        chunk_size: int = 50,
+        chunk_sleep: float = 0.0,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
+        resume_latest: bool = False,
+        resume_run_id: Optional[int] = None,
+        source_label: str = "snapshot_backfill",
+    ) -> Tuple[int, int]:
+        """Backfill missing sentence snapshots for a deterministic processed-doc slice."""
+        if resume_latest and resume_run_id is not None:
+            raise ValueError("resume_latest and resume_run_id are mutually exclusive")
+
+        ordered_ids = sorted({int(doc_id) for doc_id in doc_ids})
+        if not ordered_ids:
+            return 0, 0
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be >= 1")
+
+        project_id = self._resolve_project_id_for_docs(session, ordered_ids)
+        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=False,
+            contract="snapshot_backfill_v1",
+        )
+        total_chunks = math.ceil(len(ordered_ids) / chunk_size)
+        effective_chunk_size = int(chunk_size)
+
+        run = None
+        verification: Optional[dict[str, Any]] = None
+        if resume_run_id is not None:
+            verification = self.verify_batch_run_contract(
+                session,
+                ordered_ids,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                source_label=source_label,
+                resume_run_id=resume_run_id,
+                contract="snapshot_backfill_v1",
+            )
+            if not verification.get("ok"):
+                raise ValueError(
+                    str(verification.get("reason") or "Explicit snapshot backfill resume failed")
+                )
+            run = session.get(ProcessorRun, int(verification["run_id"]))
+        elif resume_latest:
+            verification = self.verify_batch_run_contract(
+                session,
+                ordered_ids,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                source_label=source_label,
+                resume_latest=True,
+                contract="snapshot_backfill_v1",
+            )
+            if verification.get("ok"):
+                run = session.get(ProcessorRun, int(verification["run_id"]))
+
+        if run is None:
+            run = ProcessorRun(
+                project_id=project_id,
+                engine=engine.get_name(),
+                engine_version=engine.get_version(),
+                docs_total=len(ordered_ids),
+                docs_processed=0,
+                docs_failed=0,
+                chunks_total=total_chunks,
+                chunks_completed=0,
+                status="running",
+                stage="snapshot_backfill",
+                params_hash=params_hash,
+                note=self._build_batch_run_note(
+                    doc_ids=ordered_ids,
+                    chunk_size=chunk_size,
+                    source_label=source_label,
+                    is_reprocess=False,
+                ),
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="started",
+                message="Created sentence snapshot backfill run",
+            )
+        else:
+            if verification and verification.get("chunk_size"):
+                effective_chunk_size = max(1, int(verification["chunk_size"]))
+            run.status = "running"
+            run.stage = "snapshot_backfill"
+            run.error_message = None
+            run.finished_at = None
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="resumed",
+                message=(
+                    "Resuming selected sentence snapshot backfill run"
+                    if resume_run_id is not None
+                    else "Resuming latest incomplete sentence snapshot backfill run"
+                ),
+            )
+
+        remaining_ids = [
+            doc_id
+            for doc_id in ordered_ids
+            if run.last_doc_id is None or int(doc_id) > int(run.last_doc_id)
+        ]
+        if not remaining_ids:
+            run.status = "ok"
+            run.stage = "completed_with_errors" if int(run.docs_failed or 0) > 0 else "completed"
+            run.finished_at = self._utc_now()
+            if int(run.docs_failed or 0) > 0:
+                run.error_message = (
+                    f"{int(run.docs_failed)} document(s) failed during sentence snapshot backfill"
+                )
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="completed",
+                message="No remaining documents for this sentence snapshot backfill run",
+            )
+            return 0, 0
+
+        success = 0
+        errors = 0
+
+        def _cancel_current_run(message: str) -> Tuple[int, int]:
+            run.status = "cancelled"
+            run.stage = "cancelled"
+            run.finished_at = self._utc_now()
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(state_callback, run, phase="cancelled", message=message)
+            return success, errors
+
+        for doc_id in remaining_ids:
+            if cancel_check and cancel_check():
+                return _cancel_current_run("Cancellation requested before next document")
+
+            if pause_check and pause_check():
+                run.status = "paused"
+                run.stage = "paused"
+                session.commit()
+                session.refresh(run)
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="paused",
+                    message="Paused at sentence snapshot backfill checkpoint",
+                )
+                while pause_check and pause_check():
+                    if cancel_check and cancel_check():
+                        return _cancel_current_run(
+                            "Cancellation requested while paused at sentence snapshot backfill checkpoint"
+                        )
+                    time.sleep(0.1)
+                run.status = "running"
+                run.stage = "snapshot_backfill"
+                session.commit()
+                session.refresh(run)
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="resumed",
+                    message="Resumed sentence snapshot backfill run",
+                )
+
+            with self.db_service.get_session() as doc_session:
+                doc = doc_session.get(SourceDocument, int(doc_id))
+                doc_name = doc.file_name if doc else f"Doc {doc_id}"
+                done_before = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+                if progress_callback:
+                    progress_callback(done_before + 1, int(run.docs_total or 0), doc_name)
+                if cancel_check and cancel_check():
+                    return _cancel_current_run(
+                        "Cancellation requested after progress update at sentence snapshot backfill checkpoint"
+                    )
+                if pause_check and pause_check():
+                    run.status = "paused"
+                    run.stage = "paused"
+                    session.commit()
+                    session.refresh(run)
+                    self._emit_run_state(
+                        state_callback,
+                        run,
+                        phase="paused",
+                        message="Paused at sentence snapshot backfill checkpoint",
+                    )
+                    while pause_check and pause_check():
+                        if cancel_check and cancel_check():
+                            return _cancel_current_run(
+                                "Cancellation requested while paused at sentence snapshot backfill checkpoint"
+                            )
+                        time.sleep(0.1)
+                    run.status = "running"
+                    run.stage = "snapshot_backfill"
+                    session.commit()
+                    session.refresh(run)
+                    self._emit_run_state(
+                        state_callback,
+                        run,
+                        phase="resumed",
+                        message="Resumed sentence snapshot backfill run",
+                    )
+                ok, detail = self._backfill_sentence_nlp_snapshots_for_document(
+                    doc_session,
+                    int(doc_id),
+                    engine=engine,
+                    batch_run_id=int(run.run_id),
+                )
+
+            if ok:
+                success += 1
+                run.docs_processed = int(run.docs_processed or 0) + 1
+            else:
+                errors += 1
+                run.docs_failed = int(run.docs_failed or 0) + 1
+
+            docs_done = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+            run.last_doc_id = int(doc_id)
+            run.chunks_completed = docs_done // effective_chunk_size
+            run.stage = "snapshot_backfill"
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="processing",
+                message=detail,
+                doc_name=doc_name,
+            )
+
+            if docs_done % effective_chunk_size == 0:
+                self._emit_run_state(
+                    state_callback,
+                    run,
+                    phase="chunk_complete",
+                    message=(
+                        "Completed sentence snapshot backfill chunk "
+                        f"{int(run.chunks_completed or 0)}/{int(run.chunks_total or 0)}"
+                    ),
+                )
+                if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
+                    time.sleep(chunk_sleep)
+
+        run.status = "ok"
+        run.stage = "completed_with_errors" if errors > 0 else "completed"
+        run.finished_at = self._utc_now()
+        run.chunks_completed = int(run.chunks_total or 0)
+        run.error_message = (
+            f"{errors} document(s) failed during sentence snapshot backfill"
+            if errors > 0
+            else None
+        )
+        session.commit()
+        session.refresh(run)
+        self._emit_run_state(
+            state_callback,
+            run,
+            phase="completed",
+            message="Sentence snapshot backfill run completed",
+        )
+
+        logger.info(
+            "Sentence snapshot backfill complete: %d succeeded, %d failed (run_id=%d)",
+            success,
+            errors,
+            int(run.run_id),
+        )
+        return success, errors
 
     def process_documents_batch(
         self,

@@ -387,6 +387,25 @@ Coverage decision refresh on `2026-03-10`:
 - freshness/version gating should stay deferred until there is meaningful
   non-zero legacy snapshot coverage to protect
 
+Snapshot backfill follow-up implemented on `2026-03-10`:
+
+- `scripts/process_reference_corpus.py` now supports:
+  - `--backfill-snapshots`
+  - `--coverage-only`
+  - `--verify-only` for snapshot-backfill resume contracts
+- `ProcessService` now has a dedicated resumable backfill path for already
+  processed docs that still lack `sentence_nlp_snapshot` rows
+- live validation on the approved dev/test DB proved:
+  - `0.0%` coverage is reported correctly before the run
+  - missing snapshots can be backfilled without changing document NLP status
+    or lemma tables
+  - cleanup leaves no snapshot or project leftovers after the probe
+- key artifacts:
+  - `build/logs/nlp_backfill/pytest_snapshot_backfill.log`
+  - `build/logs/nlp_backfill/live_cli_probe_coverage.log`
+  - `build/logs/nlp_backfill/live_cli_probe_backfill.log`
+  - `build/logs/nlp_backfill/live_cli_probe_postcheck.log`
+
 ## Remaining follow-ups
 
 ### Follow-up A: NLP convergence and shared long-operation contract
@@ -398,9 +417,10 @@ Coverage decision refresh on `2026-03-10`:
 - the first meaningful data-path convergence is also now implemented:
   term extraction already reuses persisted NLP sentence snapshots
 - the next cross-feature convergence question is narrower:
-  implement snapshot backfill first, then decide later whether additional
-  freshness/version gating or coverage reporting is needed beyond the current
-  `prefer snapshot / fallback reparse` contract
+  measure post-backfill coverage on long-lived legacy projects, then decide
+  later whether additional freshness/version gating or stronger coverage
+  reporting is needed beyond the current `prefer snapshot / fallback reparse`
+  contract
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 
@@ -424,8 +444,9 @@ Coverage decision refresh on `2026-03-10`:
 If reference-scale runs are still too long:
 
 - compute term candidates during NLP processing instead of re-parsing sentences later
-- or expand the snapshot layer with backfill/freshness guarantees for legacy
-  processed documents
+- or expand the snapshot layer with freshness/version guarantees for legacy
+  processed documents after the new backfill path has been exercised in the
+  field
 - or materialize per-run / per-project helper tables for direct finalize paths
 
 ## Files touched in this wave
