@@ -217,6 +217,96 @@ Validation:
 - Result: implemented; `_cluster_terms()` now clusters in canonical-key batches
   and no longer builds an in-memory map for the full project.
 
+### PATCH-06: Chunked term extraction staging and resumable runs
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `app/infra/migrations/036_term_extract_chunked.sql`
+- `app/infra/sa_models.py`
+- `app/domain/dto.py`
+- `app/services/term_extraction_service.py`
+- `tests/test_term_extraction_service_large_project.py`
+
+Goals:
+
+- Make `extract_terms_for_project()` process large projects in bounded doc batches
+  instead of one monolithic collect pass.
+- Persist staged aggregate counters so interrupted runs can resume instead of
+  restarting from doc `1`.
+- Keep overwrite-safe behavior by delaying final term-table mutation until the
+  staged collect pass completes successfully.
+
+Design:
+
+- New `term_extract_run` table stores project/parameter/status/checkpoint state.
+- New `term_extract_accumulator` table stores aggregated `(source_kind, n, surface)`
+  counters with `freq_abs/doc_freq`.
+- Public overwrite path now stages by doc batch, then performs one atomic finalization
+  transaction into `ngram/ngram_project_stat/term_cluster`.
+- Legacy non-overwrite path stays on the previous implementation to avoid widening
+  behavioral surface unnecessarily.
+
+Expected effect:
+
+- Bounded RAM use during collect phase on large projects.
+- Resume/retry support after cancellation/failure without losing staged work.
+- No partial visible overwrite if collect fails before finalization starts.
+
+Validation:
+
+- New regression in `tests/test_term_extraction_service_large_project.py` covers
+  cancel-after-first-batch and resume-to-success on the same staged run.
+- Existing bounded extraction and clustering regressions still pass.
+- Migration compatibility must be re-verified on the approved `hewiki_gpu_processing test.db`.
+
+### PATCH-07: Term extraction UI/worker progress integration
+
+Status: planned follow-up
+
+Files:
+
+- `app/ui/workers.py`
+- `app/ui/terms_view.py`
+- optional progress-dialog support files
+
+Goals:
+
+- Surface chunked doc progress, resumable-run status, and finalization stage in UI.
+- Add cooperative cancel/resume controls wired to the staged collect phase.
+- Keep Terms view responsive without relying on an indeterminate progress bar only.
+
+Current note:
+
+- Backend chunking/resume is implemented first because it changes correctness and
+  large-project safety.
+- UI control wiring remains a follow-up so this patch series stays bounded.
+
+### PATCH-08: Pipeline benchmark refresh for chunked extraction
+
+Status: in progress
+
+Files:
+
+- `scripts/benchmarks/bench_reference_pipeline.py` (verification only if needed)
+- `build/logs/pipeline_bench_*`
+- perf docs / task docs as needed
+
+Goals:
+
+- Refresh apples-to-apples `extract_terms` benchmarks after chunked staging lands.
+- Separate stage time from harness copy/bootstrap overhead in recorded evidence.
+
+Known evidence so far:
+
+- On `2026-03-09`, bounded sandbox benchmark against
+  `hewiki_gpu_processing test.db` produced:
+  - `doc_limit=30`: `extract_terms = 13.960 s`
+  - `doc_limit=6000`: `extract_terms = 257.680 s`
+- These figures already confirm the live cost scales with the extraction stage,
+  not only with harness startup overhead.
+
 ## Out of scope for PATCH-01
 
 - Full dual-DB reference/user overlay architecture.
@@ -245,6 +335,8 @@ python scripts\collect_queryplan_evidence.py --db-path "J:\Project_Vibe\V_book\r
   collections during extraction.
 - Term clustering no longer materializes the full project result set before inserts.
 - Term clustering now persists mixed `source_kinds` and `member_doc_freq` correctly.
+- Term extraction overwrite path now stages by doc batch with persisted run state.
+- Term extraction can resume the latest matching staged run after cancel/failure.
 - New targeted tests cover lifecycle and stale-result behavior.
 - New targeted tests cover bounded term extraction ordering and minimal pipeline behavior.
 - Existing touched-path regressions pass on local temp-root-safe pytest runs.
