@@ -45,9 +45,11 @@ def test_parser_defaults_for_all_scenario() -> None:
     assert args.sentence_limit == 1000
     assert args.reuse_base_copy is False
     assert args.reuse_working_db is False
+    assert args.reuse_bench_slice is False
     assert args.pre_reset_sandbox is False
     assert args.post_cleanup_bench is False
     assert args.tier is None
+    assert args.prepared_source_db == ""
     assert args.temp_root == r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 
 
@@ -63,6 +65,7 @@ def test_parser_accepts_each_required_subcommand() -> None:
     ]
 
     for scenario in (
+        "prepare_bench_fixture",
         "extract_terms",
         "niqqud_bootstrap",
         "translate_bootstrap",
@@ -147,10 +150,12 @@ def test_parser_accepts_cycle_flags_for_extract_terms() -> None:
             r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db",
             "--copy-target",
             "--reuse-working-db",
+            "--reuse-bench-slice",
             "--pre-reset-sandbox",
-            "--post-cleanup-bench",
             "--source-db",
             r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db",
+            "--prepared-source-db",
+            r"J:\Project_Vibe\V_book\build\bench\fixture.db",
             "--bench-project-name",
             "BENCH_PIPELINE_SMOKE",
         ]
@@ -158,8 +163,10 @@ def test_parser_accepts_cycle_flags_for_extract_terms() -> None:
 
     assert args.scenario == "extract_terms"
     assert args.reuse_working_db is True
+    assert args.reuse_bench_slice is True
     assert args.pre_reset_sandbox is True
-    assert args.post_cleanup_bench is True
+    assert args.post_cleanup_bench is False
+    assert args.prepared_source_db.endswith("fixture.db")
     assert args.bench_project_name == "BENCH_PIPELINE_SMOKE"
 
 

@@ -516,6 +516,76 @@ Observed evidence:
   - `dict_project where name like 'BENCH_%'` returned `0`
   - no `-wal/-shm/-journal` files remained next to the sandbox DB
 
+### PATCH-11: Prepared fixture workflow for heavy benchmark tiers
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `scripts/benchmarks/bench_reference_pipeline.py`
+- `tests/test_pipeline_bench_runner_safety.py`
+- `tests/test_pipeline_bench_argparse.py`
+- `build/logs/task30/pipeline_bench_report_20260309_130908.md`
+- `build/logs/task30/pipeline_bench_report_20260309_132149.md`
+
+Goals:
+
+- Reduce full-workflow overhead for heavy benchmark tiers without touching the
+  already-passing `extract_terms` stage runtime.
+- Stop recloning the full `6000`-document bench slice into every reusable
+  sandbox run.
+- Keep heavy-tier runs deterministic by reusing a clean prepared fixture DB,
+  not a previously mutated bench project in-place.
+
+Result:
+
+- Added a new `prepare_bench_fixture` scenario that builds a reusable fixture DB
+  from the approved source DB and materializes the deterministic `BENCH_*`
+  slice once.
+- Added `--prepared-source-db` so heavy benchmark runs can reset the reusable
+  sandbox from a fixture DB instead of the full approved source DB.
+- Added `--reuse-bench-slice` so `extract_terms` can reuse the prepared
+  `BENCH_*` project when the stored slice metadata matches:
+  - `source_project_id`
+  - `doc_limit`
+  - copied document count
+- Stored deterministic slice metadata in `dict_project.description` under the
+  `bench_slice|...` contract and added parser/runtime validation for the new
+  flags.
+- Tightened source doc selection so the benchmark harness now applies SQL
+  `LIMIT` before collecting doc ids for deterministic slices.
+
+Observed evidence:
+
+- Prepared fixture build on the approved DB completed successfully:
+  - command shape:
+    `prepare_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_130908.md`
+  - `base_copy = 291.182 s`
+  - `db_initialize = 1.668 s`
+  - `bench slice clone = 412.378 s`
+  - `overall wall = 706.530 s`
+- Fixture-backed ceiling cycle on the reusable sandbox DB completed within the
+  full workflow wall budget:
+  - command shape:
+    `extract_terms --reuse-working-db --reuse-bench-slice --pre-reset-sandbox --prepared-source-db J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_132149.md`
+  - `base_copy/pre_reset = 285.941 s`
+  - `slice_clone = 14.499 s`
+  - `pre_stage_overhead = 302.903 s`
+  - `extract_terms stage = 1275.001 s`
+  - `overall wall = 1580.967 s`
+  - interpretation:
+    - the heavy-tier bottleneck moved from full `slice_clone` overhead to the
+      already-accepted `extract_terms stage`
+    - the prepared fixture path brings the full `ceiling` workflow back under
+      the current `1800 s` wall budget on this machine
+- Operational contract for heavy tiers is now:
+  - build or refresh the fixture DB explicitly with `prepare_bench_fixture`
+  - run heavy tiers with `--prepared-source-db` and `--reuse-bench-slice`
+  - keep `--post-cleanup-bench` disabled for this mode because the prepared
+    `BENCH_*` slice is the reusable fixture payload
+
 ## Out of scope for PATCH-01
 
 - Full dual-DB reference/user overlay architecture.
@@ -549,3 +619,5 @@ python scripts\collect_queryplan_evidence.py --db-path "J:\Project_Vibe\V_book\r
 - New targeted tests cover lifecycle and stale-result behavior.
 - New targeted tests cover bounded term extraction ordering and minimal pipeline behavior.
 - Existing touched-path regressions pass on local temp-root-safe pytest runs.
+- Fixture-backed `ceiling` benchmark workflow passes the current `1800 s` full
+  wall budget on the approved DB.

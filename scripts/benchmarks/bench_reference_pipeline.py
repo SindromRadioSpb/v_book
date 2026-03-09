@@ -33,6 +33,7 @@ DEFAULT_SOURCE_DB = (
 DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
 DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"
 DEFAULT_BENCH_PREFIX = "BENCH_"
+BENCH_SLICE_META_PREFIX = "bench_slice|"
 DEFAULT_TEMP_ROOT = r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 BENCH_TIER_PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -68,6 +69,35 @@ def deterministic_slice_doc_ids(doc_ids: list[int], limit: int) -> list[int]:
     if limit <= 0:
         return unique_sorted
     return unique_sorted[:limit]
+
+
+def _build_bench_slice_description(source_project_id: int, doc_limit: int) -> str:
+    return (
+        f"{BENCH_SLICE_META_PREFIX}"
+        f"source_project_id={int(source_project_id)}|doc_limit={int(doc_limit)}"
+    )
+
+
+def _parse_bench_slice_description(description: str | None) -> dict[str, int] | None:
+    raw = str(description or "").strip()
+    if not raw.startswith(BENCH_SLICE_META_PREFIX):
+        return None
+    values: dict[str, int] = {}
+    for fragment in raw.split("|")[1:]:
+        if "=" not in fragment:
+            continue
+        key, value = fragment.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            continue
+        try:
+            values[key] = int(value)
+        except ValueError:
+            return None
+    if "source_project_id" not in values or "doc_limit" not in values:
+        return None
+    return values
 
 
 def build_artifact_file_paths(output_dir: Path) -> dict[str, Path]:
@@ -249,6 +279,12 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
     db_path = Path(args.db_path).expanduser().resolve()
     source_db_raw = getattr(args, "source_db", None)
     source_db = Path(source_db_raw).expanduser().resolve() if source_db_raw else None
+    prepared_source_db_raw = str(getattr(args, "prepared_source_db", "") or "").strip()
+    prepared_source_db = (
+        Path(prepared_source_db_raw).expanduser().resolve()
+        if prepared_source_db_raw
+        else None
+    )
     temp_root_raw = getattr(args, "temp_root", DEFAULT_TEMP_ROOT)
     temp_root = Path(temp_root_raw).expanduser().resolve()
 
@@ -256,6 +292,8 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError(f"Forbidden --db-path on M: drive: {db_path}")
     if source_db is not None and _is_forbidden_m_path(source_db):
         raise ValueError(f"Forbidden --source-db on M: drive: {source_db}")
+    if prepared_source_db is not None and _is_forbidden_m_path(prepared_source_db):
+        raise ValueError(f"Forbidden --prepared-source-db on M: drive: {prepared_source_db}")
     if _is_forbidden_m_path(temp_root):
         raise ValueError(f"Forbidden --temp-root on M: drive: {temp_root}")
     if not args.copy_target:
@@ -264,10 +302,16 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError(f"--db-path must be on J: drive for sandbox safety: {db_path}")
     if source_db is not None and not _is_expected_j_path(source_db):
         raise ValueError(f"--source-db must be on J: drive for sandbox safety: {source_db}")
+    if prepared_source_db is not None and not _is_expected_j_path(prepared_source_db):
+        raise ValueError(
+            f"--prepared-source-db must be on J: drive for sandbox safety: {prepared_source_db}"
+        )
     if not _is_expected_j_path(temp_root):
         raise ValueError(f"--temp-root must be on J: drive for sandbox safety: {temp_root}")
     if source_db is not None and db_path == source_db:
         raise ValueError("--db-path must differ from --source-db for sandbox safety")
+    if prepared_source_db is not None and db_path == prepared_source_db:
+        raise ValueError("--db-path must differ from --prepared-source-db for sandbox safety")
     if args.scenario == "cleanup_sandbox":
         if not db_path.exists():
             raise FileNotFoundError(f"--db-path not found for cleanup: {db_path}")
@@ -282,22 +326,44 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         if source_db is None or not source_db.exists():
             raise FileNotFoundError(f"--source-db not found: {source_db}")
         return
+    if args.scenario == "prepare_bench_fixture":
+        if source_db is None or not source_db.exists():
+            raise FileNotFoundError(f"--source-db not found: {source_db}")
+        return
     if source_db is None or not source_db.exists():
         raise FileNotFoundError(f"--source-db not found: {source_db}")
+    if prepared_source_db is not None and not prepared_source_db.exists():
+        raise FileNotFoundError(f"--prepared-source-db not found: {prepared_source_db}")
     if bool(getattr(args, "pre_reset_sandbox", False)) and not bool(
         getattr(args, "reuse_working_db", False)
     ):
         raise ValueError("--pre-reset-sandbox requires --reuse-working-db")
+    if bool(getattr(args, "reuse_bench_slice", False)) and not bool(
+        getattr(args, "reuse_working_db", False)
+    ):
+        raise ValueError("--reuse-bench-slice requires --reuse-working-db")
+    if bool(getattr(args, "reuse_bench_slice", False)) and prepared_source_db is None:
+        raise ValueError("--reuse-bench-slice requires --prepared-source-db")
     if bool(getattr(args, "post_cleanup_bench", False)) and not bool(
         getattr(args, "reuse_working_db", False)
     ):
         raise ValueError("--post-cleanup-bench requires --reuse-working-db")
     bench_project_name = str(getattr(args, "bench_project_name", "") or "").strip()
+    if bool(getattr(args, "reuse_bench_slice", False)) and bool(
+        getattr(args, "post_cleanup_bench", False)
+    ):
+        raise ValueError("--reuse-bench-slice cannot be combined with --post-cleanup-bench")
     if bool(getattr(args, "post_cleanup_bench", False)) and not bench_project_name.startswith(
         DEFAULT_BENCH_PREFIX
     ):
         raise ValueError(
             f"--post-cleanup-bench requires --bench-project-name to start with {DEFAULT_BENCH_PREFIX!r}"
+        )
+    if bool(getattr(args, "reuse_bench_slice", False)) and not bench_project_name.startswith(
+        DEFAULT_BENCH_PREFIX
+    ):
+        raise ValueError(
+            f"--reuse-bench-slice requires --bench-project-name to start with {DEFAULT_BENCH_PREFIX!r}"
         )
     if args.doc_limit <= 0:
         raise ValueError("--doc-limit must be > 0")
@@ -406,6 +472,38 @@ def _run_reset_sandbox(
     }
 
 
+def _run_prepare_bench_fixture(
+    session,
+    *,
+    source_project_id: int,
+    bench_project_name: str,
+    doc_limit: int,
+) -> dict[str, Any]:
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+    bench = _clone_slice_into_bench_project(
+        session,
+        source_project_id=source_project_id,
+        bench_project_name=bench_project_name,
+        doc_limit=doc_limit,
+    )
+    counts = bench.get("copied_counts", {})
+    return {
+        "name": "prepare_bench_fixture",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": int(counts.get("lemmas", 0)),
+            "term": 0,
+            "sentence": int(counts.get("sentences", 0)),
+        },
+        "errors_count": 0,
+        "error_samples": [],
+        "details": bench,
+    }
+
+
 def _record_cycle_action(
     report: dict[str, Any],
     *,
@@ -489,17 +587,172 @@ def _select_source_doc_ids(session, source_project_id: int, doc_limit: int) -> l
     from sqlalchemy import select
     from app.infra.sa_models import SourceCorpus, SourceDocument
 
-    source_doc_ids = (
+    stmt = (
+        select(SourceDocument.doc_id)
+        .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+        .where(SourceCorpus.project_id == source_project_id)
+        .order_by(SourceDocument.doc_id.asc())
+    )
+    if doc_limit > 0:
+        stmt = stmt.limit(int(doc_limit))
+    source_doc_ids = session.execute(stmt).scalars().all()
+    return deterministic_slice_doc_ids(list(source_doc_ids), doc_limit)
+
+
+def _build_bench_project_summary(
+    session,
+    *,
+    source_project,
+    bench_project,
+    selected_source_doc_ids: list[int],
+) -> dict[str, Any]:
+    from sqlalchemy import func, select
+    from app.infra.sa_models import (
+        DocumentSentence,
+        DocumentText,
+        Lemma,
+        LemmaDocStat,
+        SourceCorpus,
+        SourceDocument,
+    )
+
+    bench_corpus_id = session.execute(
+        select(SourceCorpus.corpus_id)
+        .where(SourceCorpus.project_id == int(bench_project.project_id))
+        .order_by(SourceCorpus.corpus_id.asc())
+        .limit(1)
+    ).scalar_one()
+    bench_doc_ids = (
         session.execute(
             select(SourceDocument.doc_id)
             .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == source_project_id)
+            .where(SourceCorpus.project_id == int(bench_project.project_id))
             .order_by(SourceDocument.doc_id.asc())
         )
         .scalars()
         .all()
     )
-    return deterministic_slice_doc_ids(list(source_doc_ids), doc_limit)
+    bench_sentence_ids = (
+        session.execute(
+            select(DocumentSentence.sentence_id)
+            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == int(bench_project.project_id))
+            .order_by(DocumentSentence.sentence_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    copied_document_texts = (
+        session.execute(
+            select(func.count())
+            .select_from(DocumentText)
+            .join(SourceDocument, DocumentText.doc_id == SourceDocument.doc_id)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(SourceCorpus.project_id == int(bench_project.project_id))
+        ).scalar()
+        or 0
+    )
+    lemma_count = (
+        session.execute(
+            select(func.count()).select_from(Lemma).where(Lemma.project_id == int(bench_project.project_id))
+        ).scalar()
+        or 0
+    )
+    lemma_doc_stat_count = (
+        session.execute(
+            select(func.count())
+            .select_from(LemmaDocStat)
+            .where(LemmaDocStat.project_id == int(bench_project.project_id))
+        ).scalar()
+        or 0
+    )
+
+    return {
+        "source_project_id": int(source_project.project_id),
+        "source_project_name": str(source_project.name),
+        "bench_project_id": int(bench_project.project_id),
+        "bench_project_name": str(bench_project.name),
+        "bench_corpus_id": int(bench_corpus_id),
+        "src_lang": str(bench_project.src_lang),
+        "tgt_lang": str(bench_project.tgt_lang),
+        "selected_source_doc_ids": [int(x) for x in selected_source_doc_ids],
+        "bench_doc_ids": [int(x) for x in bench_doc_ids],
+        "bench_sentence_ids": [int(x) for x in bench_sentence_ids],
+        "copied_counts": {
+            "documents": len(bench_doc_ids),
+            "document_texts": int(copied_document_texts),
+            "sentences": len(bench_sentence_ids),
+            "lemmas": int(lemma_count),
+            "lemma_doc_stats": int(lemma_doc_stat_count),
+        },
+    }
+
+
+def _resolve_bench_slice(
+    session,
+    *,
+    source_project_id: int,
+    bench_project_name: str,
+    doc_limit: int,
+    reuse_existing_slice: bool,
+) -> tuple[dict[str, Any], bool]:
+    from sqlalchemy import func, select
+    from app.infra.sa_models import DictProject, SourceCorpus, SourceDocument
+
+    source_project = session.get(DictProject, source_project_id)
+    if source_project is None:
+        raise ValueError(f"Source project not found: {source_project_id}")
+
+    selected_source_doc_ids = _select_source_doc_ids(session, source_project_id, doc_limit)
+    if not selected_source_doc_ids:
+        raise RuntimeError(f"No documents available for source project_id={source_project_id}")
+
+    if reuse_existing_slice:
+        existing_bench = session.execute(
+            select(DictProject)
+            .where(
+                DictProject.library_id == source_project.library_id,
+                DictProject.name == bench_project_name,
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if existing_bench is not None:
+            meta = _parse_bench_slice_description(existing_bench.description)
+            copied_doc_count = (
+                session.execute(
+                    select(func.count())
+                    .select_from(SourceDocument)
+                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(SourceCorpus.project_id == int(existing_bench.project_id))
+                ).scalar()
+                or 0
+            )
+            if (
+                meta is not None
+                and int(meta.get("source_project_id", -1)) == int(source_project_id)
+                and int(meta.get("doc_limit", -1)) == int(doc_limit)
+                and int(copied_doc_count) == len(selected_source_doc_ids)
+            ):
+                return (
+                    _build_bench_project_summary(
+                        session,
+                        source_project=source_project,
+                        bench_project=existing_bench,
+                        selected_source_doc_ids=selected_source_doc_ids,
+                    ),
+                    True,
+                )
+
+    return (
+        _clone_slice_into_bench_project(
+            session,
+            source_project_id=source_project_id,
+            bench_project_name=bench_project_name,
+            doc_limit=doc_limit,
+        ),
+        False,
+    )
 
 def _clone_slice_into_bench_project(
     session,
@@ -543,7 +796,7 @@ def _clone_slice_into_bench_project(
     bench_project = DictProject(
         library_id=source_project.library_id,
         name=bench_project_name,
-        description=f"Deterministic benchmark slice from project_id={source_project_id}",
+        description=_build_bench_slice_description(source_project_id, doc_limit),
         src_lang=source_project.src_lang,
         tgt_lang=source_project.tgt_lang,
         nlp_engine=source_project.nlp_engine,
@@ -1265,6 +1518,8 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- Overall status: `{report['overall_status']}`")
     lines.append(f"- Base sandbox DB: `{db_info.get('base_sandbox_db', 'n/a')}`")
     lines.append(f"- Source DB: `{db_info.get('source_db') or 'n/a'}`")
+    if db_info.get("prepared_source_db"):
+        lines.append(f"- Prepared Source DB: `{db_info.get('prepared_source_db')}`")
     lines.append(f"- Working DB (temp): `{db_info.get('working_db', 'n/a')}`")
     if timings.get("base_copy_reused"):
         lines.append("- Base sandbox copy: `reused existing file`")
@@ -1288,8 +1543,12 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
             lines.append(
                 f"- Recommended wall budget: `{int(report['config']['recommended_wall_budget_sec'])} s`"
             )
+        if report["config"].get("prepared_source_db"):
+            lines.append("- Prepared source fixture: `enabled`")
         if report["config"].get("pre_reset_sandbox"):
             lines.append("- Pre-reset sandbox: `enabled`")
+        if report["config"].get("reuse_bench_slice"):
+            lines.append("- Reuse bench slice: `enabled`")
         if report["config"].get("post_cleanup_bench"):
             lines.append("- Post-cleanup bench: `enabled`")
         lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
@@ -1381,10 +1640,12 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--copy-target", action="store_true")
         cmd_parser.add_argument("--reuse-base-copy", action="store_true")
         cmd_parser.add_argument("--reuse-working-db", action="store_true")
+        cmd_parser.add_argument("--reuse-bench-slice", action="store_true")
         cmd_parser.add_argument("--pre-reset-sandbox", action="store_true")
         cmd_parser.add_argument("--post-cleanup-bench", action="store_true")
         cmd_parser.add_argument("--tier", choices=tuple(BENCH_TIER_PRESETS.keys()))
         cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
+        cmd_parser.add_argument("--prepared-source-db", default="")
         cmd_parser.add_argument("--source-project-id", type=int, default=1)
         cmd_parser.add_argument("--bench-project-name", default=DEFAULT_PROJECT_NAME)
         cmd_parser.add_argument("--doc-limit", type=int, default=6000)
@@ -1422,6 +1683,7 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--temp-root", default=DEFAULT_TEMP_ROOT)
 
     for name in (
+        "prepare_bench_fixture",
         "extract_terms",
         "niqqud_bootstrap",
         "translate_bootstrap",
@@ -1470,11 +1732,13 @@ def run(argv: list[str] | None = None) -> int:
             "copy_target": bool(args.copy_target),
             "reuse_base_copy": bool(getattr(args, "reuse_base_copy", False)),
             "reuse_working_db": bool(getattr(args, "reuse_working_db", False)),
+            "reuse_bench_slice": bool(getattr(args, "reuse_bench_slice", False)),
             "pre_reset_sandbox": bool(getattr(args, "pre_reset_sandbox", False)),
             "post_cleanup_bench": bool(getattr(args, "post_cleanup_bench", False)),
             "tier": tier["name"],
             "recommended_wall_budget_sec": tier["recommended_wall_budget_sec"],
             "bench_project_name": str(getattr(args, "bench_project_name", "")),
+            "prepared_source_db": str(getattr(args, "prepared_source_db", "")),
             "cleanup_prefix": str(getattr(args, "cleanup_prefix", "")),
             "cleanup_project_name": str(getattr(args, "cleanup_project_name", "")),
             "temp_root": str(getattr(args, "temp_root", "")),
@@ -1571,7 +1835,64 @@ def run(argv: list[str] | None = None) -> int:
             return_code = 0 if report["overall_status"] == "pass" else 1
             return return_code
 
+        if args.scenario == "prepare_bench_fixture":
+            source_db = Path(args.source_db).expanduser().resolve()
+            fixture_db = Path(args.db_path).expanduser().resolve()
+            report["db"] = {
+                "source_db": str(source_db),
+                "prepared_source_db": str(fixture_db),
+                "base_sandbox_db": str(fixture_db),
+                "working_db": str(fixture_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                    "prepare_bench_fixture": True,
+                },
+            }
+            t0 = time.perf_counter()
+            _prepare_base_sandbox(fixture_db, source_db, reuse_existing=False)
+            report["timings"]["base_copy_sec"] = round(time.perf_counter() - t0, 3)
+            report["timings"]["working_copy_sec"] = 0.0
+            report["timings"]["base_copy_reused"] = False
+            report["timings"]["working_db_reused"] = True
+            _reset_db_service()
+            from app.services.db_service import DBService
+
+            t0 = time.perf_counter()
+            DBService.initialize(fixture_db)
+            report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
+            db_service = DBService.get_instance()
+            with db_service.get_session() as session:
+                stage_result = _run_stage(
+                    "prepare_bench_fixture",
+                    lambda: _run_prepare_bench_fixture(
+                        session,
+                        source_project_id=int(args.source_project_id),
+                        bench_project_name=str(args.bench_project_name),
+                        doc_limit=int(args.doc_limit),
+                    ),
+                )
+            report["stages"].append(stage_result)
+            report["bench"] = dict(stage_result.get("details") or {})
+            report["timings"]["slice_clone_sec"] = float(stage_result.get("duration_sec", 0.0) or 0.0)
+            report["timings"]["pre_stage_overhead_sec"] = round(
+                float(report["timings"].get("base_copy_sec", 0.0))
+                + float(report["timings"].get("db_initialize_sec", 0.0))
+                + float(report["timings"].get("slice_clone_sec", 0.0)),
+                3,
+            )
+            report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
+            return_code = 0 if report["overall_status"] == "pass" else 1
+            return return_code
+
         source_db = Path(args.source_db).expanduser().resolve()
+        prepared_source_db_raw = str(getattr(args, "prepared_source_db", "") or "").strip()
+        prepared_source_db = (
+            Path(prepared_source_db_raw).expanduser().resolve()
+            if prepared_source_db_raw
+            else None
+        )
+        reset_source_db = prepared_source_db or source_db
         base_db = Path(args.db_path).expanduser().resolve()
         temp_root = Path(args.temp_root).expanduser().resolve()
         _cleanup_temp_root(temp_root)
@@ -1581,7 +1902,7 @@ def run(argv: list[str] | None = None) -> int:
             reuse_base_copy = False
         base_copy_performed = _prepare_base_sandbox(
             base_db,
-            source_db,
+            reset_source_db,
             reuse_existing=reuse_base_copy,
         )
         base_copy_duration = round(time.perf_counter() - t0, 3) if base_copy_performed else 0.0
@@ -1596,7 +1917,7 @@ def run(argv: list[str] | None = None) -> int:
                 duration_sec=base_copy_duration,
                 details={
                     "base_db": str(base_db),
-                    "source_db": str(source_db),
+                    "source_db": str(reset_source_db),
                     "base_copy_performed": bool(base_copy_performed),
                 },
             )
@@ -1610,6 +1931,7 @@ def run(argv: list[str] | None = None) -> int:
             report["timings"]["working_copy_sec"] = float(working_copy_sec)
             report["db"] = {
                 "source_db": str(source_db),
+                "prepared_source_db": str(prepared_source_db) if prepared_source_db else None,
                 "base_sandbox_db": str(base_db),
                 "working_db": str(working_db),
                 "safety": {
@@ -1630,14 +1952,27 @@ def run(argv: list[str] | None = None) -> int:
 
             with db_service.get_session() as session:
                 t0 = time.perf_counter()
-                bench = _clone_slice_into_bench_project(
+                bench, reused_bench_slice = _resolve_bench_slice(
                     session,
                     source_project_id=int(args.source_project_id),
                     bench_project_name=str(args.bench_project_name),
                     doc_limit=int(args.doc_limit),
+                    reuse_existing_slice=bool(getattr(args, "reuse_bench_slice", False)),
                 )
                 report["timings"]["slice_clone_sec"] = round(time.perf_counter() - t0, 3)
                 report["bench"] = bench
+                if bool(getattr(args, "reuse_bench_slice", False)):
+                    _record_cycle_action(
+                        report,
+                        name="reuse_bench_slice",
+                        status="reused" if reused_bench_slice else "prepared",
+                        duration_sec=float(report["timings"]["slice_clone_sec"]),
+                        details={
+                            "bench_project_name": str(bench.get("bench_project_name", "")),
+                            "bench_project_id": int(bench.get("bench_project_id", 0)),
+                            "doc_limit": int(args.doc_limit),
+                        },
+                    )
 
             planned_stages: list[str]
             if args.scenario == "all":

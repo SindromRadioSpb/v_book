@@ -204,6 +204,26 @@ Maintenance-cycle follow-up:
   - this confirms that the practical contract split should be:
     - `stage wall`
     - `full workflow wall`
+- approved prepared-fixture ceiling evidence:
+  - fixture build:
+    `prepare_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - fixture-backed run:
+    `extract_terms --reuse-working-db --reuse-bench-slice --pre-reset-sandbox --prepared-source-db J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --tier ceiling`
+  - artifacts:
+    - `build\logs\task30\pipeline_bench_report_20260309_130908.md`
+    - `build\logs\task30\pipeline_bench_report_20260309_132149.md`
+  - fixture build metrics:
+    - `base_copy = 291.182 s`
+    - `bench slice clone = 412.378 s`
+    - `overall wall = 706.530 s`
+  - fixture-backed ceiling metrics:
+    - `base_copy/pre_reset = 285.941 s`
+    - `slice_clone = 14.499 s`
+    - `pre_stage_overhead = 302.903 s`
+    - `extract_terms stage = 1275.001 s`
+    - `overall wall = 1580.967 s`
+  - this is the first completed full-workflow `ceiling` run on this machine
+    that stays under the current `1800 s` wall budget
 - after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
   SQLite sidecar files
 
@@ -214,6 +234,18 @@ Suggested benchmark tiers for repeatable task30 runs:
 - `large`: `doc_limit=2000`, wall budget `900 s`
 - `ceiling`: `doc_limit=6000`, wall budget `1800 s`
 
+Recommended heavy-tier workflow:
+
+- `smoke/medium/large` can continue to use the one-command maintenance cycle:
+  - `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier ...`
+- `ceiling` should use a prepared fixture DB:
+  - first build or refresh the fixture:
+    `prepare_bench_fixture --db-path ...hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - then run the reusable sandbox against that fixture:
+    `extract_terms --reuse-working-db --reuse-bench-slice --pre-reset-sandbox --prepared-source-db ...hewiki_pipeline_ceiling_fixture.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+- do not combine `--reuse-bench-slice` with `--post-cleanup-bench`; the
+  prepared `BENCH_*` project is intentionally preserved inside the fixture DB
+
 ## Remaining follow-ups
 
 ### Follow-up A: richer extraction progress UI
@@ -222,10 +254,12 @@ Suggested benchmark tiers for repeatable task30 runs:
 - show doc progress and finalization stage explicitly
 - optional reuse of premium batch progress dialog with extraction-specific labels
 
-### Follow-up B: bigger-slice benchmark refresh
+### Follow-up B: fixture lifecycle hardening
 
-- rerun `extract_terms` on a larger bounded slice after this patch
-- record stage time separately from sandbox DB clone/bootstrap overhead
+- add an explicit fixture refresh/verification flow if repeated operator use
+  shows drift or stale sidecar issues around the prepared fixture DB
+- optionally add fixture metadata validation beyond doc count if future heavy
+  tiers need stronger invariants than `source_project_id + doc_limit`
 
 ### Follow-up B2: optional benchmark sandbox housekeeping UX
 

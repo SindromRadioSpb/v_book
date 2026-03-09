@@ -68,12 +68,15 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
             "doc_limit": 30,
             "tier": "smoke",
             "recommended_wall_budget_sec": 300,
+            "reuse_bench_slice": True,
+            "prepared_source_db": "fixture.db",
             "pre_reset_sandbox": True,
-            "post_cleanup_bench": True,
+            "post_cleanup_bench": False,
         },
         "db": {
             "base_sandbox_db": "base.db",
             "source_db": "source.db",
+            "prepared_source_db": "fixture.db",
             "working_db": "working.db",
         },
         "bench": {
@@ -106,16 +109,16 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
         "maintenance_cycle": {
             "actions": [
                 {
+                    "name": "reuse_bench_slice",
+                    "status": "prepared",
+                    "duration_sec": 4.4,
+                    "details": {"doc_limit": 30},
+                },
+                {
                     "name": "pre_reset_sandbox",
                     "status": "ok",
                     "duration_sec": 1.1,
                     "details": {"base_copy_performed": True},
-                },
-                {
-                    "name": "post_cleanup_bench",
-                    "status": "ok",
-                    "duration_sec": 0.5,
-                    "details": {"deleted_count": 1},
                 },
             ]
         },
@@ -138,10 +141,12 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
     assert "reused sandbox file" in text
     assert "Tier: `smoke`" in text
     assert "Recommended wall budget: `300 s`" in text
+    assert "Prepared Source DB: `fixture.db`" in text
+    assert "Prepared source fixture: `enabled`" in text
     assert "Pre-reset sandbox: `enabled`" in text
-    assert "Post-cleanup bench: `enabled`" in text
+    assert "Reuse bench slice: `enabled`" in text
     assert "## Maintenance Cycle" in text
-    assert "Post-cleanup bench: `0.500 s`" in text
+    assert "reuse_bench_slice: status=`prepared`" in text
 
 
 def test_cleanup_sandbox_deletes_prefixed_projects(monkeypatch, tmp_path: Path) -> None:
@@ -249,3 +254,191 @@ def test_validate_runtime_contract_rejects_cycle_flags_without_reuse_working_db(
         assert "--pre-reset-sandbox requires --reuse-working-db" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing --reuse-working-db")
+
+
+def test_validate_runtime_contract_rejects_reuse_bench_slice_with_post_cleanup(
+    tmp_path: Path,
+) -> None:
+    mod = _load_module()
+    source_db = tmp_path / "source.db"
+    db_path = tmp_path / "sandbox.db"
+    source_db.write_bytes(b"stub")
+    db_path.write_bytes(b"stub")
+
+    args = mod.build_parser().parse_args(
+        [
+            "extract_terms",
+            "--db-path",
+            str(db_path),
+            "--copy-target",
+            "--source-db",
+            str(source_db),
+            "--reuse-working-db",
+            "--reuse-bench-slice",
+            "--prepared-source-db",
+            str(source_db),
+            "--post-cleanup-bench",
+            "--bench-project-name",
+            "BENCH_FIXTURE",
+        ]
+    )
+
+    try:
+        mod._validate_runtime_contract(args)
+    except ValueError as exc:
+        assert "--reuse-bench-slice cannot be combined with --post-cleanup-bench" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for incompatible bench-slice flags")
+
+
+def test_parse_bench_slice_description_roundtrip() -> None:
+    mod = _load_module()
+    description = mod._build_bench_slice_description(1, 6000)
+    assert mod._parse_bench_slice_description(description) == {
+        "source_project_id": 1,
+        "doc_limit": 6000,
+    }
+
+
+def test_validate_runtime_contract_requires_prepared_source_for_reuse_bench_slice(
+    tmp_path: Path,
+) -> None:
+    mod = _load_module()
+    source_db = tmp_path / "source.db"
+    db_path = tmp_path / "sandbox.db"
+    source_db.write_bytes(b"stub")
+    db_path.write_bytes(b"stub")
+
+    args = mod.build_parser().parse_args(
+        [
+            "extract_terms",
+            "--db-path",
+            str(db_path),
+            "--copy-target",
+            "--source-db",
+            str(source_db),
+            "--reuse-working-db",
+            "--reuse-bench-slice",
+            "--bench-project-name",
+            "BENCH_FIXTURE",
+        ]
+    )
+
+    try:
+        mod._validate_runtime_contract(args)
+    except ValueError as exc:
+        assert "--reuse-bench-slice requires --prepared-source-db" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing prepared source db")
+
+
+def test_resolve_bench_slice_reuses_matching_project(tmp_path: Path) -> None:
+    mod = _load_module()
+    from app.infra.sa_models import (
+        DictProject,
+        DocumentSentence,
+        DocumentText,
+        Lemma,
+        LemmaDocStat,
+        Library,
+        SourceCorpus,
+        SourceDocument,
+    )
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'reuse_slice.db'}")
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+    SourceCorpus.__table__.create(engine, checkfirst=True)
+    SourceDocument.__table__.create(engine, checkfirst=True)
+    DocumentText.__table__.create(engine, checkfirst=True)
+    DocumentSentence.__table__.create(engine, checkfirst=True)
+    Lemma.__table__.create(engine, checkfirst=True)
+    LemmaDocStat.__table__.create(engine, checkfirst=True)
+
+    with Session(engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        source = DictProject(library_id=lib.library_id, name="Source", src_lang="he", tgt_lang="ru")
+        bench = DictProject(
+            library_id=lib.library_id,
+            name="BENCH_FIXTURE",
+            description=mod._build_bench_slice_description(1, 2),
+            src_lang="he",
+            tgt_lang="ru",
+        )
+        session.add_all([source, bench])
+        session.flush()
+        source_corpus = SourceCorpus(project_id=source.project_id, name="source")
+        bench_corpus = SourceCorpus(project_id=bench.project_id, name="bench")
+        session.add_all([source_corpus, bench_corpus])
+        session.flush()
+        src_doc_1 = SourceDocument(
+            corpus_id=source_corpus.corpus_id,
+            file_path="a.txt",
+            file_name="a.txt",
+            file_ext=".txt",
+            file_size_bytes=1,
+            sha256="a",
+            status="processed",
+            sentence_count=1,
+            token_count=1,
+        )
+        src_doc_2 = SourceDocument(
+            corpus_id=source_corpus.corpus_id,
+            file_path="b.txt",
+            file_name="b.txt",
+            file_ext=".txt",
+            file_size_bytes=1,
+            sha256="b",
+            status="processed",
+            sentence_count=1,
+            token_count=1,
+        )
+        bench_doc_1 = SourceDocument(
+            corpus_id=bench_corpus.corpus_id,
+            file_path="ba.txt",
+            file_name="ba.txt",
+            file_ext=".txt",
+            file_size_bytes=1,
+            sha256="ba",
+            status="processed",
+            sentence_count=1,
+            token_count=1,
+        )
+        bench_doc_2 = SourceDocument(
+            corpus_id=bench_corpus.corpus_id,
+            file_path="bb.txt",
+            file_name="bb.txt",
+            file_ext=".txt",
+            file_size_bytes=1,
+            sha256="bb",
+            status="processed",
+            sentence_count=1,
+            token_count=1,
+        )
+        session.add_all([src_doc_1, src_doc_2, bench_doc_1, bench_doc_2])
+        session.flush()
+        session.add_all(
+            [
+                DocumentSentence(doc_id=bench_doc_1.doc_id, sent_index=0, text="one"),
+                DocumentSentence(doc_id=bench_doc_2.doc_id, sent_index=0, text="two"),
+            ]
+        )
+        selected_source_doc_ids = [src_doc_1.doc_id, src_doc_2.doc_id]
+        session.commit()
+
+        result, reused = mod._resolve_bench_slice(
+            session,
+            source_project_id=source.project_id,
+            bench_project_name="BENCH_FIXTURE",
+            doc_limit=2,
+            reuse_existing_slice=True,
+        )
+
+    engine.dispose()
+
+    assert reused is True
+    assert result["bench_project_name"] == "BENCH_FIXTURE"
+    assert result["copied_counts"]["documents"] == 2
+    assert result["selected_source_doc_ids"] == selected_source_doc_ids
