@@ -106,6 +106,7 @@ Artifacts:
 - `build\logs\task30\pipeline_bench_report_20260309_085005.md`
 - `build\logs\task30\pipeline_bench_report_20260309_090248.md`
 - `build\logs\task30\pipeline_bench_report_20260309_092015.md`
+- `build\logs\task30\pipeline_bench_report_20260309_104104.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -191,6 +192,18 @@ Maintenance-cycle follow-up:
   - full one-command workflow exceeded the current overall wall budget by
     `285.892 s`, so this is the confirmed local machine ceiling for the full
     pre-reset workflow
+- approved warm/reuse-base-copy ceiling evidence:
+  - `extract_terms --reuse-base-copy --reuse-working-db --post-cleanup-bench --tier ceiling`
+  - `base_copy = 0.000 s`
+  - `slice_clone = 416.890 s`
+  - `extract_terms stage = 1496.608 s`
+  - `post_cleanup_bench = 82.140 s`
+  - `overall wall = 1996.452 s`
+  - warm reuse removes the cold reset cost, but full workflow still exceeds the
+    current `1800 s` wall budget by `196.452 s`
+  - this confirms that the practical contract split should be:
+    - `stage wall`
+    - `full workflow wall`
 - after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
   SQLite sidecar files
 

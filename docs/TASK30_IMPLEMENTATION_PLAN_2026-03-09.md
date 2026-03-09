@@ -423,6 +423,7 @@ Files:
 - `build/logs/task30/pipeline_bench_report_20260309_085005.md`
 - `build/logs/task30/pipeline_bench_report_20260309_090248.md`
 - `build/logs/task30/pipeline_bench_report_20260309_092015.md`
+- `build/logs/task30/pipeline_bench_report_20260309_104104.md`
 
 Goals:
 
@@ -496,6 +497,21 @@ Observed evidence:
     - full one-command ceiling workflow exceeded the current `ceiling` wall
       budget by `285.892 s`, so this is the confirmed machine ceiling for the
       current local workflow contract
+- Correct warm/reuse-base-copy ceiling cycle also completed functionally but
+  still exceeded the current overall wall budget:
+  - command shape:
+    `extract_terms --reuse-base-copy --reuse-working-db --post-cleanup-bench --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_104104.md`
+  - `base_copy = 0.000 s`
+  - `slice_clone = 416.890 s`
+  - `extract_terms stage = 1496.608 s`
+  - `post_cleanup_bench = 82.140 s`
+  - `overall wall = 1996.452 s`
+  - interpretation:
+    - warm reuse removes the cold reset cost, but full workflow still exceeds
+      the current `ceiling` wall budget by `196.452 s`
+    - this confirms the actionable split: `stage wall` can pass while `full
+      workflow wall` still fails on this machine
 - After the run:
   - `dict_project where name like 'BENCH_%'` returned `0`
   - no `-wal/-shm/-journal` files remained next to the sandbox DB
