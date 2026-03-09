@@ -7,7 +7,7 @@ This plan is based on the approved Task 30 audit executed against:
 - DB path: `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - Verified runtime contract: `python -m app.main --db-path "<path above>"`
 - Verified schema version on target DB at initial Task 30 audit: `35`
-- Current schema version on the same DB after migration `037_nlp_run_state`: `37`
+- Current schema version on the same DB after migration `038_sentence_nlp_snapshot`: `38`
 
 This document records the implementation order for the confirmed findings only.
 It is intentionally patch-oriented and conservative.
@@ -1011,3 +1011,53 @@ Validation:
   - artifact:
     `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
   - confirmed `db_open ok` on the approved DB
+
+## PATCH-CONV-03 implemented (2026-03-09)
+
+Files:
+
+- `app/infra/migrations/038_sentence_nlp_snapshot.sql`
+- `app/infra/nlp_snapshot_codec.py`
+- `app/infra/sa_models.py`
+- `app/services/process_service.py`
+- `app/services/term_extraction_service.py`
+- `tests/test_sentence_nlp_snapshot_reuse.py`
+- `tests/test_term_extraction_service_large_project.py`
+- convergence/task docs as needed
+
+Result:
+
+- NLP processing now persists sentence-level token/POS/lemma snapshots in
+  `sentence_nlp_snapshot` while processing `document_sentence` rows
+- term extraction now prefers persisted snapshots when the stored
+  `sentence_text_hash` still matches the live sentence text and falls back to
+  runtime reparse only when the snapshot is missing or stale
+- this removes the main confirmed duplicate NLP work for already processed
+  documents without reopening the long-operation UI or benchmark contracts
+- approved `hewiki_gpu_processing test.db` is now at `schema_version=38`
+
+Validation:
+
+- targeted snapshot/reuse regressions:
+  - `48 passed in 209.93s`
+  - artifact: `build/logs/nlp_prework/pytest_sentence_snapshot_reuse.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_sentence_snapshot_reuse.log`
+  - result: `OK`
+- prebuild/package smoke:
+  - artifact:
+    `build/logs/nlp_prework/prebuild_validate_sentence_snapshot_reuse.log`
+  - result: all checks passed
+- approved DB open smoke:
+  - artifact:
+    `build/logs/nlp_prework/db_open_self_check_sentence_snapshot_approved.json`
+  - confirmed `db_open ok` on the approved DB
+- approved DB live snapshot-reuse probe:
+  - artifact:
+    `build/logs/nlp_prework/hewiki_live_sentence_snapshot_probe_v2.log`
+  - confirmed on the approved DB:
+    - migration `038` was applied
+    - a temporary project/document produced `2` sentence snapshots
+    - term extraction completed successfully even when its NLP engine was
+      replaced with a failing stub
+    - cleanup removed the temporary probe project with no leftovers

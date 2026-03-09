@@ -11,8 +11,8 @@ Target dataset reference:
   `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - Verified schema version at initial Task 30 audit:
   `35`
-- Current schema version after migration `037_nlp_run_state`:
-  `37`
+- Current schema version after migration `038_sentence_nlp_snapshot`:
+  `38`
 
 ## SLO Targets
 

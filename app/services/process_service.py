@@ -17,6 +17,7 @@ from app.infra.sa_models import (
     SourceDocument,
     DocumentText,
     DocumentSentence,
+    SentenceNLPSnapshot,
     Lemma,
     LemmaDocStat,
     LemmaProjectStat,
@@ -26,6 +27,11 @@ from app.infra.sa_models import (
 )
 from app.domain.dto import NLPProcessRunState
 from app.infra.nlp_engines.base import NLPEngine
+from app.infra.nlp_snapshot_codec import (
+    build_sentence_text_hash,
+    count_snapshot_tokens,
+    serialize_nlp_sentences,
+)
 from app.infra.nlp_engines.stanza_engine import create_stanza_engine
 from app.domain.preprocessing import preprocess_text
 from app.domain.sentence_splitter import split_into_sentences
@@ -386,6 +392,26 @@ class ProcessService:
 
         return project_id
 
+    def _upsert_sentence_nlp_snapshot(
+        self,
+        session: Session,
+        *,
+        sentence_row: DocumentSentence,
+        engine: NLPEngine,
+        nlp_sentences: List[Any],
+    ) -> int:
+        snapshot = session.get(SentenceNLPSnapshot, int(sentence_row.sentence_id))
+        if snapshot is None:
+            snapshot = SentenceNLPSnapshot(sentence_id=int(sentence_row.sentence_id))
+            session.add(snapshot)
+
+        snapshot.engine = engine.get_name()
+        snapshot.engine_version = engine.get_version()
+        snapshot.sentence_text_hash = build_sentence_text_hash(str(sentence_row.text or ""))
+        snapshot.payload_json = serialize_nlp_sentences(nlp_sentences)
+        snapshot.token_count = count_snapshot_tokens(nlp_sentences)
+        return int(snapshot.token_count or 0)
+
     def _start_processor_run(
         self,
         session: Session,
@@ -546,6 +572,12 @@ class ProcessService:
             for sent_row in sentences:
                 # Process sentence with NLP
                 nlp_sentences = engine.process(sent_row.text)
+                self._upsert_sentence_nlp_snapshot(
+                    session,
+                    sentence_row=sent_row,
+                    engine=engine,
+                    nlp_sentences=nlp_sentences,
+                )
 
                 if not nlp_sentences:
                     logger.warning(f"No NLP output for sentence {sent_row.sentence_id}")

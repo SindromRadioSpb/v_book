@@ -17,6 +17,7 @@ from app.infra.sa_models import (
     NgramProjectStat,
     NgramComponent,
     DocumentSentence,
+    SentenceNLPSnapshot,
     Lemma,
     LemmaProjectStat,
     SourceDocument,
@@ -32,6 +33,7 @@ from app.domain.term_extraction.ngram_extractor import extract_ngrams_from_sente
 from app.domain.term_extraction.np_extractor import extract_np_chunks_from_sentence
 from app.domain.term_extraction.association_measures import compute_all_measures
 from app.domain.term_extraction.canonicalizer import get_cluster_key, choose_representative_term
+from app.infra.nlp_snapshot_codec import build_sentence_text_hash, deserialize_nlp_sentences
 from app.services.db_service import DBService
 from app.infra.nlp_engines.base import NLPEngine
 from app.services.entity_classifier import classify_phrase
@@ -1127,15 +1129,51 @@ class TermExtractionService:
         self,
         session: Session,
         doc_ids: List[int],
-    ) -> Iterable[tuple[int, str]]:
+    ) -> Iterable[tuple[int, int, str, Optional[str], Optional[str]]]:
         if not doc_ids:
             return []
         stmt = (
-            select(DocumentSentence.doc_id, DocumentSentence.text)
+            select(
+                DocumentSentence.doc_id,
+                DocumentSentence.sentence_id,
+                DocumentSentence.text,
+                SentenceNLPSnapshot.payload_json,
+                SentenceNLPSnapshot.sentence_text_hash,
+            )
+            .outerjoin(
+                SentenceNLPSnapshot,
+                SentenceNLPSnapshot.sentence_id == DocumentSentence.sentence_id,
+            )
             .where(DocumentSentence.doc_id.in_([int(doc_id) for doc_id in doc_ids]))
             .order_by(DocumentSentence.doc_id.asc(), DocumentSentence.sent_index.asc())
         )
         return session.execute(stmt).all()
+
+    def _load_sentence_nlp_sentences(
+        self,
+        *,
+        sentence_id: int,
+        sent_text: str,
+        snapshot_payload_json: Optional[str],
+        snapshot_text_hash: Optional[str],
+        engine: NLPEngine,
+    ) -> tuple[list, str]:
+        expected_hash = build_sentence_text_hash(sent_text)
+        if snapshot_payload_json and snapshot_text_hash == expected_hash:
+            try:
+                return deserialize_nlp_sentences(snapshot_payload_json), "snapshot"
+            except Exception:
+                logger.warning(
+                    "Failed to decode sentence NLP snapshot for sentence_id=%s; falling back to reparse",
+                    int(sentence_id),
+                )
+        elif snapshot_payload_json and snapshot_text_hash != expected_hash:
+            logger.warning(
+                "Ignoring stale sentence NLP snapshot for sentence_id=%s due to text hash mismatch",
+                int(sentence_id),
+            )
+
+        return engine.process(sent_text), "fallback"
 
     def _collect_ngrams(
         self,
@@ -1178,14 +1216,26 @@ class TermExtractionService:
 
         current_doc_id: Optional[int] = None
         doc_ngrams_seen: Set[Tuple[str, int]] = set()
+        snapshot_rows_used = 0
+        fallback_rows_used = 0
 
-        for doc_id, sent_text in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+        for doc_id, sentence_id, sent_text, payload_json, snapshot_text_hash in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
             int_doc_id = int(doc_id)
             if current_doc_id != int_doc_id:
                 current_doc_id = int_doc_id
                 doc_ngrams_seen = set()
 
-            nlp_sentences = engine.process(sent_text)
+            nlp_sentences, source = self._load_sentence_nlp_sentences(
+                sentence_id=int(sentence_id),
+                sent_text=sent_text,
+                snapshot_payload_json=payload_json,
+                snapshot_text_hash=snapshot_text_hash,
+                engine=engine,
+            )
+            if source == "snapshot":
+                snapshot_rows_used += 1
+            else:
+                fallback_rows_used += 1
             if not nlp_sentences:
                 continue
 
@@ -1211,6 +1261,12 @@ class TermExtractionService:
                             "pos_pattern": ng["pos_pattern"],
                         }
 
+        logger.info(
+            "Collected n-grams for %d docs using %d sentence snapshots and %d reparsed sentences",
+            len(doc_ids),
+            snapshot_rows_used,
+            fallback_rows_used,
+        )
         return ngram_counts, ngram_doc_freq, ngram_meta
 
     def _build_lemma_freq_map(
@@ -1391,14 +1447,26 @@ class TermExtractionService:
 
         current_doc_id: Optional[int] = None
         doc_nps_seen: Set[Tuple[str, int]] = set()
+        snapshot_rows_used = 0
+        fallback_rows_used = 0
 
-        for doc_id, sent_text in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+        for doc_id, sentence_id, sent_text, payload_json, snapshot_text_hash in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
             int_doc_id = int(doc_id)
             if current_doc_id != int_doc_id:
                 current_doc_id = int_doc_id
                 doc_nps_seen = set()
 
-            nlp_sentences = engine.process(sent_text)
+            nlp_sentences, source = self._load_sentence_nlp_sentences(
+                sentence_id=int(sentence_id),
+                sent_text=sent_text,
+                snapshot_payload_json=payload_json,
+                snapshot_text_hash=snapshot_text_hash,
+                engine=engine,
+            )
+            if source == "snapshot":
+                snapshot_rows_used += 1
+            else:
+                fallback_rows_used += 1
             if not nlp_sentences:
                 continue
 
@@ -1424,6 +1492,12 @@ class TermExtractionService:
                             "pos_pattern": np["pos_pattern"],
                         }
 
+        logger.info(
+            "Collected NP chunks for %d docs using %d sentence snapshots and %d reparsed sentences",
+            len(doc_ids),
+            snapshot_rows_used,
+            fallback_rows_used,
+        )
         return np_counts, np_doc_freq, np_meta
 
     def _store_np_chunks(

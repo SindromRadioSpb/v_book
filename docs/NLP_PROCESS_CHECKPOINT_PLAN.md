@@ -8,6 +8,11 @@ This document saves the current implementation plan for bringing `process with N
 to the same engineering maturity level as staged `extract terms`, without losing
 the confirmed repo context discovered during the Task 30 follow-up work.
 
+Current approved DB state after the latest convergence wave:
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- `schema_version=38` after migration `038_sentence_nlp_snapshot`
+
 ## Confirmed entry points
 
 - Regular-project UI path:
@@ -618,6 +623,63 @@ Validation:
     `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
   - confirmed `db_open ok` on the approved `hewiki_gpu_processing test.db`
 
+### PATCH-CONV-03: sentence NLP snapshots for term-extraction reuse
+
+Status:
+
+- implemented on 2026-03-09
+
+Files:
+
+- `app/infra/migrations/038_sentence_nlp_snapshot.sql`
+- `app/infra/nlp_snapshot_codec.py`
+- `app/infra/sa_models.py`
+- `app/services/process_service.py`
+- `app/services/term_extraction_service.py`
+- `tests/test_sentence_nlp_snapshot_reuse.py`
+- docs
+
+Delivered in this wave:
+
+- `ProcessService.process_document()` now persists sentence-level NLP snapshots
+  alongside `document_sentence` rows using a dedicated
+  `sentence_nlp_snapshot` table
+- the snapshot payload stores token/POS/lemma data plus a
+  `sentence_text_hash`, letting later consumers verify that the sentence text
+  still matches the stored NLP output
+- `TermExtractionService` now prefers persisted snapshots before reparsing
+  sentence text through the current engine; fallback reparse remains in place
+  for missing, stale, or malformed snapshot rows
+- this makes the first production data-path convergence between `process with
+  NLP` and `extract terms` real, not just planned
+
+Validation:
+
+- targeted snapshot/reuse regressions:
+  - `48 passed in 209.93s`
+  - artifact: `build/logs/nlp_prework/pytest_sentence_snapshot_reuse.log`
+- import smoke:
+  - artifact: `build/logs/nlp_prework/import_smoke_sentence_snapshot_reuse.log`
+  - result: `OK`
+- prebuild/package smoke:
+  - artifact:
+    `build/logs/nlp_prework/prebuild_validate_sentence_snapshot_reuse.log`
+  - result: all checks passed
+- approved DB open smoke:
+  - artifact:
+    `build/logs/nlp_prework/db_open_self_check_sentence_snapshot_approved.json`
+  - confirmed `db_open ok` on the approved DB
+- approved DB live snapshot-reuse probe:
+  - artifact:
+    `build/logs/nlp_prework/hewiki_live_sentence_snapshot_probe_v2.log`
+  - confirmed on the approved DB:
+    - current schema advanced to `38`
+    - a temporary project produced `2` persisted sentence snapshots during NLP
+      processing
+    - term extraction completed successfully even when its engine was replaced
+      with a failing stub, proving snapshot reuse instead of forced reparse
+    - cleanup removed the temporary project cleanly
+
 ## Non-negotiable invariants
 
 - reference corpora remain CLI-only for real NLP processing
@@ -631,8 +693,10 @@ Validation:
 
 ## Related follow-up for extract terms
 
-When the NLP plan is implemented, the next convergence step for term extraction is:
+The first convergence step for term extraction is now implemented:
 
 - keep the shared staged dialog contract stable across NLP and terms
-- then evaluate whether token/POS snapshots from NLP can replace sentence re-parse
-  inside `TermExtractionService`
+- keep the current `prefer snapshot / fallback reparse` contract stable
+- only expand this with snapshot backfill, freshness/version gating, or broader
+  coverage reporting if evidence from legacy processed projects shows too much
+  fallback reparsing

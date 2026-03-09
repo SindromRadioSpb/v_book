@@ -126,6 +126,15 @@ Second wave delivered:
 - direct Qt dialog regressions now cover the real dialog classes, not only the
   surrounding view wiring
 
+Third wave delivered:
+
+- NLP processing now persists sentence-level token/POS/lemma snapshots in a
+  dedicated `sentence_nlp_snapshot` table
+- term extraction now prefers persisted snapshots whenever the stored
+  `sentence_text_hash` still matches the live sentence text
+- fallback reparse remains in place for missing or stale rows, so legacy
+  processed projects are still safe even before any snapshot backfill work
+
 Validation:
 
 - targeted convergence regressions:
@@ -142,9 +151,21 @@ Validation:
 - targeted shared-dialog regressions:
   - `28 passed in 93.79s`
   - artifact: `build/logs/nlp_prework/pytest_nlp_terms_shared_dialog.log`
+- targeted snapshot/reuse regressions:
+  - `48 passed in 209.93s`
+  - artifact: `build/logs/nlp_prework/pytest_sentence_snapshot_reuse.log`
 - import smoke:
   - artifact: `build/logs/nlp_prework/import_smoke_terms_nlp_shared_dialog.log`
   - result: `OK`
+- approved DB live snapshot-reuse probe:
+  - artifact:
+    `build/logs/nlp_prework/hewiki_live_sentence_snapshot_probe_v2.log`
+  - confirmed on the approved DB:
+    - migration `038` was applied
+    - `2` sentence snapshots were persisted for a temporary processed document
+    - term extraction completed successfully with a failing runtime NLP engine,
+      proving snapshot reuse instead of forced reparse
+    - cleanup removed the temporary probe project
 - approved DB app-open smoke:
   - artifact:
     `build/logs/nlp_prework/db_open_self_check_terms_nlp_shared_dialog.json`
@@ -156,7 +177,7 @@ Target DB:
 
 - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - initial Task 30 audit schema: `35`
-- current schema after migration `037_nlp_run_state`: `37`
+- current schema after migration `038_sentence_nlp_snapshot`: `38`
 
 Artifacts:
 
@@ -342,10 +363,17 @@ Further implementation plan for extract terms:
 - immediate runtime benchmarking work should stay focused on fixture lifecycle,
   reproducibility, and evidence quality rather than more stage-level
   `extract_terms` micro-optimization
-- the next meaningful production-scale extract-terms change should be tied to
-  the future NLP checkpoint plan:
-  - evaluate persisting token/POS snapshots during NLP processing to remove
-    sentence re-parse from term extraction
+- the next meaningful production-scale extract-terms change should stay tied to
+  the NLP checkpoint plan, but the first data-path convergence step is now
+  implemented:
+  - sentence-level NLP snapshots are persisted during processing
+  - term extraction reuses those snapshots when the stored text hash still
+    matches the live sentence text
+  - fallback reparse remains in place for missing or stale rows
+- the next extract-terms follow-up should therefore be evidence-driven:
+  - only add snapshot backfill, freshness/version gating, or broader reuse
+    coverage metrics if legacy processed projects still spend too much time on
+    fallback reparsing
 - until that convergence work is funded, the current staged extractor is the
   accepted production path for overwrite mode on large projects
 
@@ -357,10 +385,11 @@ Further implementation plan for extract terms:
   now done
 - if a future divergence appears, prefer tightening shared helper methods or
   structured state fields before introducing a second parallel dialog logic path
-- the next meaningful cross-feature convergence is no longer dialog reuse;
-  it is data-path reuse:
-  decide later whether NLP token/POS snapshots can replace sentence re-parse
-  inside term extraction
+- the first meaningful data-path convergence is also now implemented:
+  term extraction already reuses persisted NLP sentence snapshots
+- the next cross-feature convergence question is narrower:
+  decide later whether snapshot freshness/backfill/coverage reporting is needed
+  beyond the current `prefer snapshot / fallback reparse` contract
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 
@@ -384,7 +413,8 @@ Further implementation plan for extract terms:
 If reference-scale runs are still too long:
 
 - compute term candidates during NLP processing instead of re-parsing sentences later
-- or persist token/POS sequence data needed for deterministic term extraction
+- or expand the snapshot layer with backfill/freshness guarantees for legacy
+  processed documents
 - or materialize per-run / per-project helper tables for direct finalize paths
 
 ## Files touched in this wave

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.infra.sa_models import (
     DictProject,
     DocumentSentence,
+    SentenceNLPSnapshot,
     Lemma,
     LemmaProjectStat,
     Library,
@@ -110,6 +111,7 @@ def test_extract_terms_for_project_small_pipeline(monkeypatch, tmp_path: Path):
     SourceCorpus.__table__.create(engine, checkfirst=True)
     SourceDocument.__table__.create(engine, checkfirst=True)
     DocumentSentence.__table__.create(engine, checkfirst=True)
+    SentenceNLPSnapshot.__table__.create(engine, checkfirst=True)
     Lemma.__table__.create(engine, checkfirst=True)
     LemmaProjectStat.__table__.create(engine, checkfirst=True)
     Ngram.__table__.create(engine, checkfirst=True)
@@ -305,6 +307,7 @@ def test_extract_terms_chunked_run_resumes_after_cancel(monkeypatch, tmp_path: P
     SourceCorpus.__table__.create(engine, checkfirst=True)
     SourceDocument.__table__.create(engine, checkfirst=True)
     DocumentSentence.__table__.create(engine, checkfirst=True)
+    SentenceNLPSnapshot.__table__.create(engine, checkfirst=True)
     Lemma.__table__.create(engine, checkfirst=True)
     LemmaProjectStat.__table__.create(engine, checkfirst=True)
     Ngram.__table__.create(engine, checkfirst=True)
@@ -460,6 +463,7 @@ def test_extract_terms_chunked_state_callback_includes_run_metadata_and_pause_re
     SourceCorpus.__table__.create(engine, checkfirst=True)
     SourceDocument.__table__.create(engine, checkfirst=True)
     DocumentSentence.__table__.create(engine, checkfirst=True)
+    SentenceNLPSnapshot.__table__.create(engine, checkfirst=True)
     Lemma.__table__.create(engine, checkfirst=True)
     LemmaProjectStat.__table__.create(engine, checkfirst=True)
     Ngram.__table__.create(engine, checkfirst=True)

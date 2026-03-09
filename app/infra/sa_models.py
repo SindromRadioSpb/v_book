@@ -194,10 +194,42 @@ class DocumentSentence(Base):
     )
 
     document = relationship("SourceDocument", back_populates="sentences")
+    nlp_snapshot = relationship(
+        "SentenceNLPSnapshot",
+        back_populates="sentence",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     pronunciation = relationship(
         "SentencePronunciation", back_populates="sentence",
         uselist=False, cascade="all, delete-orphan",
     )
+
+
+class SentenceNLPSnapshot(Base):
+    """Persisted sentence-level NLP output for downstream reuse."""
+
+    __tablename__ = "sentence_nlp_snapshot"
+
+    sentence_id = Column(
+        Integer,
+        ForeignKey("document_sentence.sentence_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    engine = Column(Text, nullable=False)
+    engine_version = Column(Text)
+    sentence_text_hash = Column(Text, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    token_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(Text, nullable=False, default=utc_now)
+    updated_at = Column(Text, nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("token_count >= 0", name="ck_sentence_nlp_snapshot_token_count"),
+        Index("idx_sentence_nlp_snapshot_engine", "engine", "engine_version"),
+    )
+
+    sentence = relationship("DocumentSentence", back_populates="nlp_snapshot")
 
 
 class SentencePronunciation(Base):
