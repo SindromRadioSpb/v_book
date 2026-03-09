@@ -66,6 +66,8 @@ def test_parser_accepts_each_required_subcommand() -> None:
 
     for scenario in (
         "prepare_bench_fixture",
+        "refresh_bench_fixture",
+        "verify_bench_fixture",
         "extract_terms",
         "niqqud_bootstrap",
         "translate_bootstrap",

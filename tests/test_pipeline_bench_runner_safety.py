@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sqlite3
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -332,6 +333,35 @@ def test_validate_runtime_contract_requires_prepared_source_for_reuse_bench_slic
         raise AssertionError("Expected ValueError for missing prepared source db")
 
 
+def test_validate_runtime_contract_requires_existing_fixture_for_verify(
+    tmp_path: Path,
+) -> None:
+    mod = _load_module()
+    source_db = tmp_path / "source.db"
+    source_db.write_bytes(b"stub")
+    missing_fixture = tmp_path / "fixture.db"
+
+    args = mod.build_parser().parse_args(
+        [
+            "verify_bench_fixture",
+            "--db-path",
+            str(missing_fixture),
+            "--copy-target",
+            "--source-db",
+            str(source_db),
+            "--bench-project-name",
+            "BENCH_FIXTURE",
+        ]
+    )
+
+    try:
+        mod._validate_runtime_contract(args)
+    except FileNotFoundError as exc:
+        assert "--db-path not found for fixture verify" in str(exc)
+    else:
+        raise AssertionError("Expected FileNotFoundError for missing verify fixture DB")
+
+
 def test_resolve_bench_slice_reuses_matching_project(tmp_path: Path) -> None:
     mod = _load_module()
     from app.infra.sa_models import (
@@ -442,3 +472,206 @@ def test_resolve_bench_slice_reuses_matching_project(tmp_path: Path) -> None:
     assert result["bench_project_name"] == "BENCH_FIXTURE"
     assert result["copied_counts"]["documents"] == 2
     assert result["selected_source_doc_ids"] == selected_source_doc_ids
+
+
+def _insert_schema_meta(path: Path, schema_version: int) -> None:
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
+            (str(schema_version),),
+        )
+        conn.commit()
+
+
+def test_run_verify_bench_fixture_accepts_matching_fixture(tmp_path: Path) -> None:
+    mod = _load_module()
+    from app.infra.sa_models import (
+        DictProject,
+        DocumentSentence,
+        DocumentText,
+        Lemma,
+        LemmaDocStat,
+        Library,
+        SourceCorpus,
+        SourceDocument,
+    )
+
+    source_path = tmp_path / "source_fixture.db"
+    fixture_path = tmp_path / "prepared_fixture.db"
+    source_engine = create_engine(f"sqlite:///{source_path}")
+    Library.__table__.create(source_engine, checkfirst=True)
+    DictProject.__table__.create(source_engine, checkfirst=True)
+    SourceCorpus.__table__.create(source_engine, checkfirst=True)
+    SourceDocument.__table__.create(source_engine, checkfirst=True)
+    DocumentText.__table__.create(source_engine, checkfirst=True)
+    DocumentSentence.__table__.create(source_engine, checkfirst=True)
+    Lemma.__table__.create(source_engine, checkfirst=True)
+    LemmaDocStat.__table__.create(source_engine, checkfirst=True)
+
+    with Session(source_engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        source = DictProject(library_id=lib.library_id, name="Source", src_lang="he", tgt_lang="ru")
+        session.add(source)
+        session.flush()
+        source_corpus = SourceCorpus(project_id=source.project_id, name="source")
+        session.add(source_corpus)
+        session.flush()
+        for name in ("a.txt", "b.txt"):
+            session.add(
+                SourceDocument(
+                    corpus_id=source_corpus.corpus_id,
+                    file_path=name,
+                    file_name=name,
+                    file_ext=".txt",
+                    file_size_bytes=1,
+                    sha256=name,
+                    status="processed",
+                    sentence_count=1,
+                    token_count=1,
+                )
+            )
+        session.commit()
+        source_project_id = int(source.project_id)
+    source_engine.dispose()
+    _insert_schema_meta(source_path, 36)
+    shutil.copyfile(source_path, fixture_path)
+
+    fixture_engine = create_engine(f"sqlite:///{fixture_path}")
+    with Session(fixture_engine) as session:
+        source = session.get(DictProject, source_project_id)
+        assert source is not None
+        source_corpus = session.query(SourceCorpus).filter_by(project_id=source_project_id).one()
+        source_docs = (
+            session.query(SourceDocument)
+            .filter_by(corpus_id=source_corpus.corpus_id)
+            .order_by(SourceDocument.doc_id.asc())
+            .all()
+        )
+        bench = DictProject(
+            library_id=source.library_id,
+            name="BENCH_FIXTURE",
+            description=mod._build_bench_slice_description(source_project_id, 2),
+            src_lang="he",
+            tgt_lang="ru",
+        )
+        session.add(bench)
+        session.flush()
+        bench_corpus = SourceCorpus(project_id=bench.project_id, name="bench")
+        session.add(bench_corpus)
+        session.flush()
+        bench_docs = []
+        for index, source_doc in enumerate(source_docs, 1):
+            bench_doc = SourceDocument(
+                corpus_id=bench_corpus.corpus_id,
+                file_path=f"bench_{index}.txt",
+                file_name=f"bench_{index}.txt",
+                file_ext=".txt",
+                file_size_bytes=1,
+                sha256=f"bench_{index}",
+                status="processed",
+                sentence_count=1,
+                token_count=1,
+            )
+            session.add(bench_doc)
+            bench_docs.append(bench_doc)
+        session.flush()
+        for index, bench_doc in enumerate(bench_docs, 1):
+            session.add(DocumentText(doc_id=bench_doc.doc_id, raw_text=f"doc {index}"))
+            session.add(DocumentSentence(doc_id=bench_doc.doc_id, sent_index=0, text=f"sent {index}"))
+        lemma = Lemma(project_id=bench.project_id, lemma_text="lemma", pos="NOUN")
+        session.add(lemma)
+        session.flush()
+        session.add(
+            LemmaDocStat(
+                project_id=bench.project_id,
+                doc_id=bench_docs[0].doc_id,
+                lemma_id=lemma.lemma_id,
+                freq_abs=1,
+                sample_sentence_id=None,
+            )
+        )
+        session.commit()
+    fixture_engine.dispose()
+    _insert_schema_meta(fixture_path, 36)
+
+    fixture_engine = create_engine(f"sqlite:///{fixture_path}")
+    with Session(fixture_engine) as session:
+        result = mod._run_verify_bench_fixture(
+            session,
+            fixture_db=fixture_path,
+            source_db=source_path,
+            source_project_id=source_project_id,
+            bench_project_name="BENCH_FIXTURE",
+            doc_limit=2,
+        )
+    fixture_engine.dispose()
+
+    assert result["name"] == "verify_bench_fixture"
+    assert result["details"]["checks"]["schema_version_match"] is True
+    assert result["details"]["checks"]["source_doc_ids_match"] is True
+    assert result["details"]["bench"]["bench_project_name"] == "BENCH_FIXTURE"
+    assert result["rows_processed"]["sentence"] == 2
+
+
+def test_run_verify_bench_fixture_rejects_schema_mismatch(tmp_path: Path) -> None:
+    mod = _load_module()
+    from app.infra.sa_models import DictProject, Library, SourceCorpus, SourceDocument
+
+    source_path = tmp_path / "source_schema.db"
+    fixture_path = tmp_path / "fixture_schema.db"
+
+    for path in (source_path, fixture_path):
+        engine = create_engine(f"sqlite:///{path}")
+        Library.__table__.create(engine, checkfirst=True)
+        DictProject.__table__.create(engine, checkfirst=True)
+        SourceCorpus.__table__.create(engine, checkfirst=True)
+        SourceDocument.__table__.create(engine, checkfirst=True)
+        with Session(engine) as session:
+            lib = Library(name="lib")
+            session.add(lib)
+            session.flush()
+            source = DictProject(library_id=lib.library_id, name="Source", src_lang="he", tgt_lang="ru")
+            session.add(source)
+            session.flush()
+            source_corpus = SourceCorpus(project_id=source.project_id, name="source")
+            session.add(source_corpus)
+            session.flush()
+            session.add(
+                SourceDocument(
+                    corpus_id=source_corpus.corpus_id,
+                    file_path="a.txt",
+                    file_name="a.txt",
+                    file_ext=".txt",
+                    file_size_bytes=1,
+                    sha256="a",
+                    status="processed",
+                    sentence_count=1,
+                    token_count=1,
+                )
+            )
+            session.commit()
+            source_project_id = int(source.project_id)
+        engine.dispose()
+
+    _insert_schema_meta(source_path, 36)
+    _insert_schema_meta(fixture_path, 35)
+
+    engine = create_engine(f"sqlite:///{fixture_path}")
+    with Session(engine) as session:
+        try:
+            mod._run_verify_bench_fixture(
+                session,
+                fixture_db=fixture_path,
+                source_db=source_path,
+                source_project_id=source_project_id,
+                bench_project_name="BENCH_FIXTURE",
+                doc_limit=1,
+            )
+        except RuntimeError as exc:
+            assert "schema version mismatch" in str(exc)
+        else:
+            raise AssertionError("Expected RuntimeError for schema mismatch")
+    engine.dispose()

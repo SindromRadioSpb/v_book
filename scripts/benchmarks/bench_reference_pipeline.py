@@ -133,6 +133,55 @@ def _sqlite_backup(source_path: Path, dest_path: Path) -> None:
         src_conn.close()
 
 
+def _read_schema_version_sqlite(db_path: Path) -> int | None:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60)
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version' LIMIT 1"
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    finally:
+        conn.close()
+
+
+def _read_selected_source_doc_ids_sqlite(
+    db_path: Path,
+    *,
+    source_project_id: int,
+    doc_limit: int,
+) -> list[int]:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60)
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+        sql = (
+            "SELECT sd.doc_id "
+            "FROM source_document sd "
+            "JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id "
+            "WHERE sc.project_id = ? "
+            "ORDER BY sd.doc_id ASC"
+        )
+        params: list[int] = [int(source_project_id)]
+        if doc_limit > 0:
+            sql += " LIMIT ?"
+            params.append(int(doc_limit))
+        rows = conn.execute(sql, params).fetchall()
+        return deterministic_slice_doc_ids([int(row[0]) for row in rows], doc_limit)
+    finally:
+        conn.close()
+
+
+def _summarize_id_list(values: list[int]) -> dict[str, Any]:
+    normalized = [int(v) for v in values]
+    head = normalized[:3]
+    tail = normalized[-3:] if len(normalized) > 3 else normalized[:]
+    return {
+        "count": len(normalized),
+        "head": head,
+        "tail": tail,
+    }
+
+
 def _sqlite_sidecar_paths(db_path: Path) -> dict[str, Path]:
     return {
         "wal": Path(f"{db_path}-wal"),
@@ -330,6 +379,16 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         if source_db is None or not source_db.exists():
             raise FileNotFoundError(f"--source-db not found: {source_db}")
         return
+    if args.scenario == "refresh_bench_fixture":
+        if source_db is None or not source_db.exists():
+            raise FileNotFoundError(f"--source-db not found: {source_db}")
+        return
+    if args.scenario == "verify_bench_fixture":
+        if not db_path.exists():
+            raise FileNotFoundError(f"--db-path not found for fixture verify: {db_path}")
+        if source_db is None or not source_db.exists():
+            raise FileNotFoundError(f"--source-db not found: {source_db}")
+        return
     if source_db is None or not source_db.exists():
         raise FileNotFoundError(f"--source-db not found: {source_db}")
     if prepared_source_db is not None and not prepared_source_db.exists():
@@ -478,6 +537,7 @@ def _run_prepare_bench_fixture(
     source_project_id: int,
     bench_project_name: str,
     doc_limit: int,
+    stage_name: str = "prepare_bench_fixture",
 ) -> dict[str, Any]:
     started = _utc_now().isoformat()
     t0 = time.perf_counter()
@@ -489,7 +549,7 @@ def _run_prepare_bench_fixture(
     )
     counts = bench.get("copied_counts", {})
     return {
-        "name": "prepare_bench_fixture",
+        "name": str(stage_name),
         "started_at_utc": started,
         "ended_at_utc": _utc_now().isoformat(),
         "duration_sec": round(time.perf_counter() - t0, 3),
@@ -501,6 +561,136 @@ def _run_prepare_bench_fixture(
         "errors_count": 0,
         "error_samples": [],
         "details": bench,
+    }
+
+
+def _run_verify_bench_fixture(
+    session,
+    *,
+    fixture_db: Path,
+    source_db: Path,
+    source_project_id: int,
+    bench_project_name: str,
+    doc_limit: int,
+) -> dict[str, Any]:
+    from sqlalchemy import select
+    from app.infra.sa_models import DictProject
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+
+    source_project = session.get(DictProject, int(source_project_id))
+    if source_project is None:
+        raise ValueError(f"Source project not found in fixture DB: {source_project_id}")
+
+    fixture_schema_version = _read_schema_version_sqlite(fixture_db)
+    source_schema_version = _read_schema_version_sqlite(source_db)
+    if (
+        fixture_schema_version is not None
+        and source_schema_version is not None
+        and int(fixture_schema_version) != int(source_schema_version)
+    ):
+        raise RuntimeError(
+            "Prepared fixture schema version mismatch: "
+            f"fixture={fixture_schema_version} source={source_schema_version}"
+        )
+
+    expected_source_doc_ids = _read_selected_source_doc_ids_sqlite(
+        source_db,
+        source_project_id=int(source_project_id),
+        doc_limit=int(doc_limit),
+    )
+    if not expected_source_doc_ids:
+        raise RuntimeError(
+            f"No deterministic source docs available in source DB for project_id={source_project_id}"
+        )
+
+    fixture_source_doc_ids = _select_source_doc_ids(
+        session,
+        int(source_project_id),
+        int(doc_limit),
+    )
+    if fixture_source_doc_ids != expected_source_doc_ids:
+        raise RuntimeError(
+            "Prepared fixture source slice mismatch: "
+            f"fixture={_summarize_id_list(fixture_source_doc_ids)} "
+            f"source={_summarize_id_list(expected_source_doc_ids)}"
+        )
+
+    bench_project = session.execute(
+        select(DictProject)
+        .where(
+            DictProject.library_id == source_project.library_id,
+            DictProject.name == str(bench_project_name),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if bench_project is None:
+        raise RuntimeError(f"Prepared fixture bench project not found: {bench_project_name}")
+
+    meta = _parse_bench_slice_description(getattr(bench_project, "description", None))
+    if meta is None:
+        raise RuntimeError(
+            f"Prepared fixture bench project {bench_project_name} is missing bench_slice metadata"
+        )
+    if int(meta.get("source_project_id", -1)) != int(source_project_id):
+        raise RuntimeError(
+            "Prepared fixture source_project_id mismatch: "
+            f"fixture_meta={meta.get('source_project_id')} expected={source_project_id}"
+        )
+    if int(meta.get("doc_limit", -1)) != int(doc_limit):
+        raise RuntimeError(
+            f"Prepared fixture doc_limit mismatch: fixture_meta={meta.get('doc_limit')} expected={doc_limit}"
+        )
+
+    bench = _build_bench_project_summary(
+        session,
+        source_project=source_project,
+        bench_project=bench_project,
+        selected_source_doc_ids=fixture_source_doc_ids,
+    )
+    if int(bench.get("copied_counts", {}).get("documents", 0)) != len(expected_source_doc_ids):
+        raise RuntimeError(
+            "Prepared fixture bench document count mismatch: "
+            f"bench={bench.get('copied_counts', {}).get('documents', 0)} "
+            f"expected={len(expected_source_doc_ids)}"
+        )
+
+    checks = {
+        "schema_version_match": (
+            fixture_schema_version is None
+            or source_schema_version is None
+            or int(fixture_schema_version) == int(source_schema_version)
+        ),
+        "source_doc_ids_match": fixture_source_doc_ids == expected_source_doc_ids,
+        "bench_metadata_match": True,
+        "bench_doc_count_match": int(bench.get("copied_counts", {}).get("documents", 0))
+        == len(expected_source_doc_ids),
+    }
+
+    return {
+        "name": "verify_bench_fixture",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {
+            "lemma": int(bench.get("copied_counts", {}).get("lemmas", 0)),
+            "term": 0,
+            "sentence": int(bench.get("copied_counts", {}).get("sentences", 0)),
+        },
+        "errors_count": 0,
+        "error_samples": [],
+        "details": {
+            "fixture_db": str(fixture_db),
+            "source_db": str(source_db),
+            "fixture_schema_version": fixture_schema_version,
+            "source_schema_version": source_schema_version,
+            "checks": checks,
+            "expected_source_doc_ids": _summarize_id_list(expected_source_doc_ids),
+            "fixture_source_doc_ids": _summarize_id_list(fixture_source_doc_ids),
+            "bench_doc_ids": _summarize_id_list(list(bench.get("bench_doc_ids", []))),
+            "bench": bench,
+        },
     }
 
 
@@ -1504,6 +1694,7 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     timings = report.get("timings") or {}
     cleanup_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "cleanup_sandbox" else {}
     reset_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "reset_sandbox" else {}
+    verify_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "verify_bench_fixture" else {}
     post_run_maintenance = db_info.get("post_run_maintenance") or {}
     cycle_actions = ((report.get("maintenance_cycle") or {}).get("actions") or [])
     stage_total = round(
@@ -1568,6 +1759,28 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
         lines.append(f"- Source DB: `{reset_details.get('source_db', 'n/a')}`")
         lines.append(f"- Target DB: `{reset_details.get('target_db', 'n/a')}`")
         lines.append(f"- Target size bytes: `{int(reset_details.get('size_bytes', 0))}`")
+        lines.append("")
+    if report["scenario"] == "verify_bench_fixture":
+        lines.append("## Fixture Verification")
+        lines.append("")
+        lines.append(
+            f"- Fixture schema version: `{verify_details.get('fixture_schema_version', 'unknown')}`"
+        )
+        lines.append(
+            f"- Source schema version: `{verify_details.get('source_schema_version', 'unknown')}`"
+        )
+        for check_name, check_value in sorted((verify_details.get("checks") or {}).items()):
+            lines.append(f"- {check_name}: `{bool(check_value)}`")
+        if verify_details.get("expected_source_doc_ids"):
+            lines.append(
+                f"- Expected source docs: `{verify_details['expected_source_doc_ids']}`"
+            )
+        if verify_details.get("fixture_source_doc_ids"):
+            lines.append(
+                f"- Fixture source docs: `{verify_details['fixture_source_doc_ids']}`"
+            )
+        if verify_details.get("bench_doc_ids"):
+            lines.append(f"- Bench docs: `{verify_details['bench_doc_ids']}`")
         lines.append("")
     lines.append("## Timing Breakdown")
     lines.append("")
@@ -1684,6 +1897,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for name in (
         "prepare_bench_fixture",
+        "refresh_bench_fixture",
+        "verify_bench_fixture",
         "extract_terms",
         "niqqud_bootstrap",
         "translate_bootstrap",
@@ -1870,6 +2085,7 @@ def run(argv: list[str] | None = None) -> int:
                         source_project_id=int(args.source_project_id),
                         bench_project_name=str(args.bench_project_name),
                         doc_limit=int(args.doc_limit),
+                        stage_name="prepare_bench_fixture",
                     ),
                 )
             report["stages"].append(stage_result)
@@ -1881,6 +2097,115 @@ def run(argv: list[str] | None = None) -> int:
                 + float(report["timings"].get("slice_clone_sec", 0.0)),
                 3,
             )
+            report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
+            return_code = 0 if report["overall_status"] == "pass" else 1
+            return return_code
+
+        if args.scenario == "refresh_bench_fixture":
+            source_db = Path(args.source_db).expanduser().resolve()
+            fixture_db = Path(args.db_path).expanduser().resolve()
+            report["db"] = {
+                "source_db": str(source_db),
+                "prepared_source_db": str(fixture_db),
+                "base_sandbox_db": str(fixture_db),
+                "working_db": str(fixture_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                    "refresh_bench_fixture": True,
+                },
+            }
+            t0 = time.perf_counter()
+            _prepare_base_sandbox(fixture_db, source_db, reuse_existing=False)
+            refresh_duration = round(time.perf_counter() - t0, 3)
+            report["timings"]["base_copy_sec"] = float(refresh_duration)
+            report["timings"]["working_copy_sec"] = 0.0
+            report["timings"]["base_copy_reused"] = False
+            report["timings"]["working_db_reused"] = True
+            _record_cycle_action(
+                report,
+                name="refresh_bench_fixture",
+                status="ok",
+                duration_sec=refresh_duration,
+                details={
+                    "fixture_db": str(fixture_db),
+                    "source_db": str(source_db),
+                },
+            )
+            _reset_db_service()
+            from app.services.db_service import DBService
+
+            t0 = time.perf_counter()
+            DBService.initialize(fixture_db)
+            report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
+            db_service = DBService.get_instance()
+            with db_service.get_session() as session:
+                stage_result = _run_stage(
+                    "refresh_bench_fixture",
+                    lambda: _run_prepare_bench_fixture(
+                        session,
+                        source_project_id=int(args.source_project_id),
+                        bench_project_name=str(args.bench_project_name),
+                        doc_limit=int(args.doc_limit),
+                        stage_name="refresh_bench_fixture",
+                    ),
+                )
+            report["stages"].append(stage_result)
+            report["bench"] = dict(stage_result.get("details") or {})
+            report["timings"]["slice_clone_sec"] = float(stage_result.get("duration_sec", 0.0) or 0.0)
+            report["timings"]["pre_stage_overhead_sec"] = round(
+                float(report["timings"].get("base_copy_sec", 0.0))
+                + float(report["timings"].get("db_initialize_sec", 0.0))
+                + float(report["timings"].get("slice_clone_sec", 0.0)),
+                3,
+            )
+            report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
+            return_code = 0 if report["overall_status"] == "pass" else 1
+            return return_code
+
+        if args.scenario == "verify_bench_fixture":
+            source_db = Path(args.source_db).expanduser().resolve()
+            fixture_db = Path(args.db_path).expanduser().resolve()
+            report["db"] = {
+                "source_db": str(source_db),
+                "prepared_source_db": str(fixture_db),
+                "base_sandbox_db": str(fixture_db),
+                "working_db": str(fixture_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                    "verify_bench_fixture": True,
+                },
+            }
+            report["timings"]["base_copy_sec"] = 0.0
+            report["timings"]["working_copy_sec"] = 0.0
+            report["timings"]["slice_clone_sec"] = 0.0
+            report["timings"]["base_copy_reused"] = True
+            report["timings"]["working_db_reused"] = True
+            _reset_db_service()
+            from app.services.db_service import DBService
+
+            t0 = time.perf_counter()
+            DBService.initialize(fixture_db)
+            report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
+            report["timings"]["pre_stage_overhead_sec"] = float(
+                report["timings"]["db_initialize_sec"]
+            )
+            db_service = DBService.get_instance()
+            with db_service.get_session() as session:
+                stage_result = _run_stage(
+                    "verify_bench_fixture",
+                    lambda: _run_verify_bench_fixture(
+                        session,
+                        fixture_db=fixture_db,
+                        source_db=source_db,
+                        source_project_id=int(args.source_project_id),
+                        bench_project_name=str(args.bench_project_name),
+                        doc_limit=int(args.doc_limit),
+                    ),
+                )
+            report["stages"].append(stage_result)
+            report["bench"] = dict((stage_result.get("details") or {}).get("bench") or {})
             report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
             return_code = 0 if report["overall_status"] == "pass" else 1
             return return_code

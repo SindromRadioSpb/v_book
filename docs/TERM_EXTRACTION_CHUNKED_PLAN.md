@@ -107,6 +107,8 @@ Artifacts:
 - `build\logs\task30\pipeline_bench_report_20260309_090248.md`
 - `build\logs\task30\pipeline_bench_report_20260309_092015.md`
 - `build\logs\task30\pipeline_bench_report_20260309_104104.md`
+- `build\logs\task30\pipeline_bench_report_20260309_173819.md`
+- `build\logs\task30\pipeline_bench_report_20260309_175023.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -224,6 +226,27 @@ Maintenance-cycle follow-up:
     - `overall wall = 1580.967 s`
   - this is the first completed full-workflow `ceiling` run on this machine
     that stays under the current `1800 s` wall budget
+- approved fixture lifecycle hardening evidence:
+  - fixture refresh:
+    `refresh_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - fixture verify:
+    `verify_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - artifacts:
+    - `build\logs\task30\pipeline_bench_report_20260309_173819.md`
+    - `build\logs\task30\pipeline_bench_report_20260309_175023.md`
+  - refresh metrics:
+    - `base_copy/refresh = 289.567 s`
+    - `bench slice clone = 419.950 s`
+    - `overall wall = 712.619 s`
+  - verify metrics:
+    - `fixture schema version = 36`
+    - `source schema version = 36`
+    - `verify stage wall = 1.464 s`
+    - `overall wall = 2.249 s`
+  - this hardens the prepared-fixture lifecycle into:
+    - explicit refresh
+    - explicit verify
+    - fixture-backed heavy-tier run
 - after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
   SQLite sidecar files
 
@@ -239,12 +262,29 @@ Recommended heavy-tier workflow:
 - `smoke/medium/large` can continue to use the one-command maintenance cycle:
   - `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier ...`
 - `ceiling` should use a prepared fixture DB:
-  - first build or refresh the fixture:
+  - first verify the existing fixture:
+    `verify_bench_fixture --db-path ...hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - if verify fails or the approved source contract changed, refresh the fixture:
+    `refresh_bench_fixture --db-path ...hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - first-time bootstrap can still use:
     `prepare_bench_fixture --db-path ...hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
   - then run the reusable sandbox against that fixture:
     `extract_terms --reuse-working-db --reuse-bench-slice --pre-reset-sandbox --prepared-source-db ...hewiki_pipeline_ceiling_fixture.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
 - do not combine `--reuse-bench-slice` with `--post-cleanup-bench`; the
   prepared `BENCH_*` project is intentionally preserved inside the fixture DB
+
+Further implementation plan for extract terms:
+
+- immediate runtime benchmarking work should stay focused on fixture lifecycle,
+  reproducibility, and evidence quality rather than more stage-level
+  `extract_terms` micro-optimization
+- the next meaningful production-scale extract-terms change should be tied to
+  the future NLP checkpoint plan:
+  - align run-state vocabulary and progress UI semantics across NLP and terms
+  - evaluate persisting token/POS snapshots during NLP processing to remove
+    sentence re-parse from term extraction
+- until that convergence work is funded, the current staged extractor is the
+  accepted production path for overwrite mode on large projects
 
 ## Remaining follow-ups
 
@@ -254,12 +294,15 @@ Recommended heavy-tier workflow:
 - show doc progress and finalization stage explicitly
 - optional reuse of premium batch progress dialog with extraction-specific labels
 
-### Follow-up B: fixture lifecycle hardening
+### Follow-up B: stronger fixture metadata only if evidence demands it
 
-- add an explicit fixture refresh/verification flow if repeated operator use
-  shows drift or stale sidecar issues around the prepared fixture DB
-- optionally add fixture metadata validation beyond doc count if future heavy
-  tiers need stronger invariants than `source_project_id + doc_limit`
+- the current fixture contract already verifies:
+  - schema version
+  - deterministic source slice
+  - bench metadata
+  - copied document count
+- only add a richer manifest if later heavy tiers require stronger invariants
+  than the current DB-contained metadata contract
 
 ### Follow-up B2: optional benchmark sandbox housekeeping UX
 

@@ -621,3 +621,80 @@ python scripts\collect_queryplan_evidence.py --db-path "J:\Project_Vibe\V_book\r
 - Existing touched-path regressions pass on local temp-root-safe pytest runs.
 - Fixture-backed `ceiling` benchmark workflow passes the current `1800 s` full
   wall budget on the approved DB.
+- Baseline + corrected future NLP checkpoint plan is preserved in
+  `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`.
+
+### PATCH-12: Prepared fixture lifecycle hardening
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `scripts/benchmarks/bench_reference_pipeline.py`
+- `tests/test_pipeline_bench_runner_safety.py`
+- `tests/test_pipeline_bench_argparse.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `build/logs/task30/pipeline_bench_report_20260309_173819.md`
+- `build/logs/task30/pipeline_bench_report_20260309_175023.md`
+
+Goals:
+
+- Add explicit maintenance lifecycle commands for prepared fixture DBs instead of
+  treating `prepare_bench_fixture` as a one-shot bootstrap only.
+- Provide a cheap `verify` step that proves a prepared fixture still matches the
+  approved source DB and deterministic slice contract.
+- Preserve the baseline `process with NLP` design context in repo docs and
+  correct it after a deeper audit of the current UI + CLI processing paths.
+
+Result:
+
+- Added `refresh_bench_fixture` to rebuild a prepared fixture DB from the
+  approved source DB and recreate the deterministic `BENCH_*` slice in one
+  explicit maintenance step.
+- Added `verify_bench_fixture` to validate:
+  - fixture schema version vs approved source DB
+  - deterministic source `doc_id` slice vs approved source DB
+  - stored `bench_slice|...` metadata on the prepared `BENCH_*` project
+  - prepared bench project document count vs expected deterministic slice size
+- Added targeted parser/safety tests for the new fixture lifecycle scenarios and
+  successful verification path.
+- Saved the current `process with NLP` plan in
+  `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`, then corrected it after deeper review:
+  - reference-scale NLP remains CLI-only
+  - first production NLP implementation should use checkpointed writes on the
+    main DB, not a copied benchmark-fixture workflow
+
+Observed evidence:
+
+- Live fixture refresh on the approved DB completed successfully:
+  - command shape:
+    `refresh_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_173819.md`
+  - `base_copy/refresh = 289.567 s`
+  - `bench slice clone = 419.950 s`
+  - `overall wall = 712.619 s`
+- Live fixture verification on the same prepared DB completed successfully:
+  - command shape:
+    `verify_bench_fixture --db-path J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_ceiling_fixture.db --copy-target --source-db ...test.db --bench-project-name BENCH_PIPELINE_FIXTURE_CEILING --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_175023.md`
+  - `fixture schema version = 36`
+  - `source schema version = 36`
+  - `verify stage wall = 1.464 s`
+  - `overall wall = 2.249 s`
+  - all checks passed:
+    - `schema_version_match`
+    - `source_doc_ids_match`
+    - `bench_metadata_match`
+    - `bench_doc_count_match`
+
+Operational contract:
+
+- `prepare_bench_fixture` remains valid for first-time bootstrap.
+- `refresh_bench_fixture` is now the explicit maintenance path when the prepared
+  fixture must be rebuilt from the approved source DB.
+- `verify_bench_fixture` is the fast preflight path before heavy-tier runs when
+  the operator wants to confirm the prepared fixture is still current.
+- For `ceiling` runs, the recommended order is now:
+  - `verify_bench_fixture`
+  - `refresh_bench_fixture` only if verify fails or the source contract changed
+  - fixture-backed `extract_terms --reuse-bench-slice`
