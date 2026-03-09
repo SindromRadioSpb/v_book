@@ -170,6 +170,9 @@ Validation:
   enable + chain membership semantics, matching audio-style readiness reporting.
 - Result: implemented; resource registry now recognizes explicit external
   Phonikud model paths, so health/wizard state matches real inference readiness.
+- Result: implemented; sentence-niqqud bootstrap now reports the post-generation
+  `generator_mode` and persists the effective `phonikud_version` after real
+  inference, not the stale pre-generation fallback mode.
 
 ## Out of scope for PATCH-01
 

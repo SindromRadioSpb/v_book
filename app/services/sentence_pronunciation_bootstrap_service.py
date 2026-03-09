@@ -168,7 +168,7 @@ class SentencePronunciationBootstrapService:
             return result
 
         # Detect generator mode
-        _pv = phonikud_version or getattr(phonikud_generator, "mode", "unknown")
+        _pv = str(phonikud_version or getattr(phonikud_generator, "mode", "unknown") or "unknown")
         result.generator_mode = _pv
 
         # Batch-fetch sentence texts for all IDs
@@ -275,6 +275,8 @@ class SentencePronunciationBootstrapService:
                 generated_map: Dict[str, Dict] = {}
                 try:
                     generated_map = phonikud_generator.generate(lang, all_texts)
+                    _pv = str(phonikud_version or getattr(phonikud_generator, "mode", None) or _pv or "unknown")
+                    result.generator_mode = _pv
                 except Exception as exc:
                     logger.error("Phonikud generation batch failed: %s", exc, exc_info=True)
                     # Record errors for all in this sub-chunk
@@ -307,6 +309,7 @@ class SentencePronunciationBootstrapService:
 
                 # ── Write each row ─────────────────────────────────────────────
                 for sid, preprocessed, src_hash in sub_chunk:
+                    effective_src_hash = self._svc.compute_src_hash(lang, preprocessed, _pv)
                     segments = generation_inputs[sid]
                     # Assemble niqqud from segments
                     niqqud_parts = []
@@ -354,7 +357,7 @@ class SentencePronunciationBootstrapService:
                             session,
                             sentence_id=sid,
                             lang=lang,
-                            src_hash=src_hash,
+                            src_hash=effective_src_hash,
                             src_preprocessed=preprocessed,
                             niqqud_text=store_niqqud,
                             confidence=confidence,

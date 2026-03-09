@@ -57,6 +57,16 @@ class _NoNiqqudGenerator(_FakeGenerator):
         return {text: {"niqqud_text": text, "confidence": 0.1} for text in texts}
 
 
+class _ModeSwitchingGenerator(_FakeGenerator):
+    """Starts in fallback and reports real mode after first generation."""
+
+    mode = "fallback"
+
+    def generate(self, lang: str, texts: List[str]) -> Dict[str, Dict]:
+        self.mode = "real"
+        return super().generate(lang, texts)
+
+
 @pytest.fixture()
 def db_engine(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path}/sp_bootstrap.db")
@@ -200,3 +210,33 @@ class TestSkipReasonBuckets:
 
         assert r2.skipped_same_hash == 3
         assert r2.inserted == 0
+
+    def test_generator_mode_updates_after_real_generation(self, db_engine, monkeypatch):
+        from app.services import sentences_workspace_service as ws_module
+        monkeypatch.setattr(
+            SentencePronunciationService,
+            "should_process",
+            staticmethod(lambda text, *, guard=None: (True, "")),
+        )
+        monkeypatch.setattr(
+            ws_module.SentencesWorkspaceService,
+            "get_sentence_texts_by_ids",
+            lambda self, session, ids: {i: f"Ч‘Ч™ЧЄ Ч”ЧЎЧ¤ЧЁ ЧћЧЎЧ¤ЧЁ {i}" for i in ids},
+        )
+
+        svc = _make_svc()
+        generator = _ModeSwitchingGenerator()
+        with Session(db_engine) as session:
+            result = svc.run(
+                session,
+                [1],
+                lang="he",
+                mode="fill_only",
+                phonikud_generator=generator,
+            )
+            session.commit()
+            row = session.get(SentencePronunciation, 1)
+
+        assert result.generator_mode == "real"
+        assert row is not None
+        assert row.phonikud_version == "real"
