@@ -419,7 +419,9 @@ class TranslationResolveWorker(QThread):
             db_service = DBService.get_instance()
             translation_service = TranslationService()
 
-            with db_service.get_session() as session:
+            # Overlay translation resolution is read-only and should not occupy
+            # the write pool on large/reference databases.
+            with db_service.get_read_session() as session:
                 # Bulk resolve for performance (no N+1 queries)
                 results = translation_service.bulk_resolve(
                     session,
@@ -1843,12 +1845,26 @@ class SingleTextTranslateWorker(QThread):
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.project_id = project_id
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation.
+
+        The underlying provider call may still need to finish, but the worker
+        will suppress result/error delivery after cancellation.
+        """
+        self._cancelled = True
+        self.requestInterruption()
 
     def run(self):
         """Translate text via MT providers."""
         try:
             from app.services.db_service import DBService
             from app.services.translation_service import TranslationService
+
+            if self._cancelled or self.isInterruptionRequested():
+                logger.info("Single text translate cancelled before start")
+                return
 
             db_service = DBService.get_instance()
             translation_service = TranslationService()
@@ -1866,10 +1882,17 @@ class SingleTextTranslateWorker(QThread):
                     use_mt=True,  # Enable MT providers
                 )
 
+                if self._cancelled or self.isInterruptionRequested():
+                    logger.info("Single text translate cancelled before result delivery")
+                    return
+
                 # Emit result
                 self.result_ready.emit(result)
 
         except Exception as e:
+            if self._cancelled or self.isInterruptionRequested():
+                logger.info("Single text translate cancelled during failure path: %s", e)
+                return
             logger.exception("Single text translate worker error")
             error_msg = self._make_user_friendly_error(str(e))
             self.error.emit(error_msg)

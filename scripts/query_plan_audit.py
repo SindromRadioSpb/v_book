@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import sessionmaker
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.infra.sa_models import Lemma, LemmaProjectStat
+from app.services.dictionary_service import DictionaryService
+from app.services.document_service import DocumentService
 
 
 def _resolve_project_id(conn: sqlite3.Connection, explicit_project_id: int | None) -> int:
@@ -61,6 +73,106 @@ def _table_indexes(conn: sqlite3.Connection, table_name: str) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
+def _read_schema_version(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute(
+        "SELECT value FROM schema_meta WHERE key = 'schema_version' LIMIT 1"
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _compile_stmt(stmt, session) -> str:
+    return str(
+        stmt.compile(
+            dialect=session.bind.dialect,
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+
+def _build_live_queries(session, *, project_id: int, search_term: str) -> list[tuple[str, str, str]]:
+    dict_service = DictionaryService()
+    doc_service = DocumentService()
+    filters = {"pos": "All", "hide_noise": True, "search": ""}
+
+    dictionary_page_stmt = (
+        select(Lemma, LemmaProjectStat)
+        .select_from(LemmaProjectStat)
+        .join(
+            Lemma,
+            (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+            & (Lemma.project_id == LemmaProjectStat.project_id),
+        )
+        .where(
+            LemmaProjectStat.project_id == project_id,
+            Lemma.project_id == project_id,
+        )
+    )
+    dictionary_page_stmt = dict_service._apply_filters(
+        dictionary_page_stmt,
+        filters,
+        session=session,
+    )
+    dictionary_page_stmt = dict_service._apply_sort(
+        dictionary_page_stmt,
+        "freq_abs",
+        "desc",
+    )
+    dictionary_page_stmt = dictionary_page_stmt.limit(100).offset(0)
+
+    dictionary_count_stmt = select(func.count(Lemma.lemma_id)).where(
+        Lemma.project_id == project_id
+    )
+    dictionary_count_stmt = dict_service._apply_filters(
+        dictionary_count_stmt,
+        filters,
+        session=session,
+    )
+
+    picker_empty_stmt = doc_service.build_project_documents_query(
+        project_id,
+        search_query=None,
+        sort_by="doc_id",
+        sort_dir="desc",
+        session=session,
+    ).limit(50).offset(0)
+
+    picker_search_stmt = doc_service.build_project_documents_query(
+        project_id,
+        search_query=search_term,
+        sort_by="file_name",
+        sort_dir="asc",
+        session=session,
+    ).limit(50).offset(0)
+
+    return [
+        (
+            "Dictionary first page",
+            "dictionary_first_page",
+            _compile_stmt(dictionary_page_stmt, session),
+        ),
+        (
+            "Dictionary count",
+            "dictionary_count",
+            _compile_stmt(dictionary_count_stmt, session),
+        ),
+        (
+            "Document picker page (empty search)",
+            "picker_page_empty",
+            _compile_stmt(picker_empty_stmt, session),
+        ),
+        (
+            "Document picker page (text search)",
+            "picker_page_search",
+            _compile_stmt(picker_search_stmt, session),
+        ),
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="EXPLAIN QUERY PLAN audit writer")
     parser.add_argument("--db-path", type=Path, required=True, help="SQLite DB path")
@@ -83,89 +195,32 @@ def main() -> int:
         raise FileNotFoundError(f"Database not found: {args.db_path}")
 
     conn = sqlite3.connect(f"file:{args.db_path}?mode=ro", uri=True)
+    engine = create_engine(
+        f"sqlite:///{args.db_path}",
+        echo=False,
+        connect_args={"check_same_thread": False},
+    )
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     try:
         project_id = _resolve_project_id(conn, args.project_id)
-        search_pattern = f"%{args.search_term}%"
-
-        queries = [
-            (
-                "Dictionary first page",
-                "dictionary_first_page",
-                """
-SELECT l.lemma_id, l.lemma_text, l.pos, s.freq_abs, s.doc_freq
-FROM lemma_project_stat AS s
-JOIN lemma AS l
-  ON l.lemma_id = s.lemma_id AND l.project_id = s.project_id
-WHERE s.project_id = ?
-  AND l.project_id = ?
-  AND (l.is_noise = 0 OR l.is_noise IS NULL)
-ORDER BY s.freq_abs DESC, s.lemma_id ASC
-LIMIT 100 OFFSET 0
-""",
-                (project_id, project_id),
-            ),
-            (
-                "Dictionary count",
-                "dictionary_count",
-                """
-SELECT COUNT(l.lemma_id)
-FROM lemma AS l
-WHERE l.project_id = ?
-  AND (l.is_noise = 0 OR l.is_noise IS NULL)
-""",
-                (project_id,),
-            ),
-            (
-                "Document picker page (empty search)",
-                "picker_page_empty",
-                """
-SELECT d.doc_id, d.file_name, d.tag
-FROM source_document AS d
-JOIN source_corpus AS c ON d.corpus_id = c.corpus_id
-WHERE c.project_id = ?
-ORDER BY d.doc_id DESC
-LIMIT 50 OFFSET 0
-""",
-                (project_id,),
-            ),
-            (
-                "Document picker page (text search)",
-                "picker_page_search",
-                """
-WITH project_doc_match_ids AS (
-  SELECT d.doc_id
-  FROM source_document AS d
-  JOIN source_corpus AS c ON d.corpus_id = c.corpus_id
-  WHERE c.project_id = ?
-    AND d.file_name LIKE ?
-  UNION
-  SELECT d.doc_id
-  FROM source_document AS d
-  WHERE d.tag = ?
-    AND EXISTS (
-      SELECT 1
-      FROM source_corpus AS c
-      WHERE c.corpus_id = d.corpus_id
-        AND c.project_id = ?
-    )
-)
-SELECT d.doc_id, d.file_name, d.tag
-FROM source_document AS d
-JOIN project_doc_match_ids AS ids ON ids.doc_id = d.doc_id
-ORDER BY d.file_name ASC, d.doc_id ASC
-LIMIT 50 OFFSET 0
-""",
-                (project_id, search_pattern, args.search_term, project_id),
-            ),
-        ]
+        schema_version = _read_schema_version(conn)
+        with session_factory() as session:
+            queries = _build_live_queries(
+                session,
+                project_id=project_id,
+                search_term=args.search_term,
+            )
 
         report_lines: list[str] = []
         report_lines.append("# PERF Query Plan Audit (Hewiki)")
         report_lines.append("")
         report_lines.append(f"- Generated (UTC): `{datetime.now(timezone.utc).isoformat()}`")
         report_lines.append(f"- DB: `{args.db_path}`")
+        report_lines.append(f"- Schema version: `{schema_version}`")
+        report_lines.append(f"- DB size bytes: `{args.db_path.stat().st_size}`")
         report_lines.append(f"- Project ID: `{project_id}`")
         report_lines.append(f"- Search term: `{args.search_term}`")
+        report_lines.append("- Query source: `DictionaryService` / `DocumentService` live statements")
         report_lines.append("")
 
         report_lines.append("## Index Snapshot")
@@ -191,14 +246,14 @@ LIMIT 50 OFFSET 0
         report_lines.append("## Query Plans")
         report_lines.append("")
         query_temp_btree: dict[str, bool] = {}
-        for title, tag, sql, params in queries:
-            plan_rows = conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
+        for title, tag, sql in queries:
+            plan_rows = conn.execute("EXPLAIN QUERY PLAN " + sql).fetchall()
             query_temp_btree[tag] = any("USE TEMP B-TREE" in str(row[3]) for row in plan_rows)
             elapsed = None
             row_count = None
             if args.include_timings:
                 started = time.perf_counter()
-                rows = conn.execute(sql, params).fetchall()
+                rows = conn.execute(sql).fetchall()
                 elapsed = time.perf_counter() - started
                 row_count = len(rows)
 
@@ -245,6 +300,7 @@ LIMIT 50 OFFSET 0
         print(f"Wrote query plan report: {args.out.resolve()}")
         return 0
     finally:
+        engine.dispose()
         conn.close()
 
 

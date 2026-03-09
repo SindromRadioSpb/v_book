@@ -69,6 +69,9 @@ class TranslateTextDialog(QDialog):
 
         self.translation_service = TranslationService()
         self.translate_worker: Optional[SingleTextTranslateWorker] = None
+        self._translation_request_seq = 0
+        self._active_translation_seq: Optional[int] = None
+        self._retired_translate_workers: list[SingleTextTranslateWorker] = []
 
         self.initial_text = initial_text
         self.initial_src_lang = src_lang
@@ -196,6 +199,39 @@ class TranslateTextDialog(QDialog):
         # Connect Enter key in input to translate
         self.input_text.setTabChangesFocus(True)  # Tab moves focus (doesn't insert tab)
 
+    def _finalize_translate_worker(self, worker: SingleTextTranslateWorker) -> None:
+        """Release references once a worker has fully stopped."""
+        if getattr(worker, "_hdle_cleanup_done", False):
+            return
+
+        setattr(worker, "_hdle_cleanup_done", True)
+
+        if worker is self.translate_worker:
+            self.translate_worker = None
+
+        try:
+            self._retired_translate_workers.remove(worker)
+        except ValueError:
+            pass
+
+        worker.deleteLater()
+
+    def _retire_translate_worker(self, *, wait_ms: int = 100) -> None:
+        """Request cooperative stop for the current worker."""
+        worker = self.translate_worker
+        if worker is None:
+            return
+
+        worker.cancel()
+        if worker.isRunning() and not worker.wait(wait_ms):
+            logger.info("Single text translation worker is still stopping cooperatively")
+            if worker not in self._retired_translate_workers:
+                self._retired_translate_workers.append(worker)
+        else:
+            self._finalize_translate_worker(worker)
+
+        self.translate_worker = None
+
     def on_translate(self):
         """Handle translate button click."""
         source_text = self.input_text.toPlainText().strip()
@@ -219,9 +255,12 @@ class TranslateTextDialog(QDialog):
         logger.info(f"Translating text ({src_lang} → {tgt_lang}): {sanitize_for_log(source_text[:50])}")
 
         # Cancel previous worker if running
-        if self.translate_worker and self.translate_worker.isRunning():
-            self.translate_worker.quit()
-            self.translate_worker.wait(1000)
+        if self.translate_worker:
+            self._active_translation_seq = None
+            self._retire_translate_worker(wait_ms=100)
+
+        self._translation_request_seq += 1
+        request_seq = self._translation_request_seq
 
         # Create and start worker
         self.translate_worker = SingleTextTranslateWorker(
@@ -229,9 +268,17 @@ class TranslateTextDialog(QDialog):
             src_lang=src_lang,
             tgt_lang=tgt_lang,
         )
+        self._active_translation_seq = request_seq
 
-        self.translate_worker.result_ready.connect(self.on_translation_result)
-        self.translate_worker.error.connect(self.on_translation_error)
+        self.translate_worker.result_ready.connect(
+            lambda result, seq=request_seq: self.on_translation_result(result, seq)
+        )
+        self.translate_worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_translation_error(error_msg, seq)
+        )
+        self.translate_worker.finished.connect(
+            lambda worker=self.translate_worker: self._finalize_translate_worker(worker)
+        )
         self.translate_worker.start()
 
         # Update UI
@@ -244,12 +291,10 @@ class TranslateTextDialog(QDialog):
 
     def on_cancel_translation(self):
         """Handle cancel button click."""
-        if self.translate_worker and self.translate_worker.isRunning():
+        if self.translate_worker:
             logger.info("Cancelling translation")
-            self.translate_worker.quit()
-            self.translate_worker.wait(1000)
-            if self.translate_worker.isRunning():
-                self.translate_worker.terminate()
+            self._active_translation_seq = None
+            self._retire_translate_worker(wait_ms=100)
 
         # Reset UI
         self.translate_btn.setEnabled(True)
@@ -257,9 +302,22 @@ class TranslateTextDialog(QDialog):
         self.cancel_btn.setVisible(False)
         self.metadata_label.setText("Translation cancelled")
 
-    def on_translation_result(self, result: TranslationResult):
+    def on_translation_result(self, result: TranslationResult, request_seq: Optional[int] = None):
         """Handle translation result from worker."""
-        logger.info(f"Translation completed: {result.source}, provider={result.provider}, cache_hit={result.cache_hit}")
+        if request_seq is not None and request_seq != self._active_translation_seq:
+            logger.debug(
+                "Ignoring stale translate-text result: seq=%s active=%s",
+                request_seq,
+                self._active_translation_seq,
+            )
+            return
+
+        logger.info(
+            "Translation completed: %s, provider=%s, cache_hit=%s",
+            result.source,
+            result.provider,
+            getattr(result, "cache_hit", None),
+        )
 
         # Display translation
         if result.translation:
@@ -304,17 +362,21 @@ class TranslateTextDialog(QDialog):
         self.translate_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.cancel_btn.setVisible(False)
+        self._active_translation_seq = None
 
         # Emit signal (for testing)
         self.translation_completed.emit(result)
 
-        # Clean up worker
-        if self.translate_worker:
-            self.translate_worker.deleteLater()
-            self.translate_worker = None
-
-    def on_translation_error(self, error_msg: str):
+    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle translation error from worker."""
+        if request_seq is not None and request_seq != self._active_translation_seq:
+            logger.debug(
+                "Ignoring stale translate-text error: seq=%s active=%s",
+                request_seq,
+                self._active_translation_seq,
+            )
+            return
+
         logger.error(f"Translation error: {error_msg}")
 
         # Show error in UI (not modal spam - just update metadata)
@@ -336,11 +398,7 @@ class TranslateTextDialog(QDialog):
         self.translate_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.cancel_btn.setVisible(False)
-
-        # Clean up worker
-        if self.translate_worker:
-            self.translate_worker.deleteLater()
-            self.translate_worker = None
+        self._active_translation_seq = None
 
     def on_copy(self):
         """Copy translated text to clipboard."""
@@ -359,12 +417,10 @@ class TranslateTextDialog(QDialog):
 
     def closeEvent(self, event):
         """Handle dialog close - ensure worker is stopped."""
-        if self.translate_worker and self.translate_worker.isRunning():
+        if self.translate_worker:
             logger.info("Stopping translation worker on close")
-            self.translate_worker.quit()
-            self.translate_worker.wait(1000)
-            if self.translate_worker.isRunning():
-                self.translate_worker.terminate()
+            self._active_translation_seq = None
+            self._retire_translate_worker(wait_ms=100)
 
         super().closeEvent(event)
 

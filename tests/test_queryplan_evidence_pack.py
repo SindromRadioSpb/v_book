@@ -27,6 +27,10 @@ CREATE TABLE dict_project (
   src_lang TEXT,
   tgt_lang TEXT
 );
+CREATE TABLE schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 CREATE TABLE source_corpus (
   corpus_id INTEGER PRIMARY KEY,
   project_id INTEGER
@@ -92,6 +96,7 @@ CREATE TABLE document_sentence (
   text TEXT
 );
 INSERT INTO dict_project(project_id, src_lang, tgt_lang) VALUES (1, 'he', 'ru');
+INSERT INTO schema_meta(key, value) VALUES ('schema_version', '35');
 INSERT INTO source_corpus(corpus_id, project_id) VALUES (11, 1);
 INSERT INTO source_document(doc_id, corpus_id, file_name, tag) VALUES (101, 11, 'wiki_doc.txt', 'wiki');
 INSERT INTO lemma(lemma_id, project_id, lemma_text, pos, is_noise) VALUES (201, 1, 'שלום', 'NOUN', 0);
@@ -131,6 +136,8 @@ def test_collect_queryplan_evidence_generates_json_and_md(tmp_path: Path) -> Non
     md_files = list(out_dir.glob("queryplan_evidence_*.md"))
     assert json_files
     assert md_files
+    payload = json_files[0].read_text(encoding="utf-8")
+    assert '"schema_version": 35' in payload
 
 
 def test_collect_queryplan_evidence_rejects_m_drive() -> None:
@@ -141,4 +148,3 @@ def test_collect_queryplan_evidence_rejects_m_drive() -> None:
         assert "Forbidden db-path on M:" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError for forbidden M: path")
-

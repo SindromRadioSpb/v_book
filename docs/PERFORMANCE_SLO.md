@@ -7,9 +7,10 @@ This contract defines baseline read-path performance targets for large databases
 
 Target dataset reference:
 
-- `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
-- Alternative path:
-  `M:\V_book\HDLE_Processing\hewiki_gpu_processing.db`
+- Approved Task 30 DB:
+  `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- Verified schema version:
+  `35`
 
 ## SLO Targets
 
@@ -40,6 +41,7 @@ All budgets are measured in seconds:
 - Measured runs: `5`
 - Aggregates: `p50`, `p95`
 - Output format: JSON artifact from `scripts/perf_harness.py`
+- Artifact metadata must include DB path and schema version
 - Measure read paths only for perf harness (no UI actions, no writes).
 
 ## Non-Goals / Constraints

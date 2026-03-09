@@ -82,6 +82,18 @@ def _table_indexes(conn: sqlite3.Connection, table_name: str) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
+def _read_schema_version(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute(
+        "SELECT value FROM schema_meta WHERE key = 'schema_version' LIMIT 1"
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def _collect_one(
     conn: sqlite3.Connection,
     *,
@@ -114,6 +126,8 @@ def _write_markdown(out_path: Path, payload: dict[str, Any]) -> None:
     lines.append("")
     lines.append(f"- Generated UTC: `{payload['generated_utc']}`")
     lines.append(f"- DB Path: `{payload['db_path']}`")
+    lines.append(f"- Schema Version: `{payload['schema_version']}`")
+    lines.append(f"- DB Size Bytes: `{payload['db_size_bytes']}`")
     lines.append(f"- Project ID: `{payload['project_id']}`")
     lines.append(f"- Search term: `{payload['search_term']}`")
     lines.append("")
@@ -162,12 +176,12 @@ def run(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = args.db_path.expanduser().resolve()
 
-    if not db_path.exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
     if _is_forbidden_m_path(db_path):
         raise RuntimeError(f"Forbidden db-path on M:\\ for query plan evidence: {db_path}")
     if not _is_expected_j_path(db_path):
         raise RuntimeError(f"Query plan evidence db-path must be on J:\\: {db_path}")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
 
     out_dir = args.out_dir.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +194,7 @@ def run(argv: list[str] | None = None) -> int:
         project_id = _resolve_project_id(conn, args.project_id)
         src_lang, tgt_lang = _resolve_project_langs(conn, project_id)
         like_term = f"%{args.search_term}%"
+        schema_version = _read_schema_version(conn)
 
         queries = [
             {
@@ -284,6 +299,8 @@ LIMIT 100
         payload = {
             "generated_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
             "db_path": str(db_path),
+            "schema_version": schema_version,
+            "db_size_bytes": int(db_path.stat().st_size),
             "project_id": int(project_id),
             "search_term": str(args.search_term),
             "index_snapshot": {
@@ -323,4 +340,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

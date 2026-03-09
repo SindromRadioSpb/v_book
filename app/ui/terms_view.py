@@ -67,6 +67,9 @@ class TermsView(QWidget):
         self._search_request_seq = 0
         self._active_search_seq = 0
         self._search_retry_pending = False
+        self._translation_request_seq = 0
+        self._active_translation_seq = 0
+        self._pending_translation_clusters = None
         self._overlay_request_seq = 0
         self._active_overlay_seq = 0
         self._pending_overlay_clusters = None
@@ -1005,8 +1008,14 @@ class TermsView(QWidget):
 
         # Cancel previous worker if running
         if self.translation_worker and self.translation_worker.isRunning():
-            self.translation_worker.quit()
-            self.translation_worker.wait(1000)
+            self.translation_worker.cancel()
+            if not self.translation_worker.wait(100):
+                self._pending_translation_clusters = clusters
+                return
+
+        self._pending_translation_clusters = None
+        self._translation_request_seq = getattr(self, "_translation_request_seq", 0) + 1
+        request_seq = self._translation_request_seq
 
         # Build items for worker: (src_text, kind)
         items = [(cluster.representative_he, "term_cluster") for cluster in clusters]
@@ -1019,34 +1028,59 @@ class TermsView(QWidget):
             tgt_lang="ru",
             allow_draft=False,
         )
+        self._active_translation_seq = request_seq
 
-        self.translation_worker.results_ready.connect(self.on_translation_results)
-        self.translation_worker.error.connect(self.on_translation_error)
+        self.translation_worker.results_ready.connect(
+            lambda results, seq=request_seq: self.on_translation_results(results, seq)
+        )
+        self.translation_worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_translation_error(error_msg, seq)
+        )
+        self.translation_worker.finished.connect(
+            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(worker, seq)
+        )
         self.translation_worker.start()
 
         logger.info(f"Started translation worker for {len(items)} term clusters")
 
-    def on_translation_results(self, results: dict):
+    def _on_translation_worker_finished(self, worker, request_seq: int) -> None:
+        if worker is self.translation_worker:
+            self.translation_worker = None
+
+        worker.deleteLater()
+
+        pending_clusters = getattr(self, "_pending_translation_clusters", None)
+        if pending_clusters:
+            self._pending_translation_clusters = None
+            QTimer.singleShot(0, lambda: self.start_translation_worker(pending_clusters))
+
+    def on_translation_results(self, results: dict, request_seq: Optional[int] = None):
         """M7 P1: Handle translation results from worker."""
+        if request_seq is not None and request_seq != getattr(self, "_active_translation_seq", 0):
+            logger.debug(
+                "Ignoring stale terms translation results: seq=%s active=%s",
+                request_seq,
+                getattr(self, "_active_translation_seq", 0),
+            )
+            return
+
         logger.info(f"Received {len(results)} translation results")
 
         # Update model with results
         self.terms_model.update_translations(results)
 
-        # Clean up worker
-        if self.translation_worker:
-            self.translation_worker.deleteLater()
-            self.translation_worker = None
-
-    def on_translation_error(self, error_msg: str):
+    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
         """M7 P1: Handle translation worker error."""
+        if request_seq is not None and request_seq != getattr(self, "_active_translation_seq", 0):
+            logger.debug(
+                "Ignoring stale terms translation error: seq=%s active=%s",
+                request_seq,
+                getattr(self, "_active_translation_seq", 0),
+            )
+            return
+
         logger.error(f"Translation worker error: {error_msg}")
         show_error(self, "Translation Error", f"Failed to load translations: {error_msg}")
-
-        # Clean up worker
-        if self.translation_worker:
-            self.translation_worker.deleteLater()
-            self.translation_worker = None
 
     def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
         """M7 P1: Handle inline edit of translation - save to TM."""
@@ -2107,10 +2141,9 @@ class TermsView(QWidget):
         # M7 P1: Stop translation worker
         if self.translation_worker and self.translation_worker.isRunning():
             logger.info("Stopping translation worker on close")
-            self.translation_worker.quit()
-            self.translation_worker.wait(1000)
-            if self.translation_worker.isRunning():
-                self.translation_worker.terminate()
+            self.translation_worker.cancel()
+            if not self.translation_worker.wait(100):
+                logger.info("Terms translation worker will finish cooperatively after close")
 
         # Stop extraction worker
         if self.extract_worker and self.extract_worker.isRunning():

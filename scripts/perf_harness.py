@@ -72,6 +72,19 @@ def _select_project_id(session_factory: sessionmaker, explicit_project_id: int |
     raise RuntimeError("No projects found in database")
 
 
+def _read_schema_version(session_factory: sessionmaker) -> int | None:
+    with session_factory() as session:
+        row = session.execute(
+            text("SELECT value FROM schema_meta WHERE key = 'schema_version' LIMIT 1")
+        ).fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def _run_timed_operation(
     *,
     warmup: int,
@@ -127,6 +140,7 @@ def main() -> int:
 
     try:
         project_id = _select_project_id(session_factory, args.project_id)
+        schema_version = _read_schema_version(session_factory)
         dict_service = DictionaryService()
         doc_service = DocumentService()
         filters = {"pos": "All", "hide_noise": True, "search": ""}
@@ -199,6 +213,8 @@ def main() -> int:
             "schema": "hdle_perf_v1",
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "db_path": str(args.db_path),
+            "schema_version": schema_version,
+            "db_size_bytes": int(args.db_path.stat().st_size),
             "project_id": int(project_id),
             "runs": int(args.runs),
             "warmup": int(args.warmup),

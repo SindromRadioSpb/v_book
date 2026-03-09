@@ -7,6 +7,12 @@ The harness uses direct SQLAlchemy sessions (read-path only) and does not run
 migrations/prebuild write probes, so it is safe to run against readonly
 reference databases.
 
+Approved Task 30 reference target:
+
+- DB path:
+  `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- Verified schema version: `35`
+
 ## What it measures
 
 - Dictionary first page (`100` rows, default filters)
@@ -18,7 +24,7 @@ reference databases.
 
 ```powershell
 cd J:\Project_Vibe\V_book
-python scripts/perf_harness.py --db-path "M:\V_book\HDLE_Processing\hewiki_gpu_processing.db" --runs 5 --warmup 1 --out perf_hewiki.json
+python scripts/perf_harness.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --runs 5 --warmup 1 --out build\logs\task30\perf_harness_hewiki_test.json
 python scripts/perf_harness.py --db-path "J:\Project_Vibe\V_book\hdle_premium.db" --runs 5 --warmup 1 --out perf_dev.json
 ```
 
@@ -33,6 +39,7 @@ python scripts/perf_harness.py --db-path "J:\Project_Vibe\V_book\hdle_premium.db
 
 JSON includes:
 
+- schema version context from the target DB artifact set,
 - selected project id,
 - per-operation run timings,
 - `p50`/`p95`,
@@ -40,3 +47,15 @@ JSON includes:
 - timestamp + environment metadata.
 
 Compare results against `docs/PERFORMANCE_SLO.md`.
+
+## Local pytest note
+
+If local `pytest-qt` runs fail because `%TEMP%` or `%TMP%` is not writable,
+redirect them before running UI-heavy test slices:
+
+```powershell
+New-Item -ItemType Directory -Force -Path build\tmp\pytest | Out-Null
+$env:TEMP = (Resolve-Path build\tmp\pytest).Path
+$env:TMP = $env:TEMP
+python -m pytest tests\test_health_check_service.py -q
+```

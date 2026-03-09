@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from sqlalchemy import text
@@ -11,6 +12,7 @@ from sqlalchemy import text
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
 from app.infra.pronunciation import PhonikudAdapter
 from app.infra.settings import SettingsService
+from app.infra.translators.provider_config import ProviderAuthMode
 from app.infra.translators.provider_config_manager import ProviderConfigManager
 from app.services.db_service import DBService
 from app.services.resources import ResourceRegistry
@@ -183,21 +185,112 @@ class HealthCheckService:
             )
 
         # MT provider (optional readiness)
-        try:
-            mt_cfg = self.mt_cfg.load_config("google_cloud_translate")
-            configured = mt_cfg.auth.is_configured()
-        except Exception:
-            configured = False
         checks.append(
-            HealthCheckItem(
-                check_id="cloud_mt:google_cloud_translate",
+            self._check_mt_provider(
+                provider_id="google_cloud_translate",
                 title="Cloud Translation: Google Cloud Translate",
-                status="ok" if configured else "optional",
-                message="Configured." if configured else "Not configured.",
-                remediation="Open MT Provider Settings and configure service account JSON.",
+            )
+        )
+        checks.append(
+            self._check_mt_provider(
+                provider_id="google_translate",
+                title="Cloud Translation: Google Translate",
             )
         )
         return checks
+
+    def _check_mt_provider(self, *, provider_id: str, title: str) -> HealthCheckItem:
+        master_enabled = self.settings.get_bool("mt/providers/enabled", default=False)
+        raw_chain = self.settings.get_json("mt/providers/chain", default=[])
+        chain = [str(item) for item in raw_chain] if isinstance(raw_chain, list) else []
+        provider_enabled = self.settings.get_bool(
+            f"mt/providers/{provider_id}/enabled",
+            self._mt_default_enabled(provider_id),
+        )
+
+        if not master_enabled:
+            return HealthCheckItem(
+                check_id=f"cloud_mt:{provider_id}",
+                title=title,
+                status="optional",
+                message="MT providers are disabled by the master switch.",
+                remediation="Enable MT providers in Provider Settings if needed.",
+            )
+
+        if not provider_enabled:
+            return HealthCheckItem(
+                check_id=f"cloud_mt:{provider_id}",
+                title=title,
+                status="optional",
+                message="Provider is disabled.",
+                remediation="Enable this provider in Provider Settings if needed.",
+            )
+
+        if provider_id not in chain:
+            return HealthCheckItem(
+                check_id=f"cloud_mt:{provider_id}",
+                title=title,
+                status="optional",
+                message="Provider is enabled but not present in the MT chain.",
+                remediation="Add the provider to the MT chain if it should be used.",
+            )
+
+        try:
+            config = self.mt_cfg.load_config(provider_id)
+            configured = self._is_mt_provider_configured(provider_id, config)
+        except Exception as exc:
+            return HealthCheckItem(
+                check_id=f"cloud_mt:{provider_id}",
+                title=title,
+                status="warn",
+                message=f"Config load failed: {exc}",
+                remediation="Open MT Provider Settings and reconfigure the provider.",
+            )
+
+        if configured:
+            return HealthCheckItem(
+                check_id=f"cloud_mt:{provider_id}",
+                title=title,
+                status="ok",
+                message="Configured and active in the MT chain.",
+                remediation="",
+            )
+
+        return HealthCheckItem(
+            check_id=f"cloud_mt:{provider_id}",
+            title=title,
+            status="warn",
+            message="Enabled in the MT chain but credentials are missing.",
+            remediation="Open MT Provider Settings and configure provider credentials.",
+        )
+
+    @staticmethod
+    def _mt_default_enabled(provider_id: str) -> bool:
+        if provider_id == "google_cloud_translate":
+            return False
+        return True
+
+    def _is_mt_provider_configured(self, provider_id: str, config) -> bool:
+        auth_mode = config.auth.mode
+
+        # Provider settings default to auth_mode=none if unset; correct the
+        # cloud-translate health check to its real service-account contract.
+        if provider_id == "google_cloud_translate" and auth_mode == ProviderAuthMode.NONE:
+            auth_mode = ProviderAuthMode.SERVICE_ACCOUNT_JSON
+
+        if auth_mode == ProviderAuthMode.NONE:
+            return True
+
+        if auth_mode == ProviderAuthMode.API_KEY:
+            return bool(self.mt_cfg.get_credential(config.auth.api_key_credential_id))
+
+        if auth_mode == ProviderAuthMode.SERVICE_ACCOUNT_JSON:
+            if self.mt_cfg.get_credential(config.auth.service_account_credential_id):
+                return True
+            service_account_path = str(config.auth.service_account_path or "").strip()
+            return bool(service_account_path) and Path(service_account_path).exists()
+
+        return False
 
     def _check_baseline_reference(self) -> HealthCheckItem:
         status = self.resources.get_status("hewiki_baseline_processed_bundle")
@@ -263,4 +356,3 @@ class HealthCheckService:
             message=status.message,
             remediation="Install/import baseline bundle from Resources Manager if needed.",
         )
-

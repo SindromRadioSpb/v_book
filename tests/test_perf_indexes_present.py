@@ -6,6 +6,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from app.infra.db_path_resolver import get_supported_schema_version
+
 
 def _apply_all_migrations(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
@@ -46,7 +48,7 @@ def test_perf_indexes_present_after_migrations():
                 "SELECT value FROM schema_meta WHERE key='schema_version'"
             ).fetchone()
             assert schema_version is not None
-            assert str(schema_version[0]) == "32"
+            assert int(schema_version[0]) == get_supported_schema_version()
         finally:
             conn.close()
     finally:
