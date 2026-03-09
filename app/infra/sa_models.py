@@ -543,6 +543,69 @@ class ProjectSnapshot(Base):
     engine_version = Column(String)
 
 
+class TermExtractRun(Base):
+    """Chunked term extraction run state."""
+
+    __tablename__ = "term_extract_run"
+
+    run_id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, nullable=False, default="running")
+    stage = Column(String)
+    enable_ngrams = Column(Integer, nullable=False, default=1)
+    include_np = Column(Integer, nullable=False, default=0)
+    overwrite = Column(Integer, nullable=False, default=1)
+    min_freq = Column(Integer, nullable=False, default=2)
+    ngram_ns_json = Column(Text, nullable=False, default="[2,3]")
+    np_max_len = Column(Integer, nullable=False, default=5)
+    engine = Column(String)
+    engine_version = Column(String)
+    docs_total = Column(Integer, nullable=False, default=0)
+    docs_processed = Column(Integer, nullable=False, default=0)
+    chunks_total = Column(Integer, nullable=False, default=0)
+    chunks_completed = Column(Integer, nullable=False, default=0)
+    last_doc_id = Column(Integer)
+    error_message = Column(Text)
+    started_at = Column(String, nullable=False, default=utc_now)
+    updated_at = Column(String, nullable=False, default=utc_now, onupdate=utc_now)
+    finished_at = Column(String)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running','staged','finalizing','ok','failed','cancelled')",
+            name="ck_term_extract_run_status",
+        ),
+        CheckConstraint("enable_ngrams IN (0, 1)", name="ck_term_extract_run_enable_ngrams"),
+        CheckConstraint("include_np IN (0, 1)", name="ck_term_extract_run_include_np"),
+        CheckConstraint("overwrite IN (0, 1)", name="ck_term_extract_run_overwrite"),
+        Index("idx_term_extract_run_project_status", "project_id", "status", "run_id"),
+    )
+
+
+class TermExtractAccumulator(Base):
+    """Staged ngram/NP counters for resumable term extraction."""
+
+    __tablename__ = "term_extract_accumulator"
+
+    run_id = Column(Integer, ForeignKey("term_extract_run.run_id", ondelete="CASCADE"), primary_key=True)
+    source_kind = Column(String, primary_key=True)
+    n = Column(Integer, primary_key=True)
+    surface_text = Column(Text, primary_key=True)
+    lemma_phrase = Column(Text)
+    pos_pattern = Column(String)
+    freq_abs = Column(Integer, nullable=False, default=0)
+    doc_freq = Column(Integer, nullable=False, default=0)
+    updated_at = Column(String, nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("source_kind IN ('ngram', 'np')", name="ck_term_extract_acc_source_kind"),
+        CheckConstraint("n IN (2, 3, 4, 5)", name="ck_term_extract_acc_n"),
+        CheckConstraint("freq_abs >= 0", name="ck_term_extract_acc_freq_abs"),
+        CheckConstraint("doc_freq >= 0", name="ck_term_extract_acc_doc_freq"),
+        Index("idx_term_extract_acc_run_kind_freq", "run_id", "source_kind", "freq_abs", "n"),
+    )
+
+
 # -----------------------
 # Term search (materialized view)
 # -----------------------

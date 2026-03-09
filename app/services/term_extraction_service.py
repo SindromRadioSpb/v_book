@@ -1,11 +1,14 @@
 """Term Extraction Service (M5 Base + M5.1 Clustering)."""
+import json
 import logging
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+import time
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 from collections import Counter
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func, and_, or_, text, bindparam
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.infra.sa_models import (
     DictProject,
@@ -17,6 +20,8 @@ from app.infra.sa_models import (
     LemmaProjectStat,
     SourceDocument,
     SourceCorpus,
+    TermExtractAccumulator,
+    TermExtractRun,
     TermCluster,
     TermClusterMember,
     TMEntry,
@@ -146,6 +151,11 @@ class TermExtractionService:
         ngram_ns: Tuple[int, ...] = (2, 3),
         np_max_len: int = 5,
         overwrite: bool = True,
+        batch_size: int = 200,
+        progress_callback: Optional[Callable[[str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
+        resume_latest: bool = True,
     ) -> ExtractReport:
         """
         Extract terms (n-grams + NP chunks + clustering) for a project.
@@ -159,11 +169,60 @@ class TermExtractionService:
             ngram_ns: N-gram sizes (default: bigrams + trigrams)
             np_max_len: Maximum NP chunk length (2-5, default 5)
             overwrite: Clear existing ngrams before extraction
+            batch_size: Number of processed docs to stage per commit
+            progress_callback: Optional human-readable progress callback
+            cancel_check: Optional cooperative cancel callback
+            pause_check: Optional cooperative pause callback
+            resume_latest: Resume latest matching staged run when possible
 
         Returns:
             ExtractReport with counts
         """
-        logger.info(f"Starting term extraction for project {project_id}")
+        if not overwrite:
+            # Non-overwrite mode is legacy-only: final term tables use unique
+            # constraints keyed by project/source_kind/surface and cannot be
+            # safely merged from staged counters without a wider redesign.
+            return self._extract_terms_for_project_legacy(
+                session,
+                project_id,
+                enable_ngrams=enable_ngrams,
+                include_np=include_np,
+                min_freq=min_freq,
+                ngram_ns=ngram_ns,
+                np_max_len=np_max_len,
+                overwrite=overwrite,
+            )
+
+        return self._extract_terms_for_project_chunked(
+            session,
+            project_id,
+            enable_ngrams=enable_ngrams,
+            include_np=include_np,
+            min_freq=min_freq,
+            ngram_ns=ngram_ns,
+            np_max_len=np_max_len,
+            overwrite=overwrite,
+            batch_size=batch_size,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+            pause_check=pause_check,
+            resume_latest=resume_latest,
+        )
+
+    def _extract_terms_for_project_legacy(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        enable_ngrams: bool,
+        include_np: bool,
+        min_freq: int,
+        ngram_ns: Tuple[int, ...],
+        np_max_len: int,
+        overwrite: bool,
+    ) -> ExtractReport:
+        """Legacy monolithic extractor retained for non-overwrite compatibility."""
+        logger.info(f"Starting legacy term extraction for project {project_id}")
 
         try:
             # Get project
@@ -242,7 +301,7 @@ class TermExtractionService:
             )
 
         except Exception as e:
-            logger.exception(f"Term extraction failed for project {project_id}")
+            logger.exception(f"Legacy term extraction failed for project {project_id}")
             session.rollback()
             return ExtractReport(
                 project_id=project_id,
@@ -251,6 +310,306 @@ class TermExtractionService:
                 clusters_created=0,
                 success=False,
                 error_message=str(e),
+            )
+
+    def _extract_terms_for_project_chunked(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        enable_ngrams: bool,
+        include_np: bool,
+        min_freq: int,
+        ngram_ns: Tuple[int, ...],
+        np_max_len: int,
+        overwrite: bool,
+        batch_size: int,
+        progress_callback: Optional[Callable[[str], None]],
+        cancel_check: Optional[Callable[[], bool]],
+        pause_check: Optional[Callable[[], bool]],
+        resume_latest: bool,
+    ) -> ExtractReport:
+        """Chunked staged extractor for large projects."""
+
+        def _emit(message: str) -> None:
+            logger.info(message)
+            if progress_callback:
+                progress_callback(message)
+
+        run_id: Optional[int] = None
+        total_docs = 0
+        docs_processed = 0
+
+        try:
+            project = session.get(DictProject, project_id)
+            if not project:
+                raise ValueError(f"Project {project_id} not found")
+
+            batch_size = max(1, int(batch_size or 1))
+            total_docs = self._count_processed_docs(session, project_id)
+
+            run = None
+            if resume_latest:
+                run = self._find_resumable_term_extract_run(
+                    session,
+                    project_id,
+                    enable_ngrams=enable_ngrams,
+                    include_np=include_np,
+                    min_freq=min_freq,
+                    ngram_ns=ngram_ns,
+                    np_max_len=np_max_len,
+                    overwrite=overwrite,
+                )
+                if run is not None and run.status not in ("staged", "finalizing"):
+                    if int(run.docs_total or 0) != int(total_docs):
+                        logger.info(
+                            "Ignoring resumable term extraction run %s for project %s "
+                            "because processed-doc count changed (%s -> %s)",
+                            run.run_id,
+                            project_id,
+                            run.docs_total,
+                            total_docs,
+                        )
+                        run = None
+
+            if run is None:
+                run = self._create_term_extract_run(
+                    session,
+                    project_id,
+                    enable_ngrams=enable_ngrams,
+                    include_np=include_np,
+                    min_freq=min_freq,
+                    ngram_ns=ngram_ns,
+                    np_max_len=np_max_len,
+                    overwrite=overwrite,
+                    docs_total=total_docs,
+                    batch_size=batch_size,
+                )
+                _emit(f"Created term extraction run {run.run_id} for {total_docs} docs")
+            else:
+                run.docs_total = int(total_docs)
+                run.chunks_total = self._estimate_term_extract_chunks(total_docs, batch_size)
+                run.status = "running" if run.status not in ("staged", "finalizing") else run.status
+                run.stage = "Resuming staged extraction"
+                run.error_message = None
+                run.updated_at = self._utc_now()
+                session.commit()
+                _emit(
+                    f"Resuming term extraction run {run.run_id} "
+                    f"at doc {int(run.docs_processed or 0)}/{int(run.docs_total or 0)}"
+                )
+
+            run_id = int(run.run_id)
+            docs_processed = int(run.docs_processed or 0)
+
+            if total_docs == 0:
+                self._clear_existing_terms(session, project_id)
+                self._update_extract_project_metadata(
+                    project,
+                    min_freq=min_freq,
+                    include_np=include_np,
+                    np_max_len=np_max_len,
+                )
+                run.status = "ok"
+                run.stage = "Completed (no processed docs)"
+                run.finished_at = self._utc_now()
+                run.updated_at = run.finished_at
+                session.commit()
+                return ExtractReport(
+                    project_id=project_id,
+                    ngrams_extracted=0,
+                    np_chunks_extracted=0,
+                    clusters_created=0,
+                    success=True,
+                    run_id=run_id,
+                    docs_processed=0,
+                    docs_total=0,
+                )
+
+            use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
+            engine = self.get_nlp_engine(use_mock=use_mock)
+            run.engine = engine.get_name()
+            run.engine_version = engine.get_version()
+            run.updated_at = self._utc_now()
+            session.commit()
+
+            if run.status not in ("staged", "finalizing") and int(run.docs_processed or 0) < total_docs:
+                _emit(
+                    f"Collecting staged counters for run {run_id}: "
+                    f"{docs_processed}/{total_docs} docs complete"
+                )
+                while True:
+                    if self._wait_if_paused(pause_check=pause_check, cancel_check=cancel_check):
+                        return self._cancel_term_extract_run(
+                            session,
+                            run_id=run_id,
+                            project_id=project_id,
+                            docs_processed=int(run.docs_processed or 0),
+                            docs_total=total_docs,
+                        )
+
+                    doc_batch = self._fetch_processed_doc_batch(
+                        session,
+                        project_id,
+                        last_doc_id=run.last_doc_id,
+                        limit=batch_size,
+                    )
+                    if not doc_batch:
+                        break
+
+                    batch_no = int(run.chunks_completed or 0) + 1
+                    batch_total = self._estimate_term_extract_chunks(total_docs, batch_size)
+                    _emit(
+                        f"Collecting batch {batch_no}/{batch_total} "
+                        f"({len(doc_batch)} docs, up to doc {doc_batch[-1]})"
+                    )
+
+                    if enable_ngrams:
+                        batch_ngram_counts, batch_ngram_doc_freq, batch_ngram_meta = (
+                            self._collect_ngrams_for_doc_ids(
+                                session,
+                                doc_batch,
+                                ngram_ns=ngram_ns,
+                                engine=engine,
+                            )
+                        )
+                        self._upsert_term_extract_accumulators(
+                            session,
+                            run_id=run_id,
+                            source_kind="ngram",
+                            counts=batch_ngram_counts,
+                            doc_freq=batch_ngram_doc_freq,
+                            meta=batch_ngram_meta,
+                        )
+
+                    if include_np:
+                        batch_np_counts, batch_np_doc_freq, batch_np_meta = (
+                            self._collect_np_chunks_for_doc_ids(
+                                session,
+                                doc_batch,
+                                np_max_len=np_max_len,
+                                engine=engine,
+                            )
+                        )
+                        self._upsert_term_extract_accumulators(
+                            session,
+                            run_id=run_id,
+                            source_kind="np",
+                            counts=batch_np_counts,
+                            doc_freq=batch_np_doc_freq,
+                            meta=batch_np_meta,
+                        )
+
+                    run.docs_processed = int(run.docs_processed or 0) + len(doc_batch)
+                    run.chunks_completed = int(run.chunks_completed or 0) + 1
+                    run.chunks_total = batch_total
+                    run.last_doc_id = int(doc_batch[-1])
+                    run.stage = f"Collected {run.docs_processed}/{total_docs} docs"
+                    run.status = "running"
+                    run.updated_at = self._utc_now()
+                    session.commit()
+                    docs_processed = int(run.docs_processed or 0)
+
+                run.status = "staged"
+                run.stage = "Staged counters ready"
+                run.updated_at = self._utc_now()
+                session.commit()
+
+            if cancel_check and cancel_check():
+                return self._cancel_term_extract_run(
+                    session,
+                    run_id=run_id,
+                    project_id=project_id,
+                    docs_processed=int(run.docs_processed or 0),
+                    docs_total=total_docs,
+                )
+
+            run.status = "finalizing"
+            run.stage = "Finalizing staged counters"
+            run.updated_at = self._utc_now()
+            session.commit()
+
+            _emit(
+                "Finalizing staged counters into term tables "
+                "(cancel is deferred until finalization completes)"
+            )
+
+            self._clear_existing_terms(session, project_id)
+            total_tokens = self._get_total_tokens(session, project_id)
+            ngrams_extracted = self._store_staged_ngrams(
+                session,
+                project_id,
+                run_id=run_id,
+                min_freq=min_freq,
+                total_tokens=total_tokens,
+                progress_callback=_emit,
+            ) if enable_ngrams else 0
+
+            np_chunks_extracted = self._store_staged_np_chunks(
+                session,
+                project_id,
+                run_id=run_id,
+                min_freq=min_freq,
+                progress_callback=_emit,
+            ) if include_np else 0
+
+            _emit("Clustering staged terms...")
+            clusters_created = self._cluster_terms(session, project_id)
+
+            self._update_extract_project_metadata(
+                project,
+                min_freq=min_freq,
+                include_np=include_np,
+                np_max_len=np_max_len,
+            )
+
+            session.execute(
+                TermExtractAccumulator.__table__.delete().where(
+                    TermExtractAccumulator.run_id == run_id
+                )
+            )
+            run.status = "ok"
+            run.stage = "Completed"
+            run.error_message = None
+            run.finished_at = self._utc_now()
+            run.updated_at = run.finished_at
+            session.commit()
+
+            _emit(
+                f"Chunked term extraction complete: {ngrams_extracted} ngrams, "
+                f"{np_chunks_extracted} NP chunks, {clusters_created} clusters"
+            )
+
+            return ExtractReport(
+                project_id=project_id,
+                ngrams_extracted=ngrams_extracted,
+                np_chunks_extracted=np_chunks_extracted,
+                clusters_created=clusters_created,
+                success=True,
+                run_id=run_id,
+                docs_processed=int(run.docs_processed or 0),
+                docs_total=total_docs,
+            )
+
+        except Exception as e:
+            logger.exception("Chunked term extraction failed for project %s", project_id)
+            session.rollback()
+            if run_id is not None:
+                self._mark_term_extract_run_failed(
+                    session,
+                    run_id=run_id,
+                    error_message=str(e),
+                )
+            return ExtractReport(
+                project_id=project_id,
+                ngrams_extracted=0,
+                np_chunks_extracted=0,
+                clusters_created=0,
+                success=False,
+                error_message=str(e),
+                run_id=run_id,
+                docs_processed=docs_processed,
+                docs_total=total_docs,
             )
 
     def _clear_existing_terms(self, session: Session, project_id: int) -> None:
@@ -271,6 +630,194 @@ class TermExtractionService:
 
         session.flush()
         logger.info(f"Cleared existing terms for project {project_id}")
+
+    def _utc_now(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    def _serialize_ngram_ns(self, ngram_ns: Tuple[int, ...]) -> str:
+        return json.dumps([int(value) for value in ngram_ns], separators=(",", ":"))
+
+    def _count_processed_docs(self, session: Session, project_id: int) -> int:
+        stmt = (
+            select(func.count(SourceDocument.doc_id))
+            .select_from(SourceDocument)
+            .join(SourceCorpus)
+            .where(
+                and_(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.status == "processed",
+                )
+            )
+        )
+        return int(session.execute(stmt).scalar() or 0)
+
+    def _estimate_term_extract_chunks(self, docs_total: int, batch_size: int) -> int:
+        if docs_total <= 0:
+            return 0
+        return (int(docs_total) + int(batch_size) - 1) // int(batch_size)
+
+    def _find_resumable_term_extract_run(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        enable_ngrams: bool,
+        include_np: bool,
+        min_freq: int,
+        ngram_ns: Tuple[int, ...],
+        np_max_len: int,
+        overwrite: bool,
+    ) -> Optional[TermExtractRun]:
+        stmt = (
+            select(TermExtractRun)
+            .where(
+                and_(
+                    TermExtractRun.project_id == project_id,
+                    TermExtractRun.enable_ngrams == (1 if enable_ngrams else 0),
+                    TermExtractRun.include_np == (1 if include_np else 0),
+                    TermExtractRun.overwrite == (1 if overwrite else 0),
+                    TermExtractRun.min_freq == int(min_freq),
+                    TermExtractRun.ngram_ns_json == self._serialize_ngram_ns(ngram_ns),
+                    TermExtractRun.np_max_len == int(np_max_len),
+                    TermExtractRun.status.in_(("running", "staged", "finalizing", "failed", "cancelled")),
+                )
+            )
+            .order_by(TermExtractRun.run_id.desc())
+        )
+        return session.execute(stmt).scalars().first()
+
+    def _create_term_extract_run(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        enable_ngrams: bool,
+        include_np: bool,
+        min_freq: int,
+        ngram_ns: Tuple[int, ...],
+        np_max_len: int,
+        overwrite: bool,
+        docs_total: int,
+        batch_size: int,
+    ) -> TermExtractRun:
+        run = TermExtractRun(
+            project_id=project_id,
+            status="running",
+            stage="Preparing staged extraction",
+            enable_ngrams=1 if enable_ngrams else 0,
+            include_np=1 if include_np else 0,
+            overwrite=1 if overwrite else 0,
+            min_freq=int(min_freq),
+            ngram_ns_json=self._serialize_ngram_ns(ngram_ns),
+            np_max_len=int(np_max_len),
+            docs_total=int(docs_total),
+            docs_processed=0,
+            chunks_total=self._estimate_term_extract_chunks(docs_total, batch_size),
+            chunks_completed=0,
+        )
+        session.add(run)
+        session.commit()
+        return run
+
+    def _mark_term_extract_run_failed(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        error_message: str,
+    ) -> None:
+        try:
+            run = session.get(TermExtractRun, run_id)
+            if not run:
+                return
+            run.status = "failed"
+            run.error_message = error_message[:2000]
+            run.stage = "Failed"
+            run.updated_at = self._utc_now()
+            run.finished_at = None
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to mark term extraction run %s as failed", run_id)
+
+    def _cancel_term_extract_run(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        project_id: int,
+        docs_processed: int,
+        docs_total: int,
+    ) -> ExtractReport:
+        run = session.get(TermExtractRun, run_id)
+        if run:
+            run.status = "cancelled"
+            run.stage = "Cancelled during staged collection"
+            run.error_message = "Cancelled by user"
+            run.updated_at = self._utc_now()
+            session.commit()
+        return ExtractReport(
+            project_id=project_id,
+            ngrams_extracted=0,
+            np_chunks_extracted=0,
+            clusters_created=0,
+            success=False,
+            error_message="Cancelled by user",
+            cancelled=True,
+            run_id=run_id,
+            docs_processed=docs_processed,
+            docs_total=docs_total,
+        )
+
+    def _wait_if_paused(
+        self,
+        *,
+        pause_check: Optional[Callable[[], bool]],
+        cancel_check: Optional[Callable[[], bool]],
+    ) -> bool:
+        while pause_check and pause_check():
+            if cancel_check and cancel_check():
+                return True
+            time.sleep(0.1)
+        return bool(cancel_check and cancel_check())
+
+    def _update_extract_project_metadata(
+        self,
+        project: DictProject,
+        *,
+        min_freq: int,
+        include_np: bool,
+        np_max_len: int,
+    ) -> None:
+        project.last_extract_np_max_len = int(np_max_len)
+        project.last_extract_min_freq = int(min_freq)
+        project.last_extract_include_np = 1 if include_np else 0
+        project.last_extract_at = self._utc_now()
+        project.updated_at = self._utc_now()
+
+    def _fetch_processed_doc_batch(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        last_doc_id: Optional[int],
+        limit: int,
+    ) -> List[int]:
+        stmt = (
+            select(SourceDocument.doc_id)
+            .join(SourceCorpus)
+            .where(
+                and_(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.status == "processed",
+                )
+            )
+            .order_by(SourceDocument.doc_id.asc())
+            .limit(int(limit))
+        )
+        if last_doc_id is not None:
+            stmt = stmt.where(SourceDocument.doc_id > int(last_doc_id))
+        return [int(value) for value in session.execute(stmt).scalars().all()]
 
     def _iter_processed_doc_ids(self, session: Session, project_id: int) -> Iterable[int]:
         """Yield processed document ids without materializing the whole project."""
@@ -296,6 +843,20 @@ class TermExtractionService:
         )
         return session.execute(stmt).scalars()
 
+    def _iter_sentence_rows_for_doc_ids(
+        self,
+        session: Session,
+        doc_ids: List[int],
+    ) -> Iterable[tuple[int, str]]:
+        if not doc_ids:
+            return []
+        stmt = (
+            select(DocumentSentence.doc_id, DocumentSentence.text)
+            .where(DocumentSentence.doc_id.in_([int(doc_id) for doc_id in doc_ids]))
+            .order_by(DocumentSentence.doc_id.asc(), DocumentSentence.sent_index.asc())
+        )
+        return session.execute(stmt).all()
+
     def _collect_ngrams(
         self,
         session: Session,
@@ -312,61 +873,63 @@ class TermExtractionService:
 
         # Get NLP engine for re-parsing sentences
         engine = self.get_nlp_engine(use_mock=use_mock)
+        return self._collect_ngrams_for_doc_ids(
+            session,
+            [int(doc_id) for doc_id in self._iter_processed_doc_ids(session, project_id)],
+            ngram_ns=ngram_ns,
+            engine=engine,
+        )
 
-        # Extract n-grams from all sentences
+    def _collect_ngrams_for_doc_ids(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        *,
+        ngram_ns: Tuple[int, ...],
+        engine: NLPEngine,
+    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        """Collect n-gram counts for a bounded list of docs."""
         ngram_counts = Counter()
         ngram_doc_freq = Counter()
-        ngram_meta = {}  # (surface, n) -> {lemma_phrase, pos_pattern}
-        docs_found = False
+        ngram_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
 
-        for doc_id in self._iter_processed_doc_ids(session, project_id):
-            docs_found = True
-            # Track ngrams seen in this doc
-            doc_ngrams_seen = set()
-
-            for sent_text in self._iter_sentence_texts_for_doc(session, doc_id):
-                # Re-parse sentence with NLP to get tokens
-                nlp_sentences = engine.process(sent_text)
-
-                if not nlp_sentences:
-                    continue
-
-                # Process each NLP sentence (usually one)
-                for nlp_sent in nlp_sentences:
-                    # Convert NLP tokens to format expected by extract_ngrams_from_sentence
-                    tokens = [
-                        {
-                            'text': token.text,
-                            'lemma': token.lemma,
-                            'pos': token.pos,
-                        }
-                        for token in nlp_sent.tokens
-                    ]
-
-                    # Extract ngrams from this sentence
-                    ngrams = extract_ngrams_from_sentence(tokens, list(ngram_ns))
-
-                    for ng in ngrams:
-                        key = (ng['surface_text'], ng['n'])
-
-                        # Count frequency
-                        ngram_counts[key] += 1
-
-                        # Track document frequency
-                        if key not in doc_ngrams_seen:
-                            ngram_doc_freq[key] += 1
-                            doc_ngrams_seen.add(key)
-
-                        # Store metadata
-                        if key not in ngram_meta:
-                            ngram_meta[key] = {
-                                'lemma_phrase': ng['lemma_phrase'],
-                                'pos_pattern': ng['pos_pattern'],
-                            }
-
-        if not docs_found:
-            logger.warning(f"No processed documents found for project {project_id}")
+        if not doc_ids:
             return Counter(), Counter(), {}
+
+        current_doc_id: Optional[int] = None
+        doc_ngrams_seen: Set[Tuple[str, int]] = set()
+
+        for doc_id, sent_text in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+            int_doc_id = int(doc_id)
+            if current_doc_id != int_doc_id:
+                current_doc_id = int_doc_id
+                doc_ngrams_seen = set()
+
+            nlp_sentences = engine.process(sent_text)
+            if not nlp_sentences:
+                continue
+
+            for nlp_sent in nlp_sentences:
+                tokens = [
+                    {
+                        "text": token.text,
+                        "lemma": token.lemma,
+                        "pos": token.pos,
+                    }
+                    for token in nlp_sent.tokens
+                ]
+
+                for ng in extract_ngrams_from_sentence(tokens, list(ngram_ns)):
+                    key = (ng["surface_text"], ng["n"])
+                    ngram_counts[key] += 1
+                    if key not in doc_ngrams_seen:
+                        ngram_doc_freq[key] += 1
+                        doc_ngrams_seen.add(key)
+                    if key not in ngram_meta:
+                        ngram_meta[key] = {
+                            "lemma_phrase": ng["lemma_phrase"],
+                            "pos_pattern": ng["pos_pattern"],
+                        }
 
         return ngram_counts, ngram_doc_freq, ngram_meta
 
@@ -523,63 +1086,63 @@ class TermExtractionService:
 
         # Get NLP engine for re-parsing sentences
         engine = self.get_nlp_engine(use_mock=use_mock)
+        return self._collect_np_chunks_for_doc_ids(
+            session,
+            [int(doc_id) for doc_id in self._iter_processed_doc_ids(session, project_id)],
+            np_max_len=np_max_len,
+            engine=engine,
+        )
 
-        # Extract NP chunks from all sentences
+    def _collect_np_chunks_for_doc_ids(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        *,
+        np_max_len: int,
+        engine: NLPEngine,
+    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        """Collect NP chunk counts for a bounded list of docs."""
         np_counts = Counter()
         np_doc_freq = Counter()
-        np_meta = {}  # (surface, n) -> {lemma_phrase, pos_pattern}
-        docs_found = False
+        np_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
 
-        for doc_id in self._iter_processed_doc_ids(session, project_id):
-            docs_found = True
-            # Track NPs seen in this doc
-            doc_nps_seen = set()
-
-            for sent_text in self._iter_sentence_texts_for_doc(session, doc_id):
-                # Re-parse sentence with NLP to get tokens
-                nlp_sentences = engine.process(sent_text)
-
-                if not nlp_sentences:
-                    continue
-
-                # Process each NLP sentence (usually one)
-                for nlp_sent in nlp_sentences:
-                    # Convert NLP tokens to format expected by extractor
-                    tokens = [
-                        {
-                            'text': token.text,
-                            'lemma': token.lemma,
-                            'pos': token.pos,
-                        }
-                        for token in nlp_sent.tokens
-                    ]
-
-                    # Extract NP chunks from this sentence
-                    np_chunks = extract_np_chunks_from_sentence(
-                        tokens, min_len=2, max_len=np_max_len
-                    )
-
-                    for np in np_chunks:
-                        key = (np['surface_text'], np['n'])
-
-                        # Count frequency
-                        np_counts[key] += 1
-
-                        # Track document frequency
-                        if key not in doc_nps_seen:
-                            np_doc_freq[key] += 1
-                            doc_nps_seen.add(key)
-
-                        # Store metadata
-                        if key not in np_meta:
-                            np_meta[key] = {
-                                'lemma_phrase': np['lemma_phrase'],
-                                'pos_pattern': np['pos_pattern'],
-                            }
-
-        if not docs_found:
-            logger.warning(f"No processed documents found for project {project_id}")
+        if not doc_ids:
             return Counter(), Counter(), {}
+
+        current_doc_id: Optional[int] = None
+        doc_nps_seen: Set[Tuple[str, int]] = set()
+
+        for doc_id, sent_text in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+            int_doc_id = int(doc_id)
+            if current_doc_id != int_doc_id:
+                current_doc_id = int_doc_id
+                doc_nps_seen = set()
+
+            nlp_sentences = engine.process(sent_text)
+            if not nlp_sentences:
+                continue
+
+            for nlp_sent in nlp_sentences:
+                tokens = [
+                    {
+                        "text": token.text,
+                        "lemma": token.lemma,
+                        "pos": token.pos,
+                    }
+                    for token in nlp_sent.tokens
+                ]
+
+                for np in extract_np_chunks_from_sentence(tokens, min_len=2, max_len=np_max_len):
+                    key = (np["surface_text"], np["n"])
+                    np_counts[key] += 1
+                    if key not in doc_nps_seen:
+                        np_doc_freq[key] += 1
+                        doc_nps_seen.add(key)
+                    if key not in np_meta:
+                        np_meta[key] = {
+                            "lemma_phrase": np["lemma_phrase"],
+                            "pos_pattern": np["pos_pattern"],
+                        }
 
         return np_counts, np_doc_freq, np_meta
 
@@ -660,6 +1223,263 @@ class TermExtractionService:
             np_meta=np_meta,
             min_freq=min_freq,
         )
+
+    def _upsert_term_extract_accumulators(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        source_kind: str,
+        counts: Counter,
+        doc_freq: Counter,
+        meta: Dict[Tuple[str, int], Dict[str, str]],
+        insert_batch_size: int = 200,
+    ) -> int:
+        """Upsert staged term counters for one collected batch."""
+        if not counts:
+            return 0
+
+        rows = []
+        for (surface_text, n), freq_abs in counts.items():
+            meta_row = meta.get((surface_text, n)) or {}
+            rows.append(
+                {
+                    "run_id": int(run_id),
+                    "source_kind": source_kind,
+                    "n": int(n),
+                    "surface_text": str(surface_text),
+                    "lemma_phrase": meta_row.get("lemma_phrase"),
+                    "pos_pattern": meta_row.get("pos_pattern"),
+                    "freq_abs": int(freq_abs or 0),
+                    "doc_freq": int(doc_freq.get((surface_text, n), 0) or 0),
+                    "updated_at": self._utc_now(),
+                }
+            )
+
+        inserted = 0
+        for start in range(0, len(rows), insert_batch_size):
+            chunk = rows[start:start + insert_batch_size]
+            stmt = sqlite_insert(TermExtractAccumulator.__table__).values(chunk)
+            excluded = stmt.excluded
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    "run_id",
+                    "source_kind",
+                    "n",
+                    "surface_text",
+                ],
+                set_={
+                    "freq_abs": TermExtractAccumulator.freq_abs + excluded.freq_abs,
+                    "doc_freq": TermExtractAccumulator.doc_freq + excluded.doc_freq,
+                    "lemma_phrase": func.coalesce(
+                        func.nullif(TermExtractAccumulator.lemma_phrase, ""),
+                        excluded.lemma_phrase,
+                    ),
+                    "pos_pattern": func.coalesce(
+                        func.nullif(TermExtractAccumulator.pos_pattern, ""),
+                        excluded.pos_pattern,
+                    ),
+                    "updated_at": excluded.updated_at,
+                },
+            )
+            session.execute(stmt)
+            inserted += len(chunk)
+
+        session.flush()
+        return inserted
+
+    def _iter_term_extract_accumulator_batches(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        source_kind: str,
+        min_freq: int,
+        batch_size: int = 500,
+    ) -> Iterable[List[dict]]:
+        """Yield staged accumulator rows in deterministic bounded batches."""
+        last_n: Optional[int] = None
+        last_surface: Optional[str] = None
+
+        while True:
+            stmt = (
+                select(
+                    TermExtractAccumulator.n,
+                    TermExtractAccumulator.surface_text,
+                    TermExtractAccumulator.lemma_phrase,
+                    TermExtractAccumulator.pos_pattern,
+                    TermExtractAccumulator.freq_abs,
+                    TermExtractAccumulator.doc_freq,
+                )
+                .where(
+                    and_(
+                        TermExtractAccumulator.run_id == run_id,
+                        TermExtractAccumulator.source_kind == source_kind,
+                        TermExtractAccumulator.freq_abs >= int(min_freq),
+                    )
+                )
+                .order_by(TermExtractAccumulator.n.asc(), TermExtractAccumulator.surface_text.asc())
+                .limit(int(batch_size))
+            )
+            if last_n is not None and last_surface is not None:
+                stmt = stmt.where(
+                    or_(
+                        TermExtractAccumulator.n > last_n,
+                        and_(
+                            TermExtractAccumulator.n == last_n,
+                            TermExtractAccumulator.surface_text > last_surface,
+                        ),
+                    )
+                )
+
+            rows = [dict(row) for row in session.execute(stmt).mappings().all()]
+            if not rows:
+                return
+
+            yield rows
+            last_n = int(rows[-1]["n"])
+            last_surface = str(rows[-1]["surface_text"])
+
+    def _store_staged_ngrams(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        run_id: int,
+        min_freq: int,
+        total_tokens: int,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> int:
+        """Store staged ngram accumulators into final term tables."""
+        ngrams_stored = 0
+        batch_no = 0
+        for rows in self._iter_term_extract_accumulator_batches(
+            session,
+            run_id=run_id,
+            source_kind="ngram",
+            min_freq=min_freq,
+        ):
+            batch_no += 1
+            bigram_lemma_texts: Set[str] = set()
+            for row in rows:
+                if int(row["n"]) != 2:
+                    continue
+                lemmas = str(row.get("lemma_phrase") or "").split()
+                if len(lemmas) == 2:
+                    bigram_lemma_texts.update(lemmas)
+            lemma_freq_map = self._build_lemma_freq_map(session, project_id, bigram_lemma_texts)
+
+            for row in rows:
+                n = int(row["n"])
+                surface_text = str(row["surface_text"])
+                lemma_phrase = str(row.get("lemma_phrase") or "")
+                pos_pattern = row.get("pos_pattern")
+                freq_abs = int(row["freq_abs"] or 0)
+                doc_freq = int(row["doc_freq"] or 0)
+
+                canonical_key = get_cluster_key(surface_text, lemma_phrase)
+                ngram_result = session.execute(
+                    Ngram.__table__.insert().values(
+                        project_id=project_id,
+                        n=n,
+                        surface_text=surface_text,
+                        he_canonical=canonical_key,
+                        lemma_phrase=lemma_phrase,
+                        source_kind="ngram",
+                        pos_pattern=pos_pattern,
+                    )
+                )
+                ngram_id = int(ngram_result.inserted_primary_key[0])
+
+                if n == 2:
+                    lemmas = lemma_phrase.split()
+                    if len(lemmas) == 2:
+                        l1, l2 = lemmas
+                        measures = compute_all_measures(
+                            freq_abs,
+                            lemma_freq_map.get(l1, 1),
+                            lemma_freq_map.get(l2, 1),
+                            int(total_tokens or 1),
+                        )
+                    else:
+                        measures = {"pmi": None, "tscore": None, "llr": None, "dice": None}
+                else:
+                    measures = {"pmi": None, "tscore": None, "llr": None, "dice": None}
+
+                session.execute(
+                    NgramProjectStat.__table__.insert().values(
+                        project_id=project_id,
+                        ngram_id=ngram_id,
+                        freq_abs=freq_abs,
+                        doc_freq=doc_freq,
+                        pmi_cache=measures["pmi"],
+                        tscore_cache=measures["tscore"],
+                        llr_cache=measures["llr"],
+                        dice_cache=measures["dice"],
+                    )
+                )
+                ngrams_stored += 1
+
+            session.flush()
+            if progress_callback:
+                progress_callback(f"Stored n-gram batch {batch_no} ({ngrams_stored} total)")
+
+        return ngrams_stored
+
+    def _store_staged_np_chunks(
+        self,
+        session: Session,
+        project_id: int,
+        *,
+        run_id: int,
+        min_freq: int,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> int:
+        """Store staged NP accumulators into final term tables."""
+        nps_stored = 0
+        batch_no = 0
+        for rows in self._iter_term_extract_accumulator_batches(
+            session,
+            run_id=run_id,
+            source_kind="np",
+            min_freq=min_freq,
+        ):
+            batch_no += 1
+            for row in rows:
+                ngram_result = session.execute(
+                    Ngram.__table__.insert().values(
+                        project_id=project_id,
+                        n=int(row["n"]),
+                        surface_text=str(row["surface_text"]),
+                        he_canonical=get_cluster_key(
+                            str(row["surface_text"]),
+                            str(row.get("lemma_phrase") or ""),
+                        ),
+                        lemma_phrase=str(row.get("lemma_phrase") or ""),
+                        source_kind="np",
+                        pos_pattern=row.get("pos_pattern"),
+                    )
+                )
+                ngram_id = int(ngram_result.inserted_primary_key[0])
+                session.execute(
+                    NgramProjectStat.__table__.insert().values(
+                        project_id=project_id,
+                        ngram_id=ngram_id,
+                        freq_abs=int(row["freq_abs"] or 0),
+                        doc_freq=int(row["doc_freq"] or 0),
+                        pmi_cache=None,
+                        tscore_cache=None,
+                        llr_cache=None,
+                        dice_cache=None,
+                    )
+                )
+                nps_stored += 1
+
+            session.flush()
+            if progress_callback:
+                progress_callback(f"Stored NP batch {batch_no} ({nps_stored} total)")
+
+        return nps_stored
 
     def _ensure_cluster_canonical_keys(self, session: Session, project_id: int) -> int:
         """Backfill missing canonical keys so clustering can stream deterministically."""

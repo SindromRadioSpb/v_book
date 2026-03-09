@@ -279,6 +279,17 @@ class ProjectTermExtractionWorker(QThread):
         self.ngram_ns = ngram_ns
         self.np_max_len = np_max_len
         self.overwrite = overwrite
+        self._cancel_requested = False
+        self._pause_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def pause(self) -> None:
+        self._pause_requested = True
+
+    def resume(self) -> None:
+        self._pause_requested = False
 
     def run(self):
         """Extract terms for project."""
@@ -303,6 +314,9 @@ class ProjectTermExtractionWorker(QThread):
                     ngram_ns=self.ngram_ns,
                     np_max_len=self.np_max_len,
                     overwrite=self.overwrite,
+                    progress_callback=lambda message: self.progress.emit(message),
+                    cancel_check=lambda: self._cancel_requested,
+                    pause_check=lambda: self._pause_requested,
                 )
 
                 self.finished.emit(report)

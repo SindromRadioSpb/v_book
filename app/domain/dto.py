@@ -160,6 +160,10 @@ class ExtractReport:
     clusters_created: int
     success: bool
     error_message: Optional[str] = None
+    cancelled: bool = False
+    run_id: Optional[int] = None
+    docs_processed: int = 0
+    docs_total: int = 0
 
 
 @dataclass

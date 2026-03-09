@@ -17,6 +17,8 @@ from app.infra.sa_models import (
     NgramProjectStat,
     SourceCorpus,
     SourceDocument,
+    TermExtractAccumulator,
+    TermExtractRun,
     TermCluster,
     TermClusterMember,
 )
@@ -74,12 +76,14 @@ def test_extract_terms_collects_before_overwrite(monkeypatch):
     monkeypatch.setattr(service, "_store_np_chunks", lambda *args, **kwargs: order.append("store_np") or 1)
     monkeypatch.setattr(service, "_cluster_terms", lambda *args, **kwargs: order.append("cluster") or 2)
 
-    report = service.extract_terms_for_project(
+    report = service._extract_terms_for_project_legacy(
         _Session(),
         1,
         enable_ngrams=True,
         include_np=True,
         min_freq=2,
+        ngram_ns=(2, 3),
+        np_max_len=5,
         overwrite=True,
     )
 
@@ -110,6 +114,8 @@ def test_extract_terms_for_project_small_pipeline(monkeypatch, tmp_path: Path):
     LemmaProjectStat.__table__.create(engine, checkfirst=True)
     Ngram.__table__.create(engine, checkfirst=True)
     NgramProjectStat.__table__.create(engine, checkfirst=True)
+    TermExtractRun.__table__.create(engine, checkfirst=True)
+    TermExtractAccumulator.__table__.create(engine, checkfirst=True)
     TermCluster.__table__.create(engine, checkfirst=True)
     TermClusterMember.__table__.create(engine, checkfirst=True)
 
@@ -289,3 +295,156 @@ def test_cluster_terms_backfills_canonical_and_preserves_source_kinds(monkeypatc
     assert clusters[0].doc_freq == 2
     assert len(members) == 2
     assert sorted(member.member_doc_freq for member in members) == [1, 2]
+
+
+def test_extract_terms_chunked_run_resumes_after_cancel(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(DBService, "_instance", SimpleNamespace())
+    engine = create_engine(f"sqlite:///{tmp_path / 'term_chunked_resume.db'}")
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+    SourceCorpus.__table__.create(engine, checkfirst=True)
+    SourceDocument.__table__.create(engine, checkfirst=True)
+    DocumentSentence.__table__.create(engine, checkfirst=True)
+    Lemma.__table__.create(engine, checkfirst=True)
+    LemmaProjectStat.__table__.create(engine, checkfirst=True)
+    Ngram.__table__.create(engine, checkfirst=True)
+    NgramProjectStat.__table__.create(engine, checkfirst=True)
+    TermExtractRun.__table__.create(engine, checkfirst=True)
+    TermExtractAccumulator.__table__.create(engine, checkfirst=True)
+    TermCluster.__table__.create(engine, checkfirst=True)
+    TermClusterMember.__table__.create(engine, checkfirst=True)
+
+    class _Token:
+        def __init__(self, text: str, lemma: str, pos: str):
+            self.text = text
+            self.lemma = lemma
+            self.pos = pos
+
+    class _Sentence:
+        def __init__(self, tokens):
+            self.tokens = tokens
+
+    class _Engine:
+        def process(self, text: str):
+            _ = text
+            return [_Sentence([_Token("alpha", "alpha", "NOUN"), _Token("beta", "beta", "NOUN")])]
+
+        def get_name(self):
+            return "fake"
+
+        def get_version(self):
+            return "1"
+
+    monkeypatch.setattr(
+        "app.services.term_extraction_service.classify_phrase",
+        lambda _text: SimpleNamespace(
+            entity_class="WORD_HE",
+            is_noise=False,
+            noise_reason=None,
+            norm_text="alpha_beta",
+        ),
+    )
+
+    service = TermExtractionService()
+    monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+    cancel_state = {"should_cancel": False, "calls": 0}
+    original_upsert = service._upsert_term_extract_accumulators
+
+    def _upsert_then_cancel(*args, **kwargs):
+        result = original_upsert(*args, **kwargs)
+        cancel_state["calls"] += 1
+        cancel_state["should_cancel"] = True
+        return result
+
+    with Session(engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        project = DictProject(library_id=lib.library_id, name="project", src_lang="he", tgt_lang="ru", nlp_engine="mock")
+        session.add(project)
+        session.flush()
+        corpus = SourceCorpus(project_id=project.project_id, name="corpus")
+        session.add(corpus)
+        session.flush()
+        for idx in range(2):
+            doc = SourceDocument(
+                corpus_id=corpus.corpus_id,
+                file_path=f"/tmp/doc_{idx}.txt",
+                file_name=f"doc_{idx}.txt",
+                file_ext=".txt",
+                file_size_bytes=10,
+                sha256=f"sha-{idx}",
+                status="processed",
+            )
+            session.add(doc)
+            session.flush()
+            session.add(DocumentSentence(doc_id=doc.doc_id, sent_index=0, text="alpha beta"))
+        lemma1 = Lemma(project_id=project.project_id, lemma_text="alpha", pos="NOUN")
+        lemma2 = Lemma(project_id=project.project_id, lemma_text="beta", pos="NOUN")
+        session.add_all([lemma1, lemma2])
+        session.flush()
+        session.add_all(
+            [
+                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=5, doc_freq=2),
+                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=5, doc_freq=2),
+            ]
+        )
+        session.commit()
+
+        monkeypatch.setattr(service, "_upsert_term_extract_accumulators", _upsert_then_cancel)
+        cancelled = service.extract_terms_for_project(
+            session,
+            int(project.project_id),
+            enable_ngrams=True,
+            include_np=False,
+            min_freq=1,
+            overwrite=True,
+            batch_size=1,
+            cancel_check=lambda: bool(cancel_state["should_cancel"]),
+        )
+
+        assert cancelled.cancelled is True
+        assert cancelled.run_id is not None
+        assert cancelled.docs_processed == 1
+        assert cancel_state["calls"] == 1
+
+        staged_rows = session.execute(select(TermExtractAccumulator)).scalars().all()
+        staged_run = session.get(TermExtractRun, cancelled.run_id)
+        assert len(staged_rows) == 1
+        assert staged_run is not None
+        assert staged_run.status == "cancelled"
+
+        monkeypatch.setattr(service, "_upsert_term_extract_accumulators", original_upsert)
+        cancel_state["should_cancel"] = False
+
+        resumed = service.extract_terms_for_project(
+            session,
+            int(project.project_id),
+            enable_ngrams=True,
+            include_np=False,
+            min_freq=1,
+            overwrite=True,
+            batch_size=1,
+            cancel_check=lambda: False,
+        )
+
+        clusters = session.execute(select(TermCluster)).scalars().all()
+        members = session.execute(select(TermClusterMember)).scalars().all()
+        stats = session.execute(select(NgramProjectStat)).scalars().all()
+        remaining_stage_rows = session.execute(select(TermExtractAccumulator)).scalars().all()
+        resumed_run = session.get(TermExtractRun, cancelled.run_id)
+
+    engine.dispose()
+
+    assert resumed.success is True
+    assert resumed.run_id == cancelled.run_id
+    assert resumed.docs_processed == 2
+    assert len(clusters) == 1
+    assert len(members) == 1
+    assert len(stats) == 1
+    assert stats[0].freq_abs == 2
+    assert stats[0].doc_freq == 2
+    assert remaining_stage_rows == []
+    assert resumed_run is not None
+    assert resumed_run.status == "ok"

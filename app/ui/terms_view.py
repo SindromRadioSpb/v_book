@@ -907,6 +907,8 @@ class TermsView(QWidget):
             self,
             "Extract Terms",
             "Extract terms (n-grams + NP chunks + clustering) for this project?\n\n"
+            "Large projects are processed in resumable batches.\n"
+            "If extraction is interrupted, re-running will resume the latest staged run.\n\n"
             "This may take a few minutes for large corpora.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -983,6 +985,15 @@ class TermsView(QWidget):
 
             show_info(self, "Extraction Complete", msg)
             self.perform_search()
+        elif getattr(report, "cancelled", False):
+            self.status_label.setText("Extraction cancelled")
+            msg = (
+                "Term extraction was cancelled.\n\n"
+                f"Processed docs: {int(getattr(report, 'docs_processed', 0))} / "
+                f"{int(getattr(report, 'docs_total', 0))}\n"
+                "Re-run Extract Terms to resume the latest staged run."
+            )
+            show_info(self, "Extraction Cancelled", msg)
         else:
             show_error(self, "Extraction Failed", report.error_message)
 
