@@ -319,6 +319,9 @@ Result:
   - overall wall total
 - New `--reuse-base-copy` mode allows repeated runs against an existing local
   sandbox base DB without re-copying the source DB first.
+- New `--reuse-working-db` mode allows repeated runs directly against an
+  existing disposable sandbox DB at `--db-path`, skipping the temp working-copy
+  clone entirely.
 
 Known evidence:
 
@@ -334,12 +337,20 @@ Known evidence:
   - `pre_stage_overhead = 388.572 s`
   - `extract_terms stage = 164.555 s`
   - `overall wall = 554.462 s`
+- On `2026-03-09`, refreshed in-place sandbox evidence produced:
+  - `doc_limit=2000`, `reuse_base_copy=true`, `reuse_working_db=true`
+  - `working_copy = 0.000 s`
+  - `slice_clone = 158.797 s`
+  - `pre_stage_overhead = 159.199 s`
+  - `extract_terms stage = 318.852 s`
+  - `overall wall = 478.416 s`
 - These figures already confirm the live cost scales with the extraction stage,
   but also that local sandbox-copy overhead is substantial on this machine.
-- Attempted refreshed `doc_limit=6000` runs still exceeded a `1200 s`
-  wall-clock budget on this machine even after reusing the base sandbox copy, so
-  the older successful `257.680 s` stage artifact remains the best completed
-  large-slice reference for `6000` docs.
+- Attempted refreshed `doc_limit=6000` runs still exceeded a `900 s`
+  wall-clock budget on this machine even after enabling both
+  `reuse_base_copy=true` and `reuse_working_db=true`, so the older successful
+  `257.680 s` stage artifact remains the best completed large-slice reference
+  for `6000` docs.
 
 ## Out of scope for PATCH-01
 

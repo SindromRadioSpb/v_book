@@ -90,6 +90,7 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
             "pre_stage_overhead_sec": 8.0,
             "overall_wall_sec": 21.1,
             "base_copy_reused": True,
+            "working_db_reused": True,
         },
         "artifacts": {
             "latest_log": "bench.log",
@@ -107,3 +108,4 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
     assert "Stage wall total" in text
     assert "Overall wall total" in text
     assert "reused existing file" in text
+    assert "reused sandbox file" in text

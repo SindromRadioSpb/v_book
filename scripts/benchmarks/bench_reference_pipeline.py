@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -170,6 +170,8 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError(f"--source-db must be on J: drive for sandbox safety: {source_db}")
     if not _is_expected_j_path(temp_root):
         raise ValueError(f"--temp-root must be on J: drive for sandbox safety: {temp_root}")
+    if db_path == source_db:
+        raise ValueError("--db-path must differ from --source-db for sandbox safety")
     if not source_db.exists():
         raise FileNotFoundError(f"--source-db not found: {source_db}")
     if args.doc_limit <= 0:
@@ -1007,6 +1009,8 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- Working DB (temp): `{db_info.get('working_db', 'n/a')}`")
     if timings.get("base_copy_reused"):
         lines.append("- Base sandbox copy: `reused existing file`")
+    if timings.get("working_db_reused"):
+        lines.append("- Working DB copy: `reused sandbox file in place`")
     lines.append("")
     lines.append("## Bench Slice")
     lines.append("")
@@ -1063,6 +1067,7 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--db-path", required=True, default=DEFAULT_SANDBOX_DB)
         cmd_parser.add_argument("--copy-target", action="store_true")
         cmd_parser.add_argument("--reuse-base-copy", action="store_true")
+        cmd_parser.add_argument("--reuse-working-db", action="store_true")
         cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
         cmd_parser.add_argument("--source-project-id", type=int, default=1)
         cmd_parser.add_argument("--bench-project-name", default=DEFAULT_PROJECT_NAME)
@@ -1120,6 +1125,7 @@ def run(argv: list[str] | None = None) -> int:
             "sentence_limit": int(args.sentence_limit),
             "copy_target": bool(args.copy_target),
             "reuse_base_copy": bool(args.reuse_base_copy),
+            "reuse_working_db": bool(args.reuse_working_db),
             "bench_project_name": str(args.bench_project_name),
             "temp_root": str(args.temp_root),
         },
@@ -1152,8 +1158,14 @@ def run(argv: list[str] | None = None) -> int:
             round(time.perf_counter() - t0, 3) if base_copy_performed else 0.0
         )
         report["timings"]["base_copy_reused"] = not base_copy_performed
+        report["timings"]["working_db_reused"] = bool(args.reuse_working_db)
+        working_db_ctx = (
+            nullcontext((base_db, 0.0))
+            if args.reuse_working_db
+            else _working_db_copy(base_db, temp_root)
+        )
 
-        with _working_db_copy(base_db, temp_root) as (working_db, working_copy_sec):
+        with working_db_ctx as (working_db, working_copy_sec):
             report["timings"]["working_copy_sec"] = float(working_copy_sec)
             report["db"] = {
                 "source_db": str(source_db),
@@ -1163,6 +1175,7 @@ def run(argv: list[str] | None = None) -> int:
                     "copy_target": bool(args.copy_target),
                     "forbidden_m_path_enforced": True,
                     "base_copy_reused": bool(report["timings"]["base_copy_reused"]),
+                    "working_db_reused": bool(report["timings"]["working_db_reused"]),
                 },
             }
 

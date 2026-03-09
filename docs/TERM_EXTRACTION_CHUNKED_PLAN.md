@@ -99,12 +99,14 @@ Artifacts:
 - `build\logs\pipeline_bench_report_20260309_021420.md`
 - `build\logs\pipeline_bench_report_20260309_030439.md`
 - `build\logs\task30\pipeline_bench_report_20260309_045419.md`
+- `build\logs\task30\pipeline_bench_report_20260309_060810.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
 - pre-chunked staging patch, `doc_limit=30`: `13.960 s`
 - post-chunked staging patch, `doc_limit=30`: `15.431 s`
 - refreshed explicit-breakdown run, `doc_limit=1000`: `164.555 s`
+- refreshed in-place sandbox run, `doc_limit=2000`: `318.852 s`
 
 Observed harness overhead on the refreshed `doc_limit=1000` run:
 
@@ -113,15 +115,24 @@ Observed harness overhead on the refreshed `doc_limit=1000` run:
 - `pre_stage_overhead = 388.572 s`
 - `overall_wall = 554.462 s`
 
+Observed harness overhead on the refreshed `doc_limit=2000` in-place run:
+
+- `working_copy = 0.000 s`
+- `slice_clone = 158.797 s`
+- `pre_stage_overhead = 159.199 s`
+- `overall_wall = 478.416 s`
+
 Interpretation:
 
 - small-slice runtime regressed slightly because run-state staging adds overhead
 - the trade-off is intentional: resumability and bounded collect memory for large projects
 - on this machine, repeated sandbox-copy overhead is large enough that the
   benchmark harness must record overhead separately from stage duration
-- a refreshed `doc_limit=6000` run still exceeded a `1200 s` wall-clock budget,
-  so the older successful `257.680 s` stage artifact remains the best completed
-  large-slice reference for `6000` docs
+- `--reuse-working-db` materially reduces wall-clock by removing the second
+  giant sandbox copy for repeated runs
+- a refreshed `doc_limit=6000` run still exceeded a `900 s` wall-clock budget
+  even with both reuse modes enabled, so the older successful `257.680 s` stage
+  artifact remains the best completed large-slice reference for `6000` docs
 
 ## Remaining follow-ups
 
