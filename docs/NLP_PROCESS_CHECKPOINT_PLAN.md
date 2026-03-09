@@ -700,3 +700,61 @@ The first convergence step for term extraction is now implemented:
 - only expand this with snapshot backfill, freshness/version gating, or broader
   coverage reporting if evidence from legacy processed projects shows too much
   fallback reparsing
+
+## Snapshot coverage audit (2026-03-10)
+
+Migration truth re-checked on both real hewiki DBs:
+
+- main install DB:
+  `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+  - pre-check: `schema_version=35`
+  - post-check: `schema_version=38`
+- dev/test DB:
+  `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+  - pre-check: `schema_version=38`
+  - post-check: `schema_version=38`
+
+Artifacts:
+
+- `build/logs/nlp_coverage/db_migration_probe.log`
+- `build/logs/nlp_coverage/db_open_main_install.json`
+- `build/logs/nlp_coverage/db_open_dev_test.json`
+- `build/logs/nlp_coverage/sentence_snapshot_coverage_probe_after_cleanup.jsonl`
+- `build/logs/nlp_coverage/orphan_doc_hierarchy_probe.jsonl`
+
+Coverage findings on project-attached processed docs:
+
+- main install DB:
+  - project `Hebrew Wikipedia Baseline`
+  - `387639` processed docs
+  - `13387860` sentences
+  - `0` sentence snapshot rows
+  - sentence coverage `0.0%`
+  - full-doc coverage `0.0%`
+- dev/test DB:
+  - all visible processed projects also sit at `0.0%` snapshot coverage
+  - after orphan cleanup, total live `sentence_nlp_snapshot` rows returned to `0`
+
+Additional note:
+
+- both DBs contain `2` pre-existing processed `source_document` rows whose
+  `corpus_id` no longer resolves to a live `source_corpus`
+- this is a broader data-quality issue, not a new snapshot-specific regression,
+  so project-attached coverage numbers above are the trustworthy basis for the
+  backfill decision
+
+Decision after audit:
+
+- a dedicated snapshot backfill patch is justified
+- a freshness/version-gating patch is not the next priority, because the real
+  blocker is absence of snapshots on legacy processed corpora, not mismatch of
+  existing snapshots
+
+Recommended next patch series:
+
+- `PATCH-NLP-BF-01`: CLI-first chunked snapshot backfill for already processed
+  docs that still lack `sentence_nlp_snapshot` rows
+- `PATCH-NLP-BF-02`: resumable run-state/reporting for that backfill path,
+  reusing the current batch NLP state contract where practical
+- `PATCH-NLP-BF-03`: optional admin/report command for coverage-only audit once
+  the backfill path exists

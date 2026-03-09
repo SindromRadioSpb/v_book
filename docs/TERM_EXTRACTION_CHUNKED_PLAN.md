@@ -377,6 +377,16 @@ Further implementation plan for extract terms:
 - until that convergence work is funded, the current staged extractor is the
   accepted production path for overwrite mode on large projects
 
+Coverage decision refresh on `2026-03-10`:
+
+- both real hewiki DBs were re-checked after migration `038`
+- project-attached legacy processed docs currently have `0.0%` snapshot
+  coverage on both DBs
+- therefore the next useful extract-terms convergence step is not a new
+  freshness gate; it is a snapshot backfill path for legacy processed docs
+- freshness/version gating should stay deferred until there is meaningful
+  non-zero legacy snapshot coverage to protect
+
 ## Remaining follow-ups
 
 ### Follow-up A: NLP convergence and shared long-operation contract
@@ -388,8 +398,9 @@ Further implementation plan for extract terms:
 - the first meaningful data-path convergence is also now implemented:
   term extraction already reuses persisted NLP sentence snapshots
 - the next cross-feature convergence question is narrower:
-  decide later whether snapshot freshness/backfill/coverage reporting is needed
-  beyond the current `prefer snapshot / fallback reparse` contract
+  implement snapshot backfill first, then decide later whether additional
+  freshness/version gating or coverage reporting is needed beyond the current
+  `prefer snapshot / fallback reparse` contract
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 

@@ -520,6 +520,13 @@ class ProjectService:
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
                     "  WHERE sc.project_id = :pid)", p
                 )
+                _safe(
+                    "DELETE FROM sentence_nlp_snapshot WHERE sentence_id IN ("
+                    "  SELECT ds.sentence_id FROM document_sentence ds"
+                    "  JOIN source_document sd ON ds.doc_id = sd.doc_id"
+                    "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
+                    "  WHERE sc.project_id = :pid)", p
+                )
 
                 # 4. Children: direct project_id FK tables.
                 _safe("DELETE FROM lemma WHERE project_id = :pid", p)

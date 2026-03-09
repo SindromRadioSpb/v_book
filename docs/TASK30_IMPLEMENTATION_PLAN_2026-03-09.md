@@ -1061,3 +1061,61 @@ Validation:
     - term extraction completed successfully even when its NLP engine was
       replaced with a failing stub
     - cleanup removed the temporary probe project with no leftovers
+
+## Coverage audit and cleanup follow-up (2026-03-10)
+
+Files:
+
+- `app/services/project_service.py`
+- `tests/test_project_delete_fast.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `docs/TERM_EXTRACTION_CHUNKED_PLAN.md`
+- task30 docs as needed
+
+Result:
+
+- both real hewiki DBs were re-checked against the current migration set
+- main install DB advanced from `schema_version=35` to `schema_version=38`
+- coverage audit showed that legacy project-attached processed docs currently
+  have `0.0%` sentence-snapshot coverage on both DBs
+- this means the next useful convergence patch is snapshot backfill, not
+  freshness/version gating
+- the audit also exposed a real cleanup regression: fast `delete_project()`
+  had not been explicitly deleting `sentence_nlp_snapshot` while
+  `foreign_keys=OFF`, which could leave orphan rows after temporary probes
+- `delete_project()` now explicitly deletes `sentence_nlp_snapshot` rows before
+  deleting `document_sentence`
+
+Validation:
+
+- migration/runtime evidence:
+  - artifact: `build/logs/nlp_coverage/db_migration_probe.log`
+  - artifacts:
+    - `build/logs/nlp_coverage/db_open_main_install.json`
+    - `build/logs/nlp_coverage/db_open_dev_test.json`
+- coverage evidence:
+  - artifact:
+    `build/logs/nlp_coverage/sentence_snapshot_coverage_probe_after_cleanup.jsonl`
+  - artifact:
+    `build/logs/nlp_coverage/orphan_doc_hierarchy_probe.jsonl`
+- orphan cleanup evidence:
+  - artifact:
+    `build/logs/nlp_coverage/orphan_sentence_snapshot_cleanup.log`
+  - confirmed:
+    - main install orphan snapshot rows `0 -> 0`
+    - dev/test orphan snapshot rows `2 -> 0`
+- targeted delete/snapshot regressions:
+  - `14 passed in 111.45s`
+  - artifact:
+    `build/logs/nlp_coverage/pytest_project_delete_snapshot_cleanup_targeted.log`
+- prebuild lifecycle smoke:
+  - artifact:
+    `build/logs/nlp_coverage/prebuild_validate_project_delete_snapshot_cleanup.log`
+  - result: all checks passed
+- live dev/test DB delete probe:
+  - artifact:
+    `build/logs/nlp_coverage/hewiki_dev_test_snapshot_delete_probe.log`
+  - confirmed:
+    - temporary processed doc produced `2` snapshots
+    - deleting the temporary project left `orphan_after=0`
+    - no project leftovers remained

@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.infra.sa_models import (
     DictProject, Library, SourceCorpus, SourceDocument, DocumentSentence, Lemma,
+    SentenceNLPSnapshot,
 )
 from app.services.project_service import ProjectService
 
@@ -143,6 +144,47 @@ def test_foreign_keys_restored_after_delete():
 
         result = session.execute(text("PRAGMA foreign_keys")).fetchone()
         assert result[0] == 1, "foreign_keys must be ON after delete_project"
+    finally:
+        session.close()
+        engine.dispose()
+        db_path.unlink(missing_ok=True)
+
+
+def test_delete_project_removes_sentence_nlp_snapshots():
+    db_path, session, project_id, engine = _make_test_db()
+    try:
+        sentence_ids = [
+            row[0]
+            for row in session.execute(
+                text("SELECT sentence_id FROM document_sentence ORDER BY sentence_id")
+            ).fetchall()
+        ]
+        for idx, sentence_id in enumerate(sentence_ids):
+            session.add(
+                SentenceNLPSnapshot(
+                    sentence_id=int(sentence_id),
+                    engine="test",
+                    engine_version="1",
+                    sentence_text_hash=f"hash-{idx}",
+                    payload_json='[]',
+                    token_count=0,
+                )
+            )
+        session.commit()
+
+        svc = ProjectService.__new__(ProjectService)
+        svc.db_service = None
+
+        report = svc.delete_project(session, project_id)
+        assert report.success
+
+        raw = sqlite3.connect(str(db_path))
+        try:
+            assert raw.execute(
+                "SELECT COUNT(*) FROM sentence_nlp_snapshot"
+            ).fetchone()[0] == 0
+        finally:
+            raw.close()
     finally:
         session.close()
         engine.dispose()
