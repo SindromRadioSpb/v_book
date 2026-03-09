@@ -64,7 +64,13 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
         "timestamp_utc": "2026-03-09T04:00:00+00:00",
         "scenario": "extract_terms",
         "overall_status": "pass",
-        "config": {"doc_limit": 30, "tier": "smoke", "recommended_wall_budget_sec": 300},
+        "config": {
+            "doc_limit": 30,
+            "tier": "smoke",
+            "recommended_wall_budget_sec": 300,
+            "pre_reset_sandbox": True,
+            "post_cleanup_bench": True,
+        },
         "db": {
             "base_sandbox_db": "base.db",
             "source_db": "source.db",
@@ -92,9 +98,26 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
             "db_initialize_sec": 0.3,
             "slice_clone_sec": 4.4,
             "pre_stage_overhead_sec": 8.0,
+            "post_cleanup_bench_sec": 0.5,
             "overall_wall_sec": 21.1,
             "base_copy_reused": True,
             "working_db_reused": True,
+        },
+        "maintenance_cycle": {
+            "actions": [
+                {
+                    "name": "pre_reset_sandbox",
+                    "status": "ok",
+                    "duration_sec": 1.1,
+                    "details": {"base_copy_performed": True},
+                },
+                {
+                    "name": "post_cleanup_bench",
+                    "status": "ok",
+                    "duration_sec": 0.5,
+                    "details": {"deleted_count": 1},
+                },
+            ]
         },
         "artifacts": {
             "latest_log": "bench.log",
@@ -115,6 +138,10 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
     assert "reused sandbox file" in text
     assert "Tier: `smoke`" in text
     assert "Recommended wall budget: `300 s`" in text
+    assert "Pre-reset sandbox: `enabled`" in text
+    assert "Post-cleanup bench: `enabled`" in text
+    assert "## Maintenance Cycle" in text
+    assert "Post-cleanup bench: `0.500 s`" in text
 
 
 def test_cleanup_sandbox_deletes_prefixed_projects(monkeypatch, tmp_path: Path) -> None:
@@ -193,3 +220,32 @@ def test_prepare_base_sandbox_replaces_db_and_removes_sidecars(tmp_path: Path) -
     assert row == ("source",)
     for suffix in ("-wal", "-shm", "-journal"):
         assert not (tmp_path / f"target.db{suffix}").exists()
+
+
+def test_validate_runtime_contract_rejects_cycle_flags_without_reuse_working_db(
+    tmp_path: Path,
+) -> None:
+    mod = _load_module()
+    source_db = tmp_path / "source.db"
+    db_path = tmp_path / "sandbox.db"
+    source_db.write_bytes(b"stub")
+    db_path.write_bytes(b"stub")
+
+    args = mod.build_parser().parse_args(
+        [
+            "extract_terms",
+            "--db-path",
+            str(db_path),
+            "--copy-target",
+            "--source-db",
+            str(source_db),
+            "--pre-reset-sandbox",
+        ]
+    )
+
+    try:
+        mod._validate_runtime_contract(args)
+    except ValueError as exc:
+        assert "--pre-reset-sandbox requires --reuse-working-db" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing --reuse-working-db")

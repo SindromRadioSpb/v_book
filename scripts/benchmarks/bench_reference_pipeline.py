@@ -284,6 +284,21 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         return
     if source_db is None or not source_db.exists():
         raise FileNotFoundError(f"--source-db not found: {source_db}")
+    if bool(getattr(args, "pre_reset_sandbox", False)) and not bool(
+        getattr(args, "reuse_working_db", False)
+    ):
+        raise ValueError("--pre-reset-sandbox requires --reuse-working-db")
+    if bool(getattr(args, "post_cleanup_bench", False)) and not bool(
+        getattr(args, "reuse_working_db", False)
+    ):
+        raise ValueError("--post-cleanup-bench requires --reuse-working-db")
+    bench_project_name = str(getattr(args, "bench_project_name", "") or "").strip()
+    if bool(getattr(args, "post_cleanup_bench", False)) and not bench_project_name.startswith(
+        DEFAULT_BENCH_PREFIX
+    ):
+        raise ValueError(
+            f"--post-cleanup-bench requires --bench-project-name to start with {DEFAULT_BENCH_PREFIX!r}"
+        )
     if args.doc_limit <= 0:
         raise ValueError("--doc-limit must be > 0")
     if args.lemma_limit <= 0 or args.term_limit <= 0 or args.sentence_limit <= 0:
@@ -389,6 +404,25 @@ def _run_reset_sandbox(
             "size_bytes": int(base_db.stat().st_size) if base_db.exists() else 0,
         },
     }
+
+
+def _record_cycle_action(
+    report: dict[str, Any],
+    *,
+    name: str,
+    status: str,
+    duration_sec: float,
+    details: dict[str, Any],
+) -> None:
+    actions = report.setdefault("maintenance_cycle", {}).setdefault("actions", [])
+    actions.append(
+        {
+            "name": name,
+            "status": status,
+            "duration_sec": round(float(duration_sec), 3),
+            "details": details,
+        }
+    )
 
 
 def _configure_google_cloud_translate(key_path: Path) -> None:
@@ -1218,6 +1252,7 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     cleanup_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "cleanup_sandbox" else {}
     reset_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "reset_sandbox" else {}
     post_run_maintenance = db_info.get("post_run_maintenance") or {}
+    cycle_actions = ((report.get("maintenance_cycle") or {}).get("actions") or [])
     stage_total = round(
         sum(float(stage.get("duration_sec", 0.0) or 0.0) for stage in report.get("stages", [])),
         3,
@@ -1253,6 +1288,10 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
             lines.append(
                 f"- Recommended wall budget: `{int(report['config']['recommended_wall_budget_sec'])} s`"
             )
+        if report["config"].get("pre_reset_sandbox"):
+            lines.append("- Pre-reset sandbox: `enabled`")
+        if report["config"].get("post_cleanup_bench"):
+            lines.append("- Post-cleanup bench: `enabled`")
         lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
         lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
         lines.append("")
@@ -1282,9 +1321,23 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
         lines.append(
             f"- Post-run maintenance: `{float(timings.get('post_run_maintenance_sec', 0.0)):.3f} s`"
         )
+    if timings.get("post_cleanup_bench_sec") is not None:
+        lines.append(
+            f"- Post-cleanup bench: `{float(timings.get('post_cleanup_bench_sec', 0.0)):.3f} s`"
+        )
     lines.append(f"- Stage wall total: `{stage_total:.3f} s`")
     lines.append(f"- Overall wall total: `{float(timings.get('overall_wall_sec', 0.0)):.3f} s`")
     lines.append("")
+    if cycle_actions:
+        lines.append("## Maintenance Cycle")
+        lines.append("")
+        for action in cycle_actions:
+            lines.append(
+                f"- {action.get('name')}: status=`{action.get('status')}` "
+                f"duration=`{float(action.get('duration_sec', 0.0)):.3f} s` "
+                f"details=`{action.get('details', {})}`"
+            )
+        lines.append("")
     if post_run_maintenance:
         lines.append("## SQLite Maintenance")
         lines.append("")
@@ -1328,6 +1381,8 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--copy-target", action="store_true")
         cmd_parser.add_argument("--reuse-base-copy", action="store_true")
         cmd_parser.add_argument("--reuse-working-db", action="store_true")
+        cmd_parser.add_argument("--pre-reset-sandbox", action="store_true")
+        cmd_parser.add_argument("--post-cleanup-bench", action="store_true")
         cmd_parser.add_argument("--tier", choices=tuple(BENCH_TIER_PRESETS.keys()))
         cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
         cmd_parser.add_argument("--source-project-id", type=int, default=1)
@@ -1415,6 +1470,8 @@ def run(argv: list[str] | None = None) -> int:
             "copy_target": bool(args.copy_target),
             "reuse_base_copy": bool(getattr(args, "reuse_base_copy", False)),
             "reuse_working_db": bool(getattr(args, "reuse_working_db", False)),
+            "pre_reset_sandbox": bool(getattr(args, "pre_reset_sandbox", False)),
+            "post_cleanup_bench": bool(getattr(args, "post_cleanup_bench", False)),
             "tier": tier["name"],
             "recommended_wall_budget_sec": tier["recommended_wall_budget_sec"],
             "bench_project_name": str(getattr(args, "bench_project_name", "")),
@@ -1519,16 +1576,30 @@ def run(argv: list[str] | None = None) -> int:
         temp_root = Path(args.temp_root).expanduser().resolve()
         _cleanup_temp_root(temp_root)
         t0 = time.perf_counter()
+        reuse_base_copy = bool(args.reuse_base_copy)
+        if bool(getattr(args, "pre_reset_sandbox", False)):
+            reuse_base_copy = False
         base_copy_performed = _prepare_base_sandbox(
             base_db,
             source_db,
-            reuse_existing=bool(args.reuse_base_copy),
+            reuse_existing=reuse_base_copy,
         )
-        report["timings"]["base_copy_sec"] = (
-            round(time.perf_counter() - t0, 3) if base_copy_performed else 0.0
-        )
+        base_copy_duration = round(time.perf_counter() - t0, 3) if base_copy_performed else 0.0
+        report["timings"]["base_copy_sec"] = base_copy_duration
         report["timings"]["base_copy_reused"] = not base_copy_performed
         report["timings"]["working_db_reused"] = bool(args.reuse_working_db)
+        if bool(getattr(args, "pre_reset_sandbox", False)):
+            _record_cycle_action(
+                report,
+                name="pre_reset_sandbox",
+                status="ok" if base_copy_performed else "skipped",
+                duration_sec=base_copy_duration,
+                details={
+                    "base_db": str(base_db),
+                    "source_db": str(source_db),
+                    "base_copy_performed": bool(base_copy_performed),
+                },
+            )
         working_db_ctx = (
             nullcontext((base_db, 0.0))
             if args.reuse_working_db
@@ -1659,6 +1730,27 @@ def run(argv: list[str] | None = None) -> int:
                 if report["stages"] and all(stage.get("status") == "ok" for stage in report["stages"])
                 else "fail"
             )
+            if (
+                report["overall_status"] == "pass"
+                and bool(getattr(args, "post_cleanup_bench", False))
+                and report.get("bench", {}).get("bench_project_name")
+            ):
+                t_cleanup = time.perf_counter()
+                with db_service.get_session() as session:
+                    cleanup_result = _run_cleanup_sandbox(
+                        session,
+                        cleanup_project_name=str(report["bench"]["bench_project_name"]),
+                        cleanup_prefix=DEFAULT_BENCH_PREFIX,
+                    )
+                cleanup_duration = round(time.perf_counter() - t_cleanup, 3)
+                report["timings"]["post_cleanup_bench_sec"] = cleanup_duration
+                _record_cycle_action(
+                    report,
+                    name="post_cleanup_bench",
+                    status="ok",
+                    duration_sec=cleanup_duration,
+                    details=cleanup_result.get("details", {}),
+                )
             report["timings"]["pre_stage_overhead_sec"] = round(
                 float(report["timings"].get("base_copy_sec", 0.0))
                 + float(report["timings"].get("working_copy_sec", 0.0))

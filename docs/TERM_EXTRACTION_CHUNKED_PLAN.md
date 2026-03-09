@@ -102,6 +102,7 @@ Artifacts:
 - `build\logs\task30\pipeline_bench_report_20260309_060810.md`
 - `build\logs\task30\pipeline_bench_report_20260309_081444.md`
 - `build\logs\task30\pipeline_bench_report_20260309_082025.md`
+- `build\logs\task30\pipeline_bench_report_20260309_083133.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -146,6 +147,22 @@ Sandbox maintenance follow-up:
   removed a live `BENCH_MAINTENANCE_SMOKE` project in `0.174 s` stage time
 - both maintenance scenarios now finish with `wal_checkpoint(TRUNCATE)` and
   leave no sidecar files behind the reusable sandbox DB
+
+Maintenance-cycle follow-up:
+
+- main benchmark scenarios now also support:
+  - `--pre-reset-sandbox`
+  - `--post-cleanup-bench`
+- this turns reusable in-place benchmark runs into a single command instead of
+  a manual `reset -> run -> cleanup` sequence
+- approved live smoke evidence:
+  - `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier smoke`
+  - `pre_reset = 290.549 s`
+  - `extract_terms stage = 15.499 s`
+  - `post_cleanup_bench = 0.951 s`
+  - `overall wall = 314.838 s`
+- after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
+  SQLite sidecar files
 
 Suggested benchmark tiers for repeatable task30 runs:
 

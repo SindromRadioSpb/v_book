@@ -45,6 +45,8 @@ def test_parser_defaults_for_all_scenario() -> None:
     assert args.sentence_limit == 1000
     assert args.reuse_base_copy is False
     assert args.reuse_working_db is False
+    assert args.pre_reset_sandbox is False
+    assert args.post_cleanup_bench is False
     assert args.tier is None
     assert args.temp_root == r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 
@@ -133,6 +135,32 @@ def test_tier_preset_sets_expected_doc_limit() -> None:
     assert tier["doc_limit"] == 2000
     assert tier["recommended_wall_budget_sec"] == 900
     assert args.doc_limit == 2000
+
+
+def test_parser_accepts_cycle_flags_for_extract_terms() -> None:
+    mod = _load_module()
+    parser = mod.build_parser()
+    args = parser.parse_args(
+        [
+            "extract_terms",
+            "--db-path",
+            r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db",
+            "--copy-target",
+            "--reuse-working-db",
+            "--pre-reset-sandbox",
+            "--post-cleanup-bench",
+            "--source-db",
+            r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db",
+            "--bench-project-name",
+            "BENCH_PIPELINE_SMOKE",
+        ]
+    )
+
+    assert args.scenario == "extract_terms"
+    assert args.reuse_working_db is True
+    assert args.pre_reset_sandbox is True
+    assert args.post_cleanup_bench is True
+    assert args.bench_project_name == "BENCH_PIPELINE_SMOKE"
 
 
 def test_explicit_doc_limit_overrides_tier_default() -> None:

@@ -410,6 +410,58 @@ Observed evidence:
 - Post-run maintenance on both scenarios reported `checkpoint=[0, 0, 0]` and
   left no `-wal/-shm/-journal` files alongside the sandbox DB.
 
+### PATCH-10: One-command benchmark maintenance cycle
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `scripts/benchmarks/bench_reference_pipeline.py`
+- `tests/test_pipeline_bench_runner_safety.py`
+- `tests/test_pipeline_bench_argparse.py`
+- `build/logs/task30/pipeline_bench_report_20260309_083133.md`
+
+Goals:
+
+- Eliminate manual `reset -> run -> cleanup` operator sequencing for repeatable
+  task30 tier runs.
+- Keep reusable in-place sandbox runs clean after each benchmark by deleting the
+  temporary bench project automatically.
+- Preserve timing evidence so reset/cleanup overhead stays separated from stage
+  runtime.
+
+Result:
+
+- Added `--pre-reset-sandbox` to force a fresh reusable sandbox refresh before a
+  benchmark run.
+- Added `--post-cleanup-bench` to delete the exact bench project after a
+  successful run via the existing fast project-delete path.
+- Added maintenance-cycle reporting to benchmark markdown/json artifacts:
+  - pre-reset action
+  - post-cleanup action
+  - independent post-run SQLite checkpoint/truncate
+- Added safety validation:
+  - both flags require `--reuse-working-db`
+  - post-cleanup also requires bench project names to stay under the `BENCH_`
+    prefix contract
+
+Observed evidence:
+
+- Live smoke cycle on the approved sandbox DB completed successfully:
+  - command shape:
+    `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier smoke`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_083133.md`
+- Measured on `2026-03-09`:
+  - `base_copy/pre_reset = 290.549 s`
+  - `db_initialize = 1.716 s`
+  - `slice_clone = 4.771 s`
+  - `extract_terms stage = 15.499 s`
+  - `post_cleanup_bench = 0.951 s`
+  - `overall wall = 314.838 s`
+- After the run:
+  - `dict_project where name like 'BENCH_%'` returned `0`
+  - no `-wal/-shm/-journal` files remained next to the sandbox DB
+
 ## Out of scope for PATCH-01
 
 - Full dual-DB reference/user overlay architecture.
