@@ -420,6 +420,7 @@ Files:
 - `tests/test_pipeline_bench_runner_safety.py`
 - `tests/test_pipeline_bench_argparse.py`
 - `build/logs/task30/pipeline_bench_report_20260309_083133.md`
+- `build/logs/task30/pipeline_bench_report_20260309_085005.md`
 
 Goals:
 
@@ -458,6 +459,16 @@ Observed evidence:
   - `extract_terms stage = 15.499 s`
   - `post_cleanup_bench = 0.951 s`
   - `overall wall = 314.838 s`
+- Live medium cycle on the same approved sandbox DB also completed successfully:
+  - command shape:
+    `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier medium`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_085005.md`
+  - `base_copy/pre_reset = 290.648 s`
+  - `slice_clone = 93.934 s`
+  - `extract_terms stage = 172.700 s`
+  - `post_cleanup_bench = 15.418 s`
+  - `overall wall = 575.888 s`
+  - this stayed within the current `medium` tier wall budget of `600 s`
 - After the run:
   - `dict_project where name like 'BENCH_%'` returned `0`
   - no `-wal/-shm/-journal` files remained next to the sandbox DB
