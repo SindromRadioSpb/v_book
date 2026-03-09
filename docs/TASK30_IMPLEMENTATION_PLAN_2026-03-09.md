@@ -421,6 +421,7 @@ Files:
 - `tests/test_pipeline_bench_argparse.py`
 - `build/logs/task30/pipeline_bench_report_20260309_083133.md`
 - `build/logs/task30/pipeline_bench_report_20260309_085005.md`
+- `build/logs/task30/pipeline_bench_report_20260309_090248.md`
 
 Goals:
 
@@ -469,6 +470,16 @@ Observed evidence:
   - `post_cleanup_bench = 15.418 s`
   - `overall wall = 575.888 s`
   - this stayed within the current `medium` tier wall budget of `600 s`
+- Live large cycle on the same approved sandbox DB also completed successfully:
+  - command shape:
+    `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier large`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_090248.md`
+  - `base_copy/pre_reset = 289.271 s`
+  - `slice_clone = 170.809 s`
+  - `extract_terms stage = 335.494 s`
+  - `post_cleanup_bench = 27.753 s`
+  - `overall wall = 826.349 s`
+  - this stayed within the current `large` tier wall budget of `900 s`
 - After the run:
   - `dict_project where name like 'BENCH_%'` returned `0`
   - no `-wal/-shm/-journal` files remained next to the sandbox DB

@@ -104,6 +104,7 @@ Artifacts:
 - `build\logs\task30\pipeline_bench_report_20260309_082025.md`
 - `build\logs\task30\pipeline_bench_report_20260309_083133.md`
 - `build\logs\task30\pipeline_bench_report_20260309_085005.md`
+- `build\logs\task30\pipeline_bench_report_20260309_090248.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -170,6 +171,14 @@ Maintenance-cycle follow-up:
   - `post_cleanup_bench = 15.418 s`
   - `overall wall = 575.888 s`
   - this stayed within the current `medium` wall budget of `600 s`
+- approved live large evidence:
+  - `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier large`
+  - `pre_reset = 289.271 s`
+  - `slice_clone = 170.809 s`
+  - `extract_terms stage = 335.494 s`
+  - `post_cleanup_bench = 27.753 s`
+  - `overall wall = 826.349 s`
+  - this stayed within the current `large` wall budget of `900 s`
 - after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
   SQLite sidecar files
 
