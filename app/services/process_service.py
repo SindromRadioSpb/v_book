@@ -201,32 +201,166 @@ class ProcessService:
             .filter(
                 ProcessorRun.project_id == project_id,
                 ProcessorRun.params_hash == params_hash,
-                ProcessorRun.status.in_(("running", "paused", "cancelled", "failed")),
+                ProcessorRun.status.in_(("paused", "cancelled", "failed")),
             )
             .order_by(ProcessorRun.run_id.desc())
             .limit(20)
             .all()
         )
         for run in candidates:
-            note = self._parse_batch_run_note(run.note)
-            if note.get("kind") != "batch_nlp":
-                continue
-            if note.get("source") != source_label:
-                continue
-            if bool(note.get("is_reprocess")) != bool(is_reprocess):
-                continue
-            if int(note.get("doc_count") or 0) != len(doc_ids):
-                continue
-            if int(note.get("first_doc_id") or 0) != int(doc_ids[0]):
-                continue
-            if int(note.get("last_doc_id") or 0) != int(doc_ids[-1]):
-                continue
-            if str(note.get("doc_ids_hash") or "") != self._build_doc_ids_hash(doc_ids):
-                continue
-            if int((run.docs_processed or 0) + (run.docs_failed or 0)) >= int(run.docs_total or 0):
+            ok, _reason, _note = self._verify_batch_run_contract(
+                run,
+                project_id=project_id,
+                params_hash=params_hash,
+                doc_ids=doc_ids,
+                source_label=source_label,
+                is_reprocess=is_reprocess,
+                require_incomplete=True,
+            )
+            if not ok:
                 continue
             return run
         return None
+
+    def _verify_batch_run_contract(
+        self,
+        run: ProcessorRun,
+        *,
+        project_id: int,
+        params_hash: str,
+        doc_ids: List[int],
+        source_label: str,
+        is_reprocess: bool,
+        require_incomplete: bool,
+    ) -> tuple[bool, Optional[str], dict[str, Any]]:
+        note = self._parse_batch_run_note(run.note)
+        if note.get("kind") != "batch_nlp":
+            return False, "Run note is not a batch NLP contract", note
+        if int(run.project_id or 0) != int(project_id):
+            return False, "Run project does not match the requested document slice", note
+        if str(run.params_hash or "") != str(params_hash or ""):
+            return False, "Run params_hash does not match the requested engine contract", note
+        if note.get("source") != source_label:
+            return False, "Run source label does not match this processing entry point", note
+        if bool(note.get("is_reprocess")) != bool(is_reprocess):
+            return False, "Run reprocess flag does not match the requested mode", note
+        if int(note.get("doc_count") or 0) != len(doc_ids):
+            return False, "Run document count does not match the requested document slice", note
+        if int(note.get("first_doc_id") or 0) != int(doc_ids[0]):
+            return False, "Run first_doc_id does not match the requested document slice", note
+        if int(note.get("last_doc_id") or 0) != int(doc_ids[-1]):
+            return False, "Run last_doc_id does not match the requested document slice", note
+        if str(note.get("doc_ids_hash") or "") != self._build_doc_ids_hash(doc_ids):
+            return False, "Run doc_ids_hash does not match the requested document slice", note
+        if int(run.docs_total or 0) != len(doc_ids):
+            return False, "Run docs_total does not match the requested document slice", note
+        if require_incomplete:
+            if str(run.status or "") not in {"paused", "cancelled", "failed"}:
+                return (
+                    False,
+                    f"Run {int(run.run_id)} status '{run.status}' is not resumable",
+                    note,
+                )
+            if int((run.docs_processed or 0) + (run.docs_failed or 0)) >= int(run.docs_total or 0):
+                return False, f"Run {int(run.run_id)} has no remaining documents to resume", note
+        return True, None, note
+
+    def verify_batch_run_contract(
+        self,
+        session: Session,
+        doc_ids: List[int],
+        use_gpu: bool = False,
+        use_mock: bool = False,
+        *,
+        is_reprocess: bool = False,
+        source_label: str = "batch",
+        resume_latest: bool = False,
+        resume_run_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Validate a batch NLP run contract without mutating the DB."""
+        if resume_latest and resume_run_id is not None:
+            raise ValueError("resume_latest and resume_run_id are mutually exclusive")
+
+        ordered_ids = sorted({int(doc_id) for doc_id in doc_ids})
+        if not ordered_ids:
+            raise ValueError("doc_ids must not be empty")
+
+        project_id = self._resolve_project_id_for_docs(session, ordered_ids)
+        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=is_reprocess,
+        )
+        report: dict[str, Any] = {
+            "ok": False,
+            "mode": "fresh",
+            "project_id": project_id,
+            "doc_count": len(ordered_ids),
+            "doc_ids_hash": self._build_doc_ids_hash(ordered_ids),
+            "params_hash": params_hash,
+            "source_label": source_label,
+            "is_reprocess": bool(is_reprocess),
+            "run_id": None,
+            "status": None,
+            "stage": None,
+            "remaining_docs": len(ordered_ids),
+            "chunk_size": None,
+            "reason": None,
+        }
+
+        if resume_run_id is None and not resume_latest:
+            report["ok"] = True
+            return report
+
+        if resume_run_id is not None:
+            run = session.get(ProcessorRun, int(resume_run_id))
+            if run is None:
+                report["mode"] = "resume_run_id"
+                report["reason"] = f"Run {int(resume_run_id)} was not found"
+                return report
+            report["mode"] = "resume_run_id"
+        else:
+            run = self._find_batch_run_candidate(
+                session,
+                project_id=project_id,
+                params_hash=params_hash,
+                doc_ids=ordered_ids,
+                source_label=source_label,
+                is_reprocess=is_reprocess,
+            )
+            report["mode"] = "resume_latest"
+            if run is None:
+                report["reason"] = "No matching incomplete NLP batch run was found"
+                return report
+
+        ok, reason, note = self._verify_batch_run_contract(
+            run,
+            project_id=project_id,
+            params_hash=params_hash,
+            doc_ids=ordered_ids,
+            source_label=source_label,
+            is_reprocess=is_reprocess,
+            require_incomplete=True,
+        )
+        report.update(
+            {
+                "run_id": int(run.run_id),
+                "status": str(run.status or ""),
+                "stage": run.stage,
+                "remaining_docs": max(
+                    0,
+                    int(run.docs_total or 0)
+                    - int(run.docs_processed or 0)
+                    - int(run.docs_failed or 0),
+                ),
+                "chunk_size": int(note.get("chunk_size") or 0) or None,
+                "reason": reason,
+            }
+        )
+        report["ok"] = bool(ok)
+        return report
 
     def _resolve_project_id_for_docs(self, session: Session, doc_ids: List[int]) -> int:
         doc = session.get(SourceDocument, int(doc_ids[0]))
@@ -665,6 +799,7 @@ class ProcessService:
         cancel_check: Optional[Callable[[], bool]] = None,
         pause_check: Optional[Callable[[], bool]] = None,
         resume_latest: bool = False,
+        resume_run_id: Optional[int] = None,
         source_label: str = "batch",
     ) -> Tuple[int, int]:
         """
@@ -683,11 +818,15 @@ class ProcessService:
             cancel_check: Optional cooperative cancel callback
             pause_check: Optional cooperative pause callback
             resume_latest: Resume latest matching incomplete batch run if possible
+            resume_run_id: Resume this exact incomplete batch run if possible
             source_label: Batch source identifier for run-note routing
 
         Returns:
             Tuple of (success_count, error_count)
         """
+        if resume_latest and resume_run_id is not None:
+            raise ValueError("resume_latest and resume_run_id are mutually exclusive")
+
         ordered_ids = sorted({int(doc_id) for doc_id in doc_ids})
         if not ordered_ids:
             return 0, 0
@@ -707,15 +846,32 @@ class ProcessService:
         run_note: dict[str, Any] = {}
 
         run = None
-        if resume_latest:
-            run = self._find_batch_run_candidate(
+        verification: Optional[dict[str, Any]] = None
+        if resume_run_id is not None:
+            verification = self.verify_batch_run_contract(
                 session,
-                project_id=project_id,
-                params_hash=params_hash,
-                doc_ids=ordered_ids,
-                source_label=source_label,
+                ordered_ids,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
                 is_reprocess=is_reprocess,
+                source_label=source_label,
+                resume_run_id=resume_run_id,
             )
+            if not verification.get("ok"):
+                raise ValueError(str(verification.get("reason") or "Explicit batch resume failed"))
+            run = session.get(ProcessorRun, int(verification["run_id"]))
+        elif resume_latest:
+            verification = self.verify_batch_run_contract(
+                session,
+                ordered_ids,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                is_reprocess=is_reprocess,
+                source_label=source_label,
+                resume_latest=True,
+            )
+            if verification.get("ok"):
+                run = session.get(ProcessorRun, int(verification["run_id"]))
 
         if run is None:
             run = ProcessorRun(
@@ -749,7 +905,10 @@ class ProcessService:
             )
         else:
             run_note = self._parse_batch_run_note(run.note)
-            effective_chunk_size = max(1, int(run_note.get("chunk_size") or chunk_size))
+            if verification and verification.get("chunk_size"):
+                effective_chunk_size = max(1, int(verification["chunk_size"]))
+            else:
+                effective_chunk_size = max(1, int(run_note.get("chunk_size") or chunk_size))
             run.status = "running"
             run.stage = "resuming"
             run.error_message = None
@@ -760,7 +919,11 @@ class ProcessService:
                 state_callback,
                 run,
                 phase="resumed",
-                message="Resuming latest incomplete NLP batch run",
+                message=(
+                    "Resuming selected NLP batch run"
+                    if resume_run_id is not None
+                    else "Resuming latest incomplete NLP batch run"
+                ),
             )
 
         remaining_ids = [

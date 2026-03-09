@@ -456,7 +456,7 @@ Validation:
 
 Status:
 
-- pending
+- implemented on 2026-03-09
 
 Files:
 
@@ -475,6 +475,48 @@ Requirements:
 - refuse explicit resume when `params_hash` or stored source identity changed
 - validate this behavior with temporary DB fixtures or controlled sandbox slices,
   not only against the already-processed approved DB
+
+Delivered in this wave:
+
+- `ProcessService.verify_batch_run_contract()` now exposes a reusable
+  service-level verifier for:
+  - fresh batch contracts
+  - `resume_latest`
+  - explicit `resume_run_id`
+- `process_documents_batch()` now supports `resume_run_id=` and refuses
+  ambiguous `resume_latest + resume_run_id` combinations
+- `scripts/process_reference_corpus.py` now supports:
+  - `--resume-run-id <id>`
+  - `--verify-only`
+- CLI verify mode exits without writes and returns:
+  - `0` when the contract is valid
+  - `3` when the requested resume contract is invalid
+- resumable auto-selection is now intentionally limited to:
+  - `paused`
+  - `cancelled`
+  - `failed`
+  and no longer treats `status='running'` rows as safe resume candidates
+
+Validation:
+
+- targeted regressions:
+  - `47 passed in 199.98s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch04_resume_verify.log`
+- approved DB live explicit-resume proof:
+  - setup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_setup.log`
+  - verify artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_verify.log`
+  - resume artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_resume.log`
+  - postcheck/cleanup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_postcheck.log`
+  - confirmed on the approved `hewiki_gpu_processing test.db`:
+    - a controlled interrupted reference-style batch run was created on a
+      temporary `BENCH_NLP_CLI_PATCH04_%` project
+    - `--verify-only --resume-run-id <run_id>` succeeded without mutating the DB
+    - `--resume-run-id <run_id>` resumed the exact selected run and finished it
+    - cleanup removed all temporary `BENCH_NLP_CLI_PATCH04_%` projects
 
 ### PATCH-NLP-05: optional future staging/offline concept
 

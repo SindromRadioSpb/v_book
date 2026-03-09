@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.infra.sa_models import (
@@ -354,6 +355,217 @@ def test_batch_reprocess_uses_batch_run_without_extra_per_doc_runs(monkeypatch) 
         assert runs[0].docs_total == 2
         assert runs[0].docs_processed == 2
         assert runs[0].chunks_total == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_verify_batch_run_contract_reports_selected_run(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        cancel_state = {"stop": False}
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=3)
+
+            def _progress(current: int, total: int, doc_name: str) -> None:
+                _ = total, doc_name
+                if current >= 2:
+                    cancel_state["stop"] = True
+
+            service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                progress_callback=_progress,
+                cancel_check=lambda: bool(cancel_state["stop"]),
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+
+        with db.get_session() as session:
+            report = service.verify_batch_run_contract(
+                session,
+                doc_ids,
+                use_mock=True,
+                source_label="test_batch",
+                resume_run_id=int(run.run_id),
+            )
+
+        assert report["ok"] is True
+        assert report["mode"] == "resume_run_id"
+        assert report["run_id"] == int(run.run_id)
+        assert report["chunk_size"] == 1
+        assert report["remaining_docs"] == 2
+        assert report["status"] == "cancelled"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_batch_run_resumes_explicit_run_id(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        cancel_state = {"stop": False}
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=3)
+
+            def _progress(current: int, total: int, doc_name: str) -> None:
+                _ = total, doc_name
+                if current >= 2:
+                    cancel_state["stop"] = True
+
+            service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                progress_callback=_progress,
+                cancel_check=lambda: bool(cancel_state["stop"]),
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+
+        with db.get_session() as session:
+            ok_2, err_2 = service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=99,
+                resume_run_id=int(run.run_id),
+                source_label="test_batch",
+            )
+            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+
+        assert (ok_2, err_2) == (2, 0)
+        assert len(runs) == 1
+        assert runs[0].run_id == run.run_id
+        assert runs[0].status == "ok"
+        assert runs[0].chunks_total == 3
+        assert runs[0].chunks_completed == 3
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_batch_run_does_not_resume_running_candidate(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        cancel_state = {"stop": False}
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=2)
+
+            def _progress(current: int, total: int, doc_name: str) -> None:
+                _ = total, doc_name
+                if current >= 2:
+                    cancel_state["stop"] = True
+
+            service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                progress_callback=_progress,
+                cancel_check=lambda: bool(cancel_state["stop"]),
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run.status = "running"
+            run.stage = "processing"
+            session.commit()
+            run_id = int(run.run_id)
+
+        with db.get_session() as session:
+            report = service.verify_batch_run_contract(
+                session,
+                doc_ids,
+                use_mock=True,
+                source_label="test_batch",
+                resume_run_id=run_id,
+            )
+            latest_report = service.verify_batch_run_contract(
+                session,
+                doc_ids,
+                use_mock=True,
+                source_label="test_batch",
+                resume_latest=True,
+            )
+
+        assert report["ok"] is False
+        assert "not resumable" in str(report["reason"])
+        assert latest_report["ok"] is False
+        assert "No matching incomplete" in str(latest_report["reason"])
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_batch_run_rejects_explicit_resume_run_id_contract_mismatch(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        cancel_state = {"stop": False}
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=3)
+
+            def _progress(current: int, total: int, doc_name: str) -> None:
+                _ = total, doc_name
+                if current >= 2:
+                    cancel_state["stop"] = True
+
+            service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                progress_callback=_progress,
+                cancel_check=lambda: bool(cancel_state["stop"]),
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run_id = int(run.run_id)
+
+        with db.get_session() as session:
+            with pytest.raises(ValueError, match="document count does not match"):
+                service.process_documents_batch(
+                    session,
+                    doc_ids[1:],
+                    use_mock=True,
+                    chunk_size=1,
+                    resume_run_id=run_id,
+                    source_label="test_batch",
+                )
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

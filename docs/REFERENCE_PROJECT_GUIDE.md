@@ -229,13 +229,32 @@ python scripts/process_reference_corpus.py `
     --resume-latest
 ```
 
+### Resume an explicit interrupted batch run
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --resume-run-id 387620
+```
+
+### Verify a resume contract without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --resume-run-id 387620 `
+    --verify-only
+```
+
 ### How it differs from the UI worker
 
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
 | Session scope | One session per document | One session per document |
-| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters and deterministic `--resume-latest` |
-| Cancellation | Regular-project UI now has pause/resume/cancel at document checkpoints, but reference corpora must still use the CLI path | Cooperative resume-at-checkpoint model; interrupted work can be resumed via `--resume-latest` when the contract still matches |
+| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters, deterministic `--resume-latest`, explicit `--resume-run-id`, and `--verify-only` preflight |
+| Cancellation | Regular-project UI now has pause/resume/cancel at document checkpoints, but reference corpora must still use the CLI path | Cooperative resume-at-checkpoint model; interrupted work can be resumed only when the stored contract still matches and the persisted run is in `paused`, `cancelled`, or `failed` state |
 | Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |
 | Suitable for 387 K docs | No | Yes |
 
@@ -353,6 +372,25 @@ Resume is safe:
 - `--resume-latest` reuses the latest matching incomplete batch run only if the
   stored run contract still matches the deterministic source slice and NLP
   parameters
+- `--resume-run-id` lets the operator resume a specific incomplete run when
+  multiple interrupted runs exist
+- `--verify-only` performs the same contract validation without writing
+- rows still marked `status='running'` are not treated as safe resume targets;
+  wait for the active run to finish or recover it first
+
+---
+
+### Process script exits with code 3
+
+The CLI script returns exit code 3 when `--verify-only` or `--resume-run-id`
+fails contract validation.
+
+Typical causes:
+
+- the selected run ID does not exist
+- the stored source slice no longer matches `--max-docs` / project selection
+- NLP engine parameters changed
+- the selected run is already complete or still marked `running`
 
 ---
 

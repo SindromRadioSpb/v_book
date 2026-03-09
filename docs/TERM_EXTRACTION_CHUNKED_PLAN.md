@@ -292,10 +292,11 @@ Further implementation plan for extract terms:
 
 - keep the current Terms staged progress flow stable; do not reopen blind
   progress-UI refactors before NLP catches up
-- with `PATCH-NLP-03` now in place, the next convergence checkpoint is
-  `PATCH-NLP-04`:
-  explicit CLI resume selection and verify-only contract still need to catch up
-  with the more explicit fixture lifecycle used by heavy `extract terms` runs
+- with `PATCH-NLP-04` now in place, the next convergence checkpoint is no
+  longer CLI resume selection itself; it is semantic alignment between:
+  - NLP checkpoint vocabulary
+  - Terms staged extraction vocabulary
+  - heavy-tier fixture `verify/refresh` expectations
 - when checkpointed `process with NLP` lands, align:
   - run-state vocabulary
   - stage names

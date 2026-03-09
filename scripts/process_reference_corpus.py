@@ -180,6 +180,30 @@ def _log_batch_state(state: dict[str, Any], tracker: dict[str, Any]) -> None:
     tracker["chunks_completed"] = chunks_completed
 
 
+def _log_batch_verification(report: dict[str, Any]) -> None:
+    if not report.get("ok"):
+        logger.error(
+            "Verification failed | mode=%s run_id=%s docs=%s remaining=%s | %s",
+            report.get("mode"),
+            report.get("run_id") if report.get("run_id") is not None else "-",
+            report.get("doc_count"),
+            report.get("remaining_docs"),
+            report.get("reason") or "Unknown verification failure",
+        )
+        return
+
+    logger.info(
+        "Verification ok | mode=%s run_id=%s status=%s stage=%s | docs=%s remaining=%s chunk_size=%s",
+        report.get("mode"),
+        report.get("run_id") if report.get("run_id") is not None else "-",
+        report.get("status") or "fresh",
+        report.get("stage") or "queued",
+        report.get("doc_count"),
+        report.get("remaining_docs"),
+        report.get("chunk_size") if report.get("chunk_size") is not None else "-",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="CLI-only NLP processing for reference corpus (PERF-SCALE PATCH-J)"
@@ -220,10 +244,26 @@ def main() -> None:
         action="store_true",
         help="Resume the latest matching incomplete batch run when possible",
     )
+    parser.add_argument(
+        "--resume-run-id",
+        type=int,
+        help="Resume this exact incomplete batch run ID instead of auto-selecting the latest match",
+    )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Validate the deterministic batch contract without writing to the DB",
+    )
     args = parser.parse_args()
 
     if not args.project_id and not args.project_name:
         parser.error("Provide --project-id or --project-name")
+    if args.resume_latest and args.resume_run_id is not None:
+        parser.error("--resume-latest and --resume-run-id are mutually exclusive")
+    if args.verify_only and args.dry_run:
+        parser.error("--verify-only and --dry-run are mutually exclusive")
+    if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
+        parser.error("--resume-run-id must be >= 1")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
@@ -284,7 +324,8 @@ def main() -> None:
             total_all, already_processed, pct_done, len(remaining_doc_ids),
         )
 
-        doc_ids_all = project_doc_ids if args.resume_latest else remaining_doc_ids
+        wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
+        doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
         if args.max_docs > 0:
             doc_ids_all = doc_ids_all[: args.max_docs]
         doc_ids_to_process = doc_ids_all
@@ -293,17 +334,27 @@ def main() -> None:
             logger.info("Nothing to process. Exiting.")
             return
 
-        if args.resume_latest:
+        if wants_resume:
             logger.info(
                 "Resume contract slice: %d docs (remaining currently unprocessed: %d)",
                 len(doc_ids_to_process),
                 len(remaining_doc_ids),
             )
 
+        action_label = "Processing"
+        if args.verify_only:
+            action_label = "Verifying"
+        elif args.dry_run:
+            action_label = "Planning"
+
         logger.info(
-            "Processing %d docs | chunk=%d sleep=%.1fs mock=%s gpu=%s%s",
-            len(doc_ids_to_process), args.chunk_size, args.chunk_sleep,
-            use_mock, use_gpu,
+            "%s %d docs | chunk=%d sleep=%.1fs mock=%s gpu=%s%s",
+            action_label,
+            len(doc_ids_to_process),
+            args.chunk_size,
+            args.chunk_sleep,
+            use_mock,
+            use_gpu,
             " DRY-RUN" if args.dry_run else "",
         )
 
@@ -323,6 +374,22 @@ def main() -> None:
         start = time.monotonic()
         state_tracker = {"run_id": None, "chunks_completed": None}
 
+        if args.verify_only:
+            with db_service.get_session() as session:
+                report = process_service.verify_batch_run_contract(
+                    session,
+                    doc_ids_to_process,
+                    use_gpu=use_gpu,
+                    use_mock=use_mock,
+                    source_label="reference_cli",
+                    resume_latest=bool(args.resume_latest),
+                    resume_run_id=args.resume_run_id,
+                )
+            _log_batch_verification(report)
+            if not report.get("ok"):
+                sys.exit(3)
+            return
+
         with db_service.get_session() as session:
             total_success, total_error = process_service.process_documents_batch(
                 session,
@@ -333,6 +400,7 @@ def main() -> None:
                 chunk_sleep=args.chunk_sleep,
                 state_callback=lambda state: _log_batch_state(state, state_tracker),
                 resume_latest=bool(args.resume_latest),
+                resume_run_id=args.resume_run_id,
                 source_label="reference_cli",
             )
 

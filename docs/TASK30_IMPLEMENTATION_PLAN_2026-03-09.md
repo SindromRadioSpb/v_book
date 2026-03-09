@@ -887,9 +887,45 @@ Validation:
     - both batch runs persisted correct `processor_run` rows
     - cleanup removed the temporary project afterward
 
+## PATCH-NLP-04 implemented (2026-03-09)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_process_batch_run_state.py`
+- `tests/test_process_reference_cli_verify.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+
+Result:
+
+- CLI reference processing now supports:
+  - explicit `--resume-run-id`
+  - read-only `--verify-only` contract preflight
+- `ProcessService.verify_batch_run_contract()` centralizes the deterministic
+  batch verifier used by CLI selection and tests
+- `process_documents_batch()` now supports `resume_run_id=` and rejects
+  ambiguous `resume_latest + resume_run_id`
+- auto-resume selection no longer treats `status='running'` rows as resumable
+  candidates; only `paused`, `cancelled`, and `failed` are considered safe
+
+Validation:
+
+- targeted regressions:
+  - `47 passed in 199.98s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_patch04_resume_verify.log`
+- approved DB live explicit-resume proof:
+  - setup artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_setup.log`
+  - verify artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_verify.log`
+  - resume artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_resume.log`
+  - postcheck artifact:
+    `build/logs/nlp_prework/hewiki_cli_patch04_resume_verify_postcheck.log`
+
 Updated patch-order note:
 
-- `PATCH-NLP-04` is now the next NLP step:
-  explicit CLI resume selection and verify-only contract
 - `PATCH-NLP-05` remains optional future offline/staging scope only if product
   requirements later demand detached processing
