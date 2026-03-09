@@ -32,6 +32,7 @@ DEFAULT_SOURCE_DB = (
 )
 DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
 DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"
+DEFAULT_BENCH_PREFIX = "BENCH_"
 DEFAULT_TEMP_ROOT = r"J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work"
 BENCH_TIER_PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -100,6 +101,77 @@ def _sqlite_backup(source_path: Path, dest_path: Path) -> None:
     finally:
         dst_conn.close()
         src_conn.close()
+
+
+def _sqlite_sidecar_paths(db_path: Path) -> dict[str, Path]:
+    return {
+        "wal": Path(f"{db_path}-wal"),
+        "shm": Path(f"{db_path}-shm"),
+        "journal": Path(f"{db_path}-journal"),
+    }
+
+
+def _collect_sidecar_sizes(db_path: Path) -> dict[str, int]:
+    sizes: dict[str, int] = {}
+    for name, path in _sqlite_sidecar_paths(db_path).items():
+        if path.exists():
+            try:
+                sizes[name] = int(path.stat().st_size)
+            except OSError:
+                sizes[name] = -1
+    return sizes
+
+
+def _remove_sqlite_sidecars(db_path: Path) -> dict[str, int]:
+    removed: dict[str, int] = {}
+    for name, path in _sqlite_sidecar_paths(db_path).items():
+        if not path.exists():
+            continue
+        try:
+            removed[name] = int(path.stat().st_size)
+        except OSError:
+            removed[name] = -1
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            LOG.warning("Failed to remove sidecar %s: %s", path, exc)
+    return removed
+
+
+def _checkpoint_sqlite_wal(db_path: Path) -> dict[str, Any]:
+    if not db_path.exists():
+        return {
+            "db_path": str(db_path),
+            "before": {},
+            "after": {},
+            "checkpoint_result": None,
+        }
+
+    before = _collect_sidecar_sizes(db_path)
+    checkpoint_result = None
+    conn = sqlite3.connect(str(db_path), timeout=60)
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+        checkpoint_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint_row is not None:
+            checkpoint_result = [int(value) for value in checkpoint_row]
+    finally:
+        conn.close()
+
+    # Best-effort cleanup for empty leftovers after a successful checkpoint.
+    for path in _sqlite_sidecar_paths(db_path).values():
+        try:
+            if path.exists() and path.stat().st_size == 0:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return {
+        "db_path": str(db_path),
+        "before": before,
+        "after": _collect_sidecar_sizes(db_path),
+        "checkpoint_result": checkpoint_result,
+    }
 
 
 def _reset_db_service() -> None:
@@ -175,12 +247,14 @@ def _load_build_meta() -> dict[str, Any]:
 
 def _validate_runtime_contract(args: argparse.Namespace) -> None:
     db_path = Path(args.db_path).expanduser().resolve()
-    source_db = Path(args.source_db).expanduser().resolve()
-    temp_root = Path(args.temp_root).expanduser().resolve()
+    source_db_raw = getattr(args, "source_db", None)
+    source_db = Path(source_db_raw).expanduser().resolve() if source_db_raw else None
+    temp_root_raw = getattr(args, "temp_root", DEFAULT_TEMP_ROOT)
+    temp_root = Path(temp_root_raw).expanduser().resolve()
 
     if _is_forbidden_m_path(db_path):
         raise ValueError(f"Forbidden --db-path on M: drive: {db_path}")
-    if _is_forbidden_m_path(source_db):
+    if source_db is not None and _is_forbidden_m_path(source_db):
         raise ValueError(f"Forbidden --source-db on M: drive: {source_db}")
     if _is_forbidden_m_path(temp_root):
         raise ValueError(f"Forbidden --temp-root on M: drive: {temp_root}")
@@ -188,13 +262,27 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError("--copy-target is mandatory for all scenarios")
     if not _is_expected_j_path(db_path):
         raise ValueError(f"--db-path must be on J: drive for sandbox safety: {db_path}")
-    if not _is_expected_j_path(source_db):
+    if source_db is not None and not _is_expected_j_path(source_db):
         raise ValueError(f"--source-db must be on J: drive for sandbox safety: {source_db}")
     if not _is_expected_j_path(temp_root):
         raise ValueError(f"--temp-root must be on J: drive for sandbox safety: {temp_root}")
-    if db_path == source_db:
+    if source_db is not None and db_path == source_db:
         raise ValueError("--db-path must differ from --source-db for sandbox safety")
-    if not source_db.exists():
+    if args.scenario == "cleanup_sandbox":
+        if not db_path.exists():
+            raise FileNotFoundError(f"--db-path not found for cleanup: {db_path}")
+        cleanup_project_name = str(getattr(args, "cleanup_project_name", "") or "").strip()
+        cleanup_prefix = str(getattr(args, "cleanup_prefix", DEFAULT_BENCH_PREFIX) or "").strip()
+        if not cleanup_project_name and not cleanup_prefix:
+            raise ValueError("cleanup requires --cleanup-project-name or --cleanup-prefix")
+        if cleanup_project_name and cleanup_prefix and not cleanup_project_name.startswith(cleanup_prefix):
+            raise ValueError("--cleanup-project-name must start with --cleanup-prefix for safety")
+        return
+    if args.scenario == "reset_sandbox":
+        if source_db is None or not source_db.exists():
+            raise FileNotFoundError(f"--source-db not found: {source_db}")
+        return
+    if source_db is None or not source_db.exists():
         raise FileNotFoundError(f"--source-db not found: {source_db}")
     if args.doc_limit <= 0:
         raise ValueError("--doc-limit must be > 0")
@@ -208,7 +296,7 @@ def resolve_tier_preset(args: argparse.Namespace, raw_argv: list[str] | None = N
     if not tier_name:
         return {
             "name": None,
-            "doc_limit": int(args.doc_limit),
+            "doc_limit": int(getattr(args, "doc_limit", 0) or 0),
             "recommended_wall_budget_sec": None,
             "description": "",
         }
@@ -224,6 +312,82 @@ def resolve_tier_preset(args: argparse.Namespace, raw_argv: list[str] | None = N
         "doc_limit": int(args.doc_limit),
         "recommended_wall_budget_sec": int(preset["recommended_wall_budget_sec"]),
         "description": str(preset["description"]),
+    }
+
+
+def _run_cleanup_sandbox(
+    session,
+    *,
+    cleanup_project_name: str | None,
+    cleanup_prefix: str,
+) -> dict[str, Any]:
+    from sqlalchemy import select
+    from app.infra.sa_models import DictProject
+    from app.services.project_service import ProjectService
+
+    started = _utc_now().isoformat()
+    t0 = time.perf_counter()
+
+    stmt = select(DictProject.project_id, DictProject.name).order_by(DictProject.project_id.asc())
+    if cleanup_project_name:
+        stmt = stmt.where(DictProject.name == cleanup_project_name)
+    else:
+        stmt = stmt.where(DictProject.name.like(f"{cleanup_prefix}%"))
+
+    matches = session.execute(stmt).all()
+    deleted_projects: list[dict[str, Any]] = []
+    service = ProjectService()
+    for project_id, project_name in matches:
+        delete_report = service.delete_project(session, int(project_id))
+        if not delete_report.success:
+            raise RuntimeError(
+                f"Cleanup failed for project {project_name} ({project_id}): "
+                f"{delete_report.error_message or 'unknown error'}"
+            )
+        deleted_projects.append(
+            {
+                "project_id": int(project_id),
+                "name": project_name,
+            }
+        )
+
+    return {
+        "name": "cleanup_sandbox",
+        "started_at_utc": started,
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(time.perf_counter() - t0, 3),
+        "rows_processed": {"lemma": 0, "term": 0, "sentence": 0},
+        "errors_count": 0,
+        "error_samples": [],
+        "details": {
+            "deleted_count": len(deleted_projects),
+            "deleted_projects": deleted_projects,
+            "cleanup_project_name": cleanup_project_name,
+            "cleanup_prefix": cleanup_prefix,
+        },
+    }
+
+
+def _run_reset_sandbox(
+    *,
+    base_db: Path,
+    source_db: Path,
+    duration_sec: float,
+) -> dict[str, Any]:
+    """Build result payload for sandbox reset."""
+    return {
+        "name": "reset_sandbox",
+        "started_at_utc": _utc_now().isoformat(),
+        "ended_at_utc": _utc_now().isoformat(),
+        "duration_sec": round(float(duration_sec), 3),
+        "rows_processed": {"lemma": 0, "term": 0, "sentence": 0},
+        "errors_count": 0,
+        "error_samples": [],
+        "details": {
+            "source_db": str(source_db),
+            "target_db": str(base_db),
+            "size_bytes": int(base_db.stat().st_size) if base_db.exists() else 0,
+        },
     }
 
 
@@ -257,9 +421,19 @@ def _configure_google_cloud_tts(key_path: Path) -> None:
 def _prepare_base_sandbox(base_db: Path, source_db: Path, *, reuse_existing: bool = False) -> bool:
     base_db.parent.mkdir(parents=True, exist_ok=True)
     if reuse_existing and base_db.exists() and base_db.is_file():
+        _checkpoint_sqlite_wal(base_db)
         return False
+    temp_target = base_db.with_name(f"{base_db.name}.reset_tmp")
+    if temp_target.exists():
+        temp_target.unlink(missing_ok=True)
+    _remove_sqlite_sidecars(temp_target)
     # Refresh canonical sandbox base from local writable corpus copy.
-    _sqlite_backup(source_db, base_db)
+    _sqlite_backup(source_db, temp_target)
+    _remove_sqlite_sidecars(base_db)
+    if base_db.exists():
+        base_db.unlink(missing_ok=True)
+    temp_target.replace(base_db)
+    _remove_sqlite_sidecars(base_db)
     return True
 
 
@@ -1041,6 +1215,9 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     db_info = report.get("db") or {}
     bench_info = report.get("bench") or {}
     timings = report.get("timings") or {}
+    cleanup_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "cleanup_sandbox" else {}
+    reset_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "reset_sandbox" else {}
+    post_run_maintenance = db_info.get("post_run_maintenance") or {}
     stage_total = round(
         sum(float(stage.get("duration_sec", 0.0) or 0.0) for stage in report.get("stages", [])),
         3,
@@ -1052,32 +1229,48 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- Scenario: `{report['scenario']}`")
     lines.append(f"- Overall status: `{report['overall_status']}`")
     lines.append(f"- Base sandbox DB: `{db_info.get('base_sandbox_db', 'n/a')}`")
-    lines.append(f"- Source DB: `{db_info.get('source_db', 'n/a')}`")
+    lines.append(f"- Source DB: `{db_info.get('source_db') or 'n/a'}`")
     lines.append(f"- Working DB (temp): `{db_info.get('working_db', 'n/a')}`")
     if timings.get("base_copy_reused"):
         lines.append("- Base sandbox copy: `reused existing file`")
     if timings.get("working_db_reused"):
         lines.append("- Working DB copy: `reused sandbox file in place`")
     lines.append("")
-    lines.append("## Bench Slice")
-    lines.append("")
-    lines.append(
-        f"- Source project: `{bench_info.get('source_project_id', 'n/a')}` "
-        f"(`{bench_info.get('source_project_name', 'n/a')}`)"
-    )
-    lines.append(
-        f"- Bench project: `{bench_info.get('bench_project_id', 'n/a')}` "
-        f"(`{bench_info.get('bench_project_name', 'n/a')}`)"
-    )
-    if report["config"].get("tier"):
-        lines.append(f"- Tier: `{report['config']['tier']}`")
-    if report["config"].get("recommended_wall_budget_sec") is not None:
+    if report["scenario"] not in {"cleanup_sandbox", "reset_sandbox"}:
+        lines.append("## Bench Slice")
+        lines.append("")
         lines.append(
-            f"- Recommended wall budget: `{int(report['config']['recommended_wall_budget_sec'])} s`"
+            f"- Source project: `{bench_info.get('source_project_id', 'n/a')}` "
+            f"(`{bench_info.get('source_project_name', 'n/a')}`)"
         )
-    lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
-    lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
-    lines.append("")
+        lines.append(
+            f"- Bench project: `{bench_info.get('bench_project_id', 'n/a')}` "
+            f"(`{bench_info.get('bench_project_name', 'n/a')}`)"
+        )
+        if report["config"].get("tier"):
+            lines.append(f"- Tier: `{report['config']['tier']}`")
+        if report["config"].get("recommended_wall_budget_sec") is not None:
+            lines.append(
+                f"- Recommended wall budget: `{int(report['config']['recommended_wall_budget_sec'])} s`"
+            )
+        lines.append(f"- Doc limit: `{report['config']['doc_limit']}`")
+        lines.append(f"- Selected docs: `{len(bench_info.get('selected_source_doc_ids', []))}`")
+        lines.append("")
+    if report["scenario"] == "cleanup_sandbox":
+        lines.append("## Cleanup Summary")
+        lines.append("")
+        lines.append(f"- Deleted projects: `{int(cleanup_details.get('deleted_count', 0))}`")
+        lines.append(f"- Cleanup prefix: `{cleanup_details.get('cleanup_prefix', '')}`")
+        if cleanup_details.get("cleanup_project_name"):
+            lines.append(f"- Cleanup project name: `{cleanup_details.get('cleanup_project_name')}`")
+        lines.append("")
+    if report["scenario"] == "reset_sandbox":
+        lines.append("## Reset Summary")
+        lines.append("")
+        lines.append(f"- Source DB: `{reset_details.get('source_db', 'n/a')}`")
+        lines.append(f"- Target DB: `{reset_details.get('target_db', 'n/a')}`")
+        lines.append(f"- Target size bytes: `{int(reset_details.get('size_bytes', 0))}`")
+        lines.append("")
     lines.append("## Timing Breakdown")
     lines.append("")
     lines.append(f"- Base sandbox copy: `{float(timings.get('base_copy_sec', 0.0)):.3f} s`")
@@ -1085,9 +1278,23 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- DB initialize: `{float(timings.get('db_initialize_sec', 0.0)):.3f} s`")
     lines.append(f"- Bench slice clone: `{float(timings.get('slice_clone_sec', 0.0)):.3f} s`")
     lines.append(f"- Pre-stage overhead total: `{float(timings.get('pre_stage_overhead_sec', 0.0)):.3f} s`")
+    if timings.get("post_run_maintenance_sec") is not None:
+        lines.append(
+            f"- Post-run maintenance: `{float(timings.get('post_run_maintenance_sec', 0.0)):.3f} s`"
+        )
     lines.append(f"- Stage wall total: `{stage_total:.3f} s`")
     lines.append(f"- Overall wall total: `{float(timings.get('overall_wall_sec', 0.0)):.3f} s`")
     lines.append("")
+    if post_run_maintenance:
+        lines.append("## SQLite Maintenance")
+        lines.append("")
+        for db_path, details in sorted(post_run_maintenance.items()):
+            lines.append(f"- DB: `{db_path}`")
+            lines.append(
+                f"  checkpoint={details.get('checkpoint_result')} "
+                f"before={details.get('before', {})} after={details.get('after', {})}"
+            )
+        lines.append("")
     lines.append("## Stage Summary")
     lines.append("")
     lines.append("| Stage | Status | Duration (s) | Lemma | Term | Sentence | Errors |")
@@ -1144,6 +1351,21 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd_parser.add_argument("--output-dir", default="build/logs")
         cmd_parser.add_argument("--temp-root", default=DEFAULT_TEMP_ROOT)
 
+    def _add_cleanup_arguments(cmd_parser: argparse.ArgumentParser) -> None:
+        cmd_parser.add_argument("--db-path", required=True)
+        cmd_parser.add_argument("--copy-target", action="store_true")
+        cmd_parser.add_argument("--cleanup-prefix", default=DEFAULT_BENCH_PREFIX)
+        cmd_parser.add_argument("--cleanup-project-name", default="")
+        cmd_parser.add_argument("--output-dir", default="build/logs")
+        cmd_parser.add_argument("--temp-root", default=DEFAULT_TEMP_ROOT)
+
+    def _add_reset_arguments(cmd_parser: argparse.ArgumentParser) -> None:
+        cmd_parser.add_argument("--db-path", required=True)
+        cmd_parser.add_argument("--copy-target", action="store_true")
+        cmd_parser.add_argument("--source-db", required=True, default=DEFAULT_SOURCE_DB)
+        cmd_parser.add_argument("--output-dir", default="build/logs")
+        cmd_parser.add_argument("--temp-root", default=DEFAULT_TEMP_ROOT)
+
     for name in (
         "extract_terms",
         "niqqud_bootstrap",
@@ -1153,6 +1375,17 @@ def _build_parser() -> argparse.ArgumentParser:
     ):
         child = subparsers.add_parser(name, help=f"Run scenario: {name}")
         _add_common_arguments(child)
+
+    cleanup = subparsers.add_parser(
+        "cleanup_sandbox",
+        help="Delete benchmark projects from a sandbox DB by prefix or exact name.",
+    )
+    _add_cleanup_arguments(cleanup)
+    reset = subparsers.add_parser(
+        "reset_sandbox",
+        help="Replace sandbox DB with a fresh copy of source DB.",
+    )
+    _add_reset_arguments(reset)
     return parser
 
 
@@ -1174,18 +1407,20 @@ def run(argv: list[str] | None = None) -> int:
         "overall_status": "error",
         "build_meta": _load_build_meta(),
         "config": {
-            "doc_limit": int(args.doc_limit),
-            "overwrite": int(args.overwrite),
-            "lemma_limit": int(args.lemma_limit),
-            "term_limit": int(args.term_limit),
-            "sentence_limit": int(args.sentence_limit),
+            "doc_limit": int(getattr(args, "doc_limit", 0) or 0),
+            "overwrite": int(getattr(args, "overwrite", 0) or 0),
+            "lemma_limit": int(getattr(args, "lemma_limit", 0) or 0),
+            "term_limit": int(getattr(args, "term_limit", 0) or 0),
+            "sentence_limit": int(getattr(args, "sentence_limit", 0) or 0),
             "copy_target": bool(args.copy_target),
-            "reuse_base_copy": bool(args.reuse_base_copy),
-            "reuse_working_db": bool(args.reuse_working_db),
+            "reuse_base_copy": bool(getattr(args, "reuse_base_copy", False)),
+            "reuse_working_db": bool(getattr(args, "reuse_working_db", False)),
             "tier": tier["name"],
             "recommended_wall_budget_sec": tier["recommended_wall_budget_sec"],
-            "bench_project_name": str(args.bench_project_name),
-            "temp_root": str(args.temp_root),
+            "bench_project_name": str(getattr(args, "bench_project_name", "")),
+            "cleanup_prefix": str(getattr(args, "cleanup_prefix", "")),
+            "cleanup_project_name": str(getattr(args, "cleanup_project_name", "")),
+            "temp_root": str(getattr(args, "temp_root", "")),
         },
         "db": {},
         "bench": {},
@@ -1201,6 +1436,83 @@ def run(argv: list[str] | None = None) -> int:
 
     try:
         _validate_runtime_contract(args)
+
+        if args.scenario == "cleanup_sandbox":
+            base_db = Path(args.db_path).expanduser().resolve()
+            report["timings"]["base_copy_sec"] = 0.0
+            report["timings"]["working_copy_sec"] = 0.0
+            report["timings"]["db_initialize_sec"] = 0.0
+            report["timings"]["slice_clone_sec"] = 0.0
+            report["timings"]["pre_stage_overhead_sec"] = 0.0
+            report["timings"]["base_copy_reused"] = True
+            report["timings"]["working_db_reused"] = True
+            report["db"] = {
+                "source_db": None,
+                "base_sandbox_db": str(base_db),
+                "working_db": str(base_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                    "cleanup_direct": True,
+                },
+            }
+            _reset_db_service()
+            from app.services.db_service import DBService
+
+            t0 = time.perf_counter()
+            DBService.initialize(base_db)
+            report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
+            report["timings"]["pre_stage_overhead_sec"] = float(report["timings"]["db_initialize_sec"])
+            db_service = DBService.get_instance()
+            with db_service.get_session() as session:
+                stage_result = _run_stage(
+                    "cleanup_sandbox",
+                    lambda: _run_cleanup_sandbox(
+                        session,
+                        cleanup_project_name=str(getattr(args, "cleanup_project_name", "") or "").strip() or None,
+                        cleanup_prefix=str(getattr(args, "cleanup_prefix", DEFAULT_BENCH_PREFIX) or "").strip(),
+                    ),
+                )
+            report["stages"].append(stage_result)
+            report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
+            return_code = 0 if report["overall_status"] == "pass" else 1
+            return return_code
+
+        if args.scenario == "reset_sandbox":
+            source_db = Path(args.source_db).expanduser().resolve()
+            base_db = Path(args.db_path).expanduser().resolve()
+            report["db"] = {
+                "source_db": str(source_db),
+                "base_sandbox_db": str(base_db),
+                "working_db": str(base_db),
+                "safety": {
+                    "copy_target": bool(args.copy_target),
+                    "forbidden_m_path_enforced": True,
+                    "reset_direct": True,
+                },
+            }
+            t0 = time.perf_counter()
+            _prepare_base_sandbox(base_db, source_db, reuse_existing=False)
+            reset_duration = round(time.perf_counter() - t0, 3)
+            report["timings"]["base_copy_sec"] = float(reset_duration)
+            report["timings"]["working_copy_sec"] = 0.0
+            report["timings"]["db_initialize_sec"] = 0.0
+            report["timings"]["slice_clone_sec"] = 0.0
+            report["timings"]["pre_stage_overhead_sec"] = float(reset_duration)
+            report["timings"]["base_copy_reused"] = False
+            report["timings"]["working_db_reused"] = True
+            stage_result = _run_stage(
+                "reset_sandbox",
+                lambda: _run_reset_sandbox(
+                    base_db=base_db,
+                    source_db=source_db,
+                    duration_sec=reset_duration,
+                ),
+            )
+            report["stages"].append(stage_result)
+            report["overall_status"] = "pass" if stage_result.get("status") == "ok" else "fail"
+            return_code = 0 if report["overall_status"] == "pass" else 1
+            return return_code
 
         source_db = Path(args.source_db).expanduser().resolve()
         base_db = Path(args.db_path).expanduser().resolve()
@@ -1371,6 +1683,38 @@ def run(argv: list[str] | None = None) -> int:
             _reset_db_service()
         except Exception:
             pass
+        maintenance_started = time.perf_counter()
+        maintenance_results: dict[str, Any] = {}
+        working_db_raw = (report.get("db") or {}).get("working_db")
+        base_db_raw = (report.get("db") or {}).get("base_sandbox_db")
+        should_maintain = (
+            report.get("scenario") in {"cleanup_sandbox", "reset_sandbox"}
+            or bool((report.get("timings") or {}).get("working_db_reused"))
+        )
+        if should_maintain:
+            seen_paths: set[str] = set()
+            for raw_path in (working_db_raw, base_db_raw):
+                if not raw_path or raw_path in seen_paths or raw_path == "n/a":
+                    continue
+                seen_paths.add(raw_path)
+                db_path = Path(str(raw_path)).expanduser().resolve()
+                try:
+                    maintenance_results[str(db_path)] = _checkpoint_sqlite_wal(db_path)
+                except Exception as exc:
+                    maintenance_results[str(db_path)] = {
+                        "db_path": str(db_path),
+                        "before": _collect_sidecar_sizes(db_path),
+                        "after": _collect_sidecar_sizes(db_path),
+                        "checkpoint_result": None,
+                        "error": str(exc),
+                    }
+        report["timings"]["post_run_maintenance_sec"] = round(
+            time.perf_counter() - maintenance_started,
+            3,
+        )
+        if maintenance_results:
+            report.setdefault("db", {})
+            report["db"]["post_run_maintenance"] = maintenance_results
         paths["metrics_json"].write_text(
             json.dumps(report, indent=2, ensure_ascii=False),
             encoding="utf-8",

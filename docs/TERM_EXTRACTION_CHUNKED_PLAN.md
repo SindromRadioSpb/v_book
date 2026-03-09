@@ -100,6 +100,8 @@ Artifacts:
 - `build\logs\pipeline_bench_report_20260309_030439.md`
 - `build\logs\task30\pipeline_bench_report_20260309_045419.md`
 - `build\logs\task30\pipeline_bench_report_20260309_060810.md`
+- `build\logs\task30\pipeline_bench_report_20260309_081444.md`
+- `build\logs\task30\pipeline_bench_report_20260309_082025.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -134,6 +136,17 @@ Interpretation:
   even with both reuse modes enabled, so the older successful `257.680 s` stage
   artifact remains the best completed large-slice reference for `6000` docs
 
+Sandbox maintenance follow-up:
+
+- the reusable `2000/6000` benchmark sandbox needed explicit maintenance
+  because a stale reusable `-wal` file had grown to `19.9 GB`
+- `reset_sandbox` now refreshes the sandbox through a fresh-file replace flow
+  and completed on the approved DB in `282.138 s`
+- `cleanup_sandbox` now uses the existing project fast-delete service and
+  removed a live `BENCH_MAINTENANCE_SMOKE` project in `0.174 s` stage time
+- both maintenance scenarios now finish with `wal_checkpoint(TRUNCATE)` and
+  leave no sidecar files behind the reusable sandbox DB
+
 Suggested benchmark tiers for repeatable task30 runs:
 
 - `smoke`: `doc_limit=30`, wall budget `300 s`
@@ -153,6 +166,13 @@ Suggested benchmark tiers for repeatable task30 runs:
 
 - rerun `extract_terms` on a larger bounded slice after this patch
 - record stage time separately from sandbox DB clone/bootstrap overhead
+
+### Follow-up B2: optional benchmark sandbox housekeeping UX
+
+- current CLI maintenance modes are sufficient for engineering use:
+  - `reset_sandbox`
+  - `cleanup_sandbox`
+- only add an extra wrapper or preset if repeated operator use still proves noisy
 
 ### Follow-up C: deeper architecture tier if needed
 

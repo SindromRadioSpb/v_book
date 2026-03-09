@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 def _load_module():
@@ -111,3 +115,81 @@ def test_markdown_report_includes_timing_breakdown(tmp_path: Path) -> None:
     assert "reused sandbox file" in text
     assert "Tier: `smoke`" in text
     assert "Recommended wall budget: `300 s`" in text
+
+
+def test_cleanup_sandbox_deletes_prefixed_projects(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    from app.infra.sa_models import DictProject, Library
+    from app.services.project_service import ProjectService
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'cleanup_bench.db'}")
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+
+    calls: list[int] = []
+
+    def _fake_delete_project(self, session, project_id):
+        calls.append(int(project_id))
+        session.execute(
+            DictProject.__table__.delete().where(DictProject.project_id == int(project_id))
+        )
+        session.commit()
+        return type(
+            "DeleteReportStub",
+            (),
+            {"success": True, "error_message": ""},
+        )()
+
+    monkeypatch.setattr(ProjectService, "__init__", lambda self: None)
+    monkeypatch.setattr(ProjectService, "delete_project", _fake_delete_project)
+
+    with Session(engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        keep = DictProject(library_id=lib.library_id, name="KEEP_PROJECT", src_lang="he", tgt_lang="ru")
+        bench_a = DictProject(library_id=lib.library_id, name="BENCH_A", src_lang="he", tgt_lang="ru")
+        bench_b = DictProject(library_id=lib.library_id, name="BENCH_B", src_lang="he", tgt_lang="ru")
+        session.add_all([keep, bench_a, bench_b])
+        session.commit()
+        bench_ids = [bench_a.project_id, bench_b.project_id]
+
+        result = mod._run_cleanup_sandbox(
+            session,
+            cleanup_project_name=None,
+            cleanup_prefix="BENCH_",
+        )
+
+        remaining = session.query(DictProject).order_by(DictProject.project_id.asc()).all()
+
+    engine.dispose()
+
+    assert calls == bench_ids
+    assert result["details"]["deleted_count"] == 2
+    assert [item["name"] for item in result["details"]["deleted_projects"]] == ["BENCH_A", "BENCH_B"]
+    assert [project.name for project in remaining] == ["KEEP_PROJECT"]
+
+
+def test_prepare_base_sandbox_replaces_db_and_removes_sidecars(tmp_path: Path) -> None:
+    mod = _load_module()
+    source_db = tmp_path / "source.db"
+    target_db = tmp_path / "target.db"
+
+    with sqlite3.connect(str(source_db)) as conn:
+        conn.execute("CREATE TABLE sample(id INTEGER PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO sample(value) VALUES ('source')")
+        conn.commit()
+
+    target_db.write_bytes(b"stale")
+    for suffix in ("-wal", "-shm", "-journal"):
+        (tmp_path / f"target.db{suffix}").write_bytes(b"stale-sidecar")
+
+    copied = mod._prepare_base_sandbox(target_db, source_db, reuse_existing=False)
+
+    with sqlite3.connect(str(target_db)) as conn:
+        row = conn.execute("SELECT value FROM sample").fetchone()
+
+    assert copied is True
+    assert row == ("source",)
+    for suffix in ("-wal", "-shm", "-journal"):
+        assert not (tmp_path / f"target.db{suffix}").exists()

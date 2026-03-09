@@ -361,6 +361,55 @@ Recommended task30 benchmark tiers:
 - `large`: `doc_limit=2000`, recommended wall budget `900 s`
 - `ceiling`: `doc_limit=6000`, recommended wall budget `1800 s`
 
+### PATCH-09: Benchmark sandbox maintenance modes
+
+Status: implemented on 2026-03-09
+
+Files:
+
+- `scripts/benchmarks/bench_reference_pipeline.py`
+- `tests/test_pipeline_bench_runner_safety.py`
+- `tests/test_pipeline_bench_argparse.py`
+- `build/logs/task30/pipeline_bench_report_20260309_081444.md`
+- `build/logs/task30/pipeline_bench_report_20260309_082025.md`
+
+Goals:
+
+- Make repeated task30 sandbox runs recoverable after huge reusable-WAL growth.
+- Provide explicit `reset` and `cleanup` maintenance commands instead of ad-hoc
+  manual DB surgery.
+- Keep reusable sandbox DBs checkpointed so follow-up queries and runs do not
+  stall behind large stale `-wal` files.
+
+Result:
+
+- Added `cleanup_sandbox` scenario to delete `BENCH_*` projects from a sandbox
+  DB using the existing `ProjectService.delete_project()` fast path instead of a
+  naive `dict_project` delete under `foreign_keys=ON`.
+- Added `reset_sandbox` scenario to rebuild the sandbox DB from the approved
+  source DB through a fresh temp file + replace flow, explicitly discarding old
+  `-wal/-shm/-journal` sidecars.
+- Added post-run SQLite maintenance for reusable sandbox DBs:
+  `PRAGMA wal_checkpoint(TRUNCATE)` now runs after maintenance scenarios and
+  after reusable in-place benchmark runs.
+- Added unit coverage for parser contracts, cleanup routing, and stale-sidecar
+  replacement behavior.
+
+Observed evidence:
+
+- Before this patch, `build\bench\hewiki_pipeline_task30_patch08_6000.db-wal`
+  had grown to `19,941,055,472` bytes and even trivial `dict_project` reads on
+  that sandbox stalled.
+- `reset_sandbox` on the same DB completed successfully in `282.138 s` and
+  removed all sidecars:
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_081444.md`
+- After reset, a live empty benchmark project
+  `BENCH_MAINTENANCE_SMOKE` was inserted and then removed through
+  `cleanup_sandbox` in `0.174 s` stage time / `0.957 s` overall wall:
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_082025.md`
+- Post-run maintenance on both scenarios reported `checkpoint=[0, 0, 0]` and
+  left no `-wal/-shm/-journal` files alongside the sandbox DB.
+
 ## Out of scope for PATCH-01
 
 - Full dual-DB reference/user overlay architecture.

@@ -71,6 +71,46 @@ def test_parser_accepts_each_required_subcommand() -> None:
         assert args.scenario == scenario
 
 
+def test_parser_accepts_cleanup_sandbox_subcommand() -> None:
+    mod = _load_module()
+    parser = mod.build_parser()
+    args = parser.parse_args(
+        [
+            "cleanup_sandbox",
+            "--db-path",
+            r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db",
+            "--copy-target",
+            "--cleanup-prefix",
+            "BENCH_",
+        ]
+    )
+
+    assert args.scenario == "cleanup_sandbox"
+    assert args.cleanup_prefix == "BENCH_"
+    assert args.cleanup_project_name == ""
+    tier = mod.resolve_tier_preset(args, ["cleanup_sandbox"])
+    assert tier["name"] is None
+    assert tier["doc_limit"] == 0
+
+
+def test_parser_accepts_reset_sandbox_subcommand() -> None:
+    mod = _load_module()
+    parser = mod.build_parser()
+    args = parser.parse_args(
+        [
+            "reset_sandbox",
+            "--db-path",
+            r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db",
+            "--copy-target",
+            "--source-db",
+            r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db",
+        ]
+    )
+
+    assert args.scenario == "reset_sandbox"
+    assert args.source_db.endswith("hewiki_gpu_processing.db")
+
+
 def test_tier_preset_sets_expected_doc_limit() -> None:
     mod = _load_module()
     parser = mod.build_parser()
