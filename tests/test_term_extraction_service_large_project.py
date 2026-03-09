@@ -448,3 +448,135 @@ def test_extract_terms_chunked_run_resumes_after_cancel(monkeypatch, tmp_path: P
     assert remaining_stage_rows == []
     assert resumed_run is not None
     assert resumed_run.status == "ok"
+
+
+def test_extract_terms_chunked_state_callback_includes_run_metadata_and_pause_resume(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(DBService, "_instance", SimpleNamespace())
+    engine = create_engine(f"sqlite:///{tmp_path / 'term_chunked_state.db'}")
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+    SourceCorpus.__table__.create(engine, checkfirst=True)
+    SourceDocument.__table__.create(engine, checkfirst=True)
+    DocumentSentence.__table__.create(engine, checkfirst=True)
+    Lemma.__table__.create(engine, checkfirst=True)
+    LemmaProjectStat.__table__.create(engine, checkfirst=True)
+    Ngram.__table__.create(engine, checkfirst=True)
+    NgramProjectStat.__table__.create(engine, checkfirst=True)
+    TermExtractRun.__table__.create(engine, checkfirst=True)
+    TermExtractAccumulator.__table__.create(engine, checkfirst=True)
+    TermCluster.__table__.create(engine, checkfirst=True)
+    TermClusterMember.__table__.create(engine, checkfirst=True)
+
+    class _Token:
+        def __init__(self, text: str, lemma: str, pos: str):
+            self.text = text
+            self.lemma = lemma
+            self.pos = pos
+
+    class _Sentence:
+        def __init__(self, tokens):
+            self.tokens = tokens
+
+    class _Engine:
+        def process(self, text: str):
+            _ = text
+            return [_Sentence([_Token("alpha", "alpha", "NOUN"), _Token("beta", "beta", "NOUN")])]
+
+        def get_name(self):
+            return "fake"
+
+        def get_version(self):
+            return "1"
+
+    monkeypatch.setattr(
+        "app.services.term_extraction_service.classify_phrase",
+        lambda _text: SimpleNamespace(
+            entity_class="WORD_HE",
+            is_noise=False,
+            noise_reason=None,
+            norm_text="alpha_beta",
+        ),
+    )
+
+    service = TermExtractionService()
+    monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+    pause_state = {"remaining_true": 2}
+    states: list[dict] = []
+
+    def _pause_check() -> bool:
+        if pause_state["remaining_true"] > 0:
+            pause_state["remaining_true"] -= 1
+            return True
+        return False
+
+    with Session(engine) as session:
+        lib = Library(name="lib")
+        session.add(lib)
+        session.flush()
+        project = DictProject(
+            library_id=lib.library_id,
+            name="project",
+            src_lang="he",
+            tgt_lang="ru",
+            nlp_engine="mock",
+        )
+        session.add(project)
+        session.flush()
+        corpus = SourceCorpus(project_id=project.project_id, name="corpus")
+        session.add(corpus)
+        session.flush()
+        doc = SourceDocument(
+            corpus_id=corpus.corpus_id,
+            file_path="/tmp/doc_0.txt",
+            file_name="doc_0.txt",
+            file_ext=".txt",
+            file_size_bytes=10,
+            sha256="sha-0",
+            status="processed",
+        )
+        session.add(doc)
+        session.flush()
+        session.add(DocumentSentence(doc_id=doc.doc_id, sent_index=0, text="alpha beta"))
+        lemma1 = Lemma(project_id=project.project_id, lemma_text="alpha", pos="NOUN")
+        lemma2 = Lemma(project_id=project.project_id, lemma_text="beta", pos="NOUN")
+        session.add_all([lemma1, lemma2])
+        session.flush()
+        session.add_all(
+            [
+                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=2, doc_freq=1),
+                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=2, doc_freq=1),
+            ]
+        )
+        session.commit()
+        project_id = int(project.project_id)
+
+        report = service.extract_terms_for_project(
+            session,
+            project_id,
+            enable_ngrams=True,
+            include_np=False,
+            min_freq=1,
+            overwrite=True,
+            batch_size=1,
+            pause_check=_pause_check,
+            cancel_check=lambda: False,
+            state_callback=states.append,
+        )
+
+    engine.dispose()
+
+    phases = [str(state.get("phase") or "") for state in states]
+    assert report.success is True
+    assert states
+    assert states[0]["project_id"] == project_id
+    assert all("status" in state for state in states)
+    assert all("docs_failed" in state for state in states)
+    assert all("error_message" in state for state in states)
+    assert "" not in phases
+    assert "paused" in phases
+    assert "resumed" in phases
+    assert any(state.get("phase") == "paused" and state.get("stage") == "Paused at batch checkpoint" for state in states)
+    assert any(state.get("phase") == "completed" and state.get("status") == "ok" for state in states)

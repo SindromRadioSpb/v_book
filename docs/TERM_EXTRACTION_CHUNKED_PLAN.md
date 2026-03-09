@@ -86,6 +86,44 @@ Resume contract:
 - closing the Terms view requests cooperative extraction cancel instead of
   force-terminating the worker
 
+## Implemented convergence follow-up (2026-03-09)
+
+First Terms/NLP convergence wave is now implemented.
+
+Delivered:
+
+- staged term extraction structured state now includes the same baseline
+  run-metadata fields already used by NLP:
+  - `project_id`
+  - `status`
+  - `stage`
+  - `docs_total`
+  - `docs_processed`
+  - `docs_failed`
+  - `chunks_total`
+  - `chunks_completed`
+  - `last_doc_id`
+  - `error_message`
+- term extraction now emits explicit `paused` and `resumed` phases at the
+  batch checkpoint instead of only changing the dialog button state
+- finalize-stage state emissions no longer produce blank `phase` values
+- Terms progress dialog now consumes structured state for recent-activity
+  logging, matching the NLP dialog pattern more closely
+
+Validation:
+
+- targeted convergence regressions:
+  - `46 passed in 205.80s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_convergence.log`
+- approved DB live probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_terms_convergence_probe.log`
+  - confirmed on the approved `hewiki_gpu_processing test.db`:
+    - a temporary project completed staged term extraction on the real DB
+    - the state stream included both `paused` and `resumed`
+    - no empty `phase` values remained
+    - final completed state carried the aligned run metadata fields
+    - cleanup deleted the temporary project successfully
+
 ## Bench evidence on approved DB
 
 Target DB:
@@ -290,21 +328,17 @@ Further implementation plan for extract terms:
 
 ### Follow-up A: NLP convergence and shared long-operation contract
 
-- keep the current Terms staged progress flow stable; do not reopen blind
-  progress-UI refactors before NLP catches up
-- with `PATCH-NLP-04` now in place, the next convergence checkpoint is no
-  longer CLI resume selection itself; it is semantic alignment between:
-  - NLP checkpoint vocabulary
-  - Terms staged extraction vocabulary
-  - heavy-tier fixture `verify/refresh` expectations
+- keep the current Terms staged progress flow stable; the first semantic
+  alignment wave is now done
 - when checkpointed `process with NLP` lands, align:
   - run-state vocabulary
   - stage names
   - progress payload fields
   - pause/resume/cancel semantics
   - cooperative close behavior
-- only then evaluate whether a shared reusable progress-dialog base is actually
-  warranted across NLP and Terms
+- the remaining convergence question is now narrower:
+  decide later whether a shared reusable progress-dialog base is actually
+  warranted across NLP and Terms, or whether aligned semantics are sufficient
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 

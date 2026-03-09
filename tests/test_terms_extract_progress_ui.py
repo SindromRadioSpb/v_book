@@ -56,6 +56,9 @@ class _FakeDialog:
 
     def update_state(self, state):
         self.states.append(state)
+        message = state.get("message")
+        if message:
+            self.messages.append(message)
 
     def set_completed(self):
         self.completed = True
@@ -131,11 +134,15 @@ def test_project_term_extraction_worker_emits_structured_state(monkeypatch):
                 "stage": "Collecting batch 1/3",
                 "phase": "collect",
                 "run_id": 77,
+                "project_id": 11,
+                "status": "running",
                 "docs_processed": 10,
+                "docs_failed": 0,
                 "docs_total": 30,
                 "chunks_completed": 1,
                 "chunks_total": 3,
                 "last_doc_id": 100,
+                "error_message": None,
             }
         )
         return SimpleNamespace(success=True, cancelled=False)
@@ -157,9 +164,23 @@ def test_project_term_extraction_worker_emits_structured_state(monkeypatch):
 
     assert progress_messages == ["Collecting batch 1/3"]
     assert states[0]["run_id"] == 77
+    assert states[0]["project_id"] == 11
+    assert states[0]["status"] == "running"
+    assert states[0]["docs_failed"] == 0
     assert states[0]["docs_processed"] == 10
     assert len(finished_reports) == 1
     assert finished_reports[0].success is True
+
+
+def test_terms_extract_progress_does_not_duplicate_dialog_activity():
+    view = TermsView.__new__(TermsView)
+    view.status_label = _FakeLabel()
+    view.extract_progress_dialog = _FakeDialog()
+
+    TermsView.on_extract_progress(view, "Collecting batch 1/4")
+
+    assert view.status_label.text == "Collecting batch 1/4"
+    assert view.extract_progress_dialog.messages == []
 
 
 def test_terms_extract_state_updates_progress_ui():
@@ -173,19 +194,24 @@ def test_terms_extract_state_updates_progress_ui():
         {
             "message": "Collecting batch 2/4",
             "stage": "Collecting batch 2/4",
+            "project_id": 15,
+            "status": "running",
             "docs_processed": 25,
+            "docs_failed": 1,
             "docs_total": 100,
             "chunks_completed": 2,
             "chunks_total": 4,
             "run_id": 15,
+            "error_message": None,
         },
     )
 
     assert view.progress_bar.visible is True
     assert view.progress_bar.range == (0, 100)
-    assert view.progress_bar.value == 25
+    assert view.progress_bar.value == 26
     assert view.status_label.text == "Collecting batch 2/4"
     assert view.extract_progress_dialog.states[0]["run_id"] == 15
+    assert view.extract_progress_dialog.messages == ["Collecting batch 2/4"]
 
 
 def test_terms_extract_finished_success_cleans_dialog_and_refreshes(monkeypatch):

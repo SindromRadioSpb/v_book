@@ -971,19 +971,18 @@ class TermsView(QWidget):
     def on_extract_progress(self, message: str):
         """Handle extraction progress updates."""
         self.status_label.setText(message)
-        if self.extract_progress_dialog:
-            self.extract_progress_dialog.append_activity(message)
 
     def on_extract_state(self, state: dict):
         """Handle structured extraction progress state."""
         docs_total = max(0, int(state.get("docs_total") or 0))
         docs_processed = max(0, int(state.get("docs_processed") or 0))
-        stage = str(state.get("stage") or state.get("message") or "Extracting terms...")
+        docs_failed = max(0, int(state.get("docs_failed") or 0))
+        stage = str(state.get("message") or state.get("stage") or "Extracting terms...")
 
         self.progress_bar.setVisible(True)
         if docs_total > 0:
             self.progress_bar.setRange(0, docs_total)
-            self.progress_bar.setValue(min(docs_processed, docs_total))
+            self.progress_bar.setValue(min(docs_processed + docs_failed, docs_total))
         else:
             self.progress_bar.setRange(0, 0)
         self.status_label.setText(stage)

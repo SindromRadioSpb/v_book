@@ -1,4 +1,5 @@
 """Term Extraction Service (M5 Base + M5.1 Clustering)."""
+from dataclasses import asdict
 import json
 import logging
 import time
@@ -26,7 +27,7 @@ from app.infra.sa_models import (
     TermClusterMember,
     TMEntry,
 )
-from app.domain.dto import ExtractReport, ClusterStats
+from app.domain.dto import ExtractReport, ClusterStats, TermExtractionRunState
 from app.domain.term_extraction.ngram_extractor import extract_ngrams_from_sentence
 from app.domain.term_extraction.np_extractor import extract_np_chunks_from_sentence
 from app.domain.term_extraction.association_measures import compute_all_measures
@@ -139,6 +140,47 @@ class TermExtractionService:
 
             logger.info(f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}")
         return self._engine
+
+    def _build_run_state_payload(
+        self,
+        run: Optional[TermExtractRun],
+        *,
+        project_id: int,
+        phase: str,
+        message: Optional[str] = None,
+        docs_processed: int = 0,
+        docs_total: int = 0,
+        chunks_completed: int = 0,
+        chunks_total: int = 0,
+        last_doc_id: Optional[int] = None,
+    ) -> dict:
+        payload = asdict(
+            TermExtractionRunState(
+                run_id=int(run.run_id) if run is not None else 0,
+                project_id=int(project_id),
+                status=str(getattr(run, "status", "") or ""),
+                stage=getattr(run, "stage", None),
+                docs_total=int(docs_total),
+                docs_processed=int(docs_processed),
+                docs_failed=0,
+                chunks_total=int(chunks_total),
+                chunks_completed=int(chunks_completed),
+                last_doc_id=(
+                    int(last_doc_id)
+                    if last_doc_id is not None
+                    else (
+                        int(getattr(run, "last_doc_id"))
+                        if run is not None and getattr(run, "last_doc_id", None) is not None
+                        else None
+                    )
+                ),
+                error_message=getattr(run, "error_message", None),
+            )
+        )
+        payload["phase"] = str(phase or "")
+        if message is not None:
+            payload["message"] = message
+        return payload
 
     def extract_terms_for_project(
         self,
@@ -355,13 +397,15 @@ class TermExtractionService:
             if progress_callback:
                 progress_callback(message)
             if state_callback:
+                if run is not None and stage is not None:
+                    run.stage = stage
                 state_callback(
-                    {
-                        "message": message,
-                        "stage": stage or message,
-                        "phase": phase or "",
-                        "run_id": int(run_id) if run_id is not None else None,
-                        "docs_processed": int(
+                    self._build_run_state_payload(
+                        run,
+                        project_id=project_id,
+                        phase=phase or "",
+                        message=message,
+                        docs_processed=int(
                             docs_done
                             if docs_done is not None
                             else (
@@ -369,7 +413,7 @@ class TermExtractionService:
                                 if run is not None else docs_processed
                             )
                         ),
-                        "docs_total": int(
+                        docs_total=int(
                             docs_hint
                             if docs_hint is not None
                             else (
@@ -377,26 +421,18 @@ class TermExtractionService:
                                 if run is not None else total_docs
                             )
                         ),
-                        "chunks_completed": int(
+                        chunks_completed=int(
                             chunks_done
                             if chunks_done is not None
                             else int(getattr(run, "chunks_completed", 0) or 0)
                         ),
-                        "chunks_total": int(
+                        chunks_total=int(
                             chunks_hint
                             if chunks_hint is not None
                             else int(getattr(run, "chunks_total", 0) or 0)
                         ),
-                        "last_doc_id": (
-                            int(last_doc_id)
-                            if last_doc_id is not None
-                            else (
-                                int(getattr(run, "last_doc_id", 0))
-                                if run is not None and getattr(run, "last_doc_id", None) is not None
-                                else None
-                            )
-                        ),
-                    }
+                        last_doc_id=last_doc_id,
+                    )
                 )
 
         try:
@@ -536,7 +572,54 @@ class TermExtractionService:
                     ),
                 )
                 while True:
-                    if self._wait_if_paused(pause_check=pause_check, cancel_check=cancel_check):
+                    resume_stage = "Collecting staged counters"
+
+                    def _on_paused() -> None:
+                        if run is None:
+                            return
+                        run.stage = "Paused at batch checkpoint"
+                        run.updated_at = self._utc_now()
+                        session.commit()
+                        _emit(
+                            "Paused at batch checkpoint; waiting for resume",
+                            stage=run.stage,
+                            phase="paused",
+                            docs_done=int(run.docs_processed or 0),
+                            docs_hint=total_docs,
+                            chunks_done=int(run.chunks_completed or 0),
+                            chunks_hint=int(run.chunks_total or 0),
+                            last_doc_id=(
+                                int(run.last_doc_id)
+                                if run.last_doc_id is not None else None
+                            ),
+                        )
+
+                    def _on_resumed() -> None:
+                        if run is None:
+                            return
+                        run.stage = resume_stage
+                        run.updated_at = self._utc_now()
+                        session.commit()
+                        _emit(
+                            "Resumed staged extraction",
+                            stage=run.stage,
+                            phase="resumed",
+                            docs_done=int(run.docs_processed or 0),
+                            docs_hint=total_docs,
+                            chunks_done=int(run.chunks_completed or 0),
+                            chunks_hint=int(run.chunks_total or 0),
+                            last_doc_id=(
+                                int(run.last_doc_id)
+                                if run.last_doc_id is not None else None
+                            ),
+                        )
+
+                    if self._wait_if_paused(
+                        pause_check=pause_check,
+                        cancel_check=cancel_check,
+                        on_paused=_on_paused,
+                        on_resumed=_on_resumed,
+                    ):
                         _emit(
                             "Cancellation requested; keeping staged progress for resume",
                             stage="Cancelled",
@@ -696,7 +779,16 @@ class TermExtractionService:
                 run_id=run_id,
                 min_freq=min_freq,
                 total_tokens=total_tokens,
-                progress_callback=_emit,
+                progress_callback=lambda message: _emit(
+                    message,
+                    stage="Storing staged n-grams",
+                    phase="finalize",
+                    docs_done=total_docs,
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                ),
             ) if enable_ngrams else 0
 
             np_chunks_extracted = self._store_staged_np_chunks(
@@ -704,10 +796,28 @@ class TermExtractionService:
                 project_id,
                 run_id=run_id,
                 min_freq=min_freq,
-                progress_callback=_emit,
+                progress_callback=lambda message: _emit(
+                    message,
+                    stage="Storing staged NP chunks",
+                    phase="finalize",
+                    docs_done=total_docs,
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                ),
             ) if include_np else 0
 
-            _emit("Clustering staged terms...")
+            _emit(
+                "Clustering staged terms...",
+                stage="Clustering staged terms",
+                phase="finalize",
+                docs_done=total_docs,
+                docs_hint=total_docs,
+                chunks_done=int(run.chunks_completed or 0),
+                chunks_hint=int(run.chunks_total or 0),
+                last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+            )
             clusters_created = self._cluster_terms(session, project_id)
 
             self._update_extract_project_metadata(
@@ -935,11 +1045,20 @@ class TermExtractionService:
         *,
         pause_check: Optional[Callable[[], bool]],
         cancel_check: Optional[Callable[[], bool]],
+        on_paused: Optional[Callable[[], None]] = None,
+        on_resumed: Optional[Callable[[], None]] = None,
     ) -> bool:
+        was_paused = False
         while pause_check and pause_check():
+            if not was_paused:
+                was_paused = True
+                if on_paused:
+                    on_paused()
             if cancel_check and cancel_check():
                 return True
             time.sleep(0.1)
+        if was_paused and on_resumed:
+            on_resumed()
         return bool(cancel_check and cancel_check())
 
     def _update_extract_project_metadata(

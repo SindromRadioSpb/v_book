@@ -120,14 +120,16 @@ class TermExtractionProgressDialog(QDialog):
         phase = str(state.get("phase") or "")
         run_id = state.get("run_id")
         docs_processed = max(0, int(state.get("docs_processed") or 0))
+        docs_failed = max(0, int(state.get("docs_failed") or 0))
         docs_total = max(0, int(state.get("docs_total") or 0))
         chunks_completed = max(0, int(state.get("chunks_completed") or 0))
         chunks_total = max(0, int(state.get("chunks_total") or 0))
         last_doc_id = state.get("last_doc_id")
+        message = str(state.get("message") or "")
 
         self.stage_label.setText(f"Stage: {stage}")
         self.run_label.setText(f"Run ID: {run_id if run_id is not None else '-'}")
-        self.docs_label.setText(f"Docs: {docs_processed} / {docs_total}")
+        self.docs_label.setText(f"Docs: {docs_processed + docs_failed} / {docs_total}")
         self.chunks_label.setText(f"Chunks: {chunks_completed} / {chunks_total}")
         self.last_doc_label.setText(
             f"Last doc ID: {last_doc_id if last_doc_id is not None else '-'}"
@@ -137,9 +139,12 @@ class TermExtractionProgressDialog(QDialog):
             if self.progress_bar.maximum() != docs_total:
                 self.progress_bar.setRange(0, docs_total)
                 self.progress_bar.setFormat("%v / %m docs (%p%)")
-            self.progress_bar.setValue(min(docs_processed, docs_total))
+            self.progress_bar.setValue(min(docs_processed + docs_failed, docs_total))
         else:
             self.progress_bar.setRange(0, 0)
+
+        if message:
+            self.append_activity(message)
 
         if not self.is_paused:
             if phase == "completed":
@@ -152,8 +157,18 @@ class TermExtractionProgressDialog(QDialog):
                 self.status_label.setStyleSheet(
                     "font-size: 14px; font-weight: bold; color: #b42318;"
                 )
+            elif phase == "paused":
+                self.status_label.setText("Paused after current batch checkpoint")
+                self.status_label.setStyleSheet(
+                    "font-size: 14px; font-weight: bold; color: #b26a00;"
+                )
             elif phase == "finalize":
                 self.status_label.setText("Finalizing staged counters...")
+                self.status_label.setStyleSheet(
+                    "font-size: 14px; font-weight: bold; color: #1f6fb2;"
+                )
+            elif phase == "resumed":
+                self.status_label.setText("Running staged extraction...")
                 self.status_label.setStyleSheet(
                     "font-size: 14px; font-weight: bold; color: #1f6fb2;"
                 )

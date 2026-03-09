@@ -929,3 +929,47 @@ Updated patch-order note:
 
 - `PATCH-NLP-05` remains optional future offline/staging scope only if product
   requirements later demand detached processing
+
+## PATCH-CONV-01 implemented (2026-03-09)
+
+Files:
+
+- `app/domain/dto.py`
+- `app/services/term_extraction_service.py`
+- `app/ui/dialogs/term_extraction_progress_dialog.py`
+- `app/ui/terms_view.py`
+- `tests/test_term_extraction_service_large_project.py`
+- `tests/test_terms_extract_progress_ui.py`
+- convergence/task docs as needed
+
+Result:
+
+- staged term extraction state payload now carries NLP-aligned baseline fields:
+  - `project_id`
+  - `status`
+  - `stage`
+  - `docs_total`
+  - `docs_processed`
+  - `docs_failed`
+  - `chunks_total`
+  - `chunks_completed`
+  - `last_doc_id`
+  - `error_message`
+- term extraction now emits explicit `paused` / `resumed` phases during the
+  batch checkpoint wait
+- finalize-state term extraction no longer emits blank `phase` values
+- Terms progress dialog now consumes structured state for activity logging,
+  which reduces UI wiring drift versus the NLP progress dialog
+
+Validation:
+
+- targeted convergence regressions:
+  - `46 passed in 205.80s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_convergence.log`
+- approved DB live convergence probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_terms_convergence_probe.log`
+  - confirmed on the approved DB:
+    - the staged term extraction state stream included `paused` and `resumed`
+    - `saw_empty_phase=false`
+    - completed state carried the aligned metadata fields
+    - cleanup removed the temporary probe project

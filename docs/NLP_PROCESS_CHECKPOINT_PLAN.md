@@ -530,6 +530,53 @@ Only if product requirements later demand detached/offline NLP processing:
 - define merge-back protocol explicitly
 - keep this out of the first implementation wave
 
+### PATCH-CONV-01: Terms/NLP state semantics alignment
+
+Status:
+
+- implemented on 2026-03-09
+
+Files:
+
+- `app/domain/dto.py`
+- `app/services/term_extraction_service.py`
+- `app/ui/dialogs/term_extraction_progress_dialog.py`
+- `app/ui/terms_view.py`
+- tests
+- docs
+
+Delivered in this wave:
+
+- staged term extraction now emits structured state with NLP-aligned core
+  fields:
+  - `project_id`
+  - `status`
+  - `stage`
+  - `docs_total`
+  - `docs_processed`
+  - `docs_failed`
+  - `chunks_total`
+  - `chunks_completed`
+  - `last_doc_id`
+  - `error_message`
+- term extraction now emits explicit `paused` and `resumed` phases at the
+  batch checkpoint
+- finalize-stage terms payloads no longer leak empty `phase` values
+- Terms progress dialog now relies on structured state for recent activity,
+  reducing semantic drift from the NLP progress dialog
+
+Validation:
+
+- targeted convergence regressions:
+  - `46 passed in 205.80s`
+  - artifact: `build/logs/nlp_prework/pytest_nlp_terms_convergence.log`
+- approved DB live convergence probe:
+  - artifact: `build/logs/nlp_prework/hewiki_live_terms_convergence_probe.log`
+  - confirmed:
+    - real approved DB run emitted both `paused` and `resumed`
+    - no empty `phase` remained in the state stream
+    - final completed term-extraction state carried the aligned metadata fields
+
 ## Non-negotiable invariants
 
 - reference corpora remain CLI-only for real NLP processing
