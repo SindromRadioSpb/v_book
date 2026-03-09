@@ -83,6 +83,8 @@ Resume contract:
 Target DB:
 
 - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- initial Task 30 audit schema: `35`
+- current schema after migration `036_term_extract_chunked`: `36`
 
 Artifacts:
 

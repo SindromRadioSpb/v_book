@@ -11,7 +11,8 @@ Approved Task 30 reference target:
 
 - DB path:
   `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
-- Verified schema version: `35`
+- Verified schema version at initial Task 30 audit: `35`
+- Current schema version after migration `036_term_extract_chunked`: `36`
 
 ## What it measures
 

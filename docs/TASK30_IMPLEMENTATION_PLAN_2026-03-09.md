@@ -6,7 +6,8 @@ This plan is based on the approved Task 30 audit executed against:
 
 - DB path: `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - Verified runtime contract: `python -m app.main --db-path "<path above>"`
-- Verified schema version on target DB: `35`
+- Verified schema version on target DB at initial Task 30 audit: `35`
+- Current schema version on the same DB after migration `036_term_extract_chunked`: `36`
 
 This document records the implementation order for the confirmed findings only.
 It is intentionally patch-oriented and conservative.
