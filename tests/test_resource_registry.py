@@ -95,3 +95,31 @@ def test_resource_status_uses_bundled_fallback_when_custom_data_root_missing(mon
 
     assert status.state == "installed"
     assert status.install_paths == [bundled_model]
+
+
+def test_resource_status_uses_explicit_phonikud_model_path_outside_data_root(monkeypatch, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.sync()
+
+    data_root = tmp_path / "custom_data"
+    explicit_model = tmp_path / "external_models" / "phonikud-1.0.int8.onnx"
+    explicit_model.parent.mkdir(parents=True, exist_ok=True)
+    explicit_model.write_bytes(b"external-model")
+    checksum = hashlib.sha256(b"external-model").hexdigest()
+
+    manifest_path = tmp_path / "resource_manifest.json"
+    _write_manifest(manifest_path, checksum)
+
+    settings.set_value("resources/manifest_path", str(manifest_path))
+    settings.set_value("resources/data_root", str(data_root))
+    settings.set_value("pronunciation/phonikud/model_path", str(explicit_model))
+    settings.sync()
+    monkeypatch.delenv("HDLE_DATA_ROOT", raising=False)
+
+    registry = ResourceRegistry(settings=settings)
+    status = registry.get_status("nikud_pronunciation_model")
+
+    assert status.state == "installed"
+    assert status.install_paths == [explicit_model]

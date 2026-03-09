@@ -158,6 +158,9 @@ Goals:
 - Unify readiness semantics for MT and audio providers.
 - Make configured vs enabled vs optional reporting consistent.
 - Document known runtime-root/resource-root assumptions.
+- Treat explicit `pronunciation/phonikud/model_path` or `PHONIKUD_MODEL_PATH`
+  as a valid installed niqqud resource source, even when the model lives
+  outside the managed `data_root`.
 
 Validation:
 
@@ -165,6 +168,8 @@ Validation:
 - Targeted provider config tests.
 - Result: implemented; MT health now respects master enable + per-provider
   enable + chain membership semantics, matching audio-style readiness reporting.
+- Result: implemented; resource registry now recognizes explicit external
+  Phonikud model paths, so health/wizard state matches real inference readiness.
 
 ## Out of scope for PATCH-01
 

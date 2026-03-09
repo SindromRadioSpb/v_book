@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,11 +126,43 @@ class ResourceRegistry:
         if primary:
             candidates.append(primary)
 
+        explicit = self._resolve_explicit_phonikud_install_paths(entry)
+        if explicit and explicit not in candidates:
+            candidates.append(explicit)
+
         bundled = self.resolve_bundled_install_paths(entry)
         if bundled and bundled != primary:
             candidates.append(bundled)
 
         return candidates
+
+    def _resolve_explicit_phonikud_install_paths(self, entry: ResourceEntry) -> List[Path]:
+        """Treat explicit phonikud model paths as valid installed resources.
+
+        The niqqud bootstrap can be configured with a direct ONNX file path via
+        `pronunciation/phonikud/model_path` (or `PHONIKUD_MODEL_PATH`). Those
+        paths may live outside the managed data_root, but they are still the
+        real runtime source-of-truth for lexical/sentence niqqud readiness.
+        """
+        if entry.id not in {"nikud_pronunciation_model", "sentence_niqqud_model"}:
+            return []
+
+        raw_candidates = [
+            self.settings.get_string("pronunciation/phonikud/model_path", "") or "",
+            os.getenv("PHONIKUD_MODEL_PATH") or "",
+        ]
+        for raw in raw_candidates:
+            cleaned = str(raw or "").strip().strip("\"'").rstrip(" .")
+            if not cleaned:
+                continue
+            path = Path(cleaned)
+            if path.is_file():
+                return [path]
+            if path.is_dir():
+                resolved = [path / filename for filename in entry.filenames]
+                if resolved and all(candidate.exists() for candidate in resolved):
+                    return resolved
+        return []
 
     def get_status(self, resource_id: str) -> ResourceStatus:
         entry = self.get_entry(resource_id)
