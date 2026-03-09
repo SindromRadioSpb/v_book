@@ -105,6 +105,7 @@ Artifacts:
 - `build\logs\task30\pipeline_bench_report_20260309_083133.md`
 - `build\logs\task30\pipeline_bench_report_20260309_085005.md`
 - `build\logs\task30\pipeline_bench_report_20260309_090248.md`
+- `build\logs\task30\pipeline_bench_report_20260309_092015.md`
 
 Observed `extract_terms` stage timings on the same DB/slice:
 
@@ -179,6 +180,17 @@ Maintenance-cycle follow-up:
   - `post_cleanup_bench = 27.753 s`
   - `overall wall = 826.349 s`
   - this stayed within the current `large` wall budget of `900 s`
+- approved live ceiling evidence:
+  - `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier ceiling`
+  - `pre_reset = 291.628 s`
+  - `slice_clone = 440.776 s`
+  - `extract_terms stage = 1281.056 s`
+  - `post_cleanup_bench = 68.910 s`
+  - `overall wall = 2085.892 s`
+  - stage runtime stayed below the nominal `1800 s` ceiling budget
+  - full one-command workflow exceeded the current overall wall budget by
+    `285.892 s`, so this is the confirmed local machine ceiling for the full
+    pre-reset workflow
 - after the run, the sandbox contained `0` remaining `BENCH_%` projects and no
   SQLite sidecar files
 

@@ -422,6 +422,7 @@ Files:
 - `build/logs/task30/pipeline_bench_report_20260309_083133.md`
 - `build/logs/task30/pipeline_bench_report_20260309_085005.md`
 - `build/logs/task30/pipeline_bench_report_20260309_090248.md`
+- `build/logs/task30/pipeline_bench_report_20260309_092015.md`
 
 Goals:
 
@@ -480,6 +481,21 @@ Observed evidence:
   - `post_cleanup_bench = 27.753 s`
   - `overall wall = 826.349 s`
   - this stayed within the current `large` tier wall budget of `900 s`
+- Live ceiling cycle on the same approved sandbox DB completed functionally but
+  exceeded the current overall wall budget:
+  - command shape:
+    `extract_terms --reuse-working-db --pre-reset-sandbox --post-cleanup-bench --tier ceiling`
+  - artifact: `build\logs\task30\pipeline_bench_report_20260309_092015.md`
+  - `base_copy/pre_reset = 291.628 s`
+  - `slice_clone = 440.776 s`
+  - `extract_terms stage = 1281.056 s`
+  - `post_cleanup_bench = 68.910 s`
+  - `overall wall = 2085.892 s`
+  - interpretation:
+    - stage runtime itself stayed below `1800 s`
+    - full one-command ceiling workflow exceeded the current `ceiling` wall
+      budget by `285.892 s`, so this is the confirmed machine ceiling for the
+      current local workflow contract
 - After the run:
   - `dict_project where name like 'BENCH_%'` returned `0`
   - no `-wal/-shm/-journal` files remained next to the sandbox DB
