@@ -1200,3 +1200,81 @@ Next step after this rerun:
   - smaller transaction fences within each document batch
   - explicit reopen/checkpoint discipline between super-chunks
   - table-layout or insert-order investigation for the snapshot table itself
+
+## Staged super-chunk redesign validated on approved dev/test DB (2026-03-10)
+
+Files / artifacts:
+
+- `app/infra/migrations/040_sentence_nlp_snapshot_stage.sql`
+- `app/infra/sa_models.py`
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `tests/test_project_delete_fast.py`
+- `build/logs/nlp_redesign_validation/schema_probe_main_after_migrate.json`
+- `build/logs/nlp_redesign_validation/schema_probe_test_after_migrate.json`
+- `build/logs/nlp_redesign_validation/coverage_before_id1_redesign.log`
+- `build/logs/nlp_redesign_validation/snapshot_backfill_id1_10000.log`
+- `build/logs/nlp_redesign_validation/snapshot_backfill_probe_id1_10000.jsonl`
+- `build/logs/nlp_redesign_validation/coverage_after_id1_10000.log`
+- `build/logs/nlp_redesign_validation/postrun_probe_id1_10000.json`
+- `build/logs/nlp_redesign_validation/doc1_postrun_probe.json`
+
+Delivered:
+
+- added `sentence_nlp_snapshot_stage` and advanced the real hewiki DBs to
+  `schema_version=40`
+- legacy snapshot backfill now stages per-document rows first, then merges them
+  into `sentence_nlp_snapshot` in bounded batches
+- every snapshot-backfill super-chunk now ends with a bounded physical check
+  before resumable run state advances
+- snapshot-backfill CLI gained:
+  - `--merge-batch-size`
+  - `--segment-quick-check-timeout`
+
+Observed on the approved dev/test DB:
+
+- real bounded run:
+  - `project_id=1`
+  - `max_docs=10000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+  - `integrity_checkpoint_mode=none`
+- runtime:
+  - `1780.3 s`
+  - about `29.7` minutes
+- result:
+  - run `387618`
+  - `status='ok'`
+  - `stage='completed'`
+  - `docs_processed=10000`
+  - `docs_failed=0`
+  - `chunks_completed=2/2`
+  - `stage_rows_remaining=0`
+  - post-run `db_open` remained healthy
+- coverage after the bounded run:
+  - `6.2069%` sentence coverage
+  - `2.5795%` full-doc coverage
+  - `9999` fully covered docs in the first `10000`-doc slice
+
+Important data-quality note:
+
+- the missing `1` fully covered doc is explained by a restored-DB inconsistency,
+  not by a new backfill regression
+- `doc_id=1` currently has:
+  - `status='processed'`
+  - `sentence_count=272`
+  - `0` `document_sentence` rows
+  - `0` snapshot rows
+
+Current conclusion:
+
+- the staged/super-chunk redesign is a real durability improvement
+- it is already good enough for bounded large-project validation on the real
+  dev/test DB
+- full-scale `ID=1` is still unproven; do not jump back to
+  freshness/version-hardening yet
+- the next evidence step should be a larger staged slice on sandbox or the
+  approved dev/test DB before any new full `387639`-doc rerun

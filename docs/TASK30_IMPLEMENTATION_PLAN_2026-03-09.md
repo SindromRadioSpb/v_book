@@ -1477,3 +1477,59 @@ Current next step:
 - do not resume freshness/version work
 - move to a new storage-level redesign wave for `sentence_nlp_snapshot`
   full-scale writes
+
+## Snapshot backfill storage redesign wave (2026-03-10)
+
+Status:
+
+- implemented and validated on the approved dev/test DB
+
+Files:
+
+- `app/infra/migrations/040_sentence_nlp_snapshot_stage.sql`
+- `app/infra/sa_models.py`
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `tests/test_project_delete_fast.py`
+
+What changed:
+
+- added `sentence_nlp_snapshot_stage`
+- legacy snapshot backfill now uses:
+  - per-document staging
+  - bounded merge batches into `sentence_nlp_snapshot`
+  - bounded physical verification on every super-chunk boundary
+- CLI controls added:
+  - `--merge-batch-size`
+  - `--segment-quick-check-timeout`
+- fast project delete now explicitly clears stage rows too
+
+Validation:
+
+- targeted + adjacent regressions:
+  - `57 passed in 300.05s`
+  - artifact: `build/logs/nlp_redesign_preflight/pytest_redesign_regression.log`
+- both real hewiki DBs now at:
+  - `schema_version=40`
+  - `sentence_nlp_snapshot_stage` present
+- bounded real run on `hewiki_gpu_processing test.db`:
+  - `ID=1`
+  - `max_docs=10000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+  - runtime `1780.3 s`
+  - run `387618` finished `ok/completed`
+  - `stage_rows_remaining=0`
+  - post-run `db_open` healthy
+
+Operational interpretation:
+
+- the redesign is good enough for bounded large-scale backfill on the real
+  dev/test DB
+- this is a real step forward from the old direct-write path, but it still does
+  not justify an immediate fresh full-scale rerun on all `387639` docs
+- the next evidence step should be a larger staged slice, not a return to
+  freshness/version work

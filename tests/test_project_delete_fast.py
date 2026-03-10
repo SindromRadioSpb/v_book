@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.infra.sa_models import (
     DictProject, Library, SourceCorpus, SourceDocument, DocumentSentence, Lemma,
-    SentenceNLPSnapshot,
+    SentenceNLPSnapshot, SentenceNLPSnapshotStage, ProcessorRun,
 )
 from app.services.project_service import ProjectService
 
@@ -182,6 +182,58 @@ def test_delete_project_removes_sentence_nlp_snapshots():
         try:
             assert raw.execute(
                 "SELECT COUNT(*) FROM sentence_nlp_snapshot"
+            ).fetchone()[0] == 0
+        finally:
+            raw.close()
+    finally:
+        session.close()
+        engine.dispose()
+        db_path.unlink(missing_ok=True)
+
+
+def test_delete_project_removes_sentence_nlp_snapshot_stage_rows():
+    db_path, session, project_id, engine = _make_test_db()
+    try:
+        sentence_id = session.execute(
+            text("SELECT sentence_id FROM document_sentence ORDER BY sentence_id LIMIT 1")
+        ).scalar_one()
+        run = ProcessorRun(
+            project_id=project_id,
+            engine="fake",
+            engine_version="1",
+            docs_total=1,
+            docs_processed=0,
+            docs_failed=0,
+            chunks_total=1,
+            chunks_completed=0,
+            status="running",
+            stage="snapshot_backfill",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            SentenceNLPSnapshotStage(
+                run_id=int(run.run_id),
+                sentence_id=int(sentence_id),
+                engine="fake",
+                engine_version="1",
+                sentence_text_hash="hash-stage",
+                payload_json="[]",
+                token_count=0,
+            )
+        )
+        session.commit()
+
+        svc = ProjectService.__new__(ProjectService)
+        svc.db_service = None
+
+        report = svc.delete_project(session, project_id)
+        assert report.success
+
+        raw = sqlite3.connect(str(db_path))
+        try:
+            assert raw.execute(
+                "SELECT COUNT(*) FROM sentence_nlp_snapshot_stage"
             ).fetchone()[0] == 0
         finally:
             raw.close()

@@ -485,6 +485,10 @@ class ProjectService:
                     "(SELECT run_id FROM processor_run WHERE project_id = :pid)", p
                 )
                 _safe(
+                    "DELETE FROM sentence_nlp_snapshot_stage WHERE run_id IN "
+                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)", p
+                )
+                _safe(
                     "DELETE FROM stopword_item WHERE stopset_id IN "
                     "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)", p
                 )

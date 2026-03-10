@@ -232,6 +232,35 @@ class SentenceNLPSnapshot(Base):
     sentence = relationship("DocumentSentence", back_populates="nlp_snapshot")
 
 
+class SentenceNLPSnapshotStage(Base):
+    """Ephemeral staged rows for bounded legacy snapshot backfill."""
+
+    __tablename__ = "sentence_nlp_snapshot_stage"
+
+    run_id = Column(
+        Integer,
+        ForeignKey("processor_run.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sentence_id = Column(
+        Integer,
+        ForeignKey("document_sentence.sentence_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    engine = Column(Text, nullable=False)
+    engine_version = Column(Text)
+    sentence_text_hash = Column(Text, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    token_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(Text, nullable=False, default=utc_now)
+    updated_at = Column(Text, nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("token_count >= 0", name="ck_sentence_nlp_snapshot_stage_token_count"),
+        Index("idx_sentence_nlp_snapshot_stage_sentence", "sentence_id"),
+    )
+
+
 class SentencePronunciation(Base):
     """Sentence-level niqqud layer (Migration 024).
 

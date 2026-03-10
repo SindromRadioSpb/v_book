@@ -575,6 +575,8 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
         ):
             captured["doc_ids"] = list(doc_ids)
             captured["integrity_checkpoint_mode"] = kwargs.get("integrity_checkpoint_mode")
+            captured["merge_batch_size"] = kwargs.get("merge_batch_size")
+            captured["segment_quick_check_timeout"] = kwargs.get("segment_quick_check_timeout")
             return len(doc_ids), 0
 
         monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
@@ -594,6 +596,10 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
                 "2",
                 "--integrity-checkpoint-mode",
                 "none",
+                "--merge-batch-size",
+                "77",
+                "--segment-quick-check-timeout",
+                "0.25",
             ],
         )
 
@@ -601,6 +607,8 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
 
         assert captured["doc_ids"] == doc_ids[2:4]
         assert captured["integrity_checkpoint_mode"] == "none"
+        assert captured["merge_batch_size"] == 77
+        assert captured["segment_quick_check_timeout"] == 0.25
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
@@ -627,6 +635,8 @@ def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkey
         ):
             captured["doc_ids"] = list(doc_ids)
             captured["integrity_checkpoint_mode"] = kwargs.get("integrity_checkpoint_mode")
+            captured["merge_batch_size"] = kwargs.get("merge_batch_size")
+            captured["segment_quick_check_timeout"] = kwargs.get("segment_quick_check_timeout")
             return len(doc_ids), 0
 
         monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
@@ -647,6 +657,8 @@ def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkey
 
         assert captured["doc_ids"] == doc_ids
         assert captured["integrity_checkpoint_mode"] == "none"
+        assert captured["merge_batch_size"] == 1000
+        assert captured["segment_quick_check_timeout"] == 0.5
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
@@ -665,6 +677,27 @@ def test_cli_rejects_integrity_checkpoint_mode_without_snapshot_backfill(monkeyp
             "1",
             "--integrity-checkpoint-mode",
             "none",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+
+
+def test_cli_rejects_invalid_snapshot_backfill_merge_batch_size(monkeypatch):
+    module = _load_script_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "process_reference_corpus.py",
+            "--db-path",
+            "dummy.db",
+            "--project-id",
+            "1",
+            "--backfill-snapshots",
+            "--merge-batch-size",
+            "0",
         ],
     )
     with pytest.raises(SystemExit) as exc:

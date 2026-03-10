@@ -16,6 +16,7 @@ from app.infra.sa_models import (
     ProcessorRun,
     RunError,
     SentenceNLPSnapshot,
+    SentenceNLPSnapshotStage,
     SourceCorpus,
     SourceDocument,
 )
@@ -141,6 +142,7 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
                 source_label="snapshot_backfill_test",
             )
             snapshots = session.execute(select(SentenceNLPSnapshot)).scalars().all()
+            staged_rows = session.execute(select(SentenceNLPSnapshotStage)).scalars().all()
             docs = session.execute(
                 select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
             ).scalars().all()
@@ -148,6 +150,7 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
 
         assert (ok_count, err_count) == (2, 0)
         assert len(snapshots) == 4
+        assert staged_rows == []
         assert all(str(doc.status) == "processed" for doc in docs)
         assert lemmas == []
     finally:
@@ -194,11 +197,13 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
             runs_after_first = session.execute(
                 select(ProcessorRun).order_by(ProcessorRun.run_id.asc())
             ).scalars().all()
+            staged_after_first = session.execute(select(SentenceNLPSnapshotStage)).scalars().all()
 
         assert (ok_1, err_1) == (1, 0)
         assert len(runs_after_first) == 1
         assert runs_after_first[0].status == "cancelled"
         assert runs_after_first[0].docs_processed == 1
+        assert staged_after_first == []
         assert any(state.get("phase") == "cancelled" for state in first_states)
 
         second_states: list[dict] = []
@@ -274,6 +279,118 @@ def test_snapshot_backfill_batch_marks_run_failed_on_integrity_error(monkeypatch
         assert any(error.stage == "integrity_check" for error in run_errors)
         assert any(state.get("phase") == "verifying_integrity" for state in states)
         assert any(state.get("phase") == "failed" for state in states)
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_backfill_batch_runs_segment_integrity_check_per_chunk(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"]},
+        )
+        segment_calls: list[float] = []
+
+        def _fake_segment_check(**kwargs):
+            segment_calls.append(float(kwargs.get("quick_check_timeout_sec") or 0.0))
+            return {"ok": True, "quick_check_rows": ["ok"], "quick_check_timed_out": False}
+
+        monkeypatch.setattr(service, "_run_snapshot_backfill_segment_check", _fake_segment_check)
+
+        with db.get_session() as session:
+            doc_ids = _seed_processed_docs_without_snapshots(session, count=3)
+            ok_count, err_count = service.backfill_sentence_snapshots_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=2,
+                merge_batch_size=1,
+                segment_quick_check_timeout=0.25,
+                resume_latest=True,
+                source_label="snapshot_backfill_test",
+            )
+
+        assert (ok_count, err_count) == (3, 0)
+        assert segment_calls == [0.25, 0.25]
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_backfill_batch_clears_stale_stage_rows_before_resume(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"]},
+        )
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_segment_check",
+            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"], "quick_check_timed_out": False},
+        )
+
+        with db.get_session() as session:
+            doc_ids = _seed_processed_docs_without_snapshots(session, count=2)
+            service.backfill_sentence_snapshots_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="snapshot_backfill_test",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            sentence_id = session.execute(
+                select(DocumentSentence.sentence_id)
+                .where(DocumentSentence.doc_id == doc_ids[1])
+                .order_by(DocumentSentence.sent_index.asc())
+            ).scalars().first()
+            assert sentence_id is not None
+            session.add(
+                SentenceNLPSnapshotStage(
+                    run_id=int(run.run_id),
+                    sentence_id=int(sentence_id),
+                    engine="fake",
+                    engine_version="1",
+                    sentence_text_hash="stale",
+                    payload_json="[]",
+                    token_count=0,
+                )
+            )
+            run.status = "cancelled"
+            run.stage = "cancelled"
+            run.docs_processed = 1
+            run.last_doc_id = doc_ids[0]
+            session.commit()
+
+            service.backfill_sentence_snapshots_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="snapshot_backfill_test",
+            )
+            staged_rows = session.execute(select(SentenceNLPSnapshotStage)).scalars().all()
+
+        assert staged_rows == []
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

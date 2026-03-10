@@ -13,12 +13,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, text, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.infra.sa_models import (
     SourceDocument,
     DocumentText,
     DocumentSentence,
     SentenceNLPSnapshot,
+    SentenceNLPSnapshotStage,
     Lemma,
     LemmaDocStat,
     LemmaProjectStat,
@@ -396,6 +398,25 @@ class ProcessService:
 
         return project_id
 
+    def _build_sentence_nlp_snapshot_values(
+        self,
+        *,
+        sentence_row: DocumentSentence,
+        engine: NLPEngine,
+        nlp_sentences: List[Any],
+    ) -> dict[str, Any]:
+        now = self._utc_now()
+        return {
+            "sentence_id": int(sentence_row.sentence_id),
+            "engine": engine.get_name(),
+            "engine_version": engine.get_version(),
+            "sentence_text_hash": build_sentence_text_hash(str(sentence_row.text or "")),
+            "payload_json": serialize_nlp_sentences(nlp_sentences),
+            "token_count": count_snapshot_tokens(nlp_sentences),
+            "created_at": now,
+            "updated_at": now,
+        }
+
     def _upsert_sentence_nlp_snapshot(
         self,
         session: Session,
@@ -404,16 +425,21 @@ class ProcessService:
         engine: NLPEngine,
         nlp_sentences: List[Any],
     ) -> int:
+        values = self._build_sentence_nlp_snapshot_values(
+            sentence_row=sentence_row,
+            engine=engine,
+            nlp_sentences=nlp_sentences,
+        )
         snapshot = session.get(SentenceNLPSnapshot, int(sentence_row.sentence_id))
         if snapshot is None:
             snapshot = SentenceNLPSnapshot(sentence_id=int(sentence_row.sentence_id))
             session.add(snapshot)
 
-        snapshot.engine = engine.get_name()
-        snapshot.engine_version = engine.get_version()
-        snapshot.sentence_text_hash = build_sentence_text_hash(str(sentence_row.text or ""))
-        snapshot.payload_json = serialize_nlp_sentences(nlp_sentences)
-        snapshot.token_count = count_snapshot_tokens(nlp_sentences)
+        snapshot.engine = str(values["engine"])
+        snapshot.engine_version = values["engine_version"]
+        snapshot.sentence_text_hash = str(values["sentence_text_hash"])
+        snapshot.payload_json = str(values["payload_json"])
+        snapshot.token_count = int(values["token_count"] or 0)
         return int(snapshot.token_count or 0)
 
     def _record_batch_run_error(
@@ -435,6 +461,193 @@ class ProcessService:
                 message=str(message or "")[:500],
             )
         )
+
+    def _clear_sentence_nlp_snapshot_stage(self, session: Session, *, run_id: int) -> int:
+        stage_count = int(
+            session.execute(
+                select(text("COUNT(*)"))
+                .select_from(SentenceNLPSnapshotStage)
+                .where(SentenceNLPSnapshotStage.run_id == int(run_id))
+            ).scalar()
+            or 0
+        )
+        if stage_count <= 0:
+            return 0
+        session.execute(
+            SentenceNLPSnapshotStage.__table__.delete().where(
+                SentenceNLPSnapshotStage.run_id == int(run_id)
+            )
+        )
+        session.flush()
+        return stage_count
+
+    def _stage_sentence_nlp_snapshot_rows(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        rows: List[dict[str, Any]],
+        insert_batch_size: int = 200,
+    ) -> int:
+        if not rows:
+            return 0
+
+        inserted = 0
+        for start in range(0, len(rows), int(insert_batch_size)):
+            chunk = []
+            for row in rows[start:start + int(insert_batch_size)]:
+                chunk.append(
+                    {
+                        "run_id": int(run_id),
+                        "sentence_id": int(row["sentence_id"]),
+                        "engine": str(row["engine"]),
+                        "engine_version": row.get("engine_version"),
+                        "sentence_text_hash": str(row["sentence_text_hash"]),
+                        "payload_json": str(row["payload_json"]),
+                        "token_count": int(row["token_count"] or 0),
+                        "created_at": row.get("created_at") or self._utc_now(),
+                        "updated_at": row.get("updated_at") or self._utc_now(),
+                    }
+                )
+            stmt = sqlite_insert(SentenceNLPSnapshotStage.__table__).values(chunk)
+            excluded = stmt.excluded
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["run_id", "sentence_id"],
+                set_={
+                    "engine": excluded.engine,
+                    "engine_version": excluded.engine_version,
+                    "sentence_text_hash": excluded.sentence_text_hash,
+                    "payload_json": excluded.payload_json,
+                    "token_count": excluded.token_count,
+                    "updated_at": excluded.updated_at,
+                },
+            )
+            session.execute(stmt)
+            inserted += len(chunk)
+
+        session.flush()
+        return inserted
+
+    def _merge_sentence_nlp_snapshot_stage(
+        self,
+        session: Session,
+        *,
+        run_id: int,
+        merge_batch_size: int,
+    ) -> int:
+        merged = 0
+        batch_size = max(1, int(merge_batch_size or 1000))
+
+        while True:
+            rows = [
+                dict(row)
+                for row in session.execute(
+                    select(
+                        SentenceNLPSnapshotStage.sentence_id,
+                        SentenceNLPSnapshotStage.engine,
+                        SentenceNLPSnapshotStage.engine_version,
+                        SentenceNLPSnapshotStage.sentence_text_hash,
+                        SentenceNLPSnapshotStage.payload_json,
+                        SentenceNLPSnapshotStage.token_count,
+                        SentenceNLPSnapshotStage.created_at,
+                        SentenceNLPSnapshotStage.updated_at,
+                    )
+                    .where(SentenceNLPSnapshotStage.run_id == int(run_id))
+                    .order_by(SentenceNLPSnapshotStage.sentence_id.asc())
+                    .limit(batch_size)
+                ).mappings().all()
+            ]
+            if not rows:
+                return merged
+
+            sentence_ids = [int(row["sentence_id"]) for row in rows]
+            stmt = sqlite_insert(SentenceNLPSnapshot.__table__).values(rows)
+            excluded = stmt.excluded
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["sentence_id"],
+                set_={
+                    "engine": excluded.engine,
+                    "engine_version": excluded.engine_version,
+                    "sentence_text_hash": excluded.sentence_text_hash,
+                    "payload_json": excluded.payload_json,
+                    "token_count": excluded.token_count,
+                    "updated_at": excluded.updated_at,
+                },
+            )
+            session.execute(stmt)
+            session.execute(
+                SentenceNLPSnapshotStage.__table__.delete().where(
+                    SentenceNLPSnapshotStage.run_id == int(run_id),
+                    SentenceNLPSnapshotStage.sentence_id.in_(sentence_ids),
+                )
+            )
+            session.commit()
+            merged += len(rows)
+
+    def _run_snapshot_backfill_segment_check(
+        self,
+        *,
+        quick_check_timeout_sec: float = 0.5,
+    ) -> dict[str, Any]:
+        """Run a bounded physical check between super-chunks.
+
+        Timeout is treated as inconclusive-but-not-failing; direct table probes
+        must still succeed.
+        """
+        db_path = self.db_service.db_manager.db_path
+        summary: dict[str, Any] = {
+            "ok": False,
+            "db_path": str(db_path),
+            "quick_check_rows": [],
+            "quick_check_timed_out": False,
+            "quick_check_timeout_sec": float(quick_check_timeout_sec),
+            "snapshot_probe_error": None,
+            "error": None,
+        }
+        conn: Optional[sqlite3.Connection] = None
+        started = time.perf_counter()
+
+        def _progress_handler() -> int:
+            if quick_check_timeout_sec <= 0:
+                return 0
+            elapsed = time.perf_counter() - started
+            return 1 if elapsed >= float(quick_check_timeout_sec) else 0
+
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=30)
+            conn.execute("PRAGMA busy_timeout=15000")
+            conn.set_progress_handler(_progress_handler, 10_000)
+            try:
+                quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+            except sqlite3.OperationalError as exc:
+                if "interrupted" in str(exc).lower() and quick_check_timeout_sec > 0:
+                    summary["quick_check_timed_out"] = True
+                    quick_rows = []
+                else:
+                    raise
+            finally:
+                conn.set_progress_handler(None, 0)
+
+            summary["quick_check_rows"] = quick_rows
+            if quick_rows and any(str(row).lower() != "ok" for row in quick_rows):
+                summary["error"] = "PRAGMA quick_check(10) failed: " + "; ".join(quick_rows[:5])
+                return summary
+
+            conn.execute(
+                "SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1"
+            ).fetchone()
+            summary["ok"] = True
+            return summary
+        except sqlite3.Error as exc:
+            summary["snapshot_probe_error"] = str(exc)
+            summary["error"] = str(exc)
+            return summary
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
 
     def _run_snapshot_backfill_integrity_check(
         self,
@@ -1065,11 +1278,13 @@ class ProcessService:
         *,
         engine: NLPEngine,
         batch_run_id: Optional[int] = None,
-    ) -> tuple[bool, str]:
-        """Persist missing sentence snapshots for one already-processed document."""
+    ) -> tuple[bool, str, int]:
+        """Stage missing sentence snapshots for one already-processed document."""
         logger.info("Backfilling sentence snapshots for document %s...", doc_id)
 
         try:
+            if batch_run_id is None:
+                raise ValueError("batch_run_id is required for sentence snapshot staging")
             doc = session.get(SourceDocument, int(doc_id))
             if doc is None:
                 raise ValueError(f"Document not found: {doc_id}")
@@ -1087,28 +1302,38 @@ class ProcessService:
             )
             rows = session.execute(stmt).all()
             if not rows:
-                return True, "No document_sentence rows to backfill"
+                return True, "No document_sentence rows to backfill", 0
 
             missing_count = 0
             token_total = 0
+            stage_rows: list[dict[str, Any]] = []
             for sent_row, snapshot in rows:
                 if snapshot is not None:
                     continue
                 missing_count += 1
-                token_total += self._upsert_sentence_nlp_snapshot(
-                    session,
+                nlp_sentences = engine.process(str(sent_row.text or ""))
+                row = self._build_sentence_nlp_snapshot_values(
                     sentence_row=sent_row,
                     engine=engine,
-                    nlp_sentences=engine.process(str(sent_row.text or "")),
+                    nlp_sentences=nlp_sentences,
                 )
+                token_total += int(row["token_count"] or 0)
+                stage_rows.append(row)
 
-            session.commit()
             if missing_count == 0:
-                return True, "Snapshots already present"
-            return True, (
-                f"Backfilled {missing_count} sentence snapshot(s)"
-                f" ({token_total} token(s))"
+                session.commit()
+                return True, "Snapshots already present", 0
+
+            self._stage_sentence_nlp_snapshot_rows(
+                session,
+                run_id=int(batch_run_id),
+                rows=stage_rows,
             )
+            session.commit()
+            return True, (
+                f"Staged {missing_count} sentence snapshot(s)"
+                f" ({token_total} token(s))"
+            ), missing_count
         except Exception as exc:
             logger.exception("Failed to backfill sentence snapshots for document %s", doc_id)
             session.rollback()
@@ -1123,7 +1348,7 @@ class ProcessService:
                 session.commit()
             except Exception:
                 session.rollback()
-            return False, str(exc)
+            return False, str(exc), 0
 
     def backfill_sentence_snapshots_batch(
         self,
@@ -1142,8 +1367,16 @@ class ProcessService:
         resume_run_id: Optional[int] = None,
         source_label: str = "snapshot_backfill",
         integrity_checkpoint_mode: str = "none",
+        merge_batch_size: int = 1000,
+        segment_quick_check_timeout: float = 0.5,
     ) -> Tuple[int, int]:
-        """Backfill missing sentence snapshots for a deterministic processed-doc slice."""
+        """Backfill missing sentence snapshots for a deterministic processed-doc slice.
+
+        Storage-level durability is handled through:
+        - per-document staging into `sentence_nlp_snapshot_stage`
+        - bounded merge batches into `sentence_nlp_snapshot`
+        - super-chunk integrity checks before advancing resumable run state
+        """
         if resume_latest and resume_run_id is not None:
             raise ValueError("resume_latest and resume_run_id are mutually exclusive")
 
@@ -1152,6 +1385,10 @@ class ProcessService:
             return 0, 0
         if chunk_size <= 0:
             raise ValueError("chunk_size must be >= 1")
+        if merge_batch_size <= 0:
+            raise ValueError("merge_batch_size must be >= 1")
+        if segment_quick_check_timeout < 0:
+            raise ValueError("segment_quick_check_timeout must be >= 0")
 
         project_id = self._resolve_project_id_for_docs(session, ordered_ids)
         engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
@@ -1244,12 +1481,31 @@ class ProcessService:
                 ),
             )
 
+        discarded_stage_rows = self._clear_sentence_nlp_snapshot_stage(
+            session,
+            run_id=int(run.run_id),
+        )
+        if discarded_stage_rows > 0:
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="staging_reset",
+                message=(
+                    "Discarded "
+                    f"{discarded_stage_rows} stale staged sentence snapshot row(s) before continuing"
+                ),
+            )
+
         remaining_ids = [
             doc_id
             for doc_id in ordered_ids
             if run.last_doc_id is None or int(doc_id) > int(run.last_doc_id)
         ]
         if not remaining_ids:
+            self._clear_sentence_nlp_snapshot_stage(session, run_id=int(run.run_id))
+            session.commit()
             return self._finalize_snapshot_backfill_run(
                 session,
                 run=run,
@@ -1262,14 +1518,157 @@ class ProcessService:
 
         success = 0
         errors = 0
+        current_chunk_doc_ids: list[int] = []
+        current_chunk_success = 0
+        current_chunk_errors = 0
+        current_chunk_stage_rows = 0
+
+        def _fail_current_run(message: str, *, stage: str) -> None:
+            try:
+                self._clear_sentence_nlp_snapshot_stage(session, run_id=int(run.run_id))
+                self._record_batch_run_error(
+                    session,
+                    run_id=int(run.run_id),
+                    doc_id=int(current_chunk_doc_ids[-1]) if current_chunk_doc_ids else None,
+                    stage=stage,
+                    message=message,
+                )
+                run.status = "failed"
+                run.stage = "failed_integrity"
+                run.finished_at = self._utc_now()
+                run.error_message = str(message)[:500]
+                session.commit()
+                session.refresh(run)
+            except Exception:
+                session.rollback()
+                logger.exception(
+                    "Failed to persist failure state for sentence snapshot backfill run %s",
+                    int(run.run_id),
+                )
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="failed",
+                message=message,
+            )
+            raise RuntimeError(message)
+
+        def _merge_current_chunk() -> None:
+            nonlocal success
+            nonlocal errors
+            nonlocal current_chunk_doc_ids
+            nonlocal current_chunk_success
+            nonlocal current_chunk_errors
+            nonlocal current_chunk_stage_rows
+
+            if not current_chunk_doc_ids:
+                return
+
+            chunk_no = int(run.chunks_completed or 0) + 1
+            run.stage = "snapshot_backfill_merge"
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="merging_chunk",
+                message=(
+                    "Merging staged sentence snapshot chunk "
+                    f"{chunk_no}/{int(run.chunks_total or 0)} "
+                    f"({current_chunk_stage_rows} staged row(s))"
+                ),
+            )
+
+            try:
+                with self.db_service.get_session() as merge_session:
+                    merged_rows = self._merge_sentence_nlp_snapshot_stage(
+                        merge_session,
+                        run_id=int(run.run_id),
+                        merge_batch_size=int(merge_batch_size),
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to merge staged sentence snapshot chunk for run %s",
+                    int(run.run_id),
+                )
+                _fail_current_run(
+                    f"Failed to merge staged sentence snapshot chunk: {str(exc)[:350]}",
+                    stage="snapshot_backfill_merge",
+                )
+                return
+
+            run.stage = "segment_integrity_check"
+            session.commit()
+            session.refresh(run)
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="verifying_chunk_integrity",
+                message=(
+                    "Running bounded physical verification after staged chunk "
+                    f"{chunk_no}/{int(run.chunks_total or 0)}"
+                ),
+            )
+            segment_integrity = self._run_snapshot_backfill_segment_check(
+                quick_check_timeout_sec=float(segment_quick_check_timeout),
+            )
+            if not segment_integrity.get("ok"):
+                _fail_current_run(
+                    str(
+                        segment_integrity.get("error")
+                        or "Sentence snapshot chunk integrity verification failed"
+                    )[:500],
+                    stage="segment_integrity_check",
+                )
+                return
+
+            success += current_chunk_success
+            errors += current_chunk_errors
+            run.docs_processed = int(run.docs_processed or 0) + current_chunk_success
+            run.docs_failed = int(run.docs_failed or 0) + current_chunk_errors
+            run.last_doc_id = int(current_chunk_doc_ids[-1])
+            run.chunks_completed = int(run.chunks_completed or 0) + 1
+            run.stage = "snapshot_backfill"
+            session.commit()
+            session.refresh(run)
+
+            chunk_message = (
+                "Completed staged sentence snapshot chunk "
+                f"{int(run.chunks_completed or 0)}/{int(run.chunks_total or 0)} "
+                f"({merged_rows} merged row(s))"
+            )
+            if segment_integrity.get("quick_check_timed_out"):
+                chunk_message += "; bounded quick_check timed out"
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="chunk_complete",
+                message=chunk_message,
+            )
+
+            current_chunk_doc_ids = []
+            current_chunk_success = 0
+            current_chunk_errors = 0
+            current_chunk_stage_rows = 0
+
+            docs_done = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+            if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
+                time.sleep(chunk_sleep)
 
         def _cancel_current_run(message: str) -> Tuple[int, int]:
+            staged_rows = self._clear_sentence_nlp_snapshot_stage(
+                session,
+                run_id=int(run.run_id),
+            )
             run.status = "cancelled"
             run.stage = "cancelled"
             run.finished_at = self._utc_now()
             session.commit()
             session.refresh(run)
-            self._emit_run_state(state_callback, run, phase="cancelled", message=message)
+            final_message = message
+            if staged_rows > 0:
+                final_message += f"; discarded {staged_rows} unmerged staged row(s)"
+            self._emit_run_state(state_callback, run, phase="cancelled", message=final_message)
             return success, errors
 
         for doc_id in remaining_ids:
@@ -1307,7 +1706,12 @@ class ProcessService:
             with self.db_service.get_session() as doc_session:
                 doc = doc_session.get(SourceDocument, int(doc_id))
                 doc_name = doc.file_name if doc else f"Doc {doc_id}"
-                done_before = int(run.docs_processed or 0) + int(run.docs_failed or 0)
+                done_before = (
+                    int(run.docs_processed or 0)
+                    + int(run.docs_failed or 0)
+                    + current_chunk_success
+                    + current_chunk_errors
+                )
                 if progress_callback:
                     progress_callback(done_before + 1, int(run.docs_total or 0), doc_name)
                 if cancel_check and cancel_check():
@@ -1341,26 +1745,20 @@ class ProcessService:
                         phase="resumed",
                         message="Resumed sentence snapshot backfill run",
                     )
-                ok, detail = self._backfill_sentence_nlp_snapshots_for_document(
+                ok, detail, staged_rows = self._backfill_sentence_nlp_snapshots_for_document(
                     doc_session,
                     int(doc_id),
                     engine=engine,
                     batch_run_id=int(run.run_id),
                 )
 
+            current_chunk_doc_ids.append(int(doc_id))
+            current_chunk_stage_rows += int(staged_rows or 0)
             if ok:
-                success += 1
-                run.docs_processed = int(run.docs_processed or 0) + 1
+                current_chunk_success += 1
             else:
-                errors += 1
-                run.docs_failed = int(run.docs_failed or 0) + 1
+                current_chunk_errors += 1
 
-            docs_done = int(run.docs_processed or 0) + int(run.docs_failed or 0)
-            run.last_doc_id = int(doc_id)
-            run.chunks_completed = docs_done // effective_chunk_size
-            run.stage = "snapshot_backfill"
-            session.commit()
-            session.refresh(run)
             self._emit_run_state(
                 state_callback,
                 run,
@@ -1369,19 +1767,14 @@ class ProcessService:
                 doc_name=doc_name,
             )
 
-            if docs_done % effective_chunk_size == 0:
-                self._emit_run_state(
-                    state_callback,
-                    run,
-                    phase="chunk_complete",
-                    message=(
-                        "Completed sentence snapshot backfill chunk "
-                        f"{int(run.chunks_completed or 0)}/{int(run.chunks_total or 0)}"
-                    ),
-                )
-                if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
-                    time.sleep(chunk_sleep)
+            if len(current_chunk_doc_ids) >= effective_chunk_size:
+                _merge_current_chunk()
 
+        if current_chunk_doc_ids:
+            _merge_current_chunk()
+
+        self._clear_sentence_nlp_snapshot_stage(session, run_id=int(run.run_id))
+        session.commit()
         return self._finalize_snapshot_backfill_run(
             session,
             run=run,

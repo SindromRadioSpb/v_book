@@ -41,7 +41,7 @@ Coverage-only snapshot audit:
 Backfill snapshots for already processed docs:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 \\
-        --backfill-snapshots --chunk-size 50
+        --backfill-snapshots --chunk-size 5000 --merge-batch-size 1000
 
 Repeat the same late-scale probe but skip the final WAL checkpoint flush:
     python scripts/process_reference_corpus.py \\
@@ -499,7 +499,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--chunk-size", type=int, default=50,
-        help="Documents per chunk / WAL commit boundary (default: 50)",
+        help="Documents per chunk; for snapshot backfill this is the super-chunk boundary (default: 50)",
     )
     parser.add_argument(
         "--chunk-sleep", type=float, default=0.5,
@@ -576,6 +576,18 @@ def main() -> None:
         default=None,
         help="Optional snapshot-backfill post-run WAL checkpoint mode before the final quick_check (default backfill behavior: none).",
     )
+    parser.add_argument(
+        "--merge-batch-size",
+        type=int,
+        default=1000,
+        help="Snapshot-backfill merge batch size from staging into sentence_nlp_snapshot (default: 1000).",
+    )
+    parser.add_argument(
+        "--segment-quick-check-timeout",
+        type=float,
+        default=0.5,
+        help="Bounded quick_check timeout in seconds after each snapshot backfill super-chunk (default: 0.5).",
+    )
     args = parser.parse_args()
 
     if not args.project_id and not args.project_name:
@@ -598,6 +610,10 @@ def main() -> None:
         parser.error("--probe-every-chunks must be >= 0")
     if float(args.probe_quick_check_timeout or 0.0) < 0:
         parser.error("--probe-quick-check-timeout must be >= 0")
+    if int(args.merge_batch_size or 0) <= 0:
+        parser.error("--merge-batch-size must be >= 1")
+    if float(args.segment_quick_check_timeout or 0.0) < 0:
+        parser.error("--segment-quick-check-timeout must be >= 0")
     if args.probe_out and not args.backfill_snapshots:
         parser.error("--probe-out requires --backfill-snapshots")
     if int(args.probe_every_chunks or 0) > 0 and not args.backfill_snapshots:
@@ -770,8 +786,10 @@ def main() -> None:
         )
         if args.backfill_snapshots:
             logger.info(
-                "Snapshot backfill integrity checkpoint mode: %s",
+                "Snapshot backfill settings | integrity_checkpoint_mode=%s merge_batch_size=%d segment_quick_check_timeout=%.2fs",
                 integrity_checkpoint_mode,
+                int(args.merge_batch_size),
+                float(args.segment_quick_check_timeout),
             )
 
         if args.dry_run:
@@ -832,6 +850,8 @@ def main() -> None:
                         resume_run_id=args.resume_run_id,
                         source_label=source_label,
                         integrity_checkpoint_mode=integrity_checkpoint_mode,
+                        merge_batch_size=int(args.merge_batch_size),
+                        segment_quick_check_timeout=float(args.segment_quick_check_timeout),
                     )
                 else:
                     total_success, total_error = process_service.process_documents_batch(

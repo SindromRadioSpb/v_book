@@ -265,7 +265,9 @@ python scripts/process_reference_corpus.py `
     --project-id 1 `
     --db-path hdle_premium.db `
     --backfill-snapshots `
-    --chunk-size 50
+    --chunk-size 5000 `
+    --merge-batch-size 1000 `
+    --segment-quick-check-timeout 0.5
 ```
 
 ### Run a bounded late-scale backfill probe on a disposable sandbox
@@ -316,6 +318,13 @@ python scripts/process_reference_corpus.py `
   `--integrity-checkpoint-mode none`.
   Aggressive modes such as `truncate` are kept only as explicit diagnostic
   overrides while the late-scale durability investigation remains open.
+- The storage path is now staged for legacy backfill:
+  - rows are staged into `sentence_nlp_snapshot_stage`
+  - then merged into `sentence_nlp_snapshot` in bounded batches
+  - a bounded physical verification runs after every super-chunk
+- Durability knobs for heavy runs:
+  - `--merge-batch-size`
+  - `--segment-quick-check-timeout`
 - For operator decision-making, measure coverage and backfill on the large
   legacy reference project, not on tiny regular-project probes:
   - small regular projects can be used as smoke checks
@@ -331,6 +340,14 @@ python scripts/process_reference_corpus.py `
   - however, a later full-scale rerun on the restored approved dev/test DB
     still corrupted `sentence_nlp_snapshot` even with the safer default
     `--integrity-checkpoint-mode none`
+  - a later storage redesign wave then validated a bounded real run on the
+    restored approved dev/test DB:
+    - `ID=1`
+    - `max_docs=10000`
+    - `chunk_size=5000`
+    - `merge_batch_size=1000`
+    - `segment_quick_check_timeout=0.5`
+    - result: `ok/completed`, `stage_rows_remaining=0`, post-run `db_open` ok
   - until the integrity issue is fixed, use `--coverage-only` on large
     reference projects and do not run the full backfill on the main install DB
   - the CLI now includes a post-run physical integrity gate before a snapshot
