@@ -817,8 +817,11 @@ def main() -> int:
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
+    restore_backup_path = (
+        Path(args.restore_backup_path).expanduser() if args.restore_backup_path else None
+    )
     db_path = Path(args.db_path).expanduser()
-    if not db_path.exists():
+    if not db_path.exists() and restore_backup_path is None:
         error = {
             "status": "FAILED",
             "db_path": str(db_path),
@@ -828,9 +831,6 @@ def main() -> int:
         return 1
 
     recovered_path = Path(args.recovered_db_path).expanduser() if args.recovered_db_path else None
-    restore_backup_path = (
-        Path(args.restore_backup_path).expanduser() if args.restore_backup_path else None
-    )
 
     summary = repair_db_corruption(
         db_path=db_path,

@@ -1345,3 +1345,43 @@ Operational meaning:
   available
 - this does not unblock full-scale backfill:
   the durability bug is still open, only the environment has been recovered
+
+## Bounded snapshot-backfill root-cause probe (2026-03-10)
+
+Files:
+
+- `scripts/process_reference_corpus.py`
+- `tests/test_process_reference_cli_verify.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+
+Result:
+
+- added CLI-only forensic probes for snapshot backfill:
+  - `--probe-out`
+  - `--probe-every-chunks`
+  - `--probe-quick-check-timeout`
+- bounded hewiki sandbox run completed on:
+  - `build\bench\hewiki_snapshot_diag.db`
+  - `ID=1`
+  - `--max-docs 20000`
+  - `--chunk-size 5000`
+- artifacts:
+  - `build/logs/nlp_root_cause/snapshot_backfill_20000.log`
+  - `build/logs/nlp_root_cause/snapshot_backfill_probe_20000.jsonl`
+  - `build/logs/nlp_root_cause/snapshot_backfill_probe_20000_summary.json`
+  - `build/logs/nlp_root_cause/sandbox_postrun_diagnose.log`
+
+Observed:
+
+- `20000/20000` docs completed successfully
+- post-run diagnose returned `status=OK`
+- no non-timeout `quick_check` failures were recorded in chunk probes
+- this means corruption did not reproduce early in the run
+
+Interpretation:
+
+- current evidence points away from an immediate per-document write bug
+- the more likely risk area is now late-scale behavior:
+  - accumulated snapshot table size
+  - long-run checkpoint/flush discipline
+  - or a threshold hit much later than the first `20k` docs

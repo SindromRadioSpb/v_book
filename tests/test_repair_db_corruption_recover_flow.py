@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+import sys
 
 from scripts import repair_db_corruption as mod
 
@@ -257,3 +258,29 @@ def test_restore_db_from_backup_removes_source_backup_sidecars_when_moving(tmp_p
     )
     assert not backup_shm.exists()
     assert not backup_wal.exists()
+
+
+def test_main_allows_restore_to_missing_target_path(tmp_path: Path, monkeypatch, capsys) -> None:
+    target_db = tmp_path / "missing_target.db"
+    backup_db = tmp_path / "backup.db"
+    _create_recovered_db(backup_db)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "repair_db_corruption.py",
+            "--db-path",
+            str(target_db),
+            "--restore-backup-path",
+            str(backup_db),
+            "--no-apply-migrations",
+        ],
+    )
+
+    exit_code = mod.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert target_db.exists()
+    assert "\"status\": \"RESTORED_OK\"" in captured.out

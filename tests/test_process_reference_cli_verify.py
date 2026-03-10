@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import tempfile
@@ -453,6 +454,54 @@ def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
         with pytest.raises(SystemExit) as exc:
             module.main()
         assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
+    db_path = _init_temp_db()
+    probe_path = tmp_path / "snapshot_probe.jsonl"
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(ProcessService, "get_nlp_engine", lambda self, **kwargs: _Engine())
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+                "--chunk-size",
+                "1",
+                "--probe-out",
+                str(probe_path),
+                "--probe-every-chunks",
+                "1",
+                "--probe-quick-check-timeout",
+                "0.1",
+            ],
+        )
+
+        module.main()
+
+        lines = [json.loads(line) for line in probe_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        phases = {str(line.get("phase")) for line in lines}
+        assert probe_path.exists()
+        assert {"started", "chunk_complete", "verifying_integrity", "completed"}.issubset(phases)
+        assert all("page_count" in line for line in lines)
+        assert all("wal_size_bytes" in line for line in lines)
+        assert all("quick_check" in line for line in lines)
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

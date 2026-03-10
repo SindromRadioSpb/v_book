@@ -1026,3 +1026,55 @@ Roadmap after restore:
   - then a fresh full-scale backfill rerun
   - then post-run coverage measurement
   - only then freshness/version hardening
+
+## Bounded root-cause probe on disposable sandbox (2026-03-10)
+
+Files / artifacts:
+
+- `scripts/process_reference_corpus.py`
+- `tests/test_process_reference_cli_verify.py`
+- `build/logs/nlp_root_cause/snapshot_backfill_20000.log`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_20000.jsonl`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_20000_summary.json`
+- `build/logs/nlp_root_cause/sandbox_postrun_diagnose.log`
+
+Delivered:
+
+- added optional snapshot-backfill forensic probes to the CLI:
+  - `--probe-out`
+  - `--probe-every-chunks`
+  - `--probe-quick-check-timeout`
+- probes append JSONL records at:
+  - run start
+  - selected chunk boundaries
+  - integrity verification
+  - completion/failure
+- each probe records:
+  - DB/WAL/SHM sizes
+  - page/freelist counts
+  - `snapshot_max_rowid`
+  - bounded `quick_check`
+  - passive checkpoint stats
+
+Observed on a disposable hewiki sandbox:
+
+- DB:
+  - `build\bench\hewiki_snapshot_diag.db`
+- run:
+  - `ID=1`
+  - `--max-docs 20000`
+  - `--chunk-size 5000`
+  - `4` chunk probes plus start/integrity/completed probes
+- result:
+  - `20000/20000` docs completed
+  - no probe errors
+  - no non-timeout `quick_check` failures
+  - post-run `repair_db_corruption.py --diagnose-only` returned `status=OK`
+
+Important conclusion:
+
+- corruption did not reproduce on the first `20000` docs
+- this shifts the working hypothesis away from an immediate per-document write
+  bug and toward a late-scale threshold or long-run checkpoint/flush issue
+- the expensive part of the bounded run was the final integrity phase, not the
+  first `20000` doc writes themselves

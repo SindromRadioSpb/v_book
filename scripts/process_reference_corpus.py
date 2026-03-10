@@ -40,7 +40,10 @@ Backfill snapshots for already processed docs:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import json
 import logging
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -314,6 +317,163 @@ def _log_batch_verification(report: dict[str, Any]) -> None:
     )
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _run_quick_check_probe(
+    conn: sqlite3.Connection,
+    *,
+    timeout_sec: float,
+) -> dict[str, Any]:
+    probe = {
+        "ok": True,
+        "rows": [],
+        "error": None,
+        "timed_out": False,
+        "timeout_sec": float(timeout_sec),
+    }
+    quick_started = time.perf_counter()
+
+    def _progress_handler() -> int:
+        if timeout_sec <= 0:
+            return 0
+        elapsed = time.perf_counter() - quick_started
+        return 1 if elapsed >= timeout_sec else 0
+
+    conn.set_progress_handler(_progress_handler, 10_000)
+    try:
+        rows: list[str] = []
+        try:
+            rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+        except sqlite3.OperationalError as exc:
+            lowered = str(exc).lower()
+            if "interrupted" in lowered and timeout_sec > 0:
+                probe["timed_out"] = True
+            else:
+                raise
+        probe["rows"] = rows
+        if probe["timed_out"]:
+            probe["error"] = f"quick_check timed out after {timeout_sec:.1f}s"
+        elif not rows or any(str(row).lower() != "ok" for row in rows):
+            probe["ok"] = False
+            probe["error"] = "; ".join(rows) if rows else "empty quick_check output"
+        return probe
+    except sqlite3.Error as exc:
+        probe["ok"] = False
+        probe["error"] = str(exc)
+        return probe
+    finally:
+        conn.set_progress_handler(None, 0)
+
+
+def _collect_snapshot_backfill_probe(
+    *,
+    db_path: Path,
+    project_id: int,
+    state: dict[str, Any],
+    quick_check_timeout_sec: float,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "timestamp_utc": _utc_now(),
+        "db_path": str(db_path),
+        "project_id": int(project_id),
+        "run_id": state.get("run_id"),
+        "phase": str(state.get("phase") or ""),
+        "status": str(state.get("status") or ""),
+        "stage": str(state.get("stage") or ""),
+        "docs_total": int(state.get("docs_total") or 0),
+        "docs_processed": int(state.get("docs_processed") or 0),
+        "docs_failed": int(state.get("docs_failed") or 0),
+        "chunks_total": int(state.get("chunks_total") or 0),
+        "chunks_completed": int(state.get("chunks_completed") or 0),
+        "last_doc_id": state.get("last_doc_id"),
+        "message": str(state.get("message") or ""),
+        "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
+        "wal_size_bytes": None,
+        "shm_size_bytes": None,
+        "page_size": None,
+        "page_count": None,
+        "freelist_count": None,
+        "snapshot_max_rowid": None,
+        "snapshot_probe_error": None,
+        "quick_check": None,
+        "checkpoint_passive": None,
+        "probe_error": None,
+    }
+    wal_path = Path(f"{db_path}-wal")
+    shm_path = Path(f"{db_path}-shm")
+    payload["wal_size_bytes"] = wal_path.stat().st_size if wal_path.exists() else None
+    payload["shm_size_bytes"] = shm_path.stat().st_size if shm_path.exists() else None
+
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.execute("PRAGMA busy_timeout=15000")
+        payload["page_size"] = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        payload["page_count"] = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        payload["freelist_count"] = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        checkpoint_row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        if checkpoint_row is not None:
+            payload["checkpoint_passive"] = [int(value) for value in checkpoint_row]
+        try:
+            snapshot_row = conn.execute(
+                "SELECT MAX(rowid) FROM sentence_nlp_snapshot"
+            ).fetchone()
+            payload["snapshot_max_rowid"] = int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
+        except sqlite3.Error as exc:
+            payload["snapshot_probe_error"] = str(exc)
+        payload["quick_check"] = _run_quick_check_probe(
+            conn,
+            timeout_sec=float(quick_check_timeout_sec),
+        )
+    except sqlite3.Error as exc:
+        payload["probe_error"] = str(exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return payload
+
+
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _build_snapshot_probe_callback(
+    *,
+    db_path: Path,
+    project_id: int,
+    probe_out: Path | None,
+    probe_every_chunks: int,
+    quick_check_timeout_sec: float,
+    state_tracker: dict[str, Any],
+):
+    if probe_out is None:
+        return lambda state: _log_batch_state(state, state_tracker)
+
+    def _callback(state: dict[str, Any]) -> None:
+        _log_batch_state(state, state_tracker)
+        phase = str(state.get("phase") or "")
+        chunks_completed = int(state.get("chunks_completed") or 0)
+        should_probe = phase in {"started", "verifying_integrity", "completed", "failed", "cancelled"}
+        if not should_probe and probe_every_chunks > 0 and phase == "chunk_complete":
+            should_probe = chunks_completed > 0 and chunks_completed % probe_every_chunks == 0
+        if not should_probe:
+            return
+        payload = _collect_snapshot_backfill_probe(
+            db_path=db_path,
+            project_id=project_id,
+            state=state,
+            quick_check_timeout_sec=quick_check_timeout_sec,
+        )
+        _append_jsonl(probe_out, payload)
+
+    return _callback
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="CLI-only NLP processing for reference corpus (PERF-SCALE PATCH-J)"
@@ -374,6 +534,24 @@ def main() -> None:
         action="store_true",
         help="Report sentence snapshot coverage for the selected project and exit",
     )
+    parser.add_argument(
+        "--probe-out",
+        type=str,
+        default=None,
+        help="Optional JSONL path for snapshot backfill forensic probes.",
+    )
+    parser.add_argument(
+        "--probe-every-chunks",
+        type=int,
+        default=0,
+        help="Append an extra forensic probe every N completed chunks during snapshot backfill.",
+    )
+    parser.add_argument(
+        "--probe-quick-check-timeout",
+        type=float,
+        default=2.0,
+        help="Timeout in seconds for per-probe quick_check; timeout is treated as inconclusive.",
+    )
     args = parser.parse_args()
 
     if not args.project_id and not args.project_name:
@@ -388,11 +566,22 @@ def main() -> None:
         parser.error("--coverage-only and --dry-run are mutually exclusive")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
         parser.error("--resume-run-id must be >= 1")
+    if int(args.probe_every_chunks or 0) < 0:
+        parser.error("--probe-every-chunks must be >= 0")
+    if float(args.probe_quick_check_timeout or 0.0) < 0:
+        parser.error("--probe-quick-check-timeout must be >= 0")
+    if args.probe_out and not args.backfill_snapshots:
+        parser.error("--probe-out requires --backfill-snapshots")
+    if int(args.probe_every_chunks or 0) > 0 and not args.backfill_snapshots:
+        parser.error("--probe-every-chunks requires --backfill-snapshots")
+    if int(args.probe_every_chunks or 0) > 0 and not args.probe_out:
+        parser.error("--probe-every-chunks requires --probe-out")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
         logger.error("Database not found: %s", db_path)
         sys.exit(1)
+    probe_out = Path(args.probe_out).expanduser() if args.probe_out else None
 
     use_mock = not args.no_mock
     use_gpu = args.use_gpu
@@ -552,6 +741,16 @@ def main() -> None:
         process_service = ProcessService()
         start = time.monotonic()
         state_tracker = {"run_id": None, "chunks_completed": None}
+        state_callback = lambda state: _log_batch_state(state, state_tracker)
+        if args.backfill_snapshots:
+            state_callback = _build_snapshot_probe_callback(
+                db_path=db_path,
+                project_id=project_id,
+                probe_out=probe_out,
+                probe_every_chunks=int(args.probe_every_chunks or 0),
+                quick_check_timeout_sec=float(args.probe_quick_check_timeout or 0.0),
+                state_tracker=state_tracker,
+            )
 
         if args.verify_only:
             with db_service.get_session() as session:
@@ -580,7 +779,7 @@ def main() -> None:
                         use_mock=use_mock,
                         chunk_size=args.chunk_size,
                         chunk_sleep=args.chunk_sleep,
-                        state_callback=lambda state: _log_batch_state(state, state_tracker),
+                        state_callback=state_callback,
                         resume_latest=bool(args.resume_latest),
                         resume_run_id=args.resume_run_id,
                         source_label=source_label,
@@ -593,7 +792,7 @@ def main() -> None:
                         use_mock=use_mock,
                         chunk_size=args.chunk_size,
                         chunk_sleep=args.chunk_sleep,
-                        state_callback=lambda state: _log_batch_state(state, state_tracker),
+                        state_callback=state_callback,
                         resume_latest=bool(args.resume_latest),
                         resume_run_id=args.resume_run_id,
                         source_label=source_label,
