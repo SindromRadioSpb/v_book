@@ -878,3 +878,52 @@ Operational recommendation:
 - `ID=6` can be used as a quick smoke backfill run
 - use `ID=1` for the actual post-backfill coverage measurement that will decide
   whether any freshness/version hardening work is justified
+
+## Full-scale snapshot backfill probe on project ID=1 (2026-03-10)
+
+Files / artifacts:
+
+- `build/logs/nlp_backfill_id1/coverage_before_id1.log`
+- `build/logs/nlp_backfill_id1/backfill_run_id1.log`
+- `build/logs/nlp_backfill_id1/backfill_run_summary.json`
+- `build/logs/nlp_backfill_id1/quick_check_test_db.txt`
+
+Observed on the approved dev/test DB:
+
+- DB:
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- project:
+  - `ID=1`
+  - `Hebrew Wikipedia Baseline`
+- pre-run coverage:
+  - `387639` processed docs
+  - `0.0%` sentence snapshot coverage
+  - `0.0%` full-doc coverage
+- full backfill run:
+  - `run_id=387621`
+  - `docs_total=387639`
+  - `docs_processed=387639`
+  - `docs_failed=0`
+  - `chunks_total=78`
+  - `elapsed_s=6300.1`
+  - about `105` minutes wall-clock
+
+Critical outcome:
+
+- the backfill run itself completed cleanly according to `processor_run`
+- but immediate post-run coverage verification failed with:
+  - `database disk image is malformed`
+- `PRAGMA quick_check` confirms corruption in the btree rooted at
+  `sentence_nlp_snapshot` table root page `3845022`
+- this means the current full-scale snapshot-backfill path is not yet safe for
+  production-scale execution on the hewiki corpus
+
+Roadmap correction after this probe:
+
+- do not run full snapshot backfill on the main install DB yet
+- do not decide freshness/version hardening based on this run
+- the next required engineering wave is integrity/durability hardening for the
+  full-scale snapshot-backfill path, plus safe recovery/restore guidance for
+  the dev/test DB
+- only after a clean integrity-checked full-scale run should we return to the
+  freshness/version question

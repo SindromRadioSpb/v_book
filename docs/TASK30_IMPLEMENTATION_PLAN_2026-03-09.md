@@ -1230,3 +1230,31 @@ Coverage choice after this fix:
 - `ID=6` remains a valid tiny smoke target with `0.0%` coverage on `1` doc
 - `ID=1` (`Hebrew Wikipedia Baseline`) remains the meaningful legacy corpus for
   deciding whether a later freshness/version hardening patch is warranted
+
+## Full-scale ID=1 snapshot-backfill probe (2026-03-10)
+
+Result on the approved dev/test DB:
+
+- pre-run `coverage-only` confirmed:
+  - `387639` processed docs
+  - `0.0%` sentence snapshot coverage
+  - `0.0%` full-doc coverage
+- full backfill run `387621` completed:
+  - `387639/387639` docs
+  - `0` errors
+  - `78/78` chunks
+  - `6300.1 s` wall-clock, about `105` minutes
+
+Critical blocker discovered immediately after completion:
+
+- post-run coverage verification failed with `database disk image is malformed`
+- `PRAGMA quick_check` on the same dev/test DB confirmed corruption in the
+  `sentence_nlp_snapshot` table btree
+
+Task30 consequence:
+
+- the current next step is no longer freshness/version hardening
+- the next step is integrity hardening for the full-scale snapshot-backfill
+  path and safe restore guidance for the dev/test DB
+- the main install DB must not receive the same full-scale backfill run until
+  this integrity issue is understood and fixed

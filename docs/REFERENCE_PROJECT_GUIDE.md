@@ -303,6 +303,12 @@ python scripts/process_reference_corpus.py `
   - small regular projects can be used as smoke checks
   - the real convergence decision should be based on the reference-scale
     project, e.g. `ID=1` on the approved hewiki DB
+- Operational caution from the `2026-03-10` hewiki probe:
+  - a full-scale snapshot backfill on `ID=1` in the approved dev/test DB
+    completed in about `105` minutes but was followed by
+    `database disk image is malformed`
+  - until the integrity issue is fixed, use `--coverage-only` on large
+    reference projects and do not run the full backfill on the main install DB
 
 ### Inter-chunk sleep
 
