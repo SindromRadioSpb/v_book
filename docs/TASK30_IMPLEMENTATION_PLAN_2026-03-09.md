@@ -1427,3 +1427,53 @@ Current next step:
 - keep using disposable sandbox DBs for further large-scale durability probing
 - only after a clean full-scale rerun on the restored hewiki dev/test DB should
   coverage-after and freshness/version work resume
+
+## Full-scale rerun with safer integrity default still fails on approved dev/test DB (2026-03-10)
+
+Files:
+
+- `build/logs/nlp_full_rerun_id1/coverage_before_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/snapshot_backfill_full_id1.log`
+- `build/logs/nlp_full_rerun_id1/snapshot_backfill_probe_full_id1_summary.json`
+- `build/logs/nlp_full_rerun_id1/repair_diagnose_after_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/bounded_probe_after_full_rerun.json`
+- `build/logs/nlp_full_rerun_id1/restore_test_db_after_failed_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/db_open_after_restore_from_081114.json`
+
+Result:
+
+- reran full `ID=1` snapshot backfill on the restored approved dev/test DB with:
+  - `--integrity-checkpoint-mode none`
+  - `--chunk-size 5000`
+  - chunk probes every `5` chunks
+- runtime was about `132` minutes
+- logical batch counters still finished cleanly:
+  - `docs_processed=387639`
+  - `docs_failed=0`
+- physical integrity still failed at the end:
+  - `status='failed'`
+  - `stage='failed_integrity'`
+  - `PRAGMA quick_check(10)` reported corruption again
+- diagnose still maps the damaged btree to `sentence_nlp_snapshot`
+
+Interpretation:
+
+- the previous `TRUNCATE` checkpoint issue was only part of the failure surface
+- safer default `none` remains the correct mitigation for the old checkpoint bug
+- but the full-scale backfill path is still unsafe because the large-scale
+  snapshot write pattern itself can corrupt the table
+
+Operational follow-up:
+
+- `hewiki_gpu_processing test.db` was restored again after this failed rerun
+- restoration in this wave used:
+  - `backups\backup_20260310_081114_pre_migration_38_to_39.db`
+- validated post-restore:
+  - `schema_version=39`
+  - projects `1/5/6` present
+
+Current next step:
+
+- do not resume freshness/version work
+- move to a new storage-level redesign wave for `sentence_nlp_snapshot`
+  full-scale writes

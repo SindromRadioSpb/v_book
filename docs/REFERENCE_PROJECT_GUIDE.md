@@ -328,6 +328,9 @@ python scripts/process_reference_corpus.py `
   - disposable sandbox controls later showed the same corruption on
     `120k` docs with `truncate`, while a fresh `120k` control run with
     `--integrity-checkpoint-mode none` completed successfully
+  - however, a later full-scale rerun on the restored approved dev/test DB
+    still corrupted `sentence_nlp_snapshot` even with the safer default
+    `--integrity-checkpoint-mode none`
   - until the integrity issue is fixed, use `--coverage-only` on large
     reference projects and do not run the full backfill on the main install DB
   - the CLI now includes a post-run physical integrity gate before a snapshot

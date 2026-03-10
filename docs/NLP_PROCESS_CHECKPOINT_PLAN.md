@@ -1135,3 +1135,68 @@ Current next step:
   deciding whether more storage-level hardening is still required
 - only return to freshness/version hardening after a clean large-scale run on
   the restored hewiki dev/test DB
+
+## Full-scale rerun on restored dev/test DB with safer integrity default (2026-03-10)
+
+Files / artifacts:
+
+- `build/logs/nlp_full_rerun_id1/coverage_before_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/snapshot_backfill_full_id1.log`
+- `build/logs/nlp_full_rerun_id1/snapshot_backfill_probe_full_id1_summary.json`
+- `build/logs/nlp_full_rerun_id1/db_open_after_full_rerun.json`
+- `build/logs/nlp_full_rerun_id1/repair_diagnose_after_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/bounded_probe_after_full_rerun.json`
+- `build/logs/nlp_full_rerun_id1/restore_test_db_after_failed_full_rerun.log`
+- `build/logs/nlp_full_rerun_id1/db_open_after_restore_from_081114.json`
+
+Observed:
+
+- pre-run coverage on the restored approved dev/test DB still showed:
+  - `387639` processed docs
+  - `0.0%` sentence snapshot coverage
+- full rerun used the safer default integrity behavior:
+  - `--integrity-checkpoint-mode none`
+  - `--chunk-size 5000`
+  - forensic probes every `5` chunks
+- runtime:
+  - `7930.7 s`
+  - about `132` minutes
+- logical write path still completed all docs:
+  - `docs_processed=387639`
+  - `docs_failed=0`
+- integrity still failed at the end:
+  - `status='failed'`
+  - `stage='failed_integrity'`
+  - `PRAGMA quick_check(10)` reported corruption again
+- post-run diagnose still mapped the damage directly to
+  `sentence_nlp_snapshot` root page `3845022`
+
+Interpretation:
+
+- the earlier `TRUNCATE` checkpoint issue was real, but it was not the whole
+  problem
+- removing the forced final checkpoint does not make the full-scale `ID=1`
+  snapshot-backfill path safe
+- the current leading root-cause area is now the large-scale
+  `sentence_nlp_snapshot` write/growth pattern itself, not only the final
+  checkpoint mode
+
+Operational consequence:
+
+- snapshot backfill is still not production-ready for full-scale hewiki runs
+- the restored approved dev/test DB had to be restored again after this rerun
+- the practical restore source in this wave was:
+  - `backups\backup_20260310_081114_pre_migration_38_to_39.db`
+- post-restore state was revalidated:
+  - `schema_version=39`
+  - projects `ID=1`, `ID=5`, `ID=6` present
+
+Next step after this rerun:
+
+- do not return to coverage-after or freshness/version decisions yet
+- the next engineering wave must target storage-level redesign or write-path
+  discipline for `sentence_nlp_snapshot`, for example:
+  - staged snapshot writes into a temporary table followed by bounded merge
+  - smaller transaction fences within each document batch
+  - explicit reopen/checkpoint discipline between super-chunks
+  - table-layout or insert-order investigation for the snapshot table itself
