@@ -505,3 +505,168 @@ def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+
+
+def test_cli_doc_offset_and_max_docs_select_processing_slice(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_reference_docs(session, count=5)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_process_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _fake_process_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--doc-offset",
+                "1",
+                "--max-docs",
+                "2",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids[1:3]
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=5)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_backfill_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            captured["integrity_checkpoint_mode"] = kwargs.get("integrity_checkpoint_mode")
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+                "--doc-offset",
+                "2",
+                "--max-docs",
+                "2",
+                "--integrity-checkpoint-mode",
+                "none",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids[2:4]
+        assert captured["integrity_checkpoint_mode"] == "none"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_backfill_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            captured["integrity_checkpoint_mode"] = kwargs.get("integrity_checkpoint_mode")
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids
+        assert captured["integrity_checkpoint_mode"] == "none"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_rejects_integrity_checkpoint_mode_without_snapshot_backfill(monkeypatch):
+    module = _load_script_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "process_reference_corpus.py",
+            "--db-path",
+            "dummy.db",
+            "--project-id",
+            "1",
+            "--integrity-checkpoint-mode",
+            "none",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2

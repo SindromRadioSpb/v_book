@@ -268,6 +268,20 @@ python scripts/process_reference_corpus.py `
     --chunk-size 50
 ```
 
+### Run a bounded late-scale backfill probe on a disposable sandbox
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path build\bench\hewiki_snapshot_diag.db `
+    --backfill-snapshots `
+    --doc-offset 60000 `
+    --max-docs 60000 `
+    --chunk-size 5000 `
+    --probe-out build\logs\nlp_root_cause\snapshot_probe.jsonl `
+    --probe-every-chunks 1
+```
+
 ### Verify a snapshot-backfill resume contract without writing
 
 ```powershell
@@ -298,6 +312,10 @@ python scripts/process_reference_corpus.py `
   and only creating missing snapshot rows per document.
 - Backfill is designed to enrich `sentence_nlp_snapshot` only; it does not
   re-run full NLP processing and does not rewrite lemma or term data.
+- The post-run integrity verification now defaults to
+  `--integrity-checkpoint-mode none`.
+  Aggressive modes such as `truncate` are kept only as explicit diagnostic
+  overrides while the late-scale durability investigation remains open.
 - For operator decision-making, measure coverage and backfill on the large
   legacy reference project, not on tiny regular-project probes:
   - small regular projects can be used as smoke checks
@@ -307,6 +325,9 @@ python scripts/process_reference_corpus.py `
   - a full-scale snapshot backfill on `ID=1` in the approved dev/test DB
     completed in about `105` minutes but was followed by
     `database disk image is malformed`
+  - disposable sandbox controls later showed the same corruption on
+    `120k` docs with `truncate`, while a fresh `120k` control run with
+    `--integrity-checkpoint-mode none` completed successfully
   - until the integrity issue is fixed, use `--coverage-only` on large
     reference projects and do not run the full backfill on the main install DB
   - the CLI now includes a post-run physical integrity gate before a snapshot

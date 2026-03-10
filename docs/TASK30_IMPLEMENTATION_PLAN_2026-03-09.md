@@ -1277,7 +1277,7 @@ Result:
 - snapshot backfill completion is now gated by a physical integrity check, not
   just logical batch counters
 - the post-run path executes:
-  - `wal_checkpoint(TRUNCATE)`
+  - a configurable checkpoint step for diagnostics
   - `PRAGMA quick_check(10)`
 - if integrity fails, the batch no longer lands in `ok/completed`; it is
   persisted as:
@@ -1385,3 +1385,45 @@ Interpretation:
   - accumulated snapshot table size
   - long-run checkpoint/flush discipline
   - or a threshold hit much later than the first `20k` docs
+
+## Late-scale sandbox threshold narrowed (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_20001_60000_summary.json`
+- `build/logs/nlp_root_cause/snapshot_backfill_60001_120000.log`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_60001_120000_summary.json`
+- `build/logs/nlp_root_cause/sandbox_bounded_probe_after_120000.json`
+- `build/logs/nlp_root_cause/snapshot_backfill_0_120000_checkpoint_none.log`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_0_120000_checkpoint_none_summary.json`
+- `build/logs/nlp_root_cause/sandbox_bounded_probe_after_120000_checkpoint_none.json`
+
+Result:
+
+- added `--doc-offset` for reproducible late-scale slice probes through the
+  official reference-processing CLI
+- added `--integrity-checkpoint-mode` for snapshot-backfill forensic control
+- the same disposable-sandbox workload now gives a direct checkpoint control:
+  - `60001..120000` with the old `truncate` integrity mode reproduced
+    corruption in `sentence_nlp_snapshot`
+  - a fresh `0..120000` control run with `integrity-checkpoint-mode=none`
+    completed successfully
+- snapshot-backfill integrity verification now defaults to `none`; aggressive
+  checkpoint modes remain explicit diagnostic overrides
+
+Interpretation:
+
+- evidence now points more narrowly at the final `TRUNCATE` checkpoint/flush
+  path than at the per-document backfill write loop itself
+- the safer current default is to verify integrity without forcing a
+  `TRUNCATE` checkpoint at the end of the run
+
+Current next step:
+
+- keep using disposable sandbox DBs for further large-scale durability probing
+- only after a clean full-scale rerun on the restored hewiki dev/test DB should
+  coverage-after and freshness/version work resume

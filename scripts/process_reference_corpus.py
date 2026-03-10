@@ -23,6 +23,12 @@ Process with Stanza + GPU, chunk 25, max 500:
         --db-path hdle_premium.db --project-id 1 \\
         --no-mock --use-gpu --chunk-size 25 --max-docs 500
 
+Probe a deterministic late-scale processed-doc slice:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --backfill-snapshots --doc-offset 60000 --max-docs 60000 \\
+        --probe-out build\\logs\\snapshot_probe.jsonl --probe-every-chunks 1
+
 Dry run:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 --dry-run
@@ -36,6 +42,12 @@ Backfill snapshots for already processed docs:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 \\
         --backfill-snapshots --chunk-size 50
+
+Repeat the same late-scale probe but skip the final WAL checkpoint flush:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --backfill-snapshots --doc-offset 60000 --max-docs 60000 \\
+        --integrity-checkpoint-mode none
 """
 from __future__ import annotations
 
@@ -498,6 +510,12 @@ def main() -> None:
         help="Stop after N documents; 0 = no limit",
     )
     parser.add_argument(
+        "--doc-offset",
+        type=int,
+        default=0,
+        help="Skip the first N candidate docs before applying --max-docs (for deterministic bounded probes).",
+    )
+    parser.add_argument(
         "--no-mock", action="store_true",
         help="Use Stanza NLP engine instead of Mock (rule-based)",
     )
@@ -552,6 +570,12 @@ def main() -> None:
         default=2.0,
         help="Timeout in seconds for per-probe quick_check; timeout is treated as inconclusive.",
     )
+    parser.add_argument(
+        "--integrity-checkpoint-mode",
+        choices=["truncate", "passive", "full", "restart", "none"],
+        default=None,
+        help="Optional snapshot-backfill post-run WAL checkpoint mode before the final quick_check (default backfill behavior: none).",
+    )
     args = parser.parse_args()
 
     if not args.project_id and not args.project_name:
@@ -564,8 +588,12 @@ def main() -> None:
         parser.error("--coverage-only and --verify-only are mutually exclusive")
     if args.coverage_only and args.dry_run:
         parser.error("--coverage-only and --dry-run are mutually exclusive")
+    if args.coverage_only and int(args.doc_offset or 0) > 0:
+        parser.error("--doc-offset is not supported with --coverage-only")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
         parser.error("--resume-run-id must be >= 1")
+    if int(args.doc_offset or 0) < 0:
+        parser.error("--doc-offset must be >= 0")
     if int(args.probe_every_chunks or 0) < 0:
         parser.error("--probe-every-chunks must be >= 0")
     if float(args.probe_quick_check_timeout or 0.0) < 0:
@@ -576,12 +604,15 @@ def main() -> None:
         parser.error("--probe-every-chunks requires --backfill-snapshots")
     if int(args.probe_every_chunks or 0) > 0 and not args.probe_out:
         parser.error("--probe-every-chunks requires --probe-out")
+    if args.integrity_checkpoint_mode is not None and not args.backfill_snapshots:
+        parser.error("--integrity-checkpoint-mode requires --backfill-snapshots")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
         logger.error("Database not found: %s", db_path)
         sys.exit(1)
     probe_out = Path(args.probe_out).expanduser() if args.probe_out else None
+    integrity_checkpoint_mode = str(args.integrity_checkpoint_mode or "none")
 
     use_mock = not args.no_mock
     use_gpu = args.use_gpu
@@ -670,6 +701,8 @@ def main() -> None:
             doc_ids_all = processed_doc_ids
         else:
             doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
+        if args.doc_offset > 0:
+            doc_ids_all = doc_ids_all[args.doc_offset :]
         if args.max_docs > 0:
             doc_ids_all = doc_ids_all[: args.max_docs]
         doc_ids_to_process = doc_ids_all
@@ -703,6 +736,16 @@ def main() -> None:
                 len(doc_ids_to_process),
             )
 
+        if doc_ids_to_process:
+            logger.info(
+                "Selected doc slice | offset=%d max_docs=%d first_doc_id=%d last_doc_id=%d selected=%d",
+                int(args.doc_offset or 0),
+                int(args.max_docs or 0),
+                int(doc_ids_to_process[0]),
+                int(doc_ids_to_process[-1]),
+                len(doc_ids_to_process),
+            )
+
         action_label = "Processing"
         if args.verify_only:
             action_label = "Verifying"
@@ -725,6 +768,11 @@ def main() -> None:
             use_gpu,
             " DRY-RUN" if args.dry_run else "",
         )
+        if args.backfill_snapshots:
+            logger.info(
+                "Snapshot backfill integrity checkpoint mode: %s",
+                integrity_checkpoint_mode,
+            )
 
         if args.dry_run:
             total_success = len(doc_ids_to_process)
@@ -783,6 +831,7 @@ def main() -> None:
                         resume_latest=bool(args.resume_latest),
                         resume_run_id=args.resume_run_id,
                         source_label=source_label,
+                        integrity_checkpoint_mode=integrity_checkpoint_mode,
                     )
                 else:
                     total_success, total_error = process_service.process_documents_batch(

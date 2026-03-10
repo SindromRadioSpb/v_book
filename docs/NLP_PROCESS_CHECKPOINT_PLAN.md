@@ -945,7 +945,8 @@ Delivered:
 
 - snapshot backfill no longer marks a batch `ok` before a physical DB check
 - `ProcessService.backfill_sentence_snapshots_batch()` now runs a post-run
-  `wal_checkpoint(TRUNCATE)` and `PRAGMA quick_check(10)` before final success
+  checkpoint-aware physical verification and `PRAGMA quick_check(10)` before
+  final success
 - integrity failure is now persisted as:
   - `status='failed'`
   - `stage='failed_integrity'`
@@ -1078,3 +1079,59 @@ Important conclusion:
   bug and toward a late-scale threshold or long-run checkpoint/flush issue
 - the expensive part of the bounded run was the final integrity phase, not the
   first `20000` doc writes themselves
+
+## Late-scale checkpoint root-cause narrowed on sandbox (2026-03-10)
+
+Files / artifacts:
+
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_20001_60000_summary.json`
+- `build/logs/nlp_root_cause/snapshot_backfill_60001_120000.log`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_60001_120000_summary.json`
+- `build/logs/nlp_root_cause/sandbox_bounded_probe_after_120000.json`
+- `build/logs/nlp_root_cause/snapshot_backfill_0_120000_checkpoint_none.log`
+- `build/logs/nlp_root_cause/snapshot_backfill_probe_0_120000_checkpoint_none_summary.json`
+- `build/logs/nlp_root_cause/sandbox_bounded_probe_after_120000_checkpoint_none.json`
+
+Delivered:
+
+- `scripts/process_reference_corpus.py` now supports:
+  - `--doc-offset` for reproducible late-scale processed-doc slices
+  - `--integrity-checkpoint-mode {truncate,passive,full,restart,none}` for
+    snapshot-backfill diagnostics
+- `ProcessService.backfill_sentence_snapshots_batch()` now defaults the
+  post-run integrity checkpoint mode to `none`
+- aggressive checkpoint modes remain available only as explicit diagnostic
+  overrides
+
+Observed on disposable hewiki sandboxes:
+
+- first bounded follow-up on the already-healthy `0..60000` snapshot sandbox:
+  - additional slice `60001..120000`
+  - old integrity mode: `truncate`
+  - result: write loop completed, then integrity stage failed with
+    `database disk image is malformed`
+  - external diagnose mapped the damage back to `sentence_nlp_snapshot`
+- control run on a fresh sandbox restored from the same safe backup:
+  - same `0..120000` workload
+  - integrity mode forced to `none`
+  - result: `120000/120000` docs completed, run landed in `status='ok'`,
+    `stage='completed'`
+  - post-run `db_open` stayed healthy and bounded post-run probes showed no
+    immediate corruption signal
+
+Interpretation:
+
+- the write loop itself is no longer the leading suspect for the first
+  `120000` docs
+- the strongest current root-cause lead is the old
+  `wal_checkpoint(TRUNCATE)` finalization path, not early per-document writes
+- this is strong enough to keep `none` as the safer operational default for
+  snapshot-backfill integrity verification
+
+Current next step:
+
+- do not switch back to `truncate` without new evidence
+- rerun larger/full-scale snapshot backfill with the safer default before
+  deciding whether more storage-level hardening is still required
+- only return to freshness/version hardening after a clean large-scale run on
+  the restored hewiki dev/test DB

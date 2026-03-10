@@ -127,7 +127,7 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
         monkeypatch.setattr(
             service,
             "_run_snapshot_backfill_integrity_check",
-            lambda: {"ok": True, "quick_check_rows": ["ok"]},
+            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"]},
         )
 
         with db.get_session() as session:
@@ -167,7 +167,7 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
         monkeypatch.setattr(
             service,
             "_run_snapshot_backfill_integrity_check",
-            lambda: {"ok": True, "quick_check_rows": ["ok"]},
+            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"]},
         )
 
         first_states: list[dict] = []
@@ -243,7 +243,7 @@ def test_snapshot_backfill_batch_marks_run_failed_on_integrity_error(monkeypatch
         monkeypatch.setattr(
             service,
             "_run_snapshot_backfill_integrity_check",
-            lambda: {"ok": False, "error": "database disk image is malformed"},
+            lambda **kwargs: {"ok": False, "error": "database disk image is malformed"},
         )
 
         states: list[dict] = []
@@ -274,6 +274,85 @@ def test_snapshot_backfill_batch_marks_run_failed_on_integrity_error(monkeypatch
         assert any(error.stage == "integrity_check" for error in run_errors)
         assert any(state.get("phase") == "verifying_integrity" for state in states)
         assert any(state.get("phase") == "failed" for state in states)
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_backfill_batch_passes_integrity_checkpoint_mode(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        captured: dict[str, str] = {}
+
+        def _fake_integrity_check(**kwargs):
+            captured["checkpoint_mode"] = str(kwargs.get("checkpoint_mode"))
+            return {"ok": True, "quick_check_rows": ["ok"]}
+
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            _fake_integrity_check,
+        )
+
+        with db.get_session() as session:
+            doc_ids = _seed_processed_docs_without_snapshots(session, count=2)
+            ok_count, err_count = service.backfill_sentence_snapshots_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="snapshot_backfill_test",
+                integrity_checkpoint_mode="none",
+            )
+
+        assert (ok_count, err_count) == (2, 0)
+        assert captured["checkpoint_mode"] == "none"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_backfill_batch_defaults_integrity_checkpoint_mode_to_none(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        captured: dict[str, str] = {}
+
+        def _fake_integrity_check(**kwargs):
+            captured["checkpoint_mode"] = str(kwargs.get("checkpoint_mode"))
+            return {"ok": True, "quick_check_rows": ["ok"]}
+
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            _fake_integrity_check,
+        )
+
+        with db.get_session() as session:
+            doc_ids = _seed_processed_docs_without_snapshots(session, count=1)
+            ok_count, err_count = service.backfill_sentence_snapshots_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="snapshot_backfill_test",
+            )
+
+        assert (ok_count, err_count) == (1, 0)
+        assert captured["checkpoint_mode"] == "none"
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

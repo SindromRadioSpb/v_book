@@ -436,12 +436,20 @@ class ProcessService:
             )
         )
 
-    def _run_snapshot_backfill_integrity_check(self) -> dict[str, Any]:
+    def _run_snapshot_backfill_integrity_check(
+        self,
+        *,
+        checkpoint_mode: str = "none",
+    ) -> dict[str, Any]:
         """Verify physical DB integrity before marking snapshot backfill as successful."""
         db_path = self.db_service.db_manager.db_path
+        normalized_checkpoint_mode = str(checkpoint_mode or "none").strip().lower()
+        if normalized_checkpoint_mode not in {"truncate", "passive", "full", "restart", "none"}:
+            raise ValueError(f"Unsupported integrity checkpoint mode: {checkpoint_mode}")
         summary: dict[str, Any] = {
             "ok": False,
             "db_path": str(db_path),
+            "checkpoint_mode": normalized_checkpoint_mode,
             "checkpoint": None,
             "quick_check_rows": [],
             "snapshot_probe_error": None,
@@ -451,9 +459,12 @@ class ProcessService:
         try:
             conn = sqlite3.connect(str(db_path), timeout=30)
             conn.execute("PRAGMA busy_timeout=15000")
-            checkpoint_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-            if checkpoint_row is not None:
-                summary["checkpoint"] = [int(value) for value in checkpoint_row]
+            if normalized_checkpoint_mode != "none":
+                checkpoint_row = conn.execute(
+                    f"PRAGMA wal_checkpoint({normalized_checkpoint_mode.upper()})"
+                ).fetchone()
+                if checkpoint_row is not None:
+                    summary["checkpoint"] = [int(value) for value in checkpoint_row]
             quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
             summary["quick_check_rows"] = quick_rows
             if not quick_rows or any(str(row).lower() != "ok" for row in quick_rows):
@@ -488,6 +499,7 @@ class ProcessService:
         run: ProcessorRun,
         success: int,
         errors: int,
+        integrity_checkpoint_mode: str = "none",
         state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
         completion_message: str,
     ) -> Tuple[int, int]:
@@ -501,7 +513,9 @@ class ProcessService:
             message="Running post-backfill integrity verification",
         )
 
-        integrity = self._run_snapshot_backfill_integrity_check()
+        integrity = self._run_snapshot_backfill_integrity_check(
+            checkpoint_mode=integrity_checkpoint_mode,
+        )
         if not integrity.get("ok"):
             failure_message = str(
                 integrity.get("error") or "Sentence snapshot backfill integrity verification failed"
@@ -1127,6 +1141,7 @@ class ProcessService:
         resume_latest: bool = False,
         resume_run_id: Optional[int] = None,
         source_label: str = "snapshot_backfill",
+        integrity_checkpoint_mode: str = "none",
     ) -> Tuple[int, int]:
         """Backfill missing sentence snapshots for a deterministic processed-doc slice."""
         if resume_latest and resume_run_id is not None:
@@ -1240,6 +1255,7 @@ class ProcessService:
                 run=run,
                 success=0,
                 errors=int(run.docs_failed or 0),
+                integrity_checkpoint_mode=integrity_checkpoint_mode,
                 state_callback=state_callback,
                 completion_message="No remaining documents for this sentence snapshot backfill run",
             )
@@ -1371,6 +1387,7 @@ class ProcessService:
             run=run,
             success=success,
             errors=errors,
+            integrity_checkpoint_mode=integrity_checkpoint_mode,
             state_callback=state_callback,
             completion_message="Sentence snapshot backfill run completed",
         )
