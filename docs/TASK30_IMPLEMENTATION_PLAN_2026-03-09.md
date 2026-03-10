@@ -1258,3 +1258,55 @@ Task30 consequence:
   path and safe restore guidance for the dev/test DB
 - the main install DB must not receive the same full-scale backfill run until
   this integrity issue is understood and fixed
+
+## Snapshot-backfill integrity hardening follow-up (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `scripts/repair_db_corruption.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `tests/test_repair_db_corruption_diagnose_ok.py`
+- `tests/test_repair_db_corruption_detects_corruption.py`
+- `tests/test_repair_db_corruption_recover_flow.py`
+
+Result:
+
+- snapshot backfill completion is now gated by a physical integrity check, not
+  just logical batch counters
+- the post-run path executes:
+  - `wal_checkpoint(TRUNCATE)`
+  - `PRAGMA quick_check(10)`
+- if integrity fails, the batch no longer lands in `ok/completed`; it is
+  persisted as:
+  - `status='failed'`
+  - `stage='failed_integrity'`
+  - `RunError.stage='integrity_check'`
+- the reference CLI now exits with a controlled error on integrity failure
+- corruption diagnosis is sharper:
+  - `sentence_nlp_snapshot` gets an explicit probe
+  - quick-check rootpages are mapped back to `sqlite_master`
+  - valid partial `tm_entry` indexes no longer produce false corruption noise
+
+Validation:
+
+- targeted + adjacent regressions:
+  - `44 passed in 283.62s`
+- live diagnose on the corrupted approved dev/test DB:
+  - `build/logs/nlp_integrity/repair_diagnose_test_db_verbose.log`
+  - `build/logs/db_corruption_repair_20260310_073008.json`
+- confirmed:
+  - the damaged rootpage maps directly to `sentence_nlp_snapshot`
+  - `tm_entry` probe is healthy on the same file
+
+Next step:
+
+- still do not run another full-scale backfill on either hewiki DB yet
+- repair or replace the damaged dev/test DB first
+- only then repeat:
+  - `coverage-only`
+  - full backfill on `ID=1`
+  - post-run coverage measurement
+- only after a clean rerun should freshness/version hardening be reconsidered

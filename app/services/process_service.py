@@ -5,6 +5,7 @@ import logging
 import json
 import hashlib
 import math
+import sqlite3
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -434,6 +435,130 @@ class ProcessService:
                 message=str(message or "")[:500],
             )
         )
+
+    def _run_snapshot_backfill_integrity_check(self) -> dict[str, Any]:
+        """Verify physical DB integrity before marking snapshot backfill as successful."""
+        db_path = self.db_service.db_manager.db_path
+        summary: dict[str, Any] = {
+            "ok": False,
+            "db_path": str(db_path),
+            "checkpoint": None,
+            "quick_check_rows": [],
+            "snapshot_probe_error": None,
+            "error": None,
+        }
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=30)
+            conn.execute("PRAGMA busy_timeout=15000")
+            checkpoint_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if checkpoint_row is not None:
+                summary["checkpoint"] = [int(value) for value in checkpoint_row]
+            quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+            summary["quick_check_rows"] = quick_rows
+            if not quick_rows or any(str(row).lower() != "ok" for row in quick_rows):
+                summary["error"] = (
+                    "PRAGMA quick_check(10) failed: " + "; ".join(quick_rows[:5])
+                    if quick_rows
+                    else "PRAGMA quick_check(10) returned no rows"
+                )
+                return summary
+
+            conn.execute(
+                "SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1"
+            ).fetchone()
+            summary["ok"] = True
+            return summary
+        except sqlite3.Error as exc:
+            summary["snapshot_probe_error"] = str(exc)
+            if summary["error"] is None:
+                summary["error"] = str(exc)
+            return summary
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+
+    def _finalize_snapshot_backfill_run(
+        self,
+        session: Session,
+        *,
+        run: ProcessorRun,
+        success: int,
+        errors: int,
+        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        completion_message: str,
+    ) -> Tuple[int, int]:
+        run.stage = "integrity_check"
+        session.commit()
+        session.refresh(run)
+        self._emit_run_state(
+            state_callback,
+            run,
+            phase="verifying_integrity",
+            message="Running post-backfill integrity verification",
+        )
+
+        integrity = self._run_snapshot_backfill_integrity_check()
+        if not integrity.get("ok"):
+            failure_message = str(
+                integrity.get("error") or "Sentence snapshot backfill integrity verification failed"
+            )[:500]
+            try:
+                self._record_batch_run_error(
+                    session,
+                    run_id=int(run.run_id),
+                    doc_id=None,
+                    stage="integrity_check",
+                    message=failure_message,
+                )
+                run.status = "failed"
+                run.stage = "failed_integrity"
+                run.finished_at = self._utc_now()
+                run.error_message = failure_message
+                session.commit()
+                session.refresh(run)
+            except Exception:
+                session.rollback()
+                logger.exception(
+                    "Failed to persist integrity failure state for snapshot backfill run %s",
+                    int(run.run_id),
+                )
+            self._emit_run_state(
+                state_callback,
+                run,
+                phase="failed",
+                message=failure_message,
+            )
+            raise RuntimeError(failure_message)
+
+        run.status = "ok"
+        run.stage = "completed_with_errors" if errors > 0 else "completed"
+        run.finished_at = self._utc_now()
+        run.chunks_completed = int(run.chunks_total or 0)
+        run.error_message = (
+            f"{errors} document(s) failed during sentence snapshot backfill"
+            if errors > 0
+            else None
+        )
+        session.commit()
+        session.refresh(run)
+        self._emit_run_state(
+            state_callback,
+            run,
+            phase="completed",
+            message=completion_message,
+        )
+
+        logger.info(
+            "Sentence snapshot backfill complete: %d succeeded, %d failed (run_id=%d)",
+            success,
+            errors,
+            int(run.run_id),
+        )
+        return success, errors
 
     def _start_processor_run(
         self,
@@ -1110,22 +1235,14 @@ class ProcessService:
             if run.last_doc_id is None or int(doc_id) > int(run.last_doc_id)
         ]
         if not remaining_ids:
-            run.status = "ok"
-            run.stage = "completed_with_errors" if int(run.docs_failed or 0) > 0 else "completed"
-            run.finished_at = self._utc_now()
-            if int(run.docs_failed or 0) > 0:
-                run.error_message = (
-                    f"{int(run.docs_failed)} document(s) failed during sentence snapshot backfill"
-                )
-            session.commit()
-            session.refresh(run)
-            self._emit_run_state(
-                state_callback,
-                run,
-                phase="completed",
-                message="No remaining documents for this sentence snapshot backfill run",
+            return self._finalize_snapshot_backfill_run(
+                session,
+                run=run,
+                success=0,
+                errors=int(run.docs_failed or 0),
+                state_callback=state_callback,
+                completion_message="No remaining documents for this sentence snapshot backfill run",
             )
-            return 0, 0
 
         success = 0
         errors = 0
@@ -1249,31 +1366,14 @@ class ProcessService:
                 if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
                     time.sleep(chunk_sleep)
 
-        run.status = "ok"
-        run.stage = "completed_with_errors" if errors > 0 else "completed"
-        run.finished_at = self._utc_now()
-        run.chunks_completed = int(run.chunks_total or 0)
-        run.error_message = (
-            f"{errors} document(s) failed during sentence snapshot backfill"
-            if errors > 0
-            else None
+        return self._finalize_snapshot_backfill_run(
+            session,
+            run=run,
+            success=success,
+            errors=errors,
+            state_callback=state_callback,
+            completion_message="Sentence snapshot backfill run completed",
         )
-        session.commit()
-        session.refresh(run)
-        self._emit_run_state(
-            state_callback,
-            run,
-            phase="completed",
-            message="Sentence snapshot backfill run completed",
-        )
-
-        logger.info(
-            "Sentence snapshot backfill complete: %d succeeded, %d failed (run_id=%d)",
-            success,
-            errors,
-            int(run.run_id),
-        )
-        return success, errors
 
     def process_documents_batch(
         self,

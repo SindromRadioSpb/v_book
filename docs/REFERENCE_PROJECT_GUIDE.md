@@ -309,6 +309,12 @@ python scripts/process_reference_corpus.py `
     `database disk image is malformed`
   - until the integrity issue is fixed, use `--coverage-only` on large
     reference projects and do not run the full backfill on the main install DB
+  - the CLI now includes a post-run physical integrity gate before a snapshot
+    backfill can be marked successful, but this does not repair the already
+    damaged `hewiki_gpu_processing test.db`
+  - use `scripts/repair_db_corruption.py --diagnose-only --verbose` to confirm
+    the current state of a suspect DB before attempting any further heavy
+    backfill run
 
 ### Inter-chunk sleep
 

@@ -256,7 +256,15 @@ def _log_batch_state(state: dict[str, Any], tracker: dict[str, Any]) -> None:
     should_log = False
     if tracker.get("run_id") != run_id:
         should_log = True
-    elif phase in {"started", "resumed", "paused", "cancelled", "completed"}:
+    elif phase in {
+        "started",
+        "resumed",
+        "paused",
+        "cancelled",
+        "completed",
+        "verifying_integrity",
+        "failed",
+    }:
         should_log = True
     elif tracker.get("chunks_completed") != chunks_completed:
         should_log = True
@@ -562,33 +570,42 @@ def main() -> None:
                 sys.exit(3)
             return
 
-        with db_service.get_session() as session:
-            if args.backfill_snapshots:
-                total_success, total_error = process_service.backfill_sentence_snapshots_batch(
-                    session,
-                    doc_ids_to_process,
-                    use_gpu=use_gpu,
-                    use_mock=use_mock,
-                    chunk_size=args.chunk_size,
-                    chunk_sleep=args.chunk_sleep,
-                    state_callback=lambda state: _log_batch_state(state, state_tracker),
-                    resume_latest=bool(args.resume_latest),
-                    resume_run_id=args.resume_run_id,
-                    source_label=source_label,
-                )
-            else:
-                total_success, total_error = process_service.process_documents_batch(
-                    session,
-                    doc_ids_to_process,
-                    use_gpu=use_gpu,
-                    use_mock=use_mock,
-                    chunk_size=args.chunk_size,
-                    chunk_sleep=args.chunk_sleep,
-                    state_callback=lambda state: _log_batch_state(state, state_tracker),
-                    resume_latest=bool(args.resume_latest),
-                    resume_run_id=args.resume_run_id,
-                    source_label=source_label,
-                )
+        try:
+            with db_service.get_session() as session:
+                if args.backfill_snapshots:
+                    total_success, total_error = process_service.backfill_sentence_snapshots_batch(
+                        session,
+                        doc_ids_to_process,
+                        use_gpu=use_gpu,
+                        use_mock=use_mock,
+                        chunk_size=args.chunk_size,
+                        chunk_sleep=args.chunk_sleep,
+                        state_callback=lambda state: _log_batch_state(state, state_tracker),
+                        resume_latest=bool(args.resume_latest),
+                        resume_run_id=args.resume_run_id,
+                        source_label=source_label,
+                    )
+                else:
+                    total_success, total_error = process_service.process_documents_batch(
+                        session,
+                        doc_ids_to_process,
+                        use_gpu=use_gpu,
+                        use_mock=use_mock,
+                        chunk_size=args.chunk_size,
+                        chunk_sleep=args.chunk_sleep,
+                        state_callback=lambda state: _log_batch_state(state, state_tracker),
+                        resume_latest=bool(args.resume_latest),
+                        resume_run_id=args.resume_run_id,
+                        source_label=source_label,
+                    )
+        except Exception as exc:
+            logger.error(
+                "%s failed after %.1fs: %s",
+                "Snapshot backfill" if args.backfill_snapshots else "Reference processing",
+                time.monotonic() - start,
+                exc,
+            )
+            sys.exit(2)
 
         logger.info(
             "Finished. success=%d error=%d time=%.1fs",

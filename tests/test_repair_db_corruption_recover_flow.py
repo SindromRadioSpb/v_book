@@ -44,6 +44,18 @@ def _create_recovered_db(db_path: Path) -> None:
         )
         conn.execute(
             """
+            CREATE TABLE sentence_nlp_snapshot (
+                sentence_id INTEGER PRIMARY KEY,
+                engine TEXT,
+                engine_version TEXT,
+                sentence_text_hash TEXT,
+                payload_json TEXT,
+                token_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE term_search (
                 term_rowid INTEGER PRIMARY KEY,
                 he_term TEXT,
@@ -65,6 +77,18 @@ def _create_recovered_db(db_path: Path) -> None:
             """
         )
         conn.execute("INSERT INTO schema_meta(key, value) VALUES ('schema_version', '1')")
+        conn.execute(
+            """
+            INSERT INTO document_sentence(sentence_id, doc_id, text)
+            VALUES (1, 10, 'alpha beta')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO sentence_nlp_snapshot(sentence_id, engine, engine_version, sentence_text_hash, payload_json, token_count)
+            VALUES (1, 'mock', '1', 'hash', '[]', 0)
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -118,3 +142,4 @@ def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(tmp_path:
     assert Path(summary["recovered_db_path"]).exists()
     assert summary["validation_results"]["quick_check"]["ok"] is True
     assert summary["validation_results"]["tm_entry_probe"]["ok"] is True
+    assert summary["validation_results"]["sentence_snapshot_probe"]["ok"] is True

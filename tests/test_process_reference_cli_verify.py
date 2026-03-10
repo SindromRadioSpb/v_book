@@ -419,3 +419,40 @@ def test_cli_coverage_only_snapshot_backfill_is_read_only(monkeypatch):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _raise_integrity_failure(*args, **kwargs):
+            raise RuntimeError("database disk image is malformed")
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _raise_integrity_failure)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)

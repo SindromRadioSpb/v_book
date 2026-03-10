@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -34,6 +35,7 @@ KEY_TABLES = (
     "dict_project",
     "source_document",
     "document_sentence",
+    "sentence_nlp_snapshot",
     "lemma",
     "tm_entry",
 )
@@ -43,6 +45,7 @@ TM_ENTRY_INDEX_PROBE_COLUMNS = (
     "kind",
     "src_norm",
 )
+ROOTPAGE_RE = re.compile(r"\bTree\s+(\d+)\b")
 
 
 def _utc_now() -> str:
@@ -113,27 +116,89 @@ def _probe_tm_entry_indexes(conn: sqlite3.Connection) -> tuple[list[str], list[d
 
     for row in index_rows:
         index_name = str(row[1])
-        for column in TM_ENTRY_INDEX_PROBE_COLUMNS:
-            sql = (
-                f'SELECT "{column}" FROM tm_entry INDEXED BY "{index_name}" '
-                f'ORDER BY "{column}" LIMIT 1'
+        is_partial = bool(row[4]) if len(row) > 4 else False
+        if is_partial:
+            continue
+        sql = f'SELECT 1 FROM tm_entry INDEXED BY "{index_name}" LIMIT 1'
+        try:
+            conn.execute(sql).fetchone()
+        except sqlite3.Error as exc:
+            failing_objects.append(f"index:{index_name}")
+            failing_sql_examples.append(
+                {
+                    "phase": "tm_entry_index_probe",
+                    "index": index_name,
+                    "sql": sql,
+                    "error": str(exc),
+                }
             )
-            try:
-                conn.execute(sql).fetchone()
-                break
-            except sqlite3.Error as exc:
-                failing_objects.append(f"index:{index_name}")
-                failing_sql_examples.append(
-                    {
-                        "phase": "tm_entry_index_probe",
-                        "index": index_name,
-                        "sql": sql,
-                        "error": str(exc),
-                    }
-                )
-                break
 
     return sorted(set(failing_objects)), failing_sql_examples
+
+
+def _probe_sentence_snapshot_table(conn: sqlite3.Connection) -> dict[str, Any]:
+    try:
+        table_exists = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sentence_nlp_snapshot' LIMIT 1"
+            ).fetchone()
+        )
+    except sqlite3.Error as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "sql": "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sentence_nlp_snapshot' LIMIT 1",
+            "skipped": False,
+        }
+    if not table_exists:
+        return {
+            "ok": True,
+            "error": None,
+            "sql": None,
+            "skipped": True,
+        }
+    return _probe_sql(
+        conn,
+        "SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1",
+    )
+
+
+def _extract_rootpages(rows: list[str]) -> list[int]:
+    rootpages: set[int] = set()
+    for row in rows:
+        for match in ROOTPAGE_RE.findall(str(row or "")):
+            try:
+                rootpages.add(int(match))
+            except ValueError:
+                continue
+    return sorted(rootpages)
+
+
+def _lookup_rootpage_matches(
+    conn: sqlite3.Connection,
+    rootpages: list[int],
+) -> list[dict[str, Any]]:
+    if not rootpages:
+        return []
+    placeholders = ", ".join("?" for _ in rootpages)
+    rows = conn.execute(
+        f"""
+        SELECT type, name, tbl_name, rootpage
+        FROM sqlite_master
+        WHERE rootpage IN ({placeholders})
+        ORDER BY rootpage, type, name
+        """,
+        tuple(int(rootpage) for rootpage in rootpages),
+    ).fetchall()
+    return [
+        {
+            "type": str(row[0]),
+            "name": str(row[1]),
+            "table": str(row[2]),
+            "rootpage": int(row[3]),
+        }
+        for row in rows
+    ]
 
 
 def _safe_table_count(db_path: Path, table_name: str) -> dict[str, Any]:
@@ -156,6 +221,9 @@ def diagnose_db_corruption(db_path: Path, *, deep: bool = False) -> dict[str, An
         "quick_check": {},
         "integrity_check": None,
         "tm_entry_probe": {},
+        "sentence_snapshot_probe": {},
+        "quick_check_rootpages": [],
+        "rootpage_matches": [],
         "failing_objects": [],
         "failing_sql_examples": [],
         "elapsed_s": None,
@@ -179,6 +247,11 @@ def diagnose_db_corruption(db_path: Path, *, deep: bool = False) -> dict[str, An
             "error": str(exc),
             "sql": "SELECT 1 FROM tm_entry LIMIT 1",
         }
+        diagnosis["sentence_snapshot_probe"] = {
+            "ok": False,
+            "error": str(exc),
+            "sql": "SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1",
+        }
         diagnosis["failing_objects"] = ["database_open"]
         diagnosis["failing_sql_examples"] = [
             {
@@ -193,6 +266,11 @@ def diagnose_db_corruption(db_path: Path, *, deep: bool = False) -> dict[str, An
     try:
         quick_check = _run_pragma(conn, "PRAGMA quick_check(10)")
         diagnosis["quick_check"] = quick_check
+        diagnosis["quick_check_rootpages"] = _extract_rootpages(quick_check.get("rows", []))
+        diagnosis["rootpage_matches"] = _lookup_rootpage_matches(
+            conn,
+            diagnosis["quick_check_rootpages"],
+        )
         if not quick_check["ok"]:
             failing_objects.append("database")
             failing_sql_examples.append(
@@ -225,6 +303,18 @@ def diagnose_db_corruption(db_path: Path, *, deep: bool = False) -> dict[str, An
                     "phase": "tm_entry_probe",
                     "sql": tm_entry_probe["sql"],
                     "error": tm_entry_probe["error"],
+                }
+            )
+
+        sentence_snapshot_probe = _probe_sentence_snapshot_table(conn)
+        diagnosis["sentence_snapshot_probe"] = sentence_snapshot_probe
+        if not sentence_snapshot_probe["ok"]:
+            failing_objects.append("sentence_nlp_snapshot")
+            failing_sql_examples.append(
+                {
+                    "phase": "sentence_snapshot_probe",
+                    "sql": sentence_snapshot_probe.get("sql"),
+                    "error": sentence_snapshot_probe.get("error"),
                 }
             )
 
@@ -338,6 +428,7 @@ def _validate_recovered_db(db_path: Path) -> dict[str, Any]:
     validation: dict[str, Any] = {
         "quick_check": {},
         "tm_entry_probe": {},
+        "sentence_snapshot_probe": {},
         "fts_status": {},
         "schema_version": None,
         "error": None,
@@ -349,12 +440,14 @@ def _validate_recovered_db(db_path: Path) -> dict[str, Any]:
         validation["error"] = str(exc)
         validation["quick_check"] = {"ok": False, "rows": [], "error": str(exc)}
         validation["tm_entry_probe"] = {"ok": False, "error": str(exc)}
+        validation["sentence_snapshot_probe"] = {"ok": False, "error": str(exc)}
         validation["fts_status"] = {"ok": False, "error": str(exc)}
         return validation
 
     try:
         validation["quick_check"] = _run_pragma(conn, "PRAGMA quick_check(10)")
         validation["tm_entry_probe"] = _probe_sql(conn, "SELECT 1 FROM tm_entry LIMIT 1")
+        validation["sentence_snapshot_probe"] = _probe_sentence_snapshot_table(conn)
 
         try:
             sentence_fts_exists, term_fts_exists = check_fts_exists(conn)
@@ -518,9 +611,10 @@ def repair_db_corruption(
 
         quick_ok = bool(validation.get("quick_check", {}).get("ok"))
         tm_ok = bool(validation.get("tm_entry_probe", {}).get("ok"))
+        snapshot_ok = bool(validation.get("sentence_snapshot_probe", {}).get("ok"))
         fts_ok = bool(validation.get("fts_status", {}).get("ok"))
 
-        if quick_ok and tm_ok and fts_ok:
+        if quick_ok and tm_ok and snapshot_ok and fts_ok:
             summary["status"] = "SALVAGED_OK"
             if summary["recovered_warnings"]:
                 summary["status"] = "SALVAGED_WITH_WARNINGS"
@@ -528,7 +622,9 @@ def repair_db_corruption(
             summary["status"] = "FAILED"
             summary["error"] = (
                 "Recovered DB validation failed: "
-                f"quick_check_ok={quick_ok}, tm_entry_probe_ok={tm_ok}, fts_ok={fts_ok}"
+                "quick_check_ok="
+                f"{quick_ok}, tm_entry_probe_ok={tm_ok}, "
+                f"sentence_snapshot_probe_ok={snapshot_ok}, fts_ok={fts_ok}"
             )
 
         return summary

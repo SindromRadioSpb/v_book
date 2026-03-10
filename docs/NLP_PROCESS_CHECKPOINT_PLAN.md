@@ -927,3 +927,54 @@ Roadmap correction after this probe:
   the dev/test DB
 - only after a clean integrity-checked full-scale run should we return to the
   freshness/version question
+
+## Snapshot backfill integrity hardening follow-up (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `scripts/process_reference_corpus.py`
+- `scripts/repair_db_corruption.py`
+- `tests/test_sentence_snapshot_backfill_batch.py`
+- `tests/test_process_reference_cli_verify.py`
+- `tests/test_repair_db_corruption_diagnose_ok.py`
+- `tests/test_repair_db_corruption_detects_corruption.py`
+- `tests/test_repair_db_corruption_recover_flow.py`
+
+Delivered:
+
+- snapshot backfill no longer marks a batch `ok` before a physical DB check
+- `ProcessService.backfill_sentence_snapshots_batch()` now runs a post-run
+  `wal_checkpoint(TRUNCATE)` and `PRAGMA quick_check(10)` before final success
+- integrity failure is now persisted as:
+  - `status='failed'`
+  - `stage='failed_integrity'`
+  - `RunError.stage='integrity_check'`
+- CLI reference backfill now exits cleanly on integrity failure instead of
+  leaving a raw traceback
+- `repair_db_corruption.py` now:
+  - probes `sentence_nlp_snapshot` explicitly
+  - maps `quick_check` rootpages back to `sqlite_master`
+  - avoids false positives from valid partial `tm_entry` indexes
+
+Live evidence on the already-corrupted approved dev/test DB:
+
+- diagnose artifact:
+  - `build/logs/nlp_integrity/repair_diagnose_test_db_verbose.log`
+- JSON summary:
+  - `build/logs/db_corruption_repair_20260310_073008.json`
+- confirmed:
+  - the damaged rootpage maps directly to
+    `sentence_nlp_snapshot` root page `3845022`
+  - `tm_entry` probing stays healthy, so the new diagnose output is narrower
+    and more actionable than the initial blocker report
+
+Current next step after this hardening:
+
+- do not rerun full-scale snapshot backfill on either hewiki DB yet
+- repair or replace the damaged dev/test DB first
+- then rerun:
+  - `--backfill-snapshots --coverage-only`
+  - full backfill on `ID=1`
+  - post-run coverage measurement
+- only after that return to the freshness/version decision

@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.infra.sa_models import (
@@ -13,6 +14,7 @@ from app.infra.sa_models import (
     Lemma,
     Library,
     ProcessorRun,
+    RunError,
     SentenceNLPSnapshot,
     SourceCorpus,
     SourceDocument,
@@ -122,6 +124,11 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
     try:
         service = ProcessService()
         monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            lambda: {"ok": True, "quick_check_rows": ["ok"]},
+        )
 
         with db.get_session() as session:
             doc_ids = _seed_processed_docs_without_snapshots(session, count=2)
@@ -157,6 +164,11 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
     try:
         service = ProcessService()
         monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            lambda: {"ok": True, "quick_check_rows": ["ok"]},
+        )
 
         first_states: list[dict] = []
         cancel_state = {"stop": False}
@@ -214,6 +226,54 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
         assert len(snapshots) == 6
         assert any(state.get("phase") == "resumed" for state in second_states)
         assert any(state.get("phase") == "completed" for state in second_states)
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_backfill_batch_marks_run_failed_on_integrity_error(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+        monkeypatch.setattr(
+            service,
+            "_run_snapshot_backfill_integrity_check",
+            lambda: {"ok": False, "error": "database disk image is malformed"},
+        )
+
+        states: list[dict] = []
+        with db.get_session() as session:
+            doc_ids = _seed_processed_docs_without_snapshots(session, count=2)
+            with pytest.raises(RuntimeError, match="database disk image is malformed"):
+                service.backfill_sentence_snapshots_batch(
+                    session,
+                    doc_ids,
+                    use_mock=True,
+                    chunk_size=1,
+                    state_callback=states.append,
+                    resume_latest=True,
+                    source_label="snapshot_backfill_test",
+                )
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
+            run_errors = session.execute(
+                select(RunError).where(RunError.run_id == run.run_id).order_by(RunError.error_id.asc())
+            ).scalars().all()
+
+        assert run.status == "failed"
+        assert run.stage == "failed_integrity"
+        assert run.docs_total == 2
+        assert run.docs_processed == 2
+        assert "database disk image is malformed" in str(run.error_message)
+        assert any(error.stage == "integrity_check" for error in run_errors)
+        assert any(state.get("phase") == "verifying_integrity" for state in states)
+        assert any(state.get("phase") == "failed" for state in states)
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
