@@ -978,3 +978,51 @@ Current next step after this hardening:
   - full backfill on `ID=1`
   - post-run coverage measurement
 - only after that return to the freshness/version decision
+
+## Dev/test DB restored from safe backup (2026-03-10)
+
+Files / artifacts:
+
+- `scripts/repair_db_corruption.py`
+- `build/logs/nlp_restore/restore_test_db_from_backup.log`
+- `build/logs/nlp_restore/db_open_restored_test_db.json`
+- `build/logs/nlp_restore/restored_test_db_probe.json`
+- `build/logs/nlp_restore/coverage_only_id1_restored.log`
+- `build/logs/nlp_restore/coverage_only_id5_restored.log`
+
+Restore source and outcome:
+
+- restored target:
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- safe source backup that matched the legacy test DB contents:
+  - `backups\backup_20260310_033538_pre_migration_38_to_39.db`
+- the corrupted full-backfill result was preserved separately as:
+  - `hewiki_gpu_processing test.corrupt_20260310_081113.db`
+- after restore, migrations were re-applied and the DB opened cleanly at:
+  - `schema_version=39`
+
+Observed after restore:
+
+- `ID=1` (`Hebrew Wikipedia Baseline`):
+  - coverage-only works again
+  - `387639` processed docs
+  - `0.0%` sentence snapshot coverage
+- `ID=5`:
+  - project and `2` docs are present
+  - snapshot coverage is back to `0.0%`
+  - this is expected because the safe restore source predates the later
+    re-process probe that had temporarily brought it to `100%`
+- `ID=6`:
+  - project and `1` doc are present
+
+Roadmap after restore:
+
+- the dev/test DB is usable again for normal development and for future safe
+  probes
+- but we still must not rerun the full `ID=1` snapshot backfill until the
+  storage-level durability bug is fixed
+- the next decision point remains:
+  - durability/root-cause fix
+  - then a fresh full-scale backfill rerun
+  - then post-run coverage measurement
+  - only then freshness/version hardening

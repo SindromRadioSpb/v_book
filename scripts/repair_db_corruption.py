@@ -356,6 +356,107 @@ def _create_backup(db_path: Path) -> Path:
     return backup_path
 
 
+def _remove_sidecar_files(db_path: Path) -> list[str]:
+    removed: list[str] = []
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(f"{db_path}{suffix}")
+        if sidecar.exists():
+            sidecar.unlink()
+            removed.append(str(sidecar))
+    return removed
+
+
+def _read_schema_version(db_path: Path) -> int | None:
+    try:
+        conn = _connect(db_path, readonly=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def restore_db_from_backup(
+    *,
+    db_path: Path,
+    backup_db_path: Path,
+    move_backup: bool = False,
+    apply_migrations: bool = True,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    summary: dict[str, Any] = {
+        "status": "FAILED",
+        "started_at_utc": _utc_now(),
+        "db_path": str(db_path),
+        "backup_db_path": str(backup_db_path),
+        "move_backup": bool(move_backup),
+        "apply_migrations": bool(apply_migrations),
+        "corrupt_db_path": None,
+        "removed_sidecars": [],
+        "removed_backup_sidecars": [],
+        "backup_diagnosis": {},
+        "restored_diagnosis": {},
+        "schema_version_before_migration": None,
+        "schema_version_after_migration": None,
+        "error": None,
+    }
+
+    try:
+        if not backup_db_path.exists():
+            summary["error"] = f"Backup DB not found: {backup_db_path}"
+            return summary
+
+        backup_diagnosis = diagnose_db_corruption(backup_db_path, deep=False)
+        summary["backup_diagnosis"] = backup_diagnosis
+        if backup_diagnosis.get("status") != "OK":
+            summary["error"] = "Backup candidate failed corruption diagnosis"
+            return summary
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if db_path.exists():
+            summary["removed_sidecars"] = _remove_sidecar_files(db_path)
+            corrupt_db_path = db_path.with_name(f"{db_path.stem}.corrupt_{timestamp}{db_path.suffix}")
+            shutil.move(str(db_path), str(corrupt_db_path))
+            summary["corrupt_db_path"] = str(corrupt_db_path)
+        else:
+            _remove_sidecar_files(db_path)
+
+        if move_backup:
+            summary["removed_backup_sidecars"] = _remove_sidecar_files(backup_db_path)
+            shutil.move(str(backup_db_path), str(db_path))
+        else:
+            shutil.copy2(backup_db_path, db_path)
+
+        summary["schema_version_before_migration"] = _read_schema_version(db_path)
+
+        if apply_migrations:
+            from app.services.db_service import DBService
+
+            DBService.shutdown()
+            DBService.initialize(db_path)
+            DBService.shutdown()
+
+        summary["schema_version_after_migration"] = _read_schema_version(db_path)
+        restored_diagnosis = diagnose_db_corruption(db_path, deep=False)
+        summary["restored_diagnosis"] = restored_diagnosis
+        if restored_diagnosis.get("status") != "OK":
+            summary["error"] = "Restored DB failed corruption diagnosis"
+            return summary
+
+        summary["status"] = "RESTORED_OK"
+        return summary
+    except Exception as exc:
+        summary["error"] = str(exc)
+        return summary
+    finally:
+        summary["finished_at_utc"] = _utc_now()
+        summary["elapsed_s"] = round(time.perf_counter() - started, 3)
+
+
 def _run_sqlite_recover_pipeline(
     *,
     sqlite3_bin: Path,
@@ -513,7 +614,18 @@ def repair_db_corruption(
     sqlite3_bin: str | None = None,
     recovered_db_path: Path | None = None,
     fts_rebuild: bool = False,
+    restore_backup_path: Path | None = None,
+    move_backup: bool = False,
+    apply_migrations: bool = True,
 ) -> dict[str, Any]:
+    if restore_backup_path is not None:
+        return restore_db_from_backup(
+            db_path=db_path,
+            backup_db_path=restore_backup_path,
+            move_backup=move_backup,
+            apply_migrations=apply_migrations,
+        )
+
     started = time.perf_counter()
     summary: dict[str, Any] = {
         "status": "FAILED",
@@ -674,6 +786,21 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Rebuild FTS data after recovery (can be long on huge DB).",
     )
+    parser.add_argument(
+        "--restore-backup-path",
+        default=None,
+        help="Restore DB from a known-good backup DB instead of using sqlite3 .recover.",
+    )
+    parser.add_argument(
+        "--move-backup",
+        action="store_true",
+        help="Move the backup DB into place instead of copying it.",
+    )
+    parser.add_argument(
+        "--no-apply-migrations",
+        action="store_true",
+        help="Restore the backup DB without running DB migrations afterwards.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     backup_group = parser.add_mutually_exclusive_group()
     backup_group.add_argument("--backup", dest="backup", action="store_true", help="Create backup (default).")
@@ -701,6 +828,9 @@ def main() -> int:
         return 1
 
     recovered_path = Path(args.recovered_db_path).expanduser() if args.recovered_db_path else None
+    restore_backup_path = (
+        Path(args.restore_backup_path).expanduser() if args.restore_backup_path else None
+    )
 
     summary = repair_db_corruption(
         db_path=db_path,
@@ -710,13 +840,21 @@ def main() -> int:
         sqlite3_bin=args.sqlite3_bin,
         recovered_db_path=recovered_path,
         fts_rebuild=bool(args.fts_rebuild),
+        restore_backup_path=restore_backup_path,
+        move_backup=bool(args.move_backup),
+        apply_migrations=not bool(args.no_apply_migrations),
     )
 
     summary_path = _write_summary(summary)
     summary["summary_path"] = str(summary_path)
     print(json.dumps(summary, ensure_ascii=False))
 
-    return 0 if summary.get("status") in {"OK", "SALVAGED_OK", "SALVAGED_WITH_WARNINGS"} else 1
+    return 0 if summary.get("status") in {
+        "OK",
+        "SALVAGED_OK",
+        "SALVAGED_WITH_WARNINGS",
+        "RESTORED_OK",
+    } else 1
 
 
 if __name__ == "__main__":

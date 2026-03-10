@@ -315,6 +315,9 @@ python scripts/process_reference_corpus.py `
   - use `scripts/repair_db_corruption.py --diagnose-only --verbose` to confirm
     the current state of a suspect DB before attempting any further heavy
     backfill run
+  - the approved dev/test DB has since been restored from a safe pre-corruption
+    backup and is usable again, but the full `ID=1` backfill must still stay
+    blocked until the durability bug itself is fixed
 
 ### Inter-chunk sleep
 

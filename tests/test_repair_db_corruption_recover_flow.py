@@ -94,6 +94,24 @@ def _create_recovered_db(db_path: Path) -> None:
         conn.close()
 
 
+def _create_target_db(db_path: Path) -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE tm_entry (
+                tm_id INTEGER PRIMARY KEY,
+                project_id INTEGER,
+                kind TEXT
+            )
+            """
+        )
+        conn.execute("INSERT INTO tm_entry(tm_id, project_id, kind) VALUES (1, 99, 'legacy')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(tmp_path: Path, monkeypatch) -> None:
     source_db = tmp_path / "source.db"
     recovered_db = tmp_path / "recovered.db"
@@ -143,3 +161,99 @@ def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(tmp_path:
     assert summary["validation_results"]["quick_check"]["ok"] is True
     assert summary["validation_results"]["tm_entry_probe"]["ok"] is True
     assert summary["validation_results"]["sentence_snapshot_probe"]["ok"] is True
+
+
+def test_restore_db_from_backup_moves_corrupt_target_aside_and_restores_backup(tmp_path: Path) -> None:
+    target_db = tmp_path / "target.db"
+    backup_db = tmp_path / "backup.db"
+    _create_target_db(target_db)
+    _create_recovered_db(backup_db)
+
+    summary = mod.restore_db_from_backup(
+        db_path=target_db,
+        backup_db_path=backup_db,
+        move_backup=False,
+        apply_migrations=False,
+    )
+
+    assert summary["status"] == "RESTORED_OK"
+    assert summary["corrupt_db_path"] is not None
+    assert Path(summary["corrupt_db_path"]).exists()
+    assert target_db.exists()
+    assert backup_db.exists()
+    assert summary["schema_version_before_migration"] == 1
+    assert summary["schema_version_after_migration"] == 1
+    assert summary["restored_diagnosis"]["status"] == "OK"
+
+    conn = sqlite3.connect(str(target_db))
+    try:
+        row = conn.execute("SELECT tm_id, project_id, kind, src_norm FROM tm_entry").fetchone()
+        assert row == (1, 1, "lemma", "alpha")
+    finally:
+        conn.close()
+
+
+def test_restore_db_from_backup_runs_migrations_when_requested(tmp_path: Path, monkeypatch) -> None:
+    target_db = tmp_path / "target.db"
+    backup_db = tmp_path / "backup.db"
+    _create_target_db(target_db)
+    _create_recovered_db(backup_db)
+
+    calls: list[Path] = []
+
+    class _FakeDBService:
+        @classmethod
+        def shutdown(cls):
+            return None
+
+        @classmethod
+        def initialize(cls, path):
+            calls.append(Path(path))
+            conn = sqlite3.connect(str(path))
+            try:
+                conn.execute("UPDATE schema_meta SET value='39' WHERE key='schema_version'")
+                conn.commit()
+            finally:
+                conn.close()
+            return cls()
+
+    import app.services.db_service as db_service_mod
+
+    monkeypatch.setattr(db_service_mod, "DBService", _FakeDBService)
+
+    summary = mod.restore_db_from_backup(
+        db_path=target_db,
+        backup_db_path=backup_db,
+        move_backup=False,
+        apply_migrations=True,
+    )
+
+    assert summary["status"] == "RESTORED_OK"
+    assert calls == [target_db]
+    assert summary["schema_version_before_migration"] == 1
+    assert summary["schema_version_after_migration"] == 39
+
+
+def test_restore_db_from_backup_removes_source_backup_sidecars_when_moving(tmp_path: Path) -> None:
+    target_db = tmp_path / "target.db"
+    backup_db = tmp_path / "backup.db"
+    _create_target_db(target_db)
+    _create_recovered_db(backup_db)
+    backup_shm = Path(f"{backup_db}-shm")
+    backup_wal = Path(f"{backup_db}-wal")
+    backup_shm.write_bytes(b"shm")
+    backup_wal.write_bytes(b"")
+
+    summary = mod.restore_db_from_backup(
+        db_path=target_db,
+        backup_db_path=backup_db,
+        move_backup=True,
+        apply_migrations=False,
+    )
+
+    assert summary["status"] == "RESTORED_OK"
+    assert sorted(Path(path).name for path in summary["removed_backup_sidecars"]) == sorted(
+        [backup_shm.name, backup_wal.name]
+    )
+    assert not backup_shm.exists()
+    assert not backup_wal.exists()

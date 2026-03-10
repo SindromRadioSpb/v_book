@@ -1310,3 +1310,38 @@ Next step:
   - full backfill on `ID=1`
   - post-run coverage measurement
 - only after a clean rerun should freshness/version hardening be reconsidered
+
+## Dev/test DB recovery from safe backup (2026-03-10)
+
+Files:
+
+- `scripts/repair_db_corruption.py`
+- `tests/test_repair_db_corruption_recover_flow.py`
+- `docs/NLP_PROCESS_CHECKPOINT_PLAN.md`
+- `docs/REFERENCE_PROJECT_GUIDE.md`
+
+Result:
+
+- the approved dev/test DB was restored from the matching safe backup:
+  - source backup:
+    `backups\backup_20260310_033538_pre_migration_38_to_39.db`
+  - restored target:
+    `hewiki_gpu_processing test.db`
+- the corrupted post-backfill DB was preserved separately as:
+  - `hewiki_gpu_processing test.corrupt_20260310_081113.db`
+- restore then re-applied migrations and brought the restored DB back to:
+  - `schema_version=39`
+- `db_open` is healthy again on the restored target
+- `coverage-only` works again on the restored target:
+  - `ID=1`: `0.0%` snapshot coverage on `387639` processed docs
+  - `ID=5`: `0.0%` snapshot coverage on `2` docs
+  - `ID=6`: project/doc presence confirmed
+
+Operational meaning:
+
+- the development/test DB is usable again
+- the restore proves the backup-based recovery path is the practical local
+  incident-response strategy on this machine, where `sqlite3.exe` is still not
+  available
+- this does not unblock full-scale backfill:
+  the durability bug is still open, only the environment has been recovered
