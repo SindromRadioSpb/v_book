@@ -839,6 +839,86 @@ class ProcessService:
         session.flush()
         logger.debug(f"Updated statistics for {len(lemma_counter)} lemmas")
 
+    @staticmethod
+    def _chunk_int_ids(values: List[int], chunk_size: int = 500) -> List[List[int]]:
+        ordered = [int(v) for v in values]
+        size = max(1, int(chunk_size or 500))
+        return [ordered[idx : idx + size] for idx in range(0, len(ordered), size)]
+
+    def _get_document_lemma_ids(
+        self,
+        session: Session,
+        *,
+        project_id: int,
+        doc_id: int,
+    ) -> List[int]:
+        rows = session.execute(
+            text(
+                "SELECT lemma_id FROM lemma_doc_stat "
+                "WHERE project_id = :pid AND doc_id = :doc_id "
+                "ORDER BY lemma_id"
+            ),
+            {"pid": int(project_id), "doc_id": int(doc_id)},
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def _cleanup_orphaned_lemmas_for_ids(
+        self,
+        session: Session,
+        project_id: int,
+        lemma_ids: List[int],
+    ) -> int:
+        """Delete lemma rows that became orphaned after removing one document's stats.
+
+        Only lemma IDs referenced by the current document can become orphaned due to
+        this operation. Restricting the cleanup to that candidate set avoids an
+        expensive project-wide orphan sweep on large databases.
+        """
+        candidate_ids = sorted({int(lemma_id) for lemma_id in lemma_ids if lemma_id is not None})
+        if not candidate_ids:
+            return 0
+
+        surviving_ids: set[int] = set()
+        for chunk in self._chunk_int_ids(candidate_ids):
+            param_names = [f"lemma_id_{idx}" for idx in range(len(chunk))]
+            in_clause = ", ".join(f":{name}" for name in param_names)
+            params = {"pid": int(project_id)}
+            params.update({name: int(lemma_id) for name, lemma_id in zip(param_names, chunk)})
+            rows = session.execute(
+                text(
+                    "SELECT lemma_id FROM lemma_project_stat "
+                    f"WHERE project_id = :pid AND lemma_id IN ({in_clause})"
+                ),
+                params,
+            ).fetchall()
+            surviving_ids.update(int(row[0]) for row in rows)
+
+        orphan_ids = [lemma_id for lemma_id in candidate_ids if lemma_id not in surviving_ids]
+        if not orphan_ids:
+            return 0
+
+        deleted = 0
+        for chunk in self._chunk_int_ids(orphan_ids):
+            param_names = [f"lemma_id_{idx}" for idx in range(len(chunk))]
+            in_clause = ", ".join(f":{name}" for name in param_names)
+            params = {"pid": int(project_id)}
+            params.update({name: int(lemma_id) for name, lemma_id in zip(param_names, chunk)})
+            session.execute(
+                text(
+                    "DELETE FROM lemma "
+                    f"WHERE project_id = :pid AND lemma_id IN ({in_clause})"
+                ),
+                params,
+            )
+            deleted += len(chunk)
+
+        logger.info(
+            "Cleaned up %d orphaned lemmas from %d candidate lemma(s)",
+            deleted,
+            len(candidate_ids),
+        )
+        return deleted
+
     def _backfill_sentence_nlp_snapshots_for_document(
         self,
         session: Session,
@@ -1557,16 +1637,12 @@ class ProcessService:
 
             logger.info(f"Removing statistics for document {doc_id} (project {project_id})")
 
-            doc_stats_count = int(
-                session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM lemma_doc_stat "
-                        "WHERE project_id = :pid AND doc_id = :doc_id"
-                    ),
-                    {"pid": project_id, "doc_id": int(doc_id)},
-                ).scalar()
-                or 0
+            doc_lemma_ids = self._get_document_lemma_ids(
+                session,
+                project_id=int(project_id),
+                doc_id=int(doc_id),
             )
+            doc_stats_count = len(doc_lemma_ids)
             if doc_stats_count <= 0:
                 logger.info("No statistics to remove")
                 return True
@@ -1613,15 +1689,18 @@ class ProcessService:
                 params,
             )
 
-            # Delete lemmas that no longer have any project stats
-            # (orphaned lemmas)
-            self._cleanup_orphaned_lemmas(session, project_id)
+            # Only lemma IDs touched by this document can become orphaned here.
+            self._cleanup_orphaned_lemmas_for_ids(session, int(project_id), doc_lemma_ids)
 
             logger.info(f"Removed statistics for {doc_stats_count} lemmas")
             return True
 
         except Exception as e:
             logger.exception(f"Failed to remove document stats for {doc_id}")
+            try:
+                session.rollback()
+            except Exception:
+                logger.debug("Rollback after remove_document_stats failure also failed", exc_info=True)
             return False
 
     def _cleanup_orphaned_lemmas(self, session: Session, project_id: int) -> int:
@@ -1786,6 +1865,8 @@ class ProcessService:
             # Step 2: Remove old statistics
             if not self.remove_document_stats(session, doc_id):
                 logger.error(f"Failed to remove old stats for document {doc_id}")
+                session.rollback()
+                doc = session.get(SourceDocument, int(doc_id))
                 doc.status = 'failed'
                 doc.error_message = "Failed to remove old statistics"
                 session.commit()
@@ -1825,6 +1906,10 @@ class ProcessService:
 
         except Exception as e:
             logger.exception(f"Failed to reprocess document {doc_id}")
+            try:
+                session.rollback()
+            except Exception:
+                logger.debug("Rollback after reprocess failure also failed", exc_info=True)
             # Set status to failed
             doc = session.get(SourceDocument, doc_id)
             if doc:

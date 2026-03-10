@@ -43,6 +43,12 @@ def test_perf_indexes_present_after_migrations():
             assert "idx_doc_corpus_sentence_count_sum" in index_names
             # Migration 031: fast corpus-level sentence pagination
             assert "idx_sentence_corpus_sent_id" in index_names
+            # Migration 039: lemma delete cascade hardening for reprocess
+            assert "idx_lemma_doc_lemma" in index_names
+            assert "idx_lemma_proj_lemma" in index_names
+            assert "idx_term_card_lemma" in index_names
+            assert "idx_translation_memory_lemma_only" in index_names
+            assert "idx_ngram_component_lemma" in index_names
 
             schema_version = conn.execute(
                 "SELECT value FROM schema_meta WHERE key='schema_version'"

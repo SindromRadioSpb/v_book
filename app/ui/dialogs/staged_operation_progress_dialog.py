@@ -238,6 +238,7 @@ class StagedOperationProgressDialog(QDialog):
         self.cancel_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
         self._set_status_text(self.cancel_pending_status_text, style=_STATUS_STYLE_RED)
+        self.append_activity(self.cancel_pending_status_text)
         self.cancel_requested.emit()
 
     def set_completed(self) -> None:

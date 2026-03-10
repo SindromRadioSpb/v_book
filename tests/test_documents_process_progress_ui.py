@@ -207,6 +207,20 @@ def test_documents_process_state_updates_progress_ui():
     assert view.process_progress_dialog.states[0]["run_id"] == 91
 
 
+def test_documents_process_progress_appends_dialog_activity():
+    view = DocumentsView.__new__(DocumentsView)
+    view.progress_bar = _FakeProgressBar()
+    view.status_label = _FakeLabel()
+    view.process_progress_dialog = _FakeDialog()
+
+    DocumentsView.on_process_progress(view, 1, 2, "doc_1.txt")
+
+    assert view.progress_bar.maximum == 2
+    assert view.progress_bar.value == 1
+    assert view.status_label.text == "Starting 1/2: doc_1.txt"
+    assert view.process_progress_dialog.messages == ["Starting 1/2: doc_1.txt"]
+
+
 def test_documents_process_finished_cancelled_cleans_dialog_and_refreshes(monkeypatch):
     view = DocumentsView.__new__(DocumentsView)
     view.progress_bar = _FakeProgressBar()

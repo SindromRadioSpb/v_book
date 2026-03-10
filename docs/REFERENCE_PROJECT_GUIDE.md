@@ -298,6 +298,11 @@ python scripts/process_reference_corpus.py `
   and only creating missing snapshot rows per document.
 - Backfill is designed to enrich `sentence_nlp_snapshot` only; it does not
   re-run full NLP processing and does not rewrite lemma or term data.
+- For operator decision-making, measure coverage and backfill on the large
+  legacy reference project, not on tiny regular-project probes:
+  - small regular projects can be used as smoke checks
+  - the real convergence decision should be based on the reference-scale
+    project, e.g. `ID=1` on the approved hewiki DB
 
 ### Inter-chunk sleep
 

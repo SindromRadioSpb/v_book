@@ -7,7 +7,7 @@ This plan is based on the approved Task 30 audit executed against:
 - DB path: `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - Verified runtime contract: `python -m app.main --db-path "<path above>"`
 - Verified schema version on target DB at initial Task 30 audit: `35`
-- Current schema version on the same DB after migration `038_sentence_nlp_snapshot`: `38`
+- Current schema version on the same DB after migration `039_reprocess_fk_delete_indexes`: `39`
 
 This document records the implementation order for the confirmed findings only.
 It is intentionally patch-oriented and conservative.
@@ -1180,3 +1180,53 @@ Current next step:
   long-lived projects
 - only then decide whether a separate freshness/integrity hardening patch is
   warranted
+
+## Re-process bugfix on approved dev/test DB (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `app/ui/documents_view.py`
+- `app/ui/dialogs/staged_operation_progress_dialog.py`
+- `app/infra/migrations/039_reprocess_fk_delete_indexes.sql`
+- `tests/test_process_service_remove_document_stats.py`
+- `tests/test_documents_process_progress_ui.py`
+- `tests/test_staged_operation_progress_dialogs.py`
+- `tests/test_perf_indexes_present.py`
+
+Result:
+
+- fixed the live `re-process` stall reproduced on project `ID=5`
+  (`тест 9 марта`) in the approved dev/test DB
+- the stall was traced to project-wide orphan-lemma cleanup during
+  `remove_document_stats()`
+- orphan cleanup is now restricted to the current document's lemma ids, and the
+  missing `lemma_id` delete-cascade indexes were added in migration `039`
+- the regular-project NLP dialog now shows immediate per-document activity
+  instead of appearing stuck on `Created NLP batch run`
+- cancel now gives immediate visible feedback in the dialog and still cancels at
+  the next safe document checkpoint
+
+Evidence:
+
+- resumed batch run artifact:
+  `build/logs/nlp_reprocess_project5/reprocess_project5_batch_postfix.jsonl`
+- run/doc post-check:
+  `build/logs/nlp_reprocess_project5/reprocess_project5_postcheck.json`
+- worker cancel probe:
+  `build/logs/nlp_reprocess_project5/reprocess_project5_worker_cancel.json`
+
+Observed on the same approved dev/test DB:
+
+- `remove_document_stats()` for doc `387643`: `0.711 s`
+- resumed run `387617`: both docs completed in about `16.5 s`
+- worker cancel run `387620`: cancel acknowledged and stopped at the next
+  document boundary
+
+Coverage choice after this fix:
+
+- `ID=5` is already at `100.0%` sentence snapshot coverage after the re-process
+  probes and is no longer a useful decision-driving backfill target
+- `ID=6` remains a valid tiny smoke target with `0.0%` coverage on `1` doc
+- `ID=1` (`Hebrew Wikipedia Baseline`) remains the meaningful legacy corpus for
+  deciding whether a later freshness/version hardening patch is warranted

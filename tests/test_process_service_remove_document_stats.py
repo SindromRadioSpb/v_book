@@ -121,6 +121,142 @@ def test_remove_document_stats_cleans_doc_and_project_stats():
             pass
 
 
+def test_remove_document_stats_cleans_only_document_orphans_and_keeps_shared_lemmas():
+    db_path = _init_temp_db()
+    DBService.shutdown()
+    DBService._instance = None
+    DBService._db_manager = None
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            lib = Library(name="L")
+            session.add(lib)
+            session.flush()
+            project = DictProject(library_id=lib.library_id, name="P", src_lang="he", tgt_lang="ru")
+            session.add(project)
+            session.flush()
+            project_id = int(project.project_id)
+            corpus = SourceCorpus(project_id=project.project_id, name="C")
+            session.add(corpus)
+            session.flush()
+
+            doc_a = SourceDocument(
+                corpus_id=corpus.corpus_id,
+                file_path="/tmp/a.txt",
+                file_name="a.txt",
+                file_ext=".txt",
+                file_size_bytes=10,
+                sha256="sha_a",
+                status="processed",
+            )
+            doc_b = SourceDocument(
+                corpus_id=corpus.corpus_id,
+                file_path="/tmp/b.txt",
+                file_name="b.txt",
+                file_ext=".txt",
+                file_size_bytes=10,
+                sha256="sha_b",
+                status="processed",
+            )
+            session.add_all([doc_a, doc_b])
+            session.flush()
+
+            lemma_shared = Lemma(project_id=project.project_id, lemma_text="shared", pos="X")
+            lemma_only_a = Lemma(project_id=project.project_id, lemma_text="only_a", pos="X")
+            lemma_only_b = Lemma(project_id=project.project_id, lemma_text="only_b", pos="X")
+            session.add_all([lemma_shared, lemma_only_a, lemma_only_b])
+            session.flush()
+
+            session.add_all(
+                [
+                    LemmaDocStat(
+                        project_id=project.project_id,
+                        doc_id=doc_a.doc_id,
+                        lemma_id=lemma_shared.lemma_id,
+                        freq_abs=2,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaDocStat(
+                        project_id=project.project_id,
+                        doc_id=doc_b.doc_id,
+                        lemma_id=lemma_shared.lemma_id,
+                        freq_abs=3,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaDocStat(
+                        project_id=project.project_id,
+                        doc_id=doc_a.doc_id,
+                        lemma_id=lemma_only_a.lemma_id,
+                        freq_abs=5,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaDocStat(
+                        project_id=project.project_id,
+                        doc_id=doc_b.doc_id,
+                        lemma_id=lemma_only_b.lemma_id,
+                        freq_abs=7,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaProjectStat(
+                        project_id=project.project_id,
+                        lemma_id=lemma_shared.lemma_id,
+                        freq_abs=5,
+                        doc_freq=2,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaProjectStat(
+                        project_id=project.project_id,
+                        lemma_id=lemma_only_a.lemma_id,
+                        freq_abs=5,
+                        doc_freq=1,
+                        sample_sentence_id=None,
+                    ),
+                    LemmaProjectStat(
+                        project_id=project.project_id,
+                        lemma_id=lemma_only_b.lemma_id,
+                        freq_abs=7,
+                        doc_freq=1,
+                        sample_sentence_id=None,
+                    ),
+                ]
+            )
+            session.commit()
+
+            svc = ProcessService()
+            assert svc.remove_document_stats(session, int(doc_a.doc_id)) is True
+            session.commit()
+
+            remaining_doc_stats = session.execute(
+                select(LemmaDocStat).order_by(LemmaDocStat.doc_id, LemmaDocStat.lemma_id)
+            ).scalars().all()
+            remaining_proj_stats = session.execute(
+                select(LemmaProjectStat).order_by(LemmaProjectStat.lemma_id)
+            ).scalars().all()
+            remaining_lemmas = session.execute(
+                select(Lemma).order_by(Lemma.lemma_id)
+            ).scalars().all()
+
+            assert {(row.doc_id, row.lemma_id) for row in remaining_doc_stats} == {
+                (int(doc_b.doc_id), int(lemma_shared.lemma_id)),
+                (int(doc_b.doc_id), int(lemma_only_b.lemma_id)),
+            }
+            assert {(row.lemma_id, row.freq_abs, row.doc_freq) for row in remaining_proj_stats} == {
+                (int(lemma_shared.lemma_id), 3, 1),
+                (int(lemma_only_b.lemma_id), 7, 1),
+            }
+            assert [lemma.lemma_text for lemma in remaining_lemmas] == ["shared", "only_b"]
+    finally:
+        DBService.shutdown()
+        DBService._instance = None
+        DBService._db_manager = None
+        try:
+            db_path.unlink()
+        except OSError:
+            pass
+
+
 def test_delete_document_cleans_processed_sentence_references():
     db_path = _init_temp_db()
     DBService.shutdown()

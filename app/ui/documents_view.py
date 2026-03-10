@@ -1217,7 +1217,10 @@ class DocumentsView(QWidget):
         """Handle processing progress update."""
         self.progress_bar.setMaximum(max(1, total))
         self.progress_bar.setValue(min(current, total))
-        self.status_label.setText(f"Starting {current}/{total}: {doc_name}")
+        message = f"Starting {current}/{total}: {doc_name}"
+        self.status_label.setText(message)
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.append_activity(message)
 
     def on_process_state(self, state: dict):
         """Handle structured NLP processing state."""

@@ -177,7 +177,7 @@ Target DB:
 
 - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
 - initial Task 30 audit schema: `35`
-- current schema after migration `038_sentence_nlp_snapshot`: `38`
+- current schema after migration `039_reprocess_fk_delete_indexes`: `39`
 
 Artifacts:
 
@@ -421,6 +421,13 @@ Snapshot backfill follow-up implemented on `2026-03-10`:
   later whether additional freshness/version gating or stronger coverage
   reporting is needed beyond the current `prefer snapshot / fallback reparse`
   contract
+- the practical target for that decision is the large legacy reference project,
+  not tiny regular-project smoke corpora:
+  - `ID=5` on the approved dev/test DB is already `100.0%` covered after live
+    re-process validation
+  - `ID=6` is useful only as a smoke backfill run
+  - `ID=1` (`Hebrew Wikipedia Baseline`) remains the decision-driving project
+    because its legacy snapshot coverage is still `0.0%`
 
 ### Follow-up B: stronger fixture metadata only if evidence demands it
 

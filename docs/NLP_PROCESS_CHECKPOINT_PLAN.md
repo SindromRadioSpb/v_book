@@ -11,7 +11,7 @@ the confirmed repo context discovered during the Task 30 follow-up work.
 Current approved DB state after the latest convergence wave:
 
 - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
-- `schema_version=38` after migration `038_sentence_nlp_snapshot`
+- `schema_version=39` after migration `039_reprocess_fk_delete_indexes`
 
 ## Confirmed entry points
 
@@ -810,3 +810,71 @@ Current next step after implementation:
   - freshness/version gates
   - backfill reporting/export wrappers
   - broader snapshot integrity checks
+
+## Re-process hang fix and coverage decision (2026-03-10)
+
+Files:
+
+- `app/services/process_service.py`
+- `app/ui/documents_view.py`
+- `app/ui/dialogs/staged_operation_progress_dialog.py`
+- `app/infra/migrations/039_reprocess_fk_delete_indexes.sql`
+- `tests/test_process_service_remove_document_stats.py`
+- `tests/test_documents_process_progress_ui.py`
+- `tests/test_staged_operation_progress_dialogs.py`
+- `tests/test_perf_indexes_present.py`
+
+Delivered:
+
+- fixed a live `re-process` stall observed on project `ID=5` in the approved
+  dev/test DB after the staged dialog showed only `Created NLP batch run`
+- the real hot path was the old project-wide orphan-lemma cleanup during
+  `remove_document_stats()`, not the structured batch run contract itself
+- re-process now cleans orphan lemmas only for the lemma ids touched by the
+  current document, instead of sweeping the whole project
+- migration `039_reprocess_fk_delete_indexes` adds the missing `lemma_id`
+  cascade-supporting indexes on large child tables
+- the regular-project NLP dialog now appends per-document progress activity
+  immediately, so operators no longer wait on a frozen-looking
+  `Created NLP batch run` line
+- pressing `Cancel` now appends an explicit pending-cancel activity line; the
+  effective cancellation point remains the next safe document boundary
+
+Validation on the approved dev/test DB:
+
+- DB:
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- project:
+  - `ID=5`
+  - `Name=тест 9 марта`
+  - `2` processed docs
+- artifacts:
+  - `build/logs/nlp_reprocess_project5/reprocess_project5_batch_postfix.jsonl`
+  - `build/logs/nlp_reprocess_project5/reprocess_project5_postcheck.json`
+  - `build/logs/nlp_reprocess_project5/reprocess_project5_worker_cancel.json`
+- confirmed:
+  - `remove_document_stats()` for the first doc completed in `0.711 s`
+    instead of stalling for minutes
+  - resumed live batch run `387617` finished both docs in about `16.5 s`
+  - worker-path cancel stopped at the next document checkpoint and persisted
+    a fresh run as `cancelled`
+
+Coverage-only decision after the fix:
+
+- `ID=5` (`тест 9 марта`):
+  - already at `100.0%` sentence snapshot coverage after the re-process runs
+- `ID=6` (`Mishneh Torah`):
+  - `0.0%` coverage on `1` processed doc
+  - useful only as a small smoke backfill target
+- `ID=1` (`Hebrew Wikipedia Baseline`):
+  - `0.0%` coverage on `387639` processed docs
+  - this is the real decision-driving legacy target for snapshot backfill
+
+Operational recommendation:
+
+- do not use small projects such as `ID=5` to judge whether
+  freshness/version hardening is needed; they are too small and `ID=5` is
+  already fully covered
+- `ID=6` can be used as a quick smoke backfill run
+- use `ID=1` for the actual post-backfill coverage measurement that will decide
+  whether any freshness/version hardening work is justified

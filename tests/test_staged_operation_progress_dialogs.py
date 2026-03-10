@@ -68,6 +68,19 @@ def test_nlp_progress_dialog_manual_pause_resume_and_completion(qtbot):
     assert dialog.pause_btn.isEnabled() is False
 
 
+def test_nlp_progress_dialog_cancel_appends_pending_activity(qtbot):
+    dialog = NLPProcessProgressDialog(total_docs=2, operation_label="Re-processing")
+    qtbot.addWidget(dialog)
+
+    with qtbot.waitSignal(dialog.cancel_requested, timeout=1000):
+        dialog.on_cancel()
+
+    assert dialog.cancel_btn.isEnabled() is False
+    assert dialog.pause_btn.isEnabled() is False
+    assert dialog.status_label.text() == "Cancelling after current document checkpoint..."
+    assert "Cancelling after current document checkpoint..." in dialog.activity_log.toPlainText()
+
+
 def test_term_extraction_progress_dialog_finalize_state(qtbot):
     dialog = TermExtractionProgressDialog(total_docs=4)
     qtbot.addWidget(dialog)
