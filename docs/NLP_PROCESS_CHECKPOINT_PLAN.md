@@ -1278,3 +1278,60 @@ Current conclusion:
   freshness/version-hardening yet
 - the next evidence step should be a larger staged slice on sandbox or the
   approved dev/test DB before any new full `387639`-doc rerun
+
+## Real dev/test DB staged coverage extended to 50k docs (2026-03-11)
+
+Files / artifacts:
+
+- `build/logs/nlp_stage_next/db_open_before_50000.json`
+- `build/logs/nlp_stage_next/coverage_before_50000.log`
+- `build/logs/nlp_stage_next/snapshot_backfill_10001_50000.log`
+- `build/logs/nlp_stage_next/snapshot_backfill_probe_10001_50000.jsonl`
+- `build/logs/nlp_stage_next/probe_summary_10001_50000.json`
+- `build/logs/nlp_stage_next/coverage_after_50000.log`
+- `build/logs/nlp_stage_next/db_open_after_50000.json`
+- `build/logs/nlp_stage_next/postrun_probe_50000.json`
+
+Observed on the approved dev/test DB:
+
+- pre-run state:
+  - `schema_version=40`
+  - `db_open ok`
+  - coverage before extension:
+    - `9999` fully covered docs
+    - `6.2069%` sentence coverage
+    - `2.5795%` doc coverage
+- bounded extension run:
+  - `project_id=1`
+  - `doc_offset=10000`
+  - `max_docs=40000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+  - `integrity_checkpoint_mode=none`
+  - run `387619`
+- result:
+  - `status='ok'`
+  - `stage='completed'`
+  - `docs_processed=40000`
+  - `docs_failed=0`
+  - `chunks_completed=8/8`
+  - `stage_rows_remaining=0`
+  - post-run `db_open` remained healthy
+  - probe summary recorded no `probe_error` and no non-timeout `quick_check`
+    failures
+
+Coverage after the 50k cumulative state:
+
+- `49999` fully covered docs
+- `337640` zero-snapshot docs remain
+- `20.1938%` sentence coverage
+- `12.8983%` full-doc coverage
+
+Interpretation:
+
+- the staged redesign is now validated on the real approved dev/test DB across
+  a materially larger cumulative footprint than the first `10k` smoke
+- this is strong enough to keep moving forward with staged tiering
+- the next evidence step should be another larger tier such as `120k`
+  cumulative coverage before attempting any new full-scale rerun

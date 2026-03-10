@@ -348,6 +348,14 @@ python scripts/process_reference_corpus.py `
     - `merge_batch_size=1000`
     - `segment_quick_check_timeout=0.5`
     - result: `ok/completed`, `stage_rows_remaining=0`, post-run `db_open` ok
+  - the next real-db staged tier then extended that same approved dev/test DB
+    from `10k` to `50k` cumulative covered docs:
+    - extension run: `doc_offset=10000`, `max_docs=40000`
+    - result: `ok/completed`, `stage_rows_remaining=0`, post-run `db_open` ok
+    - cumulative coverage after the run:
+      - `49999` fully covered docs
+      - `20.1938%` sentence coverage
+      - `12.8983%` doc coverage
   - until the integrity issue is fixed, use `--coverage-only` on large
     reference projects and do not run the full backfill on the main install DB
   - the CLI now includes a post-run physical integrity gate before a snapshot

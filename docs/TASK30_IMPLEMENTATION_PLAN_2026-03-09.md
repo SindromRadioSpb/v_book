@@ -1533,3 +1533,47 @@ Operational interpretation:
   not justify an immediate fresh full-scale rerun on all `387639` docs
 - the next evidence step should be a larger staged slice, not a return to
   freshness/version work
+
+## Staged tier extended on real dev/test DB (2026-03-11)
+
+Status:
+
+- completed successfully
+
+Artifacts:
+
+- `build/logs/nlp_stage_next/coverage_before_50000.log`
+- `build/logs/nlp_stage_next/snapshot_backfill_10001_50000.log`
+- `build/logs/nlp_stage_next/snapshot_backfill_probe_10001_50000.jsonl`
+- `build/logs/nlp_stage_next/probe_summary_10001_50000.json`
+- `build/logs/nlp_stage_next/coverage_after_50000.log`
+- `build/logs/nlp_stage_next/db_open_after_50000.json`
+- `build/logs/nlp_stage_next/postrun_probe_50000.json`
+
+Observed:
+
+- extended the approved `hewiki_gpu_processing test.db` from the first `10k`
+  staged coverage to `50k` cumulative docs by running:
+  - `doc_offset=10000`
+  - `max_docs=40000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+- run `387619` completed with:
+  - `status='ok'`
+  - `docs_processed=40000`
+  - `docs_failed=0`
+  - `chunks_completed=8/8`
+  - `stage_rows_remaining=0`
+- post-run `db_open` stayed healthy
+- coverage on `ID=1` increased to:
+  - `49999` fully covered docs
+  - `20.1938%` sentence coverage
+  - `12.8983%` full-doc coverage
+
+Operational interpretation:
+
+- the redesigned backfill path now has real-db evidence beyond the initial
+  `10k` slice
+- the next rational step is a larger staged tier, e.g. `120k` cumulative docs,
+  before any fresh full-scale rerun discussion
