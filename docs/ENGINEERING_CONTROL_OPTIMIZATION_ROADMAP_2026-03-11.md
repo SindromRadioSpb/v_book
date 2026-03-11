@@ -597,13 +597,24 @@ Evidence:
 Remaining note:
 
 - this wave only governs operational telemetry growth
-- it does not yet add retention or cleanup for:
+- it does not turn the remaining large derived artifacts into age-prune
+  candidates
+- the follow-up governance contract is now:
+  - `processor_run`
+    - maintenance mode: `retention_available`
+    - actionable via dry-run/apply CLI
+  - `run_error`
+    - maintenance mode: `retention_with_parent_runs`
+    - only cleaned indirectly through parent `processor_run` retention
   - `lemma_doc_stat`
   - `lemma_project_stat`
   - `sentence_nlp_snapshot`
-- the next active priority is now the broader retention/cleanup policy for
-  other large derived artifacts, but telemetry remains the first implemented
-  slice of that branch
+    - maintenance mode: `reset_rebuild_only`
+    - not eligible for age-based retention
+    - operator guidance should point to explicit reset/rebuild workflows instead
+      of incremental pruning
+- governance UI now surfaces those maintenance modes explicitly, including a
+  safe telemetry dry-run CLI copy path, while staying observational-only
 
 ## Decision note
 

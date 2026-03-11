@@ -113,6 +113,11 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.copy_btn.clicked.connect(self.copy_summary_to_clipboard)
         buttons_layout.addWidget(self.copy_btn)
 
+        self.copy_telemetry_btn = QPushButton("Copy Telemetry Dry-run CLI")
+        self.copy_telemetry_btn.clicked.connect(self.copy_telemetry_cli)
+        self.copy_telemetry_btn.setEnabled(False)
+        buttons_layout.addWidget(self.copy_telemetry_btn)
+
         self.docs_btn = QPushButton("Open Lifecycle Contract")
         self.docs_btn.clicked.connect(self.open_lifecycle_contract)
         buttons_layout.addWidget(self.docs_btn)
@@ -227,6 +232,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
             )
         )
         self._rebuild_cards(summary.artifacts)
+        self._refresh_telemetry_button_state(summary.artifacts)
         self._refresh_status_text()
 
     def _rebuild_cards(self, metrics: list[DerivedArtifactMetricDTO]) -> None:
@@ -288,7 +294,38 @@ class ProjectArtifactGovernanceDialog(QDialog):
             details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(details)
 
+        if metric.maintenance_note:
+            maintenance = QLabel(
+                f"Maintenance mode: {self._maintenance_mode_text(metric.maintenance_mode)}\n{metric.maintenance_note}"
+            )
+            maintenance.setWordWrap(True)
+            maintenance.setStyleSheet("color: #334155;")
+            maintenance.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(maintenance)
+
+        if metric.maintenance_cli_hint:
+            cli_hint = QLabel(f"CLI: {metric.maintenance_cli_hint}")
+            cli_hint.setWordWrap(True)
+            cli_hint.setStyleSheet("color: #0f766e;")
+            cli_hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(cli_hint)
+
         return card
+
+    @staticmethod
+    def _maintenance_mode_text(mode: Optional[str]) -> str:
+        mapping = {
+            "reset_rebuild_only": "Reset/rebuild only",
+            "retention_available": "Retention available",
+            "retention_with_parent_runs": "Retention via parent runs",
+        }
+        return mapping.get(str(mode or ""), "Observational only")
+
+    def _refresh_telemetry_button_state(self, metrics: list[DerivedArtifactMetricDTO]) -> None:
+        metric_map = {metric.artifact_key: metric for metric in metrics}
+        processor_metric = metric_map.get("processor_run")
+        enabled = bool(processor_metric and processor_metric.maintenance_cli_hint)
+        self.copy_telemetry_btn.setEnabled(enabled)
 
     def on_worker_status(self, request_id: int, message: str) -> None:
         if int(request_id) != self._active_request_id:
@@ -335,6 +372,13 @@ class ProjectArtifactGovernanceDialog(QDialog):
             metric_lines.append(f"  {metric.summary}")
             for line in metric.detail_lines:
                 metric_lines.append(f"  - {line}")
+            if metric.maintenance_note:
+                metric_lines.append(
+                    f"  Maintenance mode: {self._maintenance_mode_text(metric.maintenance_mode)}"
+                )
+                metric_lines.append(f"  {metric.maintenance_note}")
+            if metric.maintenance_cli_hint:
+                metric_lines.append(f"  CLI: {metric.maintenance_cli_hint}")
 
         text = "\n".join(
             [
@@ -353,6 +397,22 @@ class ProjectArtifactGovernanceDialog(QDialog):
         app.clipboard().setText(text)
         self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         self.status_label.setText("Governance summary copied to clipboard.")
+
+    def copy_telemetry_cli(self) -> None:
+        if self._summary is None:
+            return
+        processor_metric = next(
+            (metric for metric in self._summary.artifacts if metric.artifact_key == "processor_run"),
+            None,
+        )
+        if processor_metric is None or not processor_metric.maintenance_cli_hint:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.clipboard().setText(str(processor_metric.maintenance_cli_hint))
+        self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.status_label.setText("Telemetry dry-run CLI copied to clipboard.")
 
     def open_lifecycle_contract(self) -> None:
         docs_path = Path(__file__).resolve().parents[3] / "docs" / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"

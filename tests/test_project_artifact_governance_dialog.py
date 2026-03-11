@@ -36,6 +36,8 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 status="expected_large",
                 summary="Expected large table at reference scale.",
                 detail_lines=["Exact project row count via project_id."],
+                maintenance_mode="reset_rebuild_only",
+                maintenance_note="Use a future project-level reset/rebuild path instead of pruning by age.",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="sentence_nlp_snapshot",
@@ -47,6 +49,8 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 status="coverage_partial",
                 summary="Sentence coverage 38.18%; doc coverage 30.96%.",
                 detail_lines=["Fully covered docs: 119,999 / 387,639."],
+                maintenance_mode="reset_rebuild_only",
+                maintenance_note="Do not prune snapshots by age.",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="processor_run",
@@ -58,6 +62,9 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 status="retention_watch",
                 summary="Operational telemetry is useful but needs retention planning.",
                 detail_lines=["Status mix: ok=387,598, failed=15"],
+                maintenance_mode="retention_available",
+                maintenance_note="Use telemetry retention dry-run/apply, preserving non-ok and noted evidence rows.",
+                maintenance_cli_hint="python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id 1 --keep-latest-ok 200",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="run_error",
@@ -69,6 +76,8 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 status="low_volume",
                 summary="Error telemetry is currently low-volume.",
                 detail_lines=["Stage mix: crash_recovery=15"],
+                maintenance_mode="retention_with_parent_runs",
+                maintenance_note="Prune via parent processor_run retention only.",
             ),
         ],
     )
@@ -101,6 +110,7 @@ def test_project_artifact_governance_dialog_renders_cards_and_notes(qtbot):
     assert "Snapshot volume reuses the existing readiness aggregate" in dialog.note_label.text()
     assert dialog._cards_layout.count() >= 4
     assert dialog.run_error_value.text() == "15"
+    assert dialog.copy_telemetry_btn.isEnabled() is True
 
 
 def test_project_artifact_governance_dialog_formats_relative_refresh(qtbot):
@@ -128,3 +138,18 @@ def test_project_artifact_governance_dialog_copy_summary(qtbot):
     assert "Derived Data Governance - Hebrew Wikipedia Baseline (#1)" in text
     assert "lemma_doc_stat" in text
     assert "sentence_nlp_snapshot" in text
+    assert "Maintenance mode: Retention available" in text
+
+
+def test_project_artifact_governance_dialog_can_copy_telemetry_cli(qtbot):
+    dialog = ProjectArtifactGovernanceDialog(1, "Hebrew Wikipedia Baseline", auto_refresh=False)
+    qtbot.addWidget(dialog)
+    dialog.set_summary(_sample_summary())
+
+    app = QApplication.instance()
+    assert app is not None
+    dialog.copy_telemetry_cli()
+
+    text = app.clipboard().text()
+    assert "prune_project_telemetry.py" in text
+    assert "--project-id 1" in text

@@ -1705,8 +1705,14 @@ Current execution status:
     - `processor_run = 387,613`
     - `run_error = 15`
     - `prunable_ok_runs = 387,398` with `keep_latest_ok = 200`
-- next active priority now narrows further to broader retention/cleanup policy
-  for the remaining large derived artifacts:
-  - `lemma_doc_stat`
-  - `lemma_project_stat`
-  - `sentence_nlp_snapshot`
+- governance observability now also distinguishes explicit maintenance modes for
+  the remaining large derived artifacts:
+  - `processor_run` -> `retention_available`
+  - `run_error` -> `retention_with_parent_runs`
+  - `lemma_doc_stat` -> `reset_rebuild_only`
+  - `lemma_project_stat` -> `reset_rebuild_only`
+  - `sentence_nlp_snapshot` -> `reset_rebuild_only`
+- this narrows the follow-up branch:
+  - no blanket age-based retention for `lemma_*` or `sentence_nlp_snapshot`
+  - future storage work there should be explicit reset/rebuild design, not
+    incremental prune

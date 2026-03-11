@@ -211,13 +211,19 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
 
         assert metrics["lemma_doc_stat"].quantity_value == 3
         assert metrics["lemma_doc_stat"].status == "expected_large"
+        assert metrics["lemma_doc_stat"].maintenance_mode == "reset_rebuild_only"
         assert metrics["lemma_project_stat"].quantity_value == 2
+        assert metrics["lemma_project_stat"].maintenance_mode == "reset_rebuild_only"
         assert metrics["sentence_nlp_snapshot"].quantity_value == 2
         assert metrics["sentence_nlp_snapshot"].status == "coverage_partial"
+        assert metrics["sentence_nlp_snapshot"].maintenance_mode == "reset_rebuild_only"
         assert "Sentence coverage 66.67%" in metrics["sentence_nlp_snapshot"].summary
         assert metrics["processor_run"].quantity_value == 2
+        assert metrics["processor_run"].maintenance_mode == "retention_available"
+        assert "prune_project_telemetry.py" in str(metrics["processor_run"].maintenance_cli_hint)
         assert any("ok=1" in line and "failed=1" in line for line in metrics["processor_run"].detail_lines)
         assert metrics["run_error"].quantity_value == 1
+        assert metrics["run_error"].maintenance_mode == "retention_with_parent_runs"
         assert any("processing=1" in line for line in metrics["run_error"].detail_lines)
     finally:
         _reset_db_service()

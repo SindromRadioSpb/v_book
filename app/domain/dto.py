@@ -212,6 +212,9 @@ class DerivedArtifactMetricDTO:
     status: str
     summary: str
     detail_lines: List[str] = field(default_factory=list)
+    maintenance_mode: Optional[str] = None
+    maintenance_note: Optional[str] = None
+    maintenance_cli_hint: Optional[str] = None
 
 
 @dataclass

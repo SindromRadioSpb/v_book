@@ -112,6 +112,7 @@ class DerivedArtifactGovernanceService:
             ),
             self._build_snapshot_metric(snapshot_summary),
             self._build_processor_run_metric(
+                project_id=int(project_id),
                 processor_run_rows=int(processor_run_rows or 0),
                 processed_docs=processed_docs,
                 status_rows=run_status_rows,
@@ -205,6 +206,11 @@ class DerivedArtifactGovernanceService:
                 "delete-path safety, not eliminating the table."
             ),
             detail_lines=detail_lines,
+            maintenance_mode="reset_rebuild_only",
+            maintenance_note=(
+                "No age-based retention is recommended. If storage pressure becomes real, use a future "
+                "project-level processing reset/rebuild path rather than pruning rows by age."
+            ),
         )
 
     def _build_lemma_project_stat_metric(
@@ -233,6 +239,11 @@ class DerivedArtifactGovernanceService:
                 "not silently treated as a cache."
             ),
             detail_lines=detail_lines,
+            maintenance_mode="reset_rebuild_only",
+            maintenance_note=(
+                "No incremental retention is recommended. This aggregate layer should only be removed through "
+                "an explicit project-level reset/rebuild workflow."
+            ),
         )
 
     def _build_snapshot_metric(
@@ -266,11 +277,17 @@ class DerivedArtifactGovernanceService:
                 f"doc coverage {self._format_pct(snapshot_summary.doc_coverage_pct)}."
             ),
             detail_lines=detail_lines,
+            maintenance_mode="reset_rebuild_only",
+            maintenance_note=(
+                "Do not prune snapshots by age. If lifecycle pressure becomes real, prefer an explicit "
+                "project-level reset/backfill decision rather than incremental retention."
+            ),
         )
 
     def _build_processor_run_metric(
         self,
         *,
+        project_id: int,
         processor_run_rows: int,
         processed_docs: int,
         status_rows: list[dict[str, Any]],
@@ -299,6 +316,14 @@ class DerivedArtifactGovernanceService:
                 "operator intent."
             ),
             detail_lines=detail_lines,
+            maintenance_mode="retention_available",
+            maintenance_note=(
+                "Safe dry-run/apply retention is available. Old successful rows with empty note metadata "
+                "can be pruned while preserving recent successful rows, all non-ok rows, and noted evidence rows."
+            ),
+            maintenance_cli_hint=(
+                f"python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id {int(project_id)} --keep-latest-ok 200"
+            ),
         )
 
     def _build_run_error_metric(
@@ -332,6 +357,11 @@ class DerivedArtifactGovernanceService:
                 "classification become the next follow-up."
             ),
             detail_lines=detail_lines,
+            maintenance_mode="retention_with_parent_runs",
+            maintenance_note=(
+                "Do not prune run_error independently. Cleanup should happen through the parent processor_run "
+                "retention path so evidence relationships stay intact."
+            ),
         )
 
     @staticmethod

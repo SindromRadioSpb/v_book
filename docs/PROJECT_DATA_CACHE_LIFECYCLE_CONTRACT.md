@@ -362,9 +362,19 @@ It must not:
   - `--apply` requires `--confirm-project-id`
   - only successful rows with empty note metadata are prunable
   - recent successful rows, noted evidence rows, and all non-ok rows are preserved
-- broader retention/cleanup policy for `lemma_doc_stat`,
-  `lemma_project_stat`, and `sentence_nlp_snapshot` remains a separate future
-  patch; visibility came first, telemetry cleanup second
+- governance/reporting now surfaces explicit maintenance modes for the remaining
+  large derived artifacts:
+  - `lemma_doc_stat` -> `reset_rebuild_only`
+  - `lemma_project_stat` -> `reset_rebuild_only`
+  - `sentence_nlp_snapshot` -> `reset_rebuild_only`
+  - `processor_run` -> `retention_available`
+  - `run_error` -> `retention_with_parent_runs`
+- this means:
+  - telemetry cleanup is actionable and previewable
+  - large project-owned derived tables are intentionally not treated as
+    age-prune candidates
+  - if storage pressure becomes real for those tables, the correct follow-up is
+    an explicit project-level reset/rebuild workflow, not incremental cleanup
 
 ## Immediate follow-up recommendations
 
