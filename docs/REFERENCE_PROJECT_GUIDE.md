@@ -161,7 +161,7 @@ Expected state:
 | Add Folder button | Disabled · tooltip: same |
 | Delete button | Disabled · tooltip: "Cannot delete documents from reference corpus (read-only)" |
 | Process button | Disabled · tooltip points to `python scripts/process_reference_corpus.py --project-id <id>` |
-| Re-process button | Disabled · tooltip points to `python scripts/process_reference_corpus.py --project-id <id> --reprocess-all` |
+| Re-process button | Disabled · tooltip points to `python scripts/process_reference_corpus.py --project-id <id> --reprocess-all --dry-run` |
 | Document list / search / filters | Fully functional |
 | Terms / Translation / Audio tabs | Fully functional (read-write for overlays) |
 
@@ -235,7 +235,8 @@ python scripts/process_reference_corpus.py `
 python scripts/process_reference_corpus.py `
     --project-id 1 `
     --db-path hdle_premium.db `
-    --reprocess-all
+    --reprocess-all `
+    --dry-run
 ```
 
 Operator note:
@@ -244,6 +245,23 @@ Operator note:
   a snapshot-specific mode is requested
 - on the approved hewiki dev/test DB, a bounded `--reprocess-all --dry-run --max-docs 20`
   planning pass dropped from multi-minute startup to low-seconds wall time
+- heavy reprocess writes now share the same safety gate as other heavy
+  reference-corpus write workflows:
+  - use `--backup-db-path <healthy-backup>` before a real write run
+  - use `--preflight-only` to validate the package without writing
+  - protected baseline/main DB targets stay blocked unless
+    `--allow-protected-db-heavy-write` is passed explicitly
+
+### Preflight a reference rebuild package without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --reprocess-all `
+    --backup-db-path path\\to\\healthy_backup.db `
+    --preflight-only
+```
 
 ### Verify a reprocess resume contract without writing
 
@@ -413,9 +431,12 @@ python scripts/process_reference_corpus.py `
     - `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
   - heavy snapshot-backfill writes now require a successful preflight with an
     explicit `--backup-db-path`
+  - heavy `--reprocess-all` writes now use the same backup/preflight gate
   - heavy snapshot-backfill writes against the protected baseline/main DB stay
     blocked unless the operator crosses the explicit decision gate with
     `--allow-protected-db-heavy-write`
+  - heavy `--reprocess-all` writes against the protected baseline/main DB now
+    use the same explicit override gate
   - the UI now surfaces read-only readiness/reporting:
     - Documents shows snapshot coverage + latest backfill summary
     - Terms shows the last extraction source mix

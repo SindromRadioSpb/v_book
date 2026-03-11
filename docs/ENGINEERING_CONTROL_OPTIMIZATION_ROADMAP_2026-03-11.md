@@ -620,6 +620,9 @@ Remaining note:
 - governance UI now surfaces those maintenance modes explicitly, including a
   safe telemetry dry-run CLI copy path and reference rebuild dry-run CLI copy path,
   while staying observational-only
+- heavy reference rebuild execution is now also aligned with the safety gate:
+  actual `--reprocess-all` writes require backup/preflight readiness and use the
+  same protected-target override gate as heavy snapshot-backfill writes
 
 ## Decision note
 

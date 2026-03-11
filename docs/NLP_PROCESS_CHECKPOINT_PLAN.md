@@ -1452,10 +1452,13 @@ To align runtime behavior with the documented decision gate:
 - heavy `--backfill-snapshots` writes now require an explicit
   `--backup-db-path`
 - `--preflight-only` now validates the heavy-run package without writing
+- heavy `--reprocess-all` writes now share the same backup/preflight gate
 - heavy snapshot-backfill writes against the protected baseline/main DB are now
   blocked by default at CLI level
 - that protected path can only be crossed with the explicit override flag
   `--allow-protected-db-heavy-write`
+- the same protected-target override gate now applies to heavy
+  `--reprocess-all` writes as well
 
 This closes an earlier gap where the hold-state was documented but not enforced
 strongly enough in the reference-processing CLI itself.

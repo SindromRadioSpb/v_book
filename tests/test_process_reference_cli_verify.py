@@ -447,6 +447,7 @@ def test_cli_verify_only_reprocess_run_exits_zero_without_processing(monkeypatch
 
 def test_cli_resume_run_id_resumes_selected_reprocess_run(monkeypatch):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     try:
         project_id, run_id, _doc_ids = _create_cancelled_reprocess_run(db_path, monkeypatch)
         module = _load_script_module()
@@ -463,6 +464,8 @@ def test_cli_resume_run_id_resumes_selected_reprocess_run(monkeypatch):
                 "--reprocess-all",
                 "--resume-run-id",
                 str(run_id),
+                "--backup-db-path",
+                str(backup_db),
             ],
         )
 
@@ -482,6 +485,7 @@ def test_cli_resume_run_id_resumes_selected_reprocess_run(monkeypatch):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_reprocess_all_dry_run_skips_snapshot_coverage_queries(monkeypatch):
@@ -853,6 +857,7 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
 
 def test_cli_doc_offset_and_max_docs_select_reprocess_slice(monkeypatch):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     try:
         _reset_db_service()
         DBService.initialize(db_path)
@@ -890,6 +895,8 @@ def test_cli_doc_offset_and_max_docs_select_reprocess_slice(monkeypatch):
                 "1",
                 "--max-docs",
                 "2",
+                "--backup-db-path",
+                str(backup_db),
             ],
         )
 
@@ -901,6 +908,7 @@ def test_cli_doc_offset_and_max_docs_select_reprocess_slice(monkeypatch):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkeypatch):
@@ -1058,12 +1066,13 @@ def test_cli_snapshot_backfill_rejects_protected_db_without_override(monkeypatch
             raise AssertionError("protected DB heavy write must be blocked before backfill starts")
 
         monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
-        monkeypatch.setattr(module, "_run_snapshot_backfill_preflight", lambda **kwargs: {
+        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
             "ok": False,
             "project_id": project_id,
             "db_profile": "Baseline (dev)",
             "protected_target": True,
             "selected_doc_count": 2,
+            "operation_label": "snapshot backfill",
             "error": "Heavy snapshot backfill is blocked on the protected baseline/main reference DB.",
         })
         monkeypatch.setattr(
@@ -1114,12 +1123,13 @@ def test_cli_snapshot_backfill_allows_protected_db_with_override(monkeypatch):
             return len(doc_ids), 0
 
         monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
-        monkeypatch.setattr(module, "_run_snapshot_backfill_preflight", lambda **kwargs: {
+        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
             "ok": True,
             "project_id": project_id,
             "db_profile": "Baseline (dev)",
             "protected_target": True,
             "selected_doc_count": len(doc_ids),
+            "operation_label": "snapshot backfill",
             "target_probe": {"schema_version": 40},
             "backup_probe": {"schema_version": 40},
         })
@@ -1142,6 +1152,194 @@ def test_cli_snapshot_backfill_allows_protected_db_with_override(monkeypatch):
         module.main()
 
         assert captured["doc_ids"] == doc_ids
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_reprocess_all_requires_backup_db_path_for_heavy_write(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_process_batch(*args, **kwargs):
+            raise AssertionError("heavy reprocess must not start without preflight backup path")
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _unexpected_process_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_reprocess_all_preflight_only_is_read_only(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_process_batch(*args, **kwargs):
+            raise AssertionError("preflight-only must not call process_documents_batch")
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _unexpected_process_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--backup-db-path",
+                str(backup_db),
+                "--preflight-only",
+            ],
+        )
+
+        module.main()
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_reprocess_all_rejects_protected_db_without_override(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_process_batch(*args, **kwargs):
+            raise AssertionError("protected DB heavy reprocess must be blocked before batch starts")
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _unexpected_process_batch)
+        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
+            "ok": False,
+            "project_id": project_id,
+            "db_profile": "Baseline (dev)",
+            "protected_target": True,
+            "selected_doc_count": 2,
+            "operation_label": "reference reprocess",
+            "error": "Heavy reference reprocess is blocked on the protected baseline/main reference DB.",
+        })
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--backup-db-path",
+                str(backup_db),
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_reprocess_all_allows_protected_db_with_override(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_process_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            captured["is_reprocess"] = kwargs.get("is_reprocess")
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _fake_process_batch)
+        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
+            "ok": True,
+            "project_id": project_id,
+            "db_profile": "Baseline (dev)",
+            "protected_target": True,
+            "selected_doc_count": len(doc_ids),
+            "operation_label": "reference reprocess",
+            "target_probe": {"schema_version": 41},
+            "backup_probe": {"schema_version": 41},
+        })
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--backup-db-path",
+                str(backup_db),
+                "--allow-protected-db-heavy-write",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids
+        assert captured["is_reprocess"] is True
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

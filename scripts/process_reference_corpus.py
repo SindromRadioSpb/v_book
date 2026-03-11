@@ -500,6 +500,21 @@ def _is_snapshot_backfill_write(args: argparse.Namespace) -> bool:
     )
 
 
+def _is_reference_reprocess_write(args: argparse.Namespace) -> bool:
+    return bool(
+        args.reprocess_all
+        and not args.verify_only
+        and not args.dry_run
+    )
+
+
+def _is_reference_heavy_write(args: argparse.Namespace) -> bool:
+    return bool(
+        _is_snapshot_backfill_write(args)
+        or _is_reference_reprocess_write(args)
+    )
+
+
 def _sqlite_health_probe(db_path: Path) -> dict[str, Any]:
     probe: dict[str, Any] = {
         "path": str(db_path),
@@ -546,13 +561,14 @@ def _sqlite_health_probe(db_path: Path) -> dict[str, Any]:
         conn.close()
 
 
-def _run_snapshot_backfill_preflight(
+def _run_reference_heavy_write_preflight(
     *,
     db_path: Path,
     backup_db_path: Path | None,
     project_id: int,
     selected_doc_count: int,
     allow_protected_db_heavy_write: bool,
+    operation_label: str,
 ) -> dict[str, Any]:
     from app.infra.db_path_resolver import classify_db_profile, is_protected_reference_db_path
 
@@ -566,6 +582,7 @@ def _run_snapshot_backfill_preflight(
         "db_profile": db_profile,
         "protected_target": bool(protected_target),
         "backup_db_path": str(backup_db_path) if backup_db_path is not None else None,
+        "operation_label": str(operation_label),
         "target_probe": {},
         "backup_probe": {},
         "error": None,
@@ -573,7 +590,7 @@ def _run_snapshot_backfill_preflight(
 
     if protected_target and not allow_protected_db_heavy_write:
         report["error"] = (
-            "Heavy snapshot backfill is blocked on the protected baseline/main reference DB. "
+            f"Heavy {operation_label} is blocked on the protected baseline/main reference DB. "
             "Use a working test DB or disposable clone, or cross the explicit decision gate "
             "with --allow-protected-db-heavy-write."
         )
@@ -581,7 +598,7 @@ def _run_snapshot_backfill_preflight(
 
     if backup_db_path is None:
         report["error"] = (
-            "Heavy snapshot backfill requires --backup-db-path so the target DB can be restored "
+            f"Heavy {operation_label} requires --backup-db-path so the target DB can be restored "
             "if durability verification fails."
         )
         return report
@@ -617,10 +634,12 @@ def _run_snapshot_backfill_preflight(
     return report
 
 
-def _log_snapshot_backfill_preflight(report: dict[str, Any]) -> None:
+def _log_reference_heavy_write_preflight(report: dict[str, Any]) -> None:
+    operation_label = str(report.get("operation_label") or "reference write")
     if not report.get("ok"):
         logger.error(
-            "Snapshot backfill preflight failed | project_id=%s profile=%s protected=%s docs=%s | %s",
+            "%s preflight failed | project_id=%s profile=%s protected=%s docs=%s | %s",
+            operation_label,
             report.get("project_id"),
             report.get("db_profile"),
             report.get("protected_target"),
@@ -630,7 +649,8 @@ def _log_snapshot_backfill_preflight(report: dict[str, Any]) -> None:
         return
 
     logger.info(
-        "Snapshot backfill preflight ok | project_id=%s profile=%s protected=%s docs=%s target_schema=%s backup_schema=%s",
+        "%s preflight ok | project_id=%s profile=%s protected=%s docs=%s target_schema=%s backup_schema=%s",
+        operation_label,
         report.get("project_id"),
         report.get("db_profile"),
         report.get("protected_target"),
@@ -807,12 +827,12 @@ def main() -> None:
         parser.error("--probe-every-chunks requires --probe-out")
     if args.integrity_checkpoint_mode is not None and not args.backfill_snapshots:
         parser.error("--integrity-checkpoint-mode requires --backfill-snapshots")
-    if args.preflight_only and not args.backfill_snapshots:
-        parser.error("--preflight-only requires --backfill-snapshots")
-    if args.backup_db_path and not args.backfill_snapshots:
-        parser.error("--backup-db-path requires --backfill-snapshots")
-    if args.allow_protected_db_heavy_write and not args.backfill_snapshots:
-        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots")
+    if args.preflight_only and not (args.backfill_snapshots or args.reprocess_all):
+        parser.error("--preflight-only requires --backfill-snapshots or --reprocess-all")
+    if args.backup_db_path and not (args.backfill_snapshots or args.reprocess_all):
+        parser.error("--backup-db-path requires --backfill-snapshots or --reprocess-all")
+    if args.allow_protected_db_heavy_write and not (args.backfill_snapshots or args.reprocess_all):
+        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots or --reprocess-all")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
@@ -983,15 +1003,23 @@ def main() -> None:
                 len(doc_ids_to_process),
             )
 
-        if args.preflight_only or _is_snapshot_backfill_write(args):
-            preflight = _run_snapshot_backfill_preflight(
+        if args.preflight_only or _is_reference_heavy_write(args):
+            operation_label = (
+                "snapshot backfill"
+                if args.backfill_snapshots
+                else "reference reprocess"
+                if is_reprocess_mode
+                else "reference write"
+            )
+            preflight = _run_reference_heavy_write_preflight(
                 db_path=db_path,
                 backup_db_path=backup_db_path,
                 project_id=project_id,
                 selected_doc_count=len(doc_ids_to_process),
                 allow_protected_db_heavy_write=bool(args.allow_protected_db_heavy_write),
+                operation_label=operation_label,
             )
-            _log_snapshot_backfill_preflight(preflight)
+            _log_reference_heavy_write_preflight(preflight)
             if not preflight.get("ok"):
                 sys.exit(2)
             if args.preflight_only:
