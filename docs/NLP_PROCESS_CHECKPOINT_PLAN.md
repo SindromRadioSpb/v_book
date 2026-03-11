@@ -1414,3 +1414,25 @@ Use that document as the source of truth for:
 - the operator run package for `250k` or full-volume validation
 - the explicit rule that `120k` cumulative evidence is not yet a production
   rollout approval
+
+## Read-only readiness/reporting layer
+
+With heavy validation intentionally paused, the next safe convergence step was
+implemented as read-only reporting instead of new storage work:
+
+- `SnapshotReadinessService` provides a reusable read-only summary for:
+  - processed docs
+  - fully covered docs
+  - zero/partial snapshot docs
+  - sentence/doc coverage percentages
+  - latest snapshot backfill run status/stage/doc cursor
+  - bounded-contract state and operator notes
+- `DocumentsView` now surfaces that summary in a non-modal readiness card
+- `TermsView` now surfaces the last extraction source mix so snapshot reuse vs
+  sentence reparse is visible without CLI/log spelunking
+
+This layer is explicitly **observability only**:
+
+- no heavy validation is started from the UI
+- no write semantics changed
+- no production approval is implied by the readiness card

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from PyQt6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -24,8 +25,8 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
     QSpinBox,
 )
-from PyQt6.QtCore import QItemSelectionModel, QModelIndex, Qt, pyqtSignal, QMimeData, QTimer
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import QItemSelectionModel, QModelIndex, Qt, pyqtSignal, QMimeData, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 
 from app.services.db_service import DBService
 from app.services.project_service import ProjectService
@@ -34,9 +35,16 @@ from app.services.document_service import DocumentService, validate_link_url, VA
 from app.infra.settings import SettingsService
 from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
-from app.ui.workers import IngestWorker, ProcessWorker, DocumentsPageWorker, DocumentDeleteWorker
+from app.ui.workers import (
+    IngestWorker,
+    ProcessWorker,
+    DocumentsPageWorker,
+    DocumentDeleteWorker,
+    SnapshotReadinessWorker,
+)
 from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
 from app.ui.dialogs import show_error, show_info, show_warning
+from app.ui.widgets.snapshot_readiness_panel import SnapshotReadinessPanel
 
 logger = logging.getLogger(__name__)
 
@@ -209,10 +217,14 @@ class DocumentsView(QWidget):
         self.documents_worker: Optional[DocumentsPageWorker] = None
         self.delete_worker: Optional[DocumentDeleteWorker] = None
         self.delete_progress: Optional[QProgressDialog] = None
+        self.snapshot_readiness_worker: Optional[SnapshotReadinessWorker] = None
+        self.snapshot_readiness_panel: Optional[SnapshotReadinessPanel] = None
 
         self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
         self._active_request_id = 0
+        self._snapshot_request_seq = 0
+        self._active_snapshot_request_id = 0
 
         # Pagination + sorting state (server-side).
         self.current_page = 1
@@ -345,6 +357,12 @@ class DocumentsView(QWidget):
 
         nlp_layout.addStretch()
         layout.addLayout(nlp_layout)
+
+        self.snapshot_readiness_panel = SnapshotReadinessPanel(self)
+        self.snapshot_readiness_panel.refresh_requested.connect(self.refresh_snapshot_readiness)
+        self.snapshot_readiness_panel.copy_cli_requested.connect(self._copy_snapshot_coverage_cli)
+        self.snapshot_readiness_panel.open_runbook_requested.connect(self._open_snapshot_runbook)
+        layout.addWidget(self.snapshot_readiness_panel)
 
         # Drag-drop hint
         self.hint_label = QLabel(
@@ -551,9 +569,88 @@ class DocumentsView(QWidget):
                 # Update UI for reference corpus
                 if self.is_reference_corpus:
                     self._configure_reference_corpus_ui()
+            self.refresh_snapshot_readiness()
         except Exception as e:
             logger.exception("Failed to load corpus")
             show_error(self, "Error", f"Failed to load corpus: {e}")
+
+    def refresh_snapshot_readiness(self) -> None:
+        """Load snapshot readiness summary in the background."""
+        panel = self.__dict__.get("snapshot_readiness_panel")
+        if panel is None:
+            return
+
+        self._snapshot_request_seq += 1
+        request_id = int(self._snapshot_request_seq)
+        self._active_snapshot_request_id = request_id
+
+        if self.snapshot_readiness_worker and self.snapshot_readiness_worker.isRunning():
+            self.snapshot_readiness_worker.cancel()
+
+        panel.set_loading("Refreshing snapshot readiness...")
+
+        worker = SnapshotReadinessWorker(request_id=request_id, project_id=self.project_id)
+        self.snapshot_readiness_worker = worker
+        worker.status.connect(self.on_snapshot_readiness_status)
+        worker.summary_ready.connect(self.on_snapshot_readiness_loaded)
+        worker.error.connect(self.on_snapshot_readiness_error)
+        worker.finished.connect(lambda current=worker: self._on_snapshot_readiness_worker_finished(current))
+        worker.start()
+
+    def on_snapshot_readiness_status(self, request_id: int, status_text: str) -> None:
+        if int(request_id) != self._active_snapshot_request_id:
+            return
+        panel = self.__dict__.get("snapshot_readiness_panel")
+        if panel is not None:
+            panel.set_loading(status_text)
+
+    def on_snapshot_readiness_loaded(self, request_id: int, summary) -> None:
+        if int(request_id) != self._active_snapshot_request_id:
+            return
+        panel = self.__dict__.get("snapshot_readiness_panel")
+        if panel is not None:
+            panel.set_summary(summary)
+
+    def on_snapshot_readiness_error(self, request_id: int, message: str) -> None:
+        if int(request_id) != self._active_snapshot_request_id:
+            return
+        panel = self.__dict__.get("snapshot_readiness_panel")
+        if panel is not None:
+            panel.set_error(f"Snapshot readiness unavailable: {message}")
+
+    def _on_snapshot_readiness_worker_finished(self, worker: SnapshotReadinessWorker) -> None:
+        if worker is self.snapshot_readiness_worker:
+            self.snapshot_readiness_worker = None
+        worker.deleteLater()
+
+    def _copy_snapshot_coverage_cli(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        db_path = getattr(self.db_service.db_manager, "db_path", None)
+        if db_path is None:
+            return
+        command = (
+            f'python scripts/process_reference_corpus.py --db-path "{db_path}" '
+            f"--project-id {int(self.project_id)} --backfill-snapshots --coverage-only"
+        )
+        app.clipboard().setText(command)
+        self.status_label.setText("Coverage CLI copied to clipboard.")
+
+    def _open_snapshot_runbook(self) -> None:
+        docs_path = Path(__file__).resolve().parents[1].parent / "docs" / "NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md"
+        if not docs_path.exists():
+            show_info(self, "Runbook", f"Open manually:\n{docs_path}")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(docs_path))):
+            show_info(self, "Runbook", f"Open manually:\n{docs_path}")
+
+    def _stop_snapshot_readiness_worker(self) -> None:
+        if self.snapshot_readiness_worker and self.snapshot_readiness_worker.isRunning():
+            logger.info("Stopping snapshot readiness worker on close")
+            self.snapshot_readiness_worker.cancel()
+            if not self.snapshot_readiness_worker.wait(100):
+                logger.info("Snapshot readiness worker will finish cooperatively after close")
 
     def load_documents(self):
         """Load current page using server-side pagination (global filters/sort)."""
@@ -1031,6 +1128,8 @@ class DocumentsView(QWidget):
         deleted = int(result.get("deleted", 0) or 0)
         failed = int(result.get("failed", 0) or 0)
         self.load_documents()
+        if deleted > 0:
+            self.refresh_snapshot_readiness()
         if failed:
             show_error(
                 self,
@@ -1247,6 +1346,7 @@ class DocumentsView(QWidget):
         success_count = int(result.get("success_count") or 0)
         error_count = int(result.get("error_count") or 0)
         cancelled = bool(result.get("cancelled"))
+        docs_processed = int(result.get("docs_processed") or 0)
         operation_label = str(result.get("operation_label") or "Processing")
 
         if cancelled:
@@ -1266,6 +1366,8 @@ class DocumentsView(QWidget):
 
         # Reload documents to show updated status
         self.load_documents()
+        if success_count > 0 or docs_processed > 0:
+            self.refresh_snapshot_readiness()
 
         # Emit signal to update other views (e.g., Dictionary)
         if success_count > 0:
@@ -1627,6 +1729,8 @@ class DocumentsView(QWidget):
             self.documents_worker.wait(1000)
             if self.documents_worker.isRunning():
                 self.documents_worker.terminate()
+
+        self._stop_snapshot_readiness_worker()
 
         self.table_layout_controller.save_now()
 

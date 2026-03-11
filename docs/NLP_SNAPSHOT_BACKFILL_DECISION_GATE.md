@@ -154,6 +154,28 @@ Preferred adjacent work while heavy validation is paused:
 - convergence work between `process with NLP` and `extract terms` that does not
   require mass backfill
 
+## Readiness reporting surfaces
+
+The application now exposes a read-only observability layer for this track:
+
+- **Documents** shows a snapshot readiness card with:
+  - doc coverage
+  - sentence coverage
+  - fully covered docs
+  - remaining uncovered docs
+  - latest snapshot backfill run summary
+- **Terms** shows the last extraction source mix:
+  - snapshot-backed rows used
+  - reparsed sentences
+  - reuse percentage
+
+These UI surfaces are intentionally observational only:
+
+- they do not start backfill
+- they do not imply production approval
+- they do not bypass the heavy-validation decision gate
+- their `Copy Coverage CLI` action only emits the safe `--coverage-only` command
+
 ## Decision rule for freshness/version hardening
 
 Do not resume freshness/version work until:

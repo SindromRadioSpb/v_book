@@ -164,6 +164,39 @@ class ExtractReport:
     run_id: Optional[int] = None
     docs_processed: int = 0
     docs_total: int = 0
+    snapshot_rows_used: int = 0
+    reparsed_sentences: int = 0
+    snapshot_reuse_pct: Optional[float] = None
+
+
+@dataclass
+class SnapshotReadinessSummaryDTO:
+    """Read-only snapshot coverage and latest backfill readiness summary."""
+
+    project_id: int
+    project_name: str
+    is_general_corpus: bool
+    is_reference_project: bool
+    processed_docs: int
+    fully_covered_docs: int
+    zero_snapshot_docs: int
+    partial_snapshot_docs: int
+    remaining_uncovered_docs: int
+    sentence_count_total: int
+    snapshot_count_total: int
+    sentence_coverage_pct: Optional[float]
+    doc_coverage_pct: Optional[float]
+    latest_backfill_run_id: Optional[int] = None
+    latest_backfill_status: Optional[str] = None
+    latest_backfill_stage: Optional[str] = None
+    latest_backfill_last_doc_id: Optional[int] = None
+    latest_backfill_finished_at: Optional[str] = None
+    latest_backfill_docs_processed: int = 0
+    latest_backfill_docs_total: int = 0
+    contract_state: str = "no_snapshot_coverage"
+    contract_note: Optional[str] = None
+    summary_note: Optional[str] = None
+    last_refreshed_at: Optional[str] = None
 
 
 @dataclass

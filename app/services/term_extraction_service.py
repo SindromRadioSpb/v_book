@@ -184,6 +184,13 @@ class TermExtractionService:
             payload["message"] = message
         return payload
 
+    @staticmethod
+    def _snapshot_reuse_pct(snapshot_rows_used: int, reparsed_sentences: int) -> Optional[float]:
+        total = int(snapshot_rows_used or 0) + int(reparsed_sentences or 0)
+        if total <= 0:
+            return None
+        return round(int(snapshot_rows_used or 0) / total * 100.0, 4)
+
     def extract_terms_for_project(
         self,
         session: Session,
@@ -278,13 +285,14 @@ class TermExtractionService:
                 raise ValueError(f"Project {project_id} not found")
 
             # Read/compute first, then perform one bounded write phase.
+            snapshot_usage = {"snapshot_rows_used": 0, "reparsed_sentences": 0}
             ngram_counts = Counter()
             ngram_doc_freq = Counter()
             ngram_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
             ngrams_extracted = 0
             if enable_ngrams:
                 ngram_counts, ngram_doc_freq, ngram_meta = self._collect_ngrams(
-                    session, project_id, ngram_ns, min_freq
+                    session, project_id, ngram_ns, min_freq, summary=snapshot_usage
                 )
 
             np_counts = Counter()
@@ -293,7 +301,7 @@ class TermExtractionService:
             np_chunks_extracted = 0
             if include_np:
                 np_counts, np_doc_freq, np_meta = self._collect_np_chunks(
-                    session, project_id, np_max_len, min_freq
+                    session, project_id, np_max_len, min_freq, summary=snapshot_usage
                 )
 
             # Clear existing only after read phase succeeded, so overwrite keeps
@@ -345,6 +353,12 @@ class TermExtractionService:
                 np_chunks_extracted=np_chunks_extracted,
                 clusters_created=clusters_created,
                 success=True,
+                snapshot_rows_used=int(snapshot_usage["snapshot_rows_used"]),
+                reparsed_sentences=int(snapshot_usage["reparsed_sentences"]),
+                snapshot_reuse_pct=self._snapshot_reuse_pct(
+                    snapshot_usage["snapshot_rows_used"],
+                    snapshot_usage["reparsed_sentences"],
+                ),
             )
 
         except Exception as e:
@@ -357,6 +371,9 @@ class TermExtractionService:
                 clusters_created=0,
                 success=False,
                 error_message=str(e),
+                snapshot_rows_used=0,
+                reparsed_sentences=0,
+                snapshot_reuse_pct=None,
             )
 
     def _extract_terms_for_project_chunked(
@@ -383,6 +400,7 @@ class TermExtractionService:
         total_docs = 0
         docs_processed = 0
         run: Optional[TermExtractRun] = None
+        snapshot_usage = {"snapshot_rows_used": 0, "reparsed_sentences": 0}
 
         def _emit(
             message: str,
@@ -549,6 +567,9 @@ class TermExtractionService:
                     run_id=run_id,
                     docs_processed=0,
                     docs_total=0,
+                    snapshot_rows_used=0,
+                    reparsed_sentences=0,
+                    snapshot_reuse_pct=None,
                 )
 
             use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
@@ -641,6 +662,8 @@ class TermExtractionService:
                             project_id=project_id,
                             docs_processed=int(run.docs_processed or 0),
                             docs_total=total_docs,
+                            snapshot_rows_used=int(snapshot_usage["snapshot_rows_used"]),
+                            reparsed_sentences=int(snapshot_usage["reparsed_sentences"]),
                         )
 
                     doc_batch = self._fetch_processed_doc_batch(
@@ -673,6 +696,7 @@ class TermExtractionService:
                                 doc_batch,
                                 ngram_ns=ngram_ns,
                                 engine=engine,
+                                summary=snapshot_usage,
                             )
                         )
                         self._upsert_term_extract_accumulators(
@@ -691,6 +715,7 @@ class TermExtractionService:
                                 doc_batch,
                                 np_max_len=np_max_len,
                                 engine=engine,
+                                summary=snapshot_usage,
                             )
                         )
                         self._upsert_term_extract_accumulators(
@@ -754,6 +779,8 @@ class TermExtractionService:
                     project_id=project_id,
                     docs_processed=int(run.docs_processed or 0),
                     docs_total=total_docs,
+                    snapshot_rows_used=int(snapshot_usage["snapshot_rows_used"]),
+                    reparsed_sentences=int(snapshot_usage["reparsed_sentences"]),
                 )
 
             run.status = "finalizing"
@@ -862,6 +889,12 @@ class TermExtractionService:
                 run_id=run_id,
                 docs_processed=int(run.docs_processed or 0),
                 docs_total=total_docs,
+                snapshot_rows_used=int(snapshot_usage["snapshot_rows_used"]),
+                reparsed_sentences=int(snapshot_usage["reparsed_sentences"]),
+                snapshot_reuse_pct=self._snapshot_reuse_pct(
+                    snapshot_usage["snapshot_rows_used"],
+                    snapshot_usage["reparsed_sentences"],
+                ),
             )
 
         except Exception as e:
@@ -883,6 +916,12 @@ class TermExtractionService:
                 run_id=run_id,
                 docs_processed=docs_processed,
                 docs_total=total_docs,
+                snapshot_rows_used=int(snapshot_usage["snapshot_rows_used"]),
+                reparsed_sentences=int(snapshot_usage["reparsed_sentences"]),
+                snapshot_reuse_pct=self._snapshot_reuse_pct(
+                    snapshot_usage["snapshot_rows_used"],
+                    snapshot_usage["reparsed_sentences"],
+                ),
             )
 
     def _clear_existing_terms(self, session: Session, project_id: int) -> None:
@@ -1021,6 +1060,8 @@ class TermExtractionService:
         project_id: int,
         docs_processed: int,
         docs_total: int,
+        snapshot_rows_used: int = 0,
+        reparsed_sentences: int = 0,
     ) -> ExtractReport:
         run = session.get(TermExtractRun, run_id)
         if run:
@@ -1040,6 +1081,12 @@ class TermExtractionService:
             run_id=run_id,
             docs_processed=docs_processed,
             docs_total=docs_total,
+            snapshot_rows_used=int(snapshot_rows_used or 0),
+            reparsed_sentences=int(reparsed_sentences or 0),
+            snapshot_reuse_pct=self._snapshot_reuse_pct(
+                snapshot_rows_used,
+                reparsed_sentences,
+            ),
         )
 
     def _wait_if_paused(
@@ -1180,7 +1227,8 @@ class TermExtractionService:
         session: Session,
         project_id: int,
         ngram_ns: Tuple[int, ...],
-        min_freq: int
+        min_freq: int,
+        summary: Optional[dict[str, int]] = None,
     ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
         """Collect n-gram counts from processed documents without writing."""
         logger.info(f"Extracting n-grams (sizes: {ngram_ns})")
@@ -1196,6 +1244,7 @@ class TermExtractionService:
             [int(doc_id) for doc_id in self._iter_processed_doc_ids(session, project_id)],
             ngram_ns=ngram_ns,
             engine=engine,
+            summary=summary,
         )
 
     def _collect_ngrams_for_doc_ids(
@@ -1205,6 +1254,7 @@ class TermExtractionService:
         *,
         ngram_ns: Tuple[int, ...],
         engine: NLPEngine,
+        summary: Optional[dict[str, int]] = None,
     ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
         """Collect n-gram counts for a bounded list of docs."""
         ngram_counts = Counter()
@@ -1267,6 +1317,9 @@ class TermExtractionService:
             snapshot_rows_used,
             fallback_rows_used,
         )
+        if summary is not None:
+            summary["snapshot_rows_used"] = int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
+            summary["reparsed_sentences"] = int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
         return ngram_counts, ngram_doc_freq, ngram_meta
 
     def _build_lemma_freq_map(
@@ -1411,7 +1464,8 @@ class TermExtractionService:
         session: Session,
         project_id: int,
         np_max_len: int,
-        min_freq: int
+        min_freq: int,
+        summary: Optional[dict[str, int]] = None,
     ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
         """Collect NP chunks from processed documents without writing."""
         logger.info(f"Extracting NP chunks (max_len={np_max_len})")
@@ -1427,6 +1481,7 @@ class TermExtractionService:
             [int(doc_id) for doc_id in self._iter_processed_doc_ids(session, project_id)],
             np_max_len=np_max_len,
             engine=engine,
+            summary=summary,
         )
 
     def _collect_np_chunks_for_doc_ids(
@@ -1436,6 +1491,7 @@ class TermExtractionService:
         *,
         np_max_len: int,
         engine: NLPEngine,
+        summary: Optional[dict[str, int]] = None,
     ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
         """Collect NP chunk counts for a bounded list of docs."""
         np_counts = Counter()
@@ -1498,6 +1554,9 @@ class TermExtractionService:
             snapshot_rows_used,
             fallback_rows_used,
         )
+        if summary is not None:
+            summary["snapshot_rows_used"] = int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
+            summary["reparsed_sentences"] = int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
         return np_counts, np_doc_freq, np_meta
 
     def _store_np_chunks(

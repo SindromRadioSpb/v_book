@@ -169,6 +169,11 @@ class TermsView(QWidget):
         self.last_extract_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
         layout.addWidget(self.last_extract_label)
 
+        self.last_extract_source_mix_label = QLabel("")
+        self.last_extract_source_mix_label.setStyleSheet("color: #475569; padding: 0 5px 5px 5px;")
+        self.last_extract_source_mix_label.setWordWrap(True)
+        layout.addWidget(self.last_extract_source_mix_label)
+
         # Filters
         filter_layout = QHBoxLayout()
 
@@ -1037,8 +1042,12 @@ class TermsView(QWidget):
             msg += f"N-grams: {report.ngrams_extracted}\n"
             msg += f"NP chunks: {report.np_chunks_extracted}\n"
             msg += f"Clusters: {report.clusters_created}"
+            source_mix = self._format_extract_source_mix(report)
+            if source_mix:
+                msg += f"\n\n{source_mix}"
 
             show_info(self, "Extraction Complete", msg)
+            self._set_last_extract_source_mix(report)
             self.perform_search()
         elif getattr(report, "cancelled", False):
             self.status_label.setText("Extraction cancelled")
@@ -1051,7 +1060,11 @@ class TermsView(QWidget):
                 f"{int(getattr(report, 'docs_total', 0))}\n"
                 "Re-run Extract Terms to resume the latest staged run."
             )
+            source_mix = self._format_extract_source_mix(report)
+            if source_mix:
+                msg += f"\n\n{source_mix}"
             show_info(self, "Extraction Cancelled", msg)
+            self._set_last_extract_source_mix(report)
         else:
             self.status_label.setText("Extraction failed")
             self._finish_extract_dialog(
@@ -2159,6 +2172,32 @@ class TermsView(QWidget):
             self.last_extract_label.setText(info_text)
         else:
             self.last_extract_label.setText("No terms extracted yet")
+
+    def _format_extract_source_mix(self, report) -> str:
+        snapshot_rows_used = int(getattr(report, "snapshot_rows_used", 0) or 0)
+        reparsed_sentences = int(getattr(report, "reparsed_sentences", 0) or 0)
+        reuse_pct = getattr(report, "snapshot_reuse_pct", None)
+        if snapshot_rows_used <= 0 and reparsed_sentences <= 0:
+            return ""
+
+        reuse_text = (
+            f"{float(reuse_pct):.2f}%"
+            if reuse_pct is not None
+            else "n/a"
+        )
+        return (
+            "Last extraction source mix: "
+            f"Snapshots used: {snapshot_rows_used:,} | "
+            f"Reparsed: {reparsed_sentences:,} | "
+            f"Reuse: {reuse_text}"
+        )
+
+    def _set_last_extract_source_mix(self, report) -> None:
+        label = self.__dict__.get("last_extract_source_mix_label")
+        if label is None:
+            return
+        text = self._format_extract_source_mix(report)
+        label.setText(text)
 
     def eventFilter(self, obj, event):
         """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""

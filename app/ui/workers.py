@@ -1075,6 +1075,44 @@ class ProjectDeleteWorker(QThread):
             self.error.emit(str(e))
 
 
+class SnapshotReadinessWorker(QThread):
+    """Background worker for read-only snapshot readiness summary."""
+
+    summary_ready = pyqtSignal(int, object)  # request_id, SnapshotReadinessSummaryDTO
+    error = pyqtSignal(int, str)
+    status = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, project_id: int):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.project_id = int(project_id)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.snapshot_readiness_service import SnapshotReadinessService
+
+            self.status.emit(self.request_id, "Loading snapshot readiness...")
+            db = DBService.get_instance()
+            service = SnapshotReadinessService()
+
+            with db.get_read_session() as session:
+                if self._cancelled:
+                    return
+                summary = service.get_project_summary(session, self.project_id)
+
+            if not self._cancelled:
+                self.summary_ready.emit(self.request_id, summary)
+        except Exception as e:
+            logger.exception("Snapshot readiness worker failed")
+            if not self._cancelled:
+                self.error.emit(self.request_id, str(e))
+
+
 class DocumentDeleteWorker(QThread):
     """Background worker for document deletion in Documents view."""
 

@@ -384,6 +384,14 @@ python scripts/process_reference_corpus.py `
     - freshness/version work blocked
   - the operator decision gate and future heavy-run package now live in:
     - `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
+  - the UI now surfaces read-only readiness/reporting:
+    - Documents shows snapshot coverage + latest backfill summary
+    - Terms shows the last extraction source mix
+  - these UI surfaces are observational only:
+    - they do not start heavy backfill
+    - they do not imply production approval
+    - for explicit coverage checks use `Copy Coverage CLI` or run
+      `--backfill-snapshots --coverage-only` manually
 
 ### Inter-chunk sleep
 
