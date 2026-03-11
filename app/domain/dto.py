@@ -1,5 +1,5 @@
 """Data Transfer Objects."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 
@@ -197,6 +197,40 @@ class SnapshotReadinessSummaryDTO:
     contract_note: Optional[str] = None
     summary_note: Optional[str] = None
     last_refreshed_at: Optional[str] = None
+
+
+@dataclass
+class DerivedArtifactMetricDTO:
+    """Read-only governance summary for one derived processing artifact."""
+
+    artifact_key: str
+    display_name: str
+    ownership: str
+    quantity_value: int
+    quantity_unit: str
+    quantity_basis: str
+    status: str
+    summary: str
+    detail_lines: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DerivedArtifactGovernanceSummaryDTO:
+    """Read-only project-scoped governance summary for heavy derived artifacts."""
+
+    project_id: int
+    project_name: str
+    is_reference_project: bool
+    total_docs: int
+    processed_docs: int
+    observability_note: str
+    storage_note: str
+    snapshot_sentence_coverage_pct: Optional[float] = None
+    snapshot_doc_coverage_pct: Optional[float] = None
+    lifecycle_note: Optional[str] = None
+    snapshot_contract_note: Optional[str] = None
+    last_refreshed_at: Optional[str] = None
+    artifacts: List[DerivedArtifactMetricDTO] = field(default_factory=list)
 
 
 @dataclass

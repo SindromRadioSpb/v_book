@@ -18,6 +18,9 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from app.domain.dto import ProjectStats
 from app.ui.models_qt import ProjectListModel
 from app.ui.dialogs import CreateProjectDialog, show_error, show_info
+from app.ui.dialogs.project_artifact_governance_dialog import (
+    ProjectArtifactGovernanceDialog,
+)
 from app.ui.workers import ProjectDeleteWorker
 from app.services.project_service import ProjectService
 
@@ -37,6 +40,7 @@ class ProjectDashboard(QWidget):
         self.project_service = ProjectService()
         self._delete_worker: ProjectDeleteWorker | None = None
         self._delete_progress: QProgressDialog | None = None
+        self._governance_dialog: ProjectArtifactGovernanceDialog | None = None
         self.init_ui()
         self.load_projects()
 
@@ -78,6 +82,11 @@ class ProjectDashboard(QWidget):
         self.delete_btn.setEnabled(False)  # Disabled until selection
         self.delete_btn.setStyleSheet("QPushButton { color: #d32f2f; }")  # Red text
         header_layout.addWidget(self.delete_btn)
+
+        self.governance_btn = QPushButton("Data Governance")
+        self.governance_btn.clicked.connect(self.on_open_governance)
+        self.governance_btn.setEnabled(False)
+        header_layout.addWidget(self.governance_btn)
 
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.load_projects)
@@ -206,7 +215,9 @@ class ProjectDashboard(QWidget):
     def on_selection_changed(self):
         """Handle selection change - enable/disable Delete button."""
         selected_indexes = self.project_table.selectedIndexes()
-        self.delete_btn.setEnabled(len(selected_indexes) > 0)
+        has_selection = len(selected_indexes) > 0
+        self.delete_btn.setEnabled(has_selection)
+        self.governance_btn.setEnabled(has_selection)
 
     def on_open_verification(self):
         """Handle verification button click."""
@@ -400,7 +411,7 @@ class ProjectDashboard(QWidget):
             self.load_projects()
 
     def show_context_menu(self, pos):
-        """Show context menu with Rename and Delete options."""
+        """Show context menu with Rename, governance, and Delete options."""
         # Get selected row
         index = self.project_table.indexAt(pos)
         if not index.isValid():
@@ -421,6 +432,15 @@ class ProjectDashboard(QWidget):
 
         menu.addSeparator()
 
+        governance_action = menu.addAction("Derived Data Governance...")
+        governance_action.triggered.connect(
+            lambda checked=False, project_id=project.project_id, name=project.name: (
+                self._open_governance_dialog(int(project_id), str(name))
+            )
+        )
+
+        menu.addSeparator()
+
         # Delete action (existing functionality, grayed out for reference corpus)
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self.on_delete_project)
@@ -436,3 +456,37 @@ class ProjectDashboard(QWidget):
         name_index = self.project_model.index(row, 1)
         self.project_table.setCurrentIndex(name_index)
         self.project_table.edit(name_index)
+
+    def _get_selected_project(self) -> ProjectStats | None:
+        selected_indexes = self.project_table.selectedIndexes()
+        if not selected_indexes:
+            return None
+        row = selected_indexes[0].row()
+        if row < 0 or row >= len(self.project_model.projects):
+            return None
+        return self.project_model.projects[row]
+
+    def on_open_governance(self) -> None:
+        project = self._get_selected_project()
+        if project is None:
+            return
+        self._open_governance_dialog(int(project.project_id), str(project.name))
+
+    def _open_governance_dialog(self, project_id: int, project_name: str) -> None:
+        dialog = self.__dict__.get("_governance_dialog")
+        if dialog is not None and getattr(dialog, "project_id", None) == int(project_id):
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+
+        if dialog is not None:
+            dialog.close()
+
+        dialog = ProjectArtifactGovernanceDialog(int(project_id), str(project_name), self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.destroyed.connect(lambda *_args: setattr(self, "_governance_dialog", None))
+        self._governance_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()

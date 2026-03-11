@@ -257,6 +257,77 @@ For large SQLite corpora:
 - use set-based SQL, not row-by-row ORM loops
 - use global cache only for deterministic artifacts with strong keys
 
+## G. Operator governance and observability contract
+
+The repo now exposes a dedicated, read-only operator surface for heavy derived
+project data:
+
+- `ProjectDashboard -> Data Governance`
+- service contract: `app/services/derived_artifact_governance_service.py`
+
+This surface exists to answer:
+
+- which derived tables are inevitably large,
+- which ones are growing as operational telemetry,
+- which values can be measured online without turning the UI into a heavy query
+  launcher.
+
+### Online metric rules
+
+#### Exact online counts are allowed only where they stay affordable
+
+Current online governance may use exact project-scoped counts for:
+
+- `lemma_doc_stat`
+- `lemma_project_stat`
+- `processor_run`
+- `run_error`
+
+These are still read-only and background-loaded.
+
+#### Snapshot volume must reuse the readiness aggregate
+
+For large reference projects, exact project-scoped `sentence_nlp_snapshot` row
+counts are too expensive for the normal operator UX.
+
+Therefore the online governance surface must:
+
+- reuse `SnapshotReadinessService`
+- show snapshot volume/coverage from its aggregate
+- avoid a second naïve exact snapshot-row-count query
+
+This is intentional. It keeps the operator surface useful on huge DBs without
+quietly reopening a heavy validation path.
+
+### UI contract
+
+The governance surface is:
+
+- observational only
+- background-loaded
+- on-demand, not auto-loaded in the dashboard table
+- not a retention/cleanup tool
+- not a production-approval signal
+
+It may surface:
+
+- exact project counts where affordable
+- ownership/lifecycle notes
+- latest coverage/backfill contract notes already established elsewhere
+
+It must not:
+
+- start backfill
+- compact or delete data
+- trigger heavy validation implicitly
+
+### Current limitations
+
+- project-scoped per-table byte accounting is not part of the live UI contract
+- if future runtime environments expose safe table-size primitives cheaply, that
+  can be added later
+- telemetry retention remains a separate future patch; visibility comes first
+
 ## Immediate follow-up recommendations
 
 1. Keep project-owned sentence/document/lemma cleanup strict and complete.

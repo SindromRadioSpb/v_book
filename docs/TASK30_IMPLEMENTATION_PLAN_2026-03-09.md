@@ -1671,4 +1671,12 @@ Current execution status:
   - live worker-path evidence is recorded in:
     - `build/logs/picker_p003/picker_worker_breakdown_pre_patch.json`
     - `build/logs/picker_p003/picker_staged_breakdown_post_patch.json`
-- next active priority is now `PATCH-P1-01` large derived data governance
+- `PATCH-P1-01` is now implemented as a read-only governance/reporting wave:
+  - new service: `app/services/derived_artifact_governance_service.py`
+  - new on-demand dashboard dialog:
+    `app/ui/dialogs/project_artifact_governance_dialog.py`
+  - snapshot volume intentionally reuses readiness aggregates instead of a fresh
+    exact project-scoped snapshot-row-count query on huge DBs
+  - governance is observational only and does not start retention cleanup or
+    heavy validation
+- next active priority is now `PATCH-P1-02` audio cache contract completion

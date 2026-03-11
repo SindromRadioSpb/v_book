@@ -308,6 +308,68 @@ Expected output:
 - operator visibility into growth/ownership,
 - clear future maintenance hooks.
 
+Status after implementation wave:
+
+- implemented on `2026-03-11`
+- refined by live evidence on the approved hewiki dev/test DB:
+  - exact project counts remain affordable for:
+    - `lemma_doc_stat`
+    - `lemma_project_stat`
+    - `processor_run`
+    - `run_error`
+  - exact project-scoped `sentence_nlp_snapshot` row counts are too expensive
+    on the huge reference project path and must not be used in an automatic UI
+    refresh contract
+- the practical fix therefore became:
+  - add a read-only governance/reporting service for large derived artifacts
+  - expose it only as an on-demand dashboard dialog, not as an automatic
+    dashboard metric
+  - reuse the existing snapshot readiness aggregate for snapshot volume/coverage
+    instead of issuing a fresh exact snapshot row count on huge DBs
+
+Concrete output of this wave:
+
+- new read-only service:
+  - `app/services/derived_artifact_governance_service.py`
+- new on-demand operator dialog from `ProjectDashboard`:
+  - `app/ui/dialogs/project_artifact_governance_dialog.py`
+- new worker / dashboard wiring:
+  - `app/ui/workers.py`
+  - `app/ui/project_dashboard.py`
+- lifecycle doc now explicitly records the online metric contract:
+  - exact project counts where affordable
+  - snapshot volume from readiness aggregate
+  - no cleanup or retention writes from the UI surface
+
+Evidence:
+
+- targeted regressions:
+  - `tests/test_derived_artifact_governance_service.py`
+  - `tests/test_project_artifact_governance_dialog.py`
+  - `tests/test_project_dashboard_governance_dialog.py`
+  - result: `8 passed`
+- broader adjacent regressions:
+  - `tests/test_snapshot_readiness_service.py`
+  - `tests/test_documents_snapshot_readiness_ui.py`
+  - `tests/test_project_dashboard_metrics.py`
+  - `tests/test_project_delete_flow.py`
+  - `tests/test_terms_snapshot_reuse_summary.py`
+  - result: `28 passed`
+- live evidence on `hewiki_gpu_processing test.db`, `project_id=1`:
+  - exact `sentence_nlp_snapshot` row count by naïve project join took about
+    `212s`, so it was intentionally excluded from the online governance
+    contract
+  - existing `SnapshotReadinessService.get_project_summary()` remained usable at
+    about `9.5s`
+  - exact `lemma_doc_stat` project count remained practical at about `3.3s`
+
+Remaining note:
+
+- this patch improves operator visibility and lifecycle governability without
+  reopening heavy validation
+- it does not add retention cleanup yet
+- the next active priority is now `PATCH-P1-02`
+
 ### PATCH-P1-02: Finish audio cache contract
 
 Goal:
@@ -334,8 +396,8 @@ Primary files:
 
 ## Immediate execution order
 
-1. `PATCH-P1-01` large derived data governance
-2. `PATCH-P1-02` audio cache contract completion
+1. `PATCH-P1-02` audio cache contract completion
+2. future retention/cleanup policy for project telemetry and other large derived artifacts
 3. future heavy validation only by explicit decision gate
 
 ## Decision note
