@@ -1679,4 +1679,12 @@ Current execution status:
     exact project-scoped snapshot-row-count query on huge DBs
   - governance is observational only and does not start retention cleanup or
     heavy validation
+- the deferred readiness/governance acceleration branch is now explicitly
+  preserved in
+  `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md`:
+  - low-risk query/cache polish stays optional only
+  - per-document snapshot stats remain the preferred future acceleration path
+  - project-level materialized summary remains a higher-risk fallback
+  - none of that branch is active unless it is explicitly reprioritized after
+    `PATCH-P1-02`
 - next active priority is now `PATCH-P1-02` audio cache contract completion

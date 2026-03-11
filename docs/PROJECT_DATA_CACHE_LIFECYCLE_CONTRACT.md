@@ -299,6 +299,25 @@ Therefore the online governance surface must:
 This is intentional. It keeps the operator surface useful on huge DBs without
 quietly reopening a heavy validation path.
 
+#### Deferred acceleration options are preserved, not active
+
+The current online contract is intentionally accepted as:
+
+- on-demand
+- background-loaded
+- honest about bounded validation rather than artificially "instant"
+
+Future acceleration options are preserved in the roadmap, but must stay
+deferred until the current latency becomes a real workflow blocker:
+
+- low-risk query/cache polish for modest wins only
+- preferred future path: per-document snapshot stats
+- higher-risk fallback: project-level materialized summary
+
+If per-document or project-level persisted stats are ever introduced, they must
+ship together with an explicit rebuild/verify/repair contract. Faster but
+unverifiable summary data is not acceptable for this layer.
+
 ### UI contract
 
 The governance surface is:

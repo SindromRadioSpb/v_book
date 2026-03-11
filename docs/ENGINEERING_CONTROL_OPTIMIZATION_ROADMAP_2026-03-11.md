@@ -370,6 +370,91 @@ Remaining note:
 - it does not add retention cleanup yet
 - the next active priority is now `PATCH-P1-02`
 
+Deferred optimization branch (preserved design option, not active now):
+
+- current governance/readiness latency is acceptable for an on-demand
+  background-loaded operator dialog:
+  - naïve exact project-scoped `sentence_nlp_snapshot` count on live hewiki
+    scale was about `212s` and is intentionally excluded from the normal UI
+    contract
+  - existing `SnapshotReadinessService.get_project_summary()` remained usable at
+    about `9.5s`
+- therefore this branch is explicitly deferred until governance latency becomes
+  a real workflow blocker
+- preserve this branch as design context only:
+  - do not implement it during `PATCH-P1-02`
+  - re-open it only if a later decision gate promotes readiness latency from an
+    acceptable operator cost to a real workflow blocker
+
+#### Deferred PATCH-01: low-risk query/cache polish
+
+- narrow the snapshot coverage query further
+- avoid recomputing fields the current UI does not display
+- continue reusing cached last-summary data where safe
+- expected effect:
+  - modest improvement only
+  - not order-of-magnitude
+  - not the preferred path for materially faster cold reads
+
+#### Deferred PATCH-02: preferred future acceleration via per-document snapshot stats
+
+- add doc-level snapshot coverage state either:
+  - directly on `source_document`, or
+  - in a dedicated doc-level stats table
+- candidate fields:
+  - `snapshot_sentence_count`
+  - optional `snapshot_coverage_state`
+  - optional `last_snapshot_updated_at`
+- update that state in:
+  - normal NLP processing
+  - snapshot backfill merge
+  - project/document delete
+- rationale:
+  - governance/readiness would read document-level rows instead of millions of
+    snapshot rows
+  - this is the preferred future path if materially faster readiness is needed
+  - it is stronger than query tweaks and safer than jumping directly to a
+    project-level materialized summary
+
+#### Deferred PATCH-03: faster but riskier project-level materialized summary
+
+- introduce a `project_artifact_stats` / `project_snapshot_stats` style table
+- pros:
+  - maximum read speed
+- cons:
+  - higher drift risk
+  - more write-semantic complexity
+  - requires explicit rebuild/repair support
+- positioning:
+  - fallback only
+  - not the default recommendation
+
+#### Deferred PATCH-04: mandatory rebuild/verify companion
+
+If deferred PATCH-02 or PATCH-03 is ever activated, it must ship together with:
+
+- manual rebuild of summary/stat rows
+- consistency verification
+- safe repair when drift is detected
+
+Activation criteria for the deferred branch:
+
+- governance/readiness latency becomes a real workflow blocker
+- the dialog becomes frequent operator workflow instead of occasional
+  diagnostics
+- the current `~9.5s` cold readiness read is judged productively harmful
+- there is an explicit requirement for near-interactive readiness/governance
+  load time
+
+Current recommendation:
+
+- keep `PATCH-P1-02` ahead of this branch
+- re-evaluate only after the audio cache contract work
+- if this branch is later activated:
+  - prefer deferred PATCH-02 first
+  - carry deferred PATCH-04 with it
+  - keep deferred PATCH-03 only as a higher-risk fallback
+
 ### PATCH-P1-02: Finish audio cache contract
 
 Goal:
