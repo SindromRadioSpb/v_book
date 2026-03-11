@@ -107,6 +107,22 @@ def test_discover_baseline_db_path_returns_existing_candidate(tmp_path, monkeypa
     assert discovered == baseline_db.resolve()
 
 
+def test_is_protected_reference_db_path_matches_baseline_candidate(tmp_path, monkeypatch):
+    baseline_db = _touch(tmp_path / "hewiki_gpu_processing.db")
+    custom_db = _touch(tmp_path / "hewiki_gpu_processing test.db")
+    monkeypatch.setattr(resolver, "DEV_HEWIKI_BASELINE_DB_PATH", baseline_db)
+    _ResourcePathsStub._root = tmp_path / "appdata"
+
+    assert resolver.is_protected_reference_db_path(
+        baseline_db,
+        resource_paths_cls=_ResourcePathsStub,
+    )
+    assert not resolver.is_protected_reference_db_path(
+        custom_db,
+        resource_paths_cls=_ResourcePathsStub,
+    )
+
+
 def _create_db_with_schema(path: Path, schema_version: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     import sqlite3

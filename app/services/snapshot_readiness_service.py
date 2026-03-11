@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.domain.dto import SnapshotReadinessSummaryDTO
 from app.infra.sa_models import DictProject, ProcessorRun
 
+SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS = 10_000
+
 
 class SnapshotReadinessService:
     """Read-only service for project snapshot coverage and latest backfill summary."""
@@ -22,13 +24,26 @@ class SnapshotReadinessService:
             raise ValueError(f"Project {project_id} not found")
 
         coverage = self._get_snapshot_coverage(session, int(project_id))
-        latest_run = self._find_latest_snapshot_backfill_run(session, int(project_id))
-        contract_state = self._resolve_contract_state(project, coverage, latest_run)
+        backfill_runs = self._find_snapshot_backfill_runs(session, int(project_id))
+        latest_run = backfill_runs[0] if backfill_runs else None
+        bounded_evidence = self._find_bounded_validation_evidence(backfill_runs)
+        contract_state = self._resolve_contract_state(
+            project,
+            coverage,
+            latest_run,
+            bounded_evidence,
+        )
 
         summary_note = (
             "Observational only. This panel does not approve production rollout or start backfill."
         )
-        contract_note = self._build_contract_note(project, coverage, latest_run, contract_state)
+        contract_note = self._build_contract_note(
+            project,
+            coverage,
+            latest_run,
+            contract_state,
+            bounded_evidence,
+        )
 
         return SnapshotReadinessSummaryDTO(
             project_id=int(project.project_id),
@@ -92,23 +107,70 @@ class SnapshotReadinessService:
         except Exception:
             return {}
 
-    def _find_latest_snapshot_backfill_run(
+    def _find_snapshot_backfill_runs(
         self,
         session: Session,
         project_id: int,
-    ) -> Optional[ProcessorRun]:
-        candidates = (
+    ) -> list[ProcessorRun]:
+        candidates: list[ProcessorRun] = (
             session.query(ProcessorRun)
             .filter(ProcessorRun.project_id == int(project_id))
             .order_by(ProcessorRun.run_id.desc())
             .limit(50)
             .all()
         )
+        runs: list[ProcessorRun] = []
         for run in candidates:
             payload = self._parse_note_payload(getattr(run, "note", None))
             source = str(payload.get("source") or "")
             if source.startswith("snapshot_backfill"):
-                return run
+                runs.append(run)
+        return runs
+
+    def _build_validation_evidence(self, run: ProcessorRun) -> dict[str, Any]:
+        payload = self._parse_note_payload(getattr(run, "note", None))
+        validation_scope = str(payload.get("validation_scope") or "").strip().lower()
+        validated_doc_count = int(payload.get("validated_doc_count") or 0)
+        latest_doc_count = max(
+            int(getattr(run, "docs_processed", 0) or 0),
+            int(getattr(run, "docs_total", 0) or 0),
+        )
+        is_success = str(getattr(run, "status", "") or "") == "ok" and str(
+            getattr(run, "stage", "") or ""
+        ) == "completed"
+        if not is_success:
+            return {"kind": "none", "validated_doc_count": 0, "run": run}
+        if validation_scope == "bounded" and validated_doc_count >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS:
+            return {
+                "kind": "bounded",
+                "validated_doc_count": validated_doc_count,
+                "source": "explicit_note",
+                "run": run,
+            }
+        if latest_doc_count >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS:
+            return {
+                "kind": "bounded",
+                "validated_doc_count": latest_doc_count,
+                "source": "legacy_large_success",
+                "run": run,
+            }
+        if latest_doc_count > 0:
+            return {
+                "kind": "limited",
+                "validated_doc_count": latest_doc_count,
+                "source": "small_success",
+                "run": run,
+            }
+        return {"kind": "none", "validated_doc_count": 0, "run": run}
+
+    def _find_bounded_validation_evidence(
+        self,
+        runs: list[ProcessorRun],
+    ) -> Optional[dict[str, Any]]:
+        for run in runs:
+            evidence = self._build_validation_evidence(run)
+            if evidence.get("kind") == "bounded":
+                return evidence
         return None
 
     def _get_snapshot_coverage(self, session: Session, project_id: int) -> dict[str, Any]:
@@ -166,6 +228,7 @@ class SnapshotReadinessService:
         project: DictProject,
         coverage: dict[str, Any],
         latest_run: Optional[ProcessorRun],
+        bounded_evidence: Optional[dict[str, Any]],
     ) -> str:
         processed_docs = int(coverage["processed_docs"])
         fully_covered_docs = int(coverage["fully_covered_docs"])
@@ -175,7 +238,7 @@ class SnapshotReadinessService:
             return "no_processed_docs"
         if fully_covered_docs >= processed_docs:
             return "fully_covered"
-        if latest_run is not None and (
+        if bounded_evidence is not None and (
             bool(getattr(project, "is_general_corpus", 0))
             or bool(getattr(project, "is_reference", 0))
         ):
@@ -190,12 +253,21 @@ class SnapshotReadinessService:
         coverage: dict[str, Any],
         latest_run: Optional[ProcessorRun],
         contract_state: str,
+        bounded_evidence: Optional[dict[str, Any]],
     ) -> str:
         if contract_state == "no_processed_docs":
             return "No processed documents exist for this project yet."
         if contract_state == "fully_covered":
             return "All processed documents currently have sentence snapshots."
         if contract_state == "bounded_validated":
+            evidence_run = bounded_evidence.get("run") if bounded_evidence else None
+            evidence_docs = int(bounded_evidence.get("validated_doc_count") or 0) if bounded_evidence else 0
+            if evidence_run is not None and evidence_docs > 0:
+                return (
+                    "Bounded staged validation exists for this workflow. "
+                    f"Most recent bounded evidence: run #{int(evidence_run.run_id)} "
+                    f"({evidence_docs:,} docs). Full-scale validation remains deferred."
+                )
             return (
                 "Bounded staged validation exists for this workflow. "
                 "Full-scale validation remains deferred."

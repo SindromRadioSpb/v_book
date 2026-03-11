@@ -486,6 +486,155 @@ def _build_snapshot_probe_callback(
     return _callback
 
 
+def _is_snapshot_backfill_write(args: argparse.Namespace) -> bool:
+    return bool(
+        args.backfill_snapshots
+        and not args.coverage_only
+        and not args.verify_only
+        and not args.dry_run
+    )
+
+
+def _sqlite_health_probe(db_path: Path) -> dict[str, Any]:
+    probe: dict[str, Any] = {
+        "path": str(db_path),
+        "ok": False,
+        "schema_version": None,
+        "page_count": None,
+        "quick_check": {},
+        "quick_check_timed_out": False,
+        "error": None,
+    }
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+        conn.execute("PRAGMA busy_timeout=15000")
+    except sqlite3.Error as exc:
+        probe["error"] = str(exc)
+        return probe
+
+    try:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+        probe["schema_version"] = int(row[0]) if row and row[0] is not None else None
+        probe["page_count"] = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        conn.execute("SELECT 1 FROM source_document LIMIT 1").fetchone()
+        conn.execute("SELECT 1 FROM document_sentence LIMIT 1").fetchone()
+        try:
+            conn.execute("SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1").fetchone()
+        except sqlite3.Error:
+            # A bounded probe should not fail solely because the snapshot table is empty.
+            pass
+
+        quick_check = _run_quick_check_probe(conn, timeout_sec=1.0)
+        probe["quick_check"] = quick_check
+        probe["quick_check_timed_out"] = bool(quick_check.get("timed_out"))
+        if quick_check.get("timed_out"):
+            probe["ok"] = True
+        else:
+            probe["ok"] = bool(quick_check.get("ok"))
+            if not probe["ok"]:
+                probe["error"] = str(quick_check.get("error") or "quick_check failed")
+        return probe
+    except sqlite3.Error as exc:
+        probe["error"] = str(exc)
+        return probe
+    finally:
+        conn.close()
+
+
+def _run_snapshot_backfill_preflight(
+    *,
+    db_path: Path,
+    backup_db_path: Path | None,
+    project_id: int,
+    selected_doc_count: int,
+    allow_protected_db_heavy_write: bool,
+) -> dict[str, Any]:
+    from app.infra.db_path_resolver import classify_db_profile, is_protected_reference_db_path
+
+    db_profile = classify_db_profile(db_path)
+    protected_target = is_protected_reference_db_path(db_path)
+    report: dict[str, Any] = {
+        "ok": False,
+        "project_id": int(project_id),
+        "selected_doc_count": int(selected_doc_count),
+        "db_path": str(db_path),
+        "db_profile": db_profile,
+        "protected_target": bool(protected_target),
+        "backup_db_path": str(backup_db_path) if backup_db_path is not None else None,
+        "target_probe": {},
+        "backup_probe": {},
+        "error": None,
+    }
+
+    if protected_target and not allow_protected_db_heavy_write:
+        report["error"] = (
+            "Heavy snapshot backfill is blocked on the protected baseline/main reference DB. "
+            "Use a working test DB or disposable clone, or cross the explicit decision gate "
+            "with --allow-protected-db-heavy-write."
+        )
+        return report
+
+    if backup_db_path is None:
+        report["error"] = (
+            "Heavy snapshot backfill requires --backup-db-path so the target DB can be restored "
+            "if durability verification fails."
+        )
+        return report
+
+    backup_db_path = backup_db_path.resolve()
+    if not backup_db_path.exists():
+        report["error"] = f"Backup DB not found: {backup_db_path}"
+        return report
+
+    if backup_db_path == db_path.resolve():
+        report["error"] = "--backup-db-path must point to a different DB file"
+        return report
+
+    target_probe = _sqlite_health_probe(db_path.resolve())
+    backup_probe = _sqlite_health_probe(backup_db_path)
+    report["target_probe"] = target_probe
+    report["backup_probe"] = backup_probe
+
+    if not target_probe.get("ok"):
+        report["error"] = (
+            "Target DB failed preflight health probe: "
+            + str(target_probe.get("error") or "unknown error")
+        )
+        return report
+    if not backup_probe.get("ok"):
+        report["error"] = (
+            "Backup DB failed preflight health probe: "
+            + str(backup_probe.get("error") or "unknown error")
+        )
+        return report
+
+    report["ok"] = True
+    return report
+
+
+def _log_snapshot_backfill_preflight(report: dict[str, Any]) -> None:
+    if not report.get("ok"):
+        logger.error(
+            "Snapshot backfill preflight failed | project_id=%s profile=%s protected=%s docs=%s | %s",
+            report.get("project_id"),
+            report.get("db_profile"),
+            report.get("protected_target"),
+            report.get("selected_doc_count"),
+            report.get("error") or "unknown error",
+        )
+        return
+
+    logger.info(
+        "Snapshot backfill preflight ok | project_id=%s profile=%s protected=%s docs=%s target_schema=%s backup_schema=%s",
+        report.get("project_id"),
+        report.get("db_profile"),
+        report.get("protected_target"),
+        report.get("selected_doc_count"),
+        report.get("target_probe", {}).get("schema_version"),
+        report.get("backup_probe", {}).get("schema_version"),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="CLI-only NLP processing for reference corpus (PERF-SCALE PATCH-J)"
@@ -553,6 +702,22 @@ def main() -> None:
         help="Report sentence snapshot coverage for the selected project and exit",
     )
     parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Run heavy snapshot-backfill preflight checks and exit without writing.",
+    )
+    parser.add_argument(
+        "--backup-db-path",
+        type=str,
+        default=None,
+        help="Path to a healthy backup DB required before heavy snapshot backfill writes.",
+    )
+    parser.add_argument(
+        "--allow-protected-db-heavy-write",
+        action="store_true",
+        help="Explicit decision-gate override for heavy snapshot backfill on the protected baseline/main DB.",
+    )
+    parser.add_argument(
         "--probe-out",
         type=str,
         default=None,
@@ -600,6 +765,12 @@ def main() -> None:
         parser.error("--coverage-only and --verify-only are mutually exclusive")
     if args.coverage_only and args.dry_run:
         parser.error("--coverage-only and --dry-run are mutually exclusive")
+    if args.preflight_only and args.verify_only:
+        parser.error("--preflight-only and --verify-only are mutually exclusive")
+    if args.preflight_only and args.coverage_only:
+        parser.error("--preflight-only and --coverage-only are mutually exclusive")
+    if args.preflight_only and args.dry_run:
+        parser.error("--preflight-only and --dry-run are mutually exclusive")
     if args.coverage_only and int(args.doc_offset or 0) > 0:
         parser.error("--doc-offset is not supported with --coverage-only")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
@@ -622,12 +793,19 @@ def main() -> None:
         parser.error("--probe-every-chunks requires --probe-out")
     if args.integrity_checkpoint_mode is not None and not args.backfill_snapshots:
         parser.error("--integrity-checkpoint-mode requires --backfill-snapshots")
+    if args.preflight_only and not args.backfill_snapshots:
+        parser.error("--preflight-only requires --backfill-snapshots")
+    if args.backup_db_path and not args.backfill_snapshots:
+        parser.error("--backup-db-path requires --backfill-snapshots")
+    if args.allow_protected_db_heavy_write and not args.backfill_snapshots:
+        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
         logger.error("Database not found: %s", db_path)
         sys.exit(1)
     probe_out = Path(args.probe_out).expanduser() if args.probe_out else None
+    backup_db_path = Path(args.backup_db_path).expanduser() if args.backup_db_path else None
     integrity_checkpoint_mode = str(args.integrity_checkpoint_mode or "none")
 
     use_mock = not args.no_mock
@@ -761,6 +939,20 @@ def main() -> None:
                 int(doc_ids_to_process[-1]),
                 len(doc_ids_to_process),
             )
+
+        if args.preflight_only or _is_snapshot_backfill_write(args):
+            preflight = _run_snapshot_backfill_preflight(
+                db_path=db_path,
+                backup_db_path=backup_db_path,
+                project_id=project_id,
+                selected_doc_count=len(doc_ids_to_process),
+                allow_protected_db_heavy_write=bool(args.allow_protected_db_heavy_write),
+            )
+            _log_snapshot_backfill_preflight(preflight)
+            if not preflight.get("ok"):
+                sys.exit(2)
+            if args.preflight_only:
+                return
 
         action_label = "Processing"
         if args.verify_only:

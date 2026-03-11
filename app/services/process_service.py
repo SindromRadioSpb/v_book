@@ -43,6 +43,8 @@ from app.services.entity_classifier import classify_text
 
 logger = logging.getLogger(__name__)
 
+SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS = 10_000
+
 
 class ProcessService:
     """Service for NLP document processing."""
@@ -173,6 +175,7 @@ class ProcessService:
         chunk_size: int,
         source_label: str,
         is_reprocess: bool,
+        extra_note: Optional[dict[str, Any]] = None,
     ) -> str:
         note = {
             "kind": "batch_nlp",
@@ -184,6 +187,8 @@ class ProcessService:
             "doc_ids_hash": ProcessService._build_doc_ids_hash(doc_ids),
             "is_reprocess": bool(is_reprocess),
         }
+        if extra_note:
+            note.update(extra_note)
         return json.dumps(note, sort_keys=True, separators=(",", ":"))
 
     @staticmethod
@@ -1401,6 +1406,7 @@ class ProcessService:
         )
         total_chunks = math.ceil(len(ordered_ids) / chunk_size)
         effective_chunk_size = int(chunk_size)
+        bounded_validation = len(ordered_ids) >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS
 
         run = None
         verification: Optional[dict[str, Any]] = None
@@ -1450,6 +1456,12 @@ class ProcessService:
                     chunk_size=chunk_size,
                     source_label=source_label,
                     is_reprocess=False,
+                    extra_note={
+                        "contract": "snapshot_backfill_v1",
+                        "validation_scope": "bounded" if bounded_validation else "limited",
+                        "validated_doc_count": len(ordered_ids) if bounded_validation else 0,
+                        "selected_doc_count": len(ordered_ids),
+                    },
                 ),
             )
             session.add(run)

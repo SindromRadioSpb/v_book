@@ -384,6 +384,11 @@ python scripts/process_reference_corpus.py `
     - freshness/version work blocked
   - the operator decision gate and future heavy-run package now live in:
     - `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
+  - heavy snapshot-backfill writes now require a successful preflight with an
+    explicit `--backup-db-path`
+  - heavy snapshot-backfill writes against the protected baseline/main DB stay
+    blocked unless the operator crosses the explicit decision gate with
+    `--allow-protected-db-heavy-write`
   - the UI now surfaces read-only readiness/reporting:
     - Documents shows snapshot coverage + latest backfill summary
     - Terms shows the last extraction source mix
@@ -392,6 +397,8 @@ python scripts/process_reference_corpus.py `
     - they do not imply production approval
     - for explicit coverage checks use `Copy Coverage CLI` or run
       `--backfill-snapshots --coverage-only` manually
+    - `Bounded validated` now reflects bounded validation evidence, not merely
+      the existence of any snapshot-backfill run
 
 ### Inter-chunk sleep
 

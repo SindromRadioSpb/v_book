@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -42,6 +43,12 @@ def _init_temp_db() -> Path:
     finally:
         conn.close()
     return db_path
+
+
+def _create_backup_copy(db_path: Path) -> Path:
+    backup_db = db_path.with_name(f"{db_path.stem}_backup{db_path.suffix}")
+    shutil.copy2(db_path, backup_db)
+    return backup_db
 
 
 def _seed_reference_docs(session, count: int = 3) -> tuple[int, list[int]]:
@@ -424,6 +431,7 @@ def test_cli_coverage_only_snapshot_backfill_is_read_only(monkeypatch):
 
 def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     try:
         _reset_db_service()
         DBService.initialize(db_path)
@@ -448,6 +456,8 @@ def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
                 "--project-id",
                 str(project_id),
                 "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
             ],
         )
 
@@ -457,10 +467,12 @@ def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     probe_path = tmp_path / "snapshot_probe.jsonl"
     try:
         _reset_db_service()
@@ -482,6 +494,8 @@ def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
                 "--project-id",
                 str(project_id),
                 "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
                 "--chunk-size",
                 "1",
                 "--probe-out",
@@ -505,6 +519,7 @@ def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_doc_offset_and_max_docs_select_processing_slice(monkeypatch):
@@ -556,6 +571,7 @@ def test_cli_doc_offset_and_max_docs_select_processing_slice(monkeypatch):
 
 def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     try:
         _reset_db_service()
         DBService.initialize(db_path)
@@ -590,6 +606,8 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
                 "--project-id",
                 str(project_id),
                 "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
                 "--doc-offset",
                 "2",
                 "--max-docs",
@@ -612,10 +630,12 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkeypatch):
     db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
     try:
         _reset_db_service()
         DBService.initialize(db_path)
@@ -650,6 +670,8 @@ def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkey
                 "--project-id",
                 str(project_id),
                 "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
             ],
         )
 
@@ -662,6 +684,198 @@ def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkey
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_requires_backup_db_path_for_heavy_write(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_backfill(*args, **kwargs):
+            raise AssertionError("heavy snapshot backfill must not start without preflight backup path")
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_preflight_only_is_read_only(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_backfill(*args, **kwargs):
+            raise AssertionError("preflight-only must not call backfill_sentence_snapshots_batch")
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
+                "--preflight-only",
+            ],
+        )
+
+        module.main()
+
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            snapshots = session.execute(select(SentenceNLPSnapshot)).scalars().all()
+        assert snapshots == []
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_rejects_protected_db_without_override(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+
+        def _unexpected_backfill(*args, **kwargs):
+            raise AssertionError("protected DB heavy write must be blocked before backfill starts")
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(module, "_run_snapshot_backfill_preflight", lambda **kwargs: {
+            "ok": False,
+            "project_id": project_id,
+            "db_profile": "Baseline (dev)",
+            "protected_target": True,
+            "selected_doc_count": 2,
+            "error": "Heavy snapshot backfill is blocked on the protected baseline/main reference DB.",
+        })
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
+def test_cli_snapshot_backfill_allows_protected_db_with_override(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_backfill_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
+        monkeypatch.setattr(module, "_run_snapshot_backfill_preflight", lambda **kwargs: {
+            "ok": True,
+            "project_id": project_id,
+            "db_profile": "Baseline (dev)",
+            "protected_target": True,
+            "selected_doc_count": len(doc_ids),
+            "target_probe": {"schema_version": 40},
+            "backup_probe": {"schema_version": 40},
+        })
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--backfill-snapshots",
+                "--backup-db-path",
+                str(backup_db),
+                "--allow-protected-db-heavy-write",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
 
 
 def test_cli_rejects_integrity_checkpoint_mode_without_snapshot_backfill(monkeypatch):

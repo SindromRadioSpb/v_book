@@ -106,6 +106,7 @@ When the decision gate is triggered, prepare the run package before execution.
 - confirm `db_open` is healthy
 - record current coverage with `--coverage-only`
 - confirm target DB path explicitly
+- run `--preflight-only` with an explicit `--backup-db-path`
 - confirm whether the target is:
   - working dev/test DB
   - disposable clone
@@ -117,11 +118,14 @@ When the decision gate is triggered, prepare the run package before execution.
 ### Required run contract
 
 - stable slice selection
+- explicit backup DB path
 - explicit chunk size
 - explicit merge batch size
 - explicit segment quick-check timeout
 - explicit integrity checkpoint mode
 - explicit output artifact directory
+- protected baseline/main DB writes require the explicit override flag
+  `--allow-protected-db-heavy-write`
 
 ### Abort conditions
 
@@ -177,6 +181,8 @@ These UI surfaces are intentionally observational only:
 - their `Copy Coverage CLI` action only emits the safe `--coverage-only` command
 - the readiness card keeps last known data visible while refresh is in flight
   and shows a human-readable stale indicator instead of implying live approval
+- `Bounded validated` now means there is explicit bounded validation evidence
+  for this project, not merely that some snapshot-backfill run exists
 
 ## Decision rule for freshness/version hardening
 

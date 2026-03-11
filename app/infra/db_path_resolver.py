@@ -107,6 +107,25 @@ def classify_db_profile(path: Path, *, settings=None, resource_paths_cls=Resourc
     return "Custom"
 
 
+def is_protected_reference_db_path(
+    path: Path,
+    *,
+    settings=None,
+    resource_paths_cls=ResourcePaths,
+) -> bool:
+    """Return True for reference DB targets that should reject heavy write runs by default.
+
+    The current protected target is the checked-in baseline/dev hewiki DB. This file is
+    intentionally excluded from heavy snapshot-backfill runs unless the operator crosses an
+    explicit decision gate.
+    """
+    return classify_db_profile(
+        path,
+        settings=settings,
+        resource_paths_cls=resource_paths_cls,
+    ) == "Baseline (dev)"
+
+
 def get_supported_schema_version() -> int:
     migrations_dir = Path(__file__).parent / "migrations"
     version = 0

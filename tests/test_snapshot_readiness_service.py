@@ -40,7 +40,7 @@ def _init_temp_db() -> Path:
     return db_path
 
 
-def _seed_snapshot_project(session) -> int:
+def _seed_snapshot_project(session) -> tuple[int, int, int]:
     lib = Library(name="L")
     session.add(lib)
     session.flush()
@@ -118,34 +118,61 @@ def _seed_snapshot_project(session) -> int:
             ),
         ]
     )
-    session.add(
-        ProcessorRun(
-            project_id=project.project_id,
-            engine="fake",
-            engine_version="1",
-            docs_total=3,
-            docs_processed=2,
-            docs_failed=0,
-            chunks_total=1,
-            chunks_completed=1,
-            status="ok",
-            stage="completed",
-            last_doc_id=2,
-            finished_at="2026-03-11T10:00:00.000000Z",
-            note=json.dumps(
-                {
-                    "kind": "batch_nlp",
-                    "source": "snapshot_backfill_cli",
-                    "doc_count": 3,
-                    "first_doc_id": 1,
-                    "last_doc_id": 3,
-                },
-                sort_keys=True,
-            ),
-        )
+    bounded_run = ProcessorRun(
+        project_id=project.project_id,
+        engine="fake",
+        engine_version="1",
+        docs_total=12000,
+        docs_processed=12000,
+        docs_failed=0,
+        chunks_total=12,
+        chunks_completed=12,
+        status="ok",
+        stage="completed",
+        last_doc_id=12000,
+        finished_at="2026-03-11T09:00:00.000000Z",
+        note=json.dumps(
+            {
+                "kind": "batch_nlp",
+                "source": "snapshot_backfill_cli",
+                "doc_count": 12000,
+                "first_doc_id": 1,
+                "last_doc_id": 12000,
+                "validation_scope": "bounded",
+                "validated_doc_count": 12000,
+            },
+            sort_keys=True,
+        ),
     )
+    latest_run = ProcessorRun(
+        project_id=project.project_id,
+        engine="fake",
+        engine_version="1",
+        docs_total=3,
+        docs_processed=2,
+        docs_failed=0,
+        chunks_total=1,
+        chunks_completed=1,
+        status="ok",
+        stage="completed",
+        last_doc_id=2,
+        finished_at="2026-03-11T10:00:00.000000Z",
+        note=json.dumps(
+            {
+                "kind": "batch_nlp",
+                "source": "snapshot_backfill_cli",
+                "doc_count": 3,
+                "first_doc_id": 1,
+                "last_doc_id": 3,
+                "validation_scope": "limited",
+                "validated_doc_count": 0,
+            },
+            sort_keys=True,
+        ),
+    )
+    session.add_all([bounded_run, latest_run])
     session.commit()
-    return int(project.project_id)
+    return int(project.project_id), int(bounded_run.run_id), int(latest_run.run_id)
 
 
 def test_snapshot_readiness_service_reports_coverage_and_latest_run() -> None:
@@ -156,7 +183,7 @@ def test_snapshot_readiness_service_reports_coverage_and_latest_run() -> None:
 
     try:
         with db.get_session() as session:
-            project_id = _seed_snapshot_project(session)
+            project_id, bounded_run_id, latest_run_id = _seed_snapshot_project(session)
 
         service = SnapshotReadinessService()
         with db.get_read_session() as session:
@@ -172,13 +199,38 @@ def test_snapshot_readiness_service_reports_coverage_and_latest_run() -> None:
         assert summary.snapshot_count_total == 3
         assert summary.sentence_coverage_pct == 60.0
         assert round(summary.doc_coverage_pct or 0.0, 4) == 33.3333
-        assert summary.latest_backfill_run_id is not None
+        assert summary.latest_backfill_run_id == latest_run_id
         assert summary.latest_backfill_status == "ok"
         assert summary.latest_backfill_stage == "completed"
         assert summary.latest_backfill_last_doc_id == 2
         assert summary.contract_state == "bounded_validated"
+        assert f"run #{bounded_run_id}" in (summary.contract_note or "")
         assert "Full-scale validation remains deferred" in (summary.contract_note or "")
         assert "Observational only" in (summary.summary_note or "")
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_readiness_service_does_not_treat_small_run_as_bounded_validation() -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            project_id, _bounded_run_id, latest_run_id = _seed_snapshot_project(session)
+            session.query(ProcessorRun).filter(ProcessorRun.run_id != latest_run_id).delete()
+            session.commit()
+
+        service = SnapshotReadinessService()
+        with db.get_read_session() as session:
+            summary = service.get_project_summary(session, project_id)
+
+        assert summary.latest_backfill_run_id == latest_run_id
+        assert summary.contract_state == "partial_coverage"
+        assert "Full-scale validation remains deferred" not in (summary.contract_note or "")
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
@@ -192,7 +244,7 @@ def test_snapshot_readiness_service_uses_read_only_session_without_commit() -> N
 
     try:
         with db.get_session() as session:
-            project_id = _seed_snapshot_project(session)
+            project_id, _bounded_run_id, _latest_run_id = _seed_snapshot_project(session)
 
         service = SnapshotReadinessService()
         with db.get_read_session() as session:
