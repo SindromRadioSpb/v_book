@@ -615,6 +615,8 @@ Remaining note:
       of incremental pruning
     - reference-scale rebuild path is now preserved via
       `scripts/process_reference_corpus.py --project-id <id> --reprocess-all`
+    - reference CLI preamble now skips expensive snapshot-audit queries unless
+      `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - governance UI now surfaces those maintenance modes explicitly, including a
   safe telemetry dry-run CLI copy path, while staying observational-only
 

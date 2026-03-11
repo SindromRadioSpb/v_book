@@ -484,6 +484,53 @@ def test_cli_resume_run_id_resumes_selected_reprocess_run(monkeypatch):
         db_path.unlink(missing_ok=True)
 
 
+def test_cli_reprocess_all_dry_run_skips_snapshot_coverage_queries(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=3)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(
+            module,
+            "_get_missing_snapshot_doc_ids",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("reprocess-all dry-run must not load missing snapshot ids")
+            ),
+        )
+        monkeypatch.setattr(
+            module,
+            "_get_snapshot_coverage",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("reprocess-all dry-run must not load snapshot coverage")
+            ),
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--dry-run",
+                "--max-docs",
+                "2",
+            ],
+        )
+
+        module.main()
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
 def test_cli_verify_only_snapshot_backfill_run_exits_zero_without_processing(monkeypatch):
     db_path = _init_temp_db()
     try:
@@ -689,6 +736,52 @@ def test_cli_doc_offset_and_max_docs_select_processing_slice(monkeypatch):
         module.main()
 
         assert captured["doc_ids"] == doc_ids[1:3]
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_processing_dry_run_skips_snapshot_coverage_queries(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_reference_docs(session, count=3)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(
+            module,
+            "_get_missing_snapshot_doc_ids",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("plain processing dry-run must not load missing snapshot ids")
+            ),
+        )
+        monkeypatch.setattr(
+            module,
+            "_get_snapshot_coverage",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("plain processing dry-run must not load snapshot coverage")
+            ),
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--dry-run",
+                "--max-docs",
+                "2",
+            ],
+        )
+
+        module.main()
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

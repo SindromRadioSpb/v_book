@@ -494,6 +494,8 @@ Delivered in this wave:
   - `--reprocess-all` for deterministic CLI rebuild of already processed docs
   - `--resume-run-id <id>`
   - `--verify-only`
+- process/reprocess CLI planning now lazily skips snapshot coverage queries
+  unless `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - CLI verify mode exits without writes and returns:
   - `0` when the contract is valid
   - `3` when the requested resume contract is invalid

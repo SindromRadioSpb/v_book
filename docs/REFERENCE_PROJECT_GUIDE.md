@@ -238,6 +238,13 @@ python scripts/process_reference_corpus.py `
     --reprocess-all
 ```
 
+Operator note:
+
+- processing / reprocess modes now skip snapshot-coverage preamble work unless
+  a snapshot-specific mode is requested
+- on the approved hewiki dev/test DB, a bounded `--reprocess-all --dry-run --max-docs 20`
+  planning pass dropped from multi-minute startup to low-seconds wall time
+
 ### Verify a reprocess resume contract without writing
 
 ```powershell

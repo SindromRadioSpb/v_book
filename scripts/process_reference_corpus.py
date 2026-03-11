@@ -824,6 +824,9 @@ def main() -> None:
 
     use_mock = not args.no_mock
     use_gpu = args.use_gpu
+    wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
+    is_reprocess_mode = bool(args.reprocess_all)
+    needs_snapshot_audit = bool(args.backfill_snapshots or args.coverage_only)
 
     from app.services.db_service import DBService
     from app.services.process_service import ProcessService
@@ -867,30 +870,43 @@ def main() -> None:
                 )
 
             total_all, already_processed = _get_doc_counts(session, project_id)
-            project_doc_ids = _get_project_doc_ids(session, project_id)
-            remaining_doc_ids = _get_unprocessed_doc_ids(session, project_id)
-            processed_doc_ids = _get_processed_doc_ids(session, project_id)
-            missing_snapshot_doc_ids = _get_missing_snapshot_doc_ids(session, project_id)
-            snapshot_coverage = _get_snapshot_coverage(session, project_id)
+            project_doc_ids: list[int] = []
+            remaining_doc_ids: list[int] = []
+            processed_doc_ids: list[int] = []
+            missing_snapshot_doc_ids: list[int] = []
+            snapshot_coverage: dict[str, Any] | None = None
+
+            if args.backfill_snapshots or is_reprocess_mode:
+                processed_doc_ids = _get_processed_doc_ids(session, project_id)
+            elif wants_resume:
+                project_doc_ids = _get_project_doc_ids(session, project_id)
+                remaining_doc_ids = _get_unprocessed_doc_ids(session, project_id)
+            else:
+                remaining_doc_ids = _get_unprocessed_doc_ids(session, project_id)
+
+            if needs_snapshot_audit:
+                missing_snapshot_doc_ids = _get_missing_snapshot_doc_ids(session, project_id)
+                snapshot_coverage = _get_snapshot_coverage(session, project_id)
 
         pct_done = already_processed / total_all * 100 if total_all else 0
         logger.info(
             "Total docs: %d | Already processed: %d (%.1f%%) | To process: %d",
             total_all, already_processed, pct_done, len(remaining_doc_ids),
         )
-        logger.info(
-            "Sentence snapshot coverage | processed_docs=%d fully_covered_docs=%d zero_snapshot_docs=%d partial_snapshot_docs=%d sentence_coverage=%s%% doc_coverage=%s%%",
-            snapshot_coverage["processed_docs"],
-            snapshot_coverage["fully_covered_docs"],
-            snapshot_coverage["zero_snapshot_docs"],
-            snapshot_coverage["partial_snapshot_docs"],
-            snapshot_coverage["sentence_snapshot_coverage_pct"]
-            if snapshot_coverage["sentence_snapshot_coverage_pct"] is not None
-            else "-",
-            snapshot_coverage["doc_full_coverage_pct"]
-            if snapshot_coverage["doc_full_coverage_pct"] is not None
-            else "-",
-        )
+        if snapshot_coverage is not None:
+            logger.info(
+                "Sentence snapshot coverage | processed_docs=%d fully_covered_docs=%d zero_snapshot_docs=%d partial_snapshot_docs=%d sentence_coverage=%s%% doc_coverage=%s%%",
+                snapshot_coverage["processed_docs"],
+                snapshot_coverage["fully_covered_docs"],
+                snapshot_coverage["zero_snapshot_docs"],
+                snapshot_coverage["partial_snapshot_docs"],
+                snapshot_coverage["sentence_snapshot_coverage_pct"]
+                if snapshot_coverage["sentence_snapshot_coverage_pct"] is not None
+                else "-",
+                snapshot_coverage["doc_full_coverage_pct"]
+                if snapshot_coverage["doc_full_coverage_pct"] is not None
+                else "-",
+            )
 
         if args.coverage_only:
             logger.info(
@@ -899,11 +915,8 @@ def main() -> None:
                 len(missing_snapshot_doc_ids),
             )
             return
-
-        wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
         mode_label = "reference_processing"
         source_label = "reference_cli"
-        is_reprocess_mode = bool(args.reprocess_all)
         if args.backfill_snapshots:
             mode_label = "snapshot_backfill"
             source_label = "snapshot_backfill_cli"

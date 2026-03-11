@@ -1143,6 +1143,8 @@ Result:
   - `--backfill-snapshots`
   - `--coverage-only`
   - snapshot-backfill `--verify-only`
+- non-snapshot CLI planning now skips snapshot-audit preamble work unless
+  `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - `ProcessService` now reuses the current batch `processor_run` model for
   resumable snapshot backfill via the explicit `snapshot_backfill_v1` contract
 - the deterministic resume slice is the full processed-doc set for the project,
