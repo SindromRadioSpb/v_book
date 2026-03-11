@@ -479,11 +479,52 @@ Primary files:
 5. Protect the main install DB from write-risk until runtime safeguards, not
    only docs, are in place.
 
+Status after implementation wave:
+
+- implemented on `2026-03-11`
+- refined by evidence:
+  - canonical persisted audio row identity is now `(lang, input_hash)` for
+    hashed rows
+  - legacy weak lookup is retained only as a bounded compatibility fallback for
+    hash-less rows
+  - regenerated identical requests still update the same canonical row, while
+    changed spoken payloads can coexist as separate cache rows
+
+Concrete output of this wave:
+
+- new migration:
+  - `app/infra/migrations/041_audio_asset_content_addressed_identity.sql`
+- updated row identity/runtime services:
+  - `app/infra/sa_models.py`
+  - `app/services/audio_asset_service.py`
+  - `app/services/audio_generation_service.py`
+  - `app/ui/widgets/audio_player_panel.py`
+
+Evidence:
+
+- targeted regressions:
+  - `tests/test_audio_asset_content_addressed_migration.py`
+  - `tests/test_audio_generation_service.py`
+  - `tests/test_audio_generation_with_pronunciation.py`
+  - `tests/test_audio_playback_service.py`
+  - `tests/test_audio_provider_chain_fallback.py`
+  - `tests/test_audio_generation_budget_guards.py`
+  - `tests/test_audio_regenerate_provider_switch_latest_ready.py`
+  - `tests/test_user_dictionaries_audio_stub.py`
+  - result: `22 passed`
+- broader adjacent regressions:
+  - `tests/test_audio_queue_populate_worker.py`
+  - `tests/test_audio_queue_display_resolver.py`
+  - `tests/test_audio_player_playlist_display_refresh.py`
+  - `tests/test_audio_track_source_url.py`
+  - `tests/test_user_dictionaries_service.py`
+  - `tests/test_sentences_workspace_service.py`
+  - result: `75 passed`
+
 ## Immediate execution order
 
-1. `PATCH-P1-02` audio cache contract completion
-2. future retention/cleanup policy for project telemetry and other large derived artifacts
-3. future heavy validation only by explicit decision gate
+1. future retention/cleanup policy for project telemetry and other large derived artifacts
+2. future heavy validation only by explicit decision gate
 
 ## Decision note
 

@@ -451,15 +451,16 @@ class AudioGenerationService:
                 failed_recorded = True
                 continue
 
-            previous_row = session.execute(
-                select(AudioAsset.audio_rel_path).where(
-                    AudioAsset.lang == source_lang_clean,
-                    AudioAsset.norm_text == source_norm_clean,
-                    AudioAsset.voice_id == provider_voice_id,
-                    AudioAsset.speed == provider_speed,
-                    AudioAsset.provider == provider_id,
-                )
-            ).scalar_one_or_none()
+            previous_asset = self.audio_asset_service.find_existing_asset(
+                session,
+                lang=source_lang_clean,
+                norm_text=source_norm_clean,
+                voice_id=provider_voice_id,
+                speed=provider_speed,
+                provider=provider_id,
+                input_hash=input_hash,
+            )
+            previous_row = str(previous_asset.audio_rel_path or "").strip() if previous_asset else None
 
             generation_tag = uuid.uuid4().hex[:12] if force_regenerate else None
             rel_path = self._asset_rel_path(

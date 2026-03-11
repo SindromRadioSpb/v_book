@@ -124,3 +124,68 @@ def test_audio_asset_bulk_status_for_items_is_pronunciation_aware():
     finally:
         engine.dispose()
         Path(db_path).unlink(missing_ok=True)
+
+
+def test_audio_asset_upsert_uses_input_hash_identity_and_allows_multiple_legacy_variants():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        AudioAsset.__table__.create(engine, checkfirst=True)
+
+        service = AudioAssetService()
+        with Session(engine) as session:
+            service.upsert_status(
+                session,
+                lang="he",
+                norm_text="alpha",
+                voice_id="default",
+                speed=1.0,
+                provider="google_cloud_tts",
+                speech_hash="speech-1",
+                input_hash="input-1",
+                status="ready",
+                audio_rel_path="audio/alpha_1.wav",
+            )
+            service.upsert_status(
+                session,
+                lang="he",
+                norm_text="alpha",
+                voice_id="default",
+                speed=1.0,
+                provider="google_cloud_tts",
+                speech_hash="speech-2",
+                input_hash="input-2",
+                status="ready",
+                audio_rel_path="audio/alpha_2.wav",
+            )
+            session.commit()
+
+            rows = (
+                session.query(AudioAsset)
+                .filter_by(
+                    lang="he",
+                    norm_text="alpha",
+                    voice_id="default",
+                    speed=1.0,
+                    provider="google_cloud_tts",
+                )
+                .order_by(AudioAsset.asset_id.asc())
+                .all()
+            )
+            assert len(rows) == 2
+            assert {str(row.input_hash or "") for row in rows} == {"input-1", "input-2"}
+
+            statuses = service.bulk_get_status(
+                session,
+                lang="he",
+                norm_texts=["alpha"],
+                voice_id="default",
+                speed=1.0,
+                provider="google_cloud_tts",
+            )
+            assert statuses["alpha"] == "ready"
+    finally:
+        engine.dispose()
+        Path(db_path).unlink(missing_ok=True)

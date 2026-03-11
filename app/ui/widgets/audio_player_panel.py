@@ -4200,6 +4200,7 @@ class AudioPlayerPanel(QWidget):
                         session,
                         lang=src_lang,
                         norm_text=src_norm,
+                        source_text=src_text or None,
                     )
 
                     changed = False

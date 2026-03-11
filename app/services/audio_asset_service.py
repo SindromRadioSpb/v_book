@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
@@ -55,6 +55,42 @@ class AudioAssetService:
             raise ValueError("audio path must not contain parent traversal")
         return str(PurePosixPath(value))
 
+    @staticmethod
+    def _has_input_hash(value: str | None) -> bool:
+        return bool(str(value or "").strip())
+
+    def find_existing_asset(
+        self,
+        session: Session,
+        *,
+        lang: str,
+        norm_text: str,
+        voice_id: str = "default",
+        speed: float = 1.0,
+        provider: str = "none",
+        input_hash: str | None = None,
+    ) -> Optional[AudioAsset]:
+        """Resolve the canonical metadata row for upsert/update purposes.
+
+        New rows are identified by `(lang, input_hash)` when the exact request hash
+        exists. Legacy/no-hash rows still fall back to the older weak lookup key.
+        """
+        if self._has_input_hash(input_hash):
+            stmt = select(AudioAsset).where(
+                AudioAsset.lang == lang,
+                AudioAsset.input_hash == str(input_hash).strip(),
+            )
+            return session.execute(stmt).scalar_one_or_none()
+
+        stmt = select(AudioAsset).where(
+            AudioAsset.lang == lang,
+            AudioAsset.norm_text == norm_text,
+            AudioAsset.voice_id == voice_id,
+            AudioAsset.speed == speed,
+            AudioAsset.provider == provider,
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
     def bulk_get_status(
         self,
         session: Session,
@@ -82,7 +118,10 @@ class AudioAssetService:
             )
         )
         for norm_text, status in session.execute(stmt).all():
-            status_map[norm_text] = status if status in self.VALID_STATUSES else "failed"
+            current = status_map.get(norm_text, "missing")
+            candidate = status if status in self.VALID_STATUSES else "failed"
+            if self.STATUS_PRIORITY.get(candidate, 0) >= self.STATUS_PRIORITY.get(current, 0):
+                status_map[norm_text] = candidate
         return status_map
 
     def bulk_get_status_any(
@@ -216,15 +255,21 @@ class AudioAssetService:
         if audio_rel_path:
             safe_rel_path = self.sanitize_relative_path(audio_rel_path)
 
-        stmt = select(AudioAsset).where(
-            AudioAsset.lang == lang,
-            AudioAsset.norm_text == norm_text,
-            AudioAsset.voice_id == voice_id,
-            AudioAsset.speed == speed,
-            AudioAsset.provider == provider,
+        row = self.find_existing_asset(
+            session,
+            lang=lang,
+            norm_text=norm_text,
+            voice_id=voice_id,
+            speed=speed,
+            provider=provider,
+            input_hash=input_hash,
         )
-        row = session.execute(stmt).scalar_one_or_none()
         if row:
+            row.lang = lang
+            row.norm_text = norm_text
+            row.voice_id = voice_id
+            row.speed = speed
+            row.provider = provider
             row.speech_hash = speech_hash
             row.input_hash = input_hash
             row.asset_status = status

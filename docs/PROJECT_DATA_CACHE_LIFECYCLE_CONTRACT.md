@@ -198,7 +198,7 @@ Then:
 
 ### Implemented bounded hardening
 
-Current implementation now enforces this with two runtime guards:
+Current implementation now enforces this with:
 
 - `speech_hash`
   - pronunciation-aware identity of the current spoken payload
@@ -209,11 +209,20 @@ Current implementation now enforces this with two runtime guards:
   - used to prevent false cache hits when provider/voice/speed/format request
     parameters or pronunciation payload changed
 
+- content-addressed row identity
+  - canonical persisted identity is now `(lang, input_hash)` for rows that
+    carry a real request hash
+  - multiple rows may legitimately coexist for the same legacy
+    `(lang, norm_text, voice_id, speed, provider)` lookup key when the spoken
+    payload changes over time
+
 Compatibility boundary:
 
-- `audio_asset` row uniqueness still uses the legacy weak key for now
-- old rows remain readable, but they are no longer considered valid cache hits
-  for new requests unless the new hash matches
+- old hash-less/legacy rows remain readable via bounded fallback
+- runtime cache reuse and playback selection must prefer `input_hash` /
+  `speech_hash` matches over the old weak lookup key
+- a legacy norm/provider match alone is no longer treated as canonical cache
+  identity
 
 ## D. Recommended pronunciation concept
 
@@ -378,11 +387,16 @@ When replacing ORM loops with set-based SQL or explicit cleanup:
 - do not keep stale entity references alive only because they are fast to reuse
 - keep deterministic ordering and one bounded transaction per user action
 
-### Requirement C. Future audio-cache hardening stays in scope
+### Requirement C. Audio-cache hardening is now implemented
 
-The next patch series may optimize other heavy paths first, but the future
-`audio_asset` change is now a tracked requirement, not an optional idea:
+The bounded audio-cache hardening requirement is now implemented:
 
-- keep `audio_asset` global
-- strengthen it with an effective synthesis input hash
-- never treat sentence-owned pronunciation rows as globally reusable data
+- `audio_asset` remains global
+- effective synthesis identity is now persisted through `speech_hash` and
+  `input_hash`
+- canonical persisted row identity is `(lang, input_hash)` for hashed rows
+- sentence-owned pronunciation rows are still not treated as globally reusable
+  cache data
+
+Future follow-up remains possible, but no longer at the weak-key compatibility
+stage.

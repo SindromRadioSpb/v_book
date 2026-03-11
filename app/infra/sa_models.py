@@ -984,7 +984,6 @@ class AudioAsset(Base):
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
-        UniqueConstraint("lang", "norm_text", "voice_id", "speed", "provider", name="uq_audio_asset_key"),
         CheckConstraint("asset_status IN ('missing', 'ready', 'failed')", name="ck_audio_asset_status"),
         CheckConstraint(
             "audio_rel_path IS NULL OR ("
@@ -995,6 +994,33 @@ class AudioAsset(Base):
             ")",
             name="ck_audio_asset_rel_path",
         ),
+        Index(
+            "uq_audio_asset_lang_input_hash",
+            "lang",
+            "input_hash",
+            unique=True,
+            sqlite_where=text("input_hash IS NOT NULL AND trim(input_hash) <> ''"),
+        ),
+        Index("idx_audio_asset_status", "asset_status"),
+        Index(
+            "idx_audio_asset_lookup",
+            "lang",
+            "norm_text",
+            "voice_id",
+            "speed",
+            "provider",
+            "updated_at",
+            "asset_id",
+        ),
+        Index(
+            "idx_audio_asset_lang_speech_hash",
+            "lang",
+            "speech_hash",
+            "asset_status",
+            "updated_at",
+            "asset_id",
+        ),
+        Index("idx_audio_asset_lang_input_hash", "lang", "input_hash"),
     )
 
 

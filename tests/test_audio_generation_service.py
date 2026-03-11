@@ -75,6 +75,7 @@ def test_generate_one_creates_ready_asset_and_skips_when_exists(monkeypatch):
 
             row = session.execute(select(AudioAsset).where(AudioAsset.norm_text == "shalom")).scalar_one()
             assert row.asset_status == "ready"
+            assert row.input_hash
             assert row.audio_rel_path
             assert not Path(str(row.audio_rel_path)).is_absolute()
             assert (temp_audio_dir / row.audio_rel_path).exists()
@@ -90,6 +91,13 @@ def test_generate_one_creates_ready_asset_and_skips_when_exists(monkeypatch):
             )
             assert result_again["ok"] is True
             assert result_again["status"] == "skipped"
+            count_rows = int(
+                session.execute(
+                    select(func.count(AudioAsset.asset_id)).where(AudioAsset.norm_text == "shalom")
+                ).scalar()
+                or 0
+            )
+            assert count_rows == 1
     finally:
         engine.dispose()
         shutil.rmtree(temp_audio_dir, ignore_errors=True)
@@ -218,6 +226,17 @@ def test_force_regenerate_same_provider_rewrites_asset_path(monkeypatch):
             second_abs = temp_audio_dir / second_rel
             assert second_abs.exists()
             assert not first_abs.exists()
+            count_rows = int(
+                session.execute(
+                    select(func.count(AudioAsset.asset_id)).where(
+                        AudioAsset.lang == "he",
+                        AudioAsset.norm_text == "shalom",
+                        AudioAsset.provider == "mock_local_audio",
+                    )
+                ).scalar()
+                or 0
+            )
+            assert count_rows == 1
 
             resolved = AudioPlaybackService.resolve_ready_path(
                 session,
@@ -239,6 +258,7 @@ def test_pronunciation_change_invalidates_audio_cache_without_force_regenerate(m
         AudioAsset.__table__.create(engine, checkfirst=True)
         PronunciationEntry.__table__.create(engine, checkfirst=True)
         monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir)
 
         service = AudioGenerationService(settings=_DummySettings())
         pron = PronunciationService()
@@ -295,17 +315,30 @@ def test_pronunciation_change_invalidates_audio_cache_without_force_regenerate(m
             assert second["ok"] is True
             assert second["status"] == "ready"
 
-            row_second = session.execute(
+            rows_after = session.execute(
                 select(AudioAsset).where(
                     AudioAsset.lang == "he",
                     AudioAsset.norm_text == source_norm,
                     AudioAsset.provider == "mock_local_audio",
                 )
-            ).scalar_one()
+            ).scalars().all()
+            assert len(rows_after) == 2
+
+            row_second = max(rows_after, key=lambda row: (str(row.updated_at or ""), int(row.asset_id or 0)))
             assert row_second.speech_hash
             assert row_second.input_hash
             assert row_second.speech_hash != first_hash
             assert str(row_second.audio_rel_path or "") != first_rel
+            assert (temp_audio_dir / first_rel).exists()
+            assert (temp_audio_dir / str(row_second.audio_rel_path or "")).exists()
+
+            resolved = AudioPlaybackService.resolve_ready_path(
+                session,
+                lang="he",
+                norm_text=source_norm,
+                source_text=source_text,
+            )
+            assert resolved == (temp_audio_dir / str(row_second.audio_rel_path or ""))
     finally:
         engine.dispose()
         shutil.rmtree(temp_audio_dir, ignore_errors=True)

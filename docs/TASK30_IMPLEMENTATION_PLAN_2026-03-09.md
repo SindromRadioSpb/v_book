@@ -1687,4 +1687,11 @@ Current execution status:
   - project-level materialized summary remains a higher-risk fallback
   - none of that branch is active unless it is explicitly reprioritized after
     `PATCH-P1-02`
-- next active priority is now `PATCH-P1-02` audio cache contract completion
+- `PATCH-P1-02` is now implemented:
+  - `audio_asset` canonical persisted row identity for hashed rows is now
+    `(lang, input_hash)`
+  - legacy weak lookup remains only as bounded compatibility fallback
+  - identical regenerate updates the same canonical row
+  - changed spoken payloads may coexist as separate global cache rows
+- next active priority now moves to future retention/cleanup policy for project
+  telemetry and other large derived artifacts

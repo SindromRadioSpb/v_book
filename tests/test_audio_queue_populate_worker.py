@@ -130,7 +130,7 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
 
 
 def test_resolve_audio_assets_fills_asset_id():
-    """_resolve_audio_assets sets audio_asset_id + audio_status for matching specs."""
+    """_resolve_audio_assets resolves ready assets by current speech hash."""
     from unittest.mock import MagicMock, patch
     from app.ui.workers import AudioQueuePopulateWorker
     from app.services.audio_queue_service import AudioItemSpec
@@ -148,10 +148,15 @@ def test_resolve_audio_assets_fills_asset_id():
         return result
 
     mock_session = MagicMock()
-    # Only "n_שלום" has a ready asset in DB
-    mock_session.execute.return_value.all.return_value = [("n_שלום", 42)]
+    mock_session.execute.return_value.all.return_value = [("speech_שלום", 42)]
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm):
+    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), patch(
+        "app.services.audio_cache_key_service.AudioCacheKeyService.prepare_pronunciation_payload",
+        side_effect=lambda **kwargs: {"token_text": kwargs["source_text"]},
+    ), patch(
+        "app.services.audio_cache_key_service.AudioCacheKeyService.build_speech_hash",
+        side_effect=lambda **kwargs: f"speech_{kwargs['source_text']}",
+    ):
         w._resolve_audio_assets(mock_session, specs)
 
     assert specs[0].audio_asset_id == 42

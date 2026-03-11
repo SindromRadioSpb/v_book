@@ -13,10 +13,10 @@ Hard rules:
 
 `audio_asset` canonical key:
 
-- `(lang, norm_text, voice_id, speed, provider)` unique.
+- canonical persisted identity for hashed rows: `(lang, input_hash)` unique
 - bounded compatibility note:
-  - weak row identity is still the legacy unique key above
-  - cache validity is now guarded by hashes below
+  - legacy/hash-less rows may still be readable through weak lookup fallback
+  - cache validity and new writes are governed by the hashes below
 
 Content-addressed cache guards:
 
@@ -33,6 +33,8 @@ Operational rule:
 - ready audio may be reused only when `input_hash` matches the current request
 - playback fallback by current source item must prefer rows whose `speech_hash`
   matches the current pronunciation-aware payload
+- multiple historical rows may coexist for one legacy weak lookup key when the
+  effective spoken payload changes over time
 - legacy rows without matching hash are treated as stale and must not block
   regeneration
 
