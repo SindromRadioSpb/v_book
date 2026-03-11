@@ -526,6 +526,85 @@ Evidence:
 1. future retention/cleanup policy for project telemetry and other large derived artifacts
 2. future heavy validation only by explicit decision gate
 
+### PATCH-P1-03: Telemetry-first retention for `processor_run` / `run_error`
+
+Goal:
+
+- add an explicit retention/cleanup contract for project-scoped processing
+  telemetry without touching heavier derived tables first
+- make the operational cleanup path safe, previewable, and evidence-preserving
+
+Primary files:
+
+- `app/services/project_telemetry_retention_service.py`
+- `scripts/prune_project_telemetry.py`
+- `tests/test_project_telemetry_retention_service.py`
+- `tests/test_prune_project_telemetry_cli.py`
+- docs/runbooks
+
+Expected output:
+
+- dry-run by default for telemetry cleanup
+- explicit apply gate
+- bounded keep-policy for old successful rows
+- preserve:
+  - recent successful rows
+  - all non-ok rows
+  - successful rows that still carry explicit note/evidence metadata
+
+Status after implementation wave:
+
+- implemented on `2026-03-11`
+- refined by live evidence on the approved hewiki dev/test DB:
+  - `processor_run` growth is the first safe cleanup target
+  - on `project_id=1`:
+    - `processor_run = 387,613`
+    - `run_error = 15`
+    - `ok = 387,598`
+    - almost all growth sits in old successful rows
+- this made it possible to start with telemetry-first retention without
+  touching `lemma_doc_stat`, `lemma_project_stat`, or `sentence_nlp_snapshot`
+
+Concrete output of this wave:
+
+- new service:
+  - `app/services/project_telemetry_retention_service.py`
+- new CLI:
+  - `scripts/prune_project_telemetry.py`
+- runtime contract:
+  - dry-run is default
+  - `--apply` requires `--confirm-project-id`
+  - only successful rows with empty note metadata are prunable
+  - noted/evidence rows and all non-ok rows are preserved
+  - no automatic `VACUUM`
+
+Evidence:
+
+- targeted regressions:
+  - `tests/test_project_telemetry_retention_service.py`
+  - `tests/test_prune_project_telemetry_cli.py`
+  - result: `5 passed`
+- live dry-run on `hewiki_gpu_processing test.db`, `project_id=1`:
+  - artifact: `build/logs/telemetry_retention/project1_prune_dry_run.json`
+  - with `keep_latest_ok = 200`:
+    - `prunable_ok_runs = 387,398`
+    - `prunable_run_error_rows = 0`
+    - preserved rows remain:
+      - `200` recent successful rows
+      - `3` noted/evidence successful rows
+      - `15` non-ok rows
+
+Remaining note:
+
+- this wave only governs operational telemetry growth
+- it does not yet add retention or cleanup for:
+  - `lemma_doc_stat`
+  - `lemma_project_stat`
+  - `sentence_nlp_snapshot`
+- the next active priority is now the broader retention/cleanup policy for
+  other large derived artifacts, but telemetry remains the first implemented
+  slice of that branch
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,

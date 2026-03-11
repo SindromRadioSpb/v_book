@@ -234,6 +234,29 @@ class DerivedArtifactGovernanceSummaryDTO:
 
 
 @dataclass
+class ProjectTelemetryRetentionSummaryDTO:
+    """Dry-run/apply summary for project-scoped processor telemetry retention."""
+
+    project_id: int
+    project_name: str
+    keep_latest_ok: int
+    total_runs: int
+    ok_runs: int
+    non_ok_runs: int
+    noted_ok_runs: int
+    kept_recent_ok_runs: int
+    prunable_ok_runs: int
+    prunable_run_error_rows: int
+    oldest_prunable_run_id: Optional[int] = None
+    newest_prunable_run_id: Optional[int] = None
+    applied: bool = False
+    deleted_runs: int = 0
+    deleted_run_errors: int = 0
+    summary_note: Optional[str] = None
+    vacuum_note: Optional[str] = None
+
+
+@dataclass
 class NLPProcessRunState:
     """Structured NLP processing run state for staged/resumable flows."""
 

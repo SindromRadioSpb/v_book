@@ -1693,5 +1693,20 @@ Current execution status:
   - legacy weak lookup remains only as bounded compatibility fallback
   - identical regenerate updates the same canonical row
   - changed spoken payloads may coexist as separate global cache rows
-- next active priority now moves to future retention/cleanup policy for project
-  telemetry and other large derived artifacts
+- telemetry-first retention is now implemented for `processor_run` / `run_error`:
+  - new service: `app/services/project_telemetry_retention_service.py`
+  - new CLI: `scripts/prune_project_telemetry.py`
+  - dry-run remains the default
+  - `--apply` requires `--confirm-project-id`
+  - only successful rows with empty note metadata are prunable
+  - recent successful rows, all non-ok rows, and noted evidence rows are
+    preserved
+  - live dry-run on `project_id=1` of the hewiki dev/test DB showed:
+    - `processor_run = 387,613`
+    - `run_error = 15`
+    - `prunable_ok_runs = 387,398` with `keep_latest_ok = 200`
+- next active priority now narrows further to broader retention/cleanup policy
+  for the remaining large derived artifacts:
+  - `lemma_doc_stat`
+  - `lemma_project_stat`
+  - `sentence_nlp_snapshot`

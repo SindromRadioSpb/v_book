@@ -354,7 +354,17 @@ It must not:
 - project-scoped per-table byte accounting is not part of the live UI contract
 - if future runtime environments expose safe table-size primitives cheaply, that
   can be added later
-- telemetry retention remains a separate future patch; visibility comes first
+- telemetry retention is now an explicit operator path, but only for
+  `processor_run` / `run_error`:
+  - service: `app/services/project_telemetry_retention_service.py`
+  - CLI: `scripts/prune_project_telemetry.py`
+  - dry-run is the default
+  - `--apply` requires `--confirm-project-id`
+  - only successful rows with empty note metadata are prunable
+  - recent successful rows, noted evidence rows, and all non-ok rows are preserved
+- broader retention/cleanup policy for `lemma_doc_stat`,
+  `lemma_project_stat`, and `sentence_nlp_snapshot` remains a separate future
+  patch; visibility came first, telemetry cleanup second
 
 ## Immediate follow-up recommendations
 
