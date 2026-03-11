@@ -45,6 +45,8 @@ class ProjectImportEngine:
     _DEFAULT_LEMMA_GATE_BATCH_CAP = 1500
     _MIN_LEMMA_GATE_BATCH_CAP = 500
     _MAX_LEMMA_GATE_BATCH_CAP = 10000
+    _DEFAULT_GENERIC_GATE_BATCH_SIZE = 200
+    _MONOLITHIC_IMPORT_TABLES = {"library", "dict_project", "tm_global"}
 
     def __init__(self):
         self.db_service = DBService.get_instance()
@@ -332,6 +334,7 @@ class ProjectImportEngine:
         action: Callable[[], None],
         batch_idx: Optional[int] = None,
         rows_in_batch: Optional[int] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """Execute a write transaction through the shared process-local write gate."""
 
@@ -344,6 +347,7 @@ class ProjectImportEngine:
         )
 
         def _run_tx() -> None:
+            self._check_cancelled(cancel_check)
             acquired_at = time.perf_counter()
             wait_ms = (acquired_at - acquire_start) * 1000.0
             self._emit_gate_trace(
@@ -653,6 +657,7 @@ class ProjectImportEngine:
                 host_conn,
                 operation="import.ensure_fts",
                 action=_ensure_fts,
+                cancel_check=cancel_check,
             )
             logger.info("Ensured FTS tables exist in host DB")
 
@@ -665,8 +670,11 @@ class ProjectImportEngine:
                     progress = 15 + (i * 80 // total_tables)
                     progress_callback(f"Importing {table_name}...", progress, 100)
 
-                if table_name in {"lemma", "source_document"}:
-                    batch_size = self._lemma_batch_size
+                progress_start = 15 + (i * 80 // total_tables)
+                progress_end = 15 + ((i + 1) * 80 // total_tables)
+
+                if table_name not in self._MONOLITHIC_IMPORT_TABLES:
+                    batch_size = self._resolve_import_batch_size(table_name)
                     count = self._import_table_in_gate_batches(
                         host_conn,
                         payload_conn,
@@ -677,6 +685,9 @@ class ProjectImportEngine:
                         tm_global_id_map,
                         cancel_check=cancel_check,
                         batch_size=batch_size,
+                        progress_callback=progress_callback,
+                        progress_start=progress_start,
+                        progress_end=progress_end,
                     )
                     table_counts[table_name] = count
                     logger.debug(
@@ -729,6 +740,7 @@ class ProjectImportEngine:
                     host_conn,
                     operation=f"import.table.{table_name}",
                     action=_import_current_table,
+                    cancel_check=cancel_check,
                 )
 
             # Fix self-referencing FK on dict_project.general_corpus_id
@@ -742,6 +754,7 @@ class ProjectImportEngine:
                     host_conn,
                     operation="import.fix_general_corpus_self_ref",
                     action=_fix_self_ref,
+                    cancel_check=cancel_check,
                 )
 
             logger.info("Import committed successfully")
@@ -824,6 +837,11 @@ class ProjectImportEngine:
             logger.info("Cleaned up partial import rows")
         except Exception as cleanup_exc:
             logger.warning("Failed to cleanup partial import rows: %s", cleanup_exc)
+
+    def _resolve_import_batch_size(self, table_name: str) -> int:
+        if table_name == "lemma":
+            return min(self._lemma_batch_size, self._lemma_gate_batch_cap)
+        return self._DEFAULT_GENERIC_GATE_BATCH_SIZE
 
     def _import_tm_global_table(
         self,
@@ -915,6 +933,9 @@ class ProjectImportEngine:
         *,
         cancel_check: Optional[Callable[[], bool]] = None,
         batch_size: int,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        progress_start: Optional[int] = None,
+        progress_end: Optional[int] = None,
     ) -> int:
         """Import a table in multiple short write-gate transactions."""
         self._check_cancelled(cancel_check)
@@ -922,6 +943,15 @@ class ProjectImportEngine:
         if not schema:
             logger.warning(f"No schema for table {table_name}, skipping")
             return 0
+
+        total_rows_expected = 0
+        if progress_callback is not None:
+            try:
+                total_rows_expected = int(
+                    payload_conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0
+                )
+            except sqlite3.OperationalError:
+                total_rows_expected = 0
 
         try:
             cursor = payload_conn.execute(f"SELECT * FROM {table_name}")
@@ -942,6 +972,8 @@ class ProjectImportEngine:
             read_chunk_size = table_batch_size * multiplier
         else:
             read_chunk_size = max(batch_size, 2048)
+
+        last_progress_value: Optional[int] = None
 
         while True:
             self._check_cancelled(cancel_check)
@@ -990,9 +1022,27 @@ class ProjectImportEngine:
                     action=_insert_batch,
                     batch_idx=batch_idx,
                     rows_in_batch=rows_in_batch,
+                    cancel_check=cancel_check,
                 )
                 total_rows += rows_in_batch
                 batch_idx += 1
+
+                if (
+                    progress_callback is not None
+                    and total_rows_expected > 0
+                    and progress_start is not None
+                    and progress_end is not None
+                ):
+                    span = max(0, progress_end - progress_start)
+                    relative = min(1.0, total_rows / total_rows_expected)
+                    progress_value = progress_start + int(round(relative * span))
+                    if last_progress_value is None or progress_value > last_progress_value:
+                        progress_callback(
+                            f"Importing {table_name}... ({total_rows:,}/{total_rows_expected:,})",
+                            min(progress_value, progress_end),
+                            100,
+                        )
+                        last_progress_value = progress_value
 
                 self._check_cancelled(cancel_check)
                 self._cooperative_yield_if_needed(phase=f"import.table.{table_name}")

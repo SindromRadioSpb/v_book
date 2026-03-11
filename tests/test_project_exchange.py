@@ -342,6 +342,23 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
             "INSERT INTO document_text (doc_id, raw_text, ocr_used) VALUES (?, ?, 0)",
             source_texts,
         )
+
+        next_sentence_id = conn.execute(
+            "SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence"
+        ).fetchone()[0] + 1
+        sentence_rows = []
+        for i in range(600):
+            sentence_id = next_sentence_id + i
+            doc_id = 1 + (i % 3)
+            sent_index = 1000 + i
+            sentence_rows.append((sentence_id, doc_id, sent_index, f"Sentence batch {sentence_id}"))
+        conn.executemany(
+            """
+            INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
+            VALUES (?, ?, ?, ?)
+            """,
+            sentence_rows,
+        )
         conn.commit()
     finally:
         conn.close()
@@ -382,8 +399,10 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
     assert "import.fix_general_corpus_self_ref" in operations
     lemma_ops = [op for op in operations if op == "import.table.lemma"]
     source_document_ops = [op for op in operations if op == "import.table.source_document"]
+    document_sentence_ops = [op for op in operations if op == "import.table.document_sentence"]
     assert len(lemma_ops) >= 3
     assert len(source_document_ops) >= 2
+    assert len(document_sentence_ops) >= 3
 
 
 def test_import_cancel_during_lemma_batch_cleans_rows(populated_project, temp_db, monkeypatch):
@@ -444,6 +463,86 @@ def test_import_cancel_during_lemma_batch_cleans_rows(populated_project, temp_db
         project_count = conn.execute(
             "SELECT COUNT(*) FROM dict_project WHERE name = ?",
             ("Cancelled During Lemma Batches",),
+        ).fetchone()[0]
+        library_count = conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert project_count == 0
+    assert library_count == 1
+
+
+def test_import_cancel_during_document_sentence_batch_cleans_rows(
+    populated_project,
+    temp_db,
+    monkeypatch,
+):
+    """Cancel during generic batched table import should cleanup imported rows."""
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        next_sentence_id = conn.execute(
+            "SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence"
+        ).fetchone()[0] + 1
+        sentence_rows = []
+        for i in range(600):
+            sentence_id = next_sentence_id + i
+            doc_id = 1 + (i % 3)
+            sent_index = 1000 + i
+            sentence_rows.append((sentence_id, doc_id, sent_index, f"Sentence cancel {sentence_id}"))
+        conn.executemany(
+            """
+            INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
+            VALUES (?, ?, ?, ?)
+            """,
+            sentence_rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "document_sentence_cancel_bundle.hdleproj"
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        cancel_state = {"value": False}
+        sentence_batches = {"count": 0}
+
+        def fake_run_serialized_db_write(operation, callback, **_kwargs):
+            result = callback()
+            if operation == "import.table.document_sentence":
+                sentence_batches["count"] += 1
+                if sentence_batches["count"] == 1:
+                    cancel_state["value"] = True
+            return result
+
+        monkeypatch.setattr(
+            import_engine_module,
+            "run_serialized_db_write",
+            fake_run_serialized_db_write,
+        )
+
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Cancelled During Sentence Batches"),
+            cancel_check=lambda: bool(cancel_state["value"]),
+        )
+
+    assert report.success is False
+    assert "cancel" in (report.error_message or "").lower()
+    assert sentence_batches["count"] >= 1
+
+    conn = sqlite3.connect(str(temp_db))
+    try:
+        project_count = conn.execute(
+            "SELECT COUNT(*) FROM dict_project WHERE name = ?",
+            ("Cancelled During Sentence Batches",),
         ).fetchone()[0]
         library_count = conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
     finally:

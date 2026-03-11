@@ -66,6 +66,7 @@ def test_import_table_in_gate_batches_acquires_gate_multiple_times() -> None:
                 action,
                 batch_idx=None,
                 rows_in_batch=None,
+                cancel_check=None,
             ) -> None:
                 calls.append((operation, batch_idx, rows_in_batch))
                 action()
@@ -124,6 +125,7 @@ def test_import_table_in_gate_batches_checks_cancel_between_batches() -> None:
                 action,
                 batch_idx=None,
                 rows_in_batch=None,
+                cancel_check=None,
             ) -> None:
                 action()
                 if operation == "import.table.lemma":
@@ -181,6 +183,7 @@ def test_import_table_in_gate_batches_respects_lemma_gate_batch_cap() -> None:
                 action,
                 batch_idx=None,
                 rows_in_batch=None,
+                cancel_check=None,
             ) -> None:
                 if operation == "import.table.lemma":
                     batch_sizes.append(int(rows_in_batch or 0))
@@ -234,6 +237,7 @@ def test_import_table_in_gate_batches_aligns_lemma_read_chunks_to_cap_boundaries
                 action,
                 batch_idx=None,
                 rows_in_batch=None,
+                cancel_check=None,
             ) -> None:
                 if operation == "import.table.lemma":
                     batch_sizes.append(int(rows_in_batch or 0))
@@ -264,3 +268,25 @@ def test_import_table_in_gate_batches_aligns_lemma_read_chunks_to_cap_boundaries
         finally:
             host_conn.close()
             payload_conn.close()
+
+
+def test_run_serialized_write_tx_honors_cancel_before_begin() -> None:
+    engine = _make_engine_without_dbservice()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "host.db"
+        conn = _build_minimal_conn(db_path)
+        executed = {"value": False}
+
+        try:
+            with pytest.raises(ImportCancelledError):
+                engine._run_serialized_write_tx(
+                    conn,
+                    operation="import.test.cancel_before_begin",
+                    action=lambda: executed.__setitem__("value", True),
+                    cancel_check=lambda: True,
+                )
+
+            assert executed["value"] is False
+        finally:
+            conn.close()

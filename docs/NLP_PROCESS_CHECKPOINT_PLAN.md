@@ -1456,3 +1456,12 @@ To align runtime behavior with the documented decision gate:
 
 This closes an earlier gap where the hold-state was documented but not enforced
 strongly enough in the reference-processing CLI itself.
+
+## Follow-on controllability roadmap
+
+The broader next-step roadmap after the readiness/reporting branch now lives in:
+
+- `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md`
+
+Use that document as the source of truth for the next priority engineering
+patches outside the bounded snapshot-backfill hold-state.

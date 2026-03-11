@@ -1637,3 +1637,26 @@ Task30 status after the `120k` cumulative evidence wave:
 The decision gate and future heavy-run package are documented in:
 
 - `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
+
+## Next priority engineering roadmap
+
+The next engineering branch after the readiness/reporting rollout is tracked in:
+
+- `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md`
+
+That roadmap freezes the current priority order for:
+
+- import controllability,
+- runtime DB write-governance,
+- picker search SLO recovery,
+- lifecycle governance for large derived processing data,
+- completion of the audio cache contract.
+
+It also explicitly records which heavy/backfill/freshness tracks remain in
+hold-state and must not be reopened implicitly.
+
+Current execution status:
+
+- `PATCH-P0-01` import controllability has started and is now implemented with
+  bounded generic table batching and improved cooperative cancel checks
+- next active priority is `PATCH-P0-02` runtime DB write-governance baseline
