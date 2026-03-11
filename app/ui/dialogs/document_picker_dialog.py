@@ -61,6 +61,8 @@ class DocumentPickerDialog(QDialog):
         self._selected_doc_id = selected_doc_id
         self._selected_doc_name = "All Documents"
         self._frequent_tag_buttons: dict[str, QPushButton] = {}
+        self._frequent_tags_cache: Optional[list[str]] = None
+        self._count_pending = False
 
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -357,6 +359,9 @@ class DocumentPickerDialog(QDialog):
             self._worker.cancel()
 
         self._render_active_filter_chips()
+        if self._frequent_tags_cache and not self._frequent_tag_buttons:
+            self._render_quick_tags(self._frequent_tags_cache)
+        self._count_pending = True
         self.status_label.setText("Loading documents...")
 
         worker = ProjectDocumentsPageWorker(
@@ -371,10 +376,12 @@ class DocumentPickerDialog(QDialog):
             tag_match_mode=self._current_tag_mode(),
             page_size=self.page_size,
             page_index=self.current_page,
+            include_frequent_tags=self._frequent_tags_cache is None,
         )
         self._worker = worker
         worker.status.connect(self._on_worker_status)
-        worker.page_loaded.connect(self._on_page_loaded)
+        worker.rows_loaded.connect(self._on_rows_loaded)
+        worker.count_loaded.connect(self._on_count_loaded)
         worker.frequent_tags_loaded.connect(self._on_frequent_tags_loaded)
         worker.error.connect(self._on_page_error)
         worker.start()
@@ -384,25 +391,42 @@ class DocumentPickerDialog(QDialog):
             return
         self.status_label.setText(text)
 
-    def _on_page_loaded(self, request_id: int, total_count: int, rows: list) -> None:
+    def _on_rows_loaded(self, request_id: int, rows: list) -> None:
         if int(request_id) != self._active_request_id:
             return
 
-        self.total_count = int(total_count or 0)
         self._current_rows = list(rows or [])
         self._render_rows()
         self._update_pagination()
 
+        if not self._current_rows:
+            self.status_label.setText("No documents on this page; calculating total...")
+            return
+
+        start = (self.current_page - 1) * self.page_size + 1
+        end = start + len(self._current_rows) - 1
+        self.status_label.setText(f"Loaded {start}-{end}; calculating total...")
+
+    def _on_count_loaded(self, request_id: int, total_count: int) -> None:
+        if int(request_id) != self._active_request_id:
+            return
+
+        self.total_count = int(total_count or 0)
+        self._count_pending = False
+        self._update_pagination()
+
         if self.total_count == 0:
             self.status_label.setText("No documents found")
-        else:
-            start = (self.current_page - 1) * self.page_size + 1
-            end = min(start + len(self._current_rows) - 1, self.total_count)
-            self.status_label.setText(f"Loaded {start}-{end} of {self.total_count}")
+            return
+
+        start = (self.current_page - 1) * self.page_size + 1
+        end = min(start + len(self._current_rows) - 1, self.total_count)
+        self.status_label.setText(f"Loaded {start}-{end} of {self.total_count}")
 
     def _on_page_error(self, request_id: int, error_message: str) -> None:
         if int(request_id) != self._active_request_id:
             return
+        self._count_pending = False
         logger.error("Document picker load failed: %s", error_message)
         self.status_label.setText(f"Load failed: {error_message}")
 
@@ -438,14 +462,22 @@ class DocumentPickerDialog(QDialog):
             self.results_table.selectRow(0)
 
     def _update_pagination(self) -> None:
-        total_pages = self.total_pages
+        total_pages = self.total_pages if not self._count_pending else max(1, self.current_page)
+        self.current_page = min(max(1, self.current_page), total_pages)
         self.page_spin.blockSignals(True)
         self.page_spin.setMaximum(total_pages)
-        self.page_spin.setValue(min(max(1, self.current_page), total_pages))
+        self.page_spin.setValue(self.current_page)
         self.page_spin.blockSignals(False)
-        self.page_count_label.setText(f"of {total_pages}")
+        self.page_count_label.setText(f"of {total_pages}" if not self._count_pending else "of ...")
 
-        if self.total_count == 0:
+        if self._count_pending:
+            if self._current_rows:
+                start = (self.current_page - 1) * self.page_size + 1
+                end = start + len(self._current_rows) - 1
+                self.range_label.setText(f"Showing {start}-{end} (total pending)")
+            else:
+                self.range_label.setText("Showing 0 rows (total pending)")
+        elif self.total_count == 0:
             self.range_label.setText("Showing 0-0 of 0")
         else:
             start = (self.current_page - 1) * self.page_size + 1
@@ -454,8 +486,8 @@ class DocumentPickerDialog(QDialog):
 
         self.first_btn.setEnabled(self.current_page > 1)
         self.prev_btn.setEnabled(self.current_page > 1)
-        self.next_btn.setEnabled(self.current_page < total_pages)
-        self.last_btn.setEnabled(self.current_page < total_pages)
+        self.next_btn.setEnabled((not self._count_pending) and self.current_page < total_pages)
+        self.last_btn.setEnabled((not self._count_pending) and self.current_page < total_pages)
 
     def _on_selection_changed(self) -> None:
         self.select_btn.setEnabled(bool(self.results_table.selectedItems()))
@@ -615,7 +647,9 @@ class DocumentPickerDialog(QDialog):
     def _on_frequent_tags_loaded(self, request_id: int, tags: list) -> None:
         if int(request_id) != self._active_request_id:
             return
-        self._render_quick_tags([str(tag) for tag in (tags or []) if str(tag).strip()])
+        cleaned = [str(tag) for tag in (tags or []) if str(tag).strip()]
+        self._frequent_tags_cache = cleaned
+        self._render_quick_tags(cleaned)
 
     def selected_document(self) -> tuple[Optional[int], str]:
         return self._selected_doc_id, self._selected_doc_name

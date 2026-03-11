@@ -980,7 +980,8 @@ class ProjectDocumentsPageWorker(QThread):
     Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
     """
 
-    page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
+    rows_loaded = pyqtSignal(int, list)           # request_id, rows(List[DocumentDTO])
+    count_loaded = pyqtSignal(int, int)           # request_id, total_count
     frequent_tags_loaded = pyqtSignal(int, list)  # request_id, tags(List[str])
     error = pyqtSignal(int, str)              # request_id, message
     status = pyqtSignal(int, str)             # request_id, status text
@@ -999,6 +1000,7 @@ class ProjectDocumentsPageWorker(QThread):
         tag_match_mode: str = "any",
         page_size: int,
         page_index: int,
+        include_frequent_tags: bool = True,
     ):
         super().__init__()
         self.request_id = int(request_id)
@@ -1012,6 +1014,7 @@ class ProjectDocumentsPageWorker(QThread):
         self.tag_match_mode = str(tag_match_mode or "any").strip().lower() or "any"
         self.page_size = max(1, int(page_size))
         self.page_index = max(1, int(page_index))
+        self.include_frequent_tags = bool(include_frequent_tags)
         self._cancelled = False
 
     def cancel(self):
@@ -1027,21 +1030,6 @@ class ProjectDocumentsPageWorker(QThread):
             doc_service = DocumentService()
 
             with db_service.get_read_session() as session:
-                if self._cancelled:
-                    return
-
-                total_count = doc_service.get_project_documents_total_count(
-                    session,
-                    self.project_id,
-                    search_query=self.search_query,
-                    document_filter=self.document_filter,
-                    document_id=self.document_id,
-                    tag_filter=self.tag_filter,
-                    topic_filter=self.topic_filter,
-                    level_filter=self.level_filter,
-                    tag_match_mode=self.tag_match_mode,
-                )
-
                 if self._cancelled:
                     return
 
@@ -1074,6 +1062,31 @@ class ProjectDocumentsPageWorker(QThread):
                     offset=offset,
                 )
 
+                if self._cancelled:
+                    return
+                self.rows_loaded.emit(self.request_id, rows)
+                self.status.emit(self.request_id, "Calculating totals...")
+
+                total_count = doc_service.get_project_documents_total_count(
+                    session,
+                    self.project_id,
+                    search_query=self.search_query,
+                    document_filter=self.document_filter,
+                    document_id=self.document_id,
+                    tag_filter=self.tag_filter,
+                    topic_filter=self.topic_filter,
+                    level_filter=self.level_filter,
+                    tag_match_mode=self.tag_match_mode,
+                )
+
+                if self._cancelled:
+                    return
+                self.count_loaded.emit(self.request_id, int(total_count))
+
+                if not self.include_frequent_tags:
+                    return
+
+                self.status.emit(self.request_id, "Loading top tags...")
                 frequent_tags = doc_service.get_project_frequent_tags(
                     session,
                     self.project_id,
@@ -1083,7 +1096,6 @@ class ProjectDocumentsPageWorker(QThread):
                 if self._cancelled:
                     return
                 self.frequent_tags_loaded.emit(self.request_id, frequent_tags)
-                self.page_loaded.emit(self.request_id, int(total_count), rows)
         except Exception as e:
             logger.exception("Project documents page worker error")
             self.error.emit(self.request_id, str(e))

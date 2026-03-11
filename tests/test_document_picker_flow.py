@@ -493,6 +493,45 @@ class _FakeSettings:
         self.values[key] = value
 
 
+class _FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args, **kwargs):
+        for callback in list(self._callbacks):
+            callback(*args, **kwargs)
+
+
+class _FakePickerWorker:
+    created = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.status = _FakeSignal()
+        self.rows_loaded = _FakeSignal()
+        self.count_loaded = _FakeSignal()
+        self.frequent_tags_loaded = _FakeSignal()
+        self.error = _FakeSignal()
+        self._running = False
+        _FakePickerWorker.created.append(self)
+
+    def start(self):
+        self._running = True
+
+    def isRunning(self):
+        return self._running
+
+    def cancel(self):
+        self._running = False
+
+    def wait(self, _ms):
+        self._running = False
+        return True
+
+
 def test_document_picker_restores_filter_state_between_dialog_instances(monkeypatch, qtbot):
     settings = _FakeSettings()
     monkeypatch.setattr(DocumentPickerDialog, "_reload", lambda self, reset_page: None)
@@ -531,3 +570,59 @@ def test_document_picker_filter_state_is_project_scoped(monkeypatch, qtbot):
     qtbot.addWidget(second)
 
     assert second.document_edit.text() == ""
+
+
+def test_document_picker_rows_render_before_total_count(monkeypatch, qtbot):
+    monkeypatch.setattr(DocumentPickerDialog, "_reload", lambda self, reset_page: None)
+    dlg = DocumentPickerDialog(project_id=1, settings=_FakeSettings())
+    qtbot.addWidget(dlg)
+
+    dlg._active_request_id = 7
+    dlg._count_pending = True
+    dlg._current_rows = []
+    dlg.total_count = 0
+
+    row = SimpleNamespace(
+        doc_id=321,
+        file_name="wiki_doc_0321",
+        tag="wiki",
+        topic="history",
+        level="aleph",
+    )
+
+    dlg._on_rows_loaded(7, [row])
+
+    assert dlg.results_table.rowCount() == 1
+    assert dlg.range_label.text() == "Showing 1-1 (total pending)"
+    assert dlg.page_count_label.text() == "of ..."
+    assert dlg.status_label.text() == "Loaded 1-1; calculating total..."
+
+    dlg._on_count_loaded(7, 11)
+
+    assert dlg.range_label.text() == "Showing 1-1 of 11"
+    assert dlg.page_count_label.text() == "of 1"
+    assert dlg.status_label.text() == "Loaded 1-1 of 11"
+
+
+def test_document_picker_reuses_cached_frequent_tags(monkeypatch, qtbot):
+    settings = _FakeSettings()
+    _FakePickerWorker.created.clear()
+    monkeypatch.setattr(
+        "app.ui.dialogs.document_picker_dialog.ProjectDocumentsPageWorker",
+        _FakePickerWorker,
+    )
+
+    dlg = DocumentPickerDialog(project_id=1, settings=settings)
+    qtbot.addWidget(dlg)
+
+    assert _FakePickerWorker.created
+    assert _FakePickerWorker.created[-1].kwargs["include_frequent_tags"] is True
+
+    dlg._on_frequent_tags_loaded(dlg._active_request_id, ["wiki", "history"])
+    assert dlg._frequent_tags_cache == ["wiki", "history"]
+
+    dlg._reload(reset_page=False)
+
+    assert len(_FakePickerWorker.created) >= 2
+    assert _FakePickerWorker.created[-1].kwargs["include_frequent_tags"] is False
+    assert "wiki" in {btn.text() for btn in dlg._frequent_tag_buttons.values()}

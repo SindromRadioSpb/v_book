@@ -45,10 +45,14 @@ another expensive validation run.
    - Read/write separation is only partial, retry discipline is selective, and a
      true single-writer baseline is still missing.
 
-3. **Document picker dominant search path**
-   - `app/services/document_service.py`
-   - `app/ui/dialogs/document_picker_dialog.py`
-   - Search remains the clearest user-facing latency hotspot on hewiki-scale DBs.
+3. **Large derived processing data governance**
+   - `lemma_doc_stat`
+   - `lemma_project_stat`
+   - `sentence_nlp_snapshot`
+   - `processor_run`
+   - `run_error`
+   - These growth-heavy artifacts are now the next practical controllability gap
+     after the import/runtime/picker P0 fixes.
 
 ### P1 data-governance risks
 
@@ -221,23 +225,67 @@ Remaining note:
   still be a future follow-up if new contention evidence appears
 - the next active priority is now `PATCH-P0-03`
 
-### PATCH-P0-03: Document picker search SLO recovery
+### PATCH-P0-03: Document picker staged first-paint / SLO recovery
 
 Goal:
 
-- remove the dominant temp-sort / high-latency path in daily navigation.
+- remove the dominant user-facing latency path in daily picker navigation.
 
 Primary files:
 
 - `app/services/document_service.py`
 - `app/ui/dialogs/document_picker_dialog.py`
-- supporting migration/index files
-- perf tests and query-plan assertions
+- `app/ui/workers.py`
+- `tests/test_document_picker_flow.py`
+- `tests/test_perf_fts_document_picker.py`
+- `tests/test_documents_pagination_sort_search.py`
 
 Expected output:
 
-- picker search p95 restored to budget on hewiki-scale evidence,
-- no regression in deterministic paging behavior.
+- rows rendered before total-count/tag side work,
+- repeated picker reloads avoid re-fetching project top tags,
+- no regression in deterministic paging behavior or anti-stale request handling.
+
+Status after implementation wave:
+
+- implemented on `2026-03-11`
+- refined by live evidence on the approved hewiki dev/test DB:
+  - query-level `picker_page_search` was already back within SLO after the
+    earlier FTS-backed service path work
+  - the remaining daily-navigation cost had shifted to the worker path:
+    `rows + count + top-tags` sequencing inside the picker dialog
+- the practical fix was therefore narrower than the original roadmap item:
+  - keep the existing `DocumentService` search path
+  - switch `ProjectDocumentsPageWorker` / `DocumentPickerDialog` to staged
+    `rows -> count -> top-tags`
+  - cache project top tags per dialog instance so repeated reloads do not pay
+    the `get_project_frequent_tags()` cost again
+
+Evidence:
+
+- baseline worker-path breakdown on live hewiki dev/test DB:
+  - `build/logs/picker_p003/picker_worker_breakdown_pre_patch.json`
+  - observed p95:
+    - `rows = 0.168s`
+    - `count = 0.103s`
+    - `top_tags = 0.273s`
+    - `total worker path = 0.523s`
+- post-patch staged breakdown on the same DB:
+  - `build/logs/picker_p003/picker_staged_breakdown_post_patch.json`
+  - observed p95:
+    - `rows-first paint = 0.161s`
+    - `rows + count (repeat reload, no tag refetch) = 0.248s`
+- regressions:
+  - `tests/test_document_picker_flow.py`
+  - `tests/test_perf_fts_document_picker.py`
+  - `tests/test_documents_pagination_sort_search.py`
+  - result: `35 passed`
+
+Remaining note:
+
+- the dominant picker debt is no longer a blocking P0 item
+- future picker work should now be treated as incremental UI/perf polish unless
+  new hewiki evidence shows a fresh regression
 
 ### PATCH-P1-01: Governance for large derived processing data
 
@@ -286,10 +334,9 @@ Primary files:
 
 ## Immediate execution order
 
-1. `PATCH-P0-01` import controllability
-2. `PATCH-P0-03` picker search SLO recovery
-3. `PATCH-P1-01` large derived data governance
-4. `PATCH-P1-02` audio cache contract completion
+1. `PATCH-P1-01` large derived data governance
+2. `PATCH-P1-02` audio cache contract completion
+3. future heavy validation only by explicit decision gate
 
 ## Decision note
 

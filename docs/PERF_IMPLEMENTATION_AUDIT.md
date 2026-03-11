@@ -5,6 +5,19 @@ Audited commit: `536e3cb` (HEAD)
 Target DB context: `M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\HDLE_Processing\hewiki_gpu_processing.db`
 Applied skill pack: `premium_desktop_pyqt_sqlite` (focus modules: SKILL_05, SKILL_06, SKILL_07, SKILL_12, SKILL_13)
 
+Historical note as of `2026-03-11`:
+
+- the picker-specific findings in this audit are now historical, not current
+  source-of-truth
+- later hewiki evidence on the live dev/test DB showed that:
+  - the service-level picker search path was recovered into SLO
+  - the remaining visible picker latency had shifted to worker-path sequencing
+    (`rows + count + top-tags`)
+- current operational status for that branch is tracked in:
+  - `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md`
+  - `build/logs/picker_p003/picker_worker_breakdown_pre_patch.json`
+  - `build/logs/picker_p003/picker_staged_breakdown_post_patch.json`
+
 ## Scope and method
 This is an evidence-based audit (no implementation changes in this task). Claims are grounded in:
 - repository code (file + line references),

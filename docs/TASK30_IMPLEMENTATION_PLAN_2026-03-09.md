@@ -1648,7 +1648,7 @@ That roadmap freezes the current priority order for:
 
 - import controllability,
 - runtime DB write-governance,
-- picker search SLO recovery,
+- picker staged first-paint / worker-path recovery,
 - lifecycle governance for large derived processing data,
 - completion of the audio cache contract.
 
@@ -1663,4 +1663,12 @@ Current execution status:
   - global heavy-operation slot semantics,
   - aligned advisory throttling,
   - runtime slot claim for the main DB-mutating workers/import paths
-- next active priority is `PATCH-P0-03` picker search SLO recovery
+- `PATCH-P0-03` is now implemented and refined by evidence:
+  - live hewiki perf showed the remaining picker delay was not the SQL search
+    path itself, but `rows + count + top-tags` sequencing in the picker worker
+  - the implementation switched the picker to staged `rows -> count -> top-tags`
+    rendering and cached project top tags per dialog instance
+  - live worker-path evidence is recorded in:
+    - `build/logs/picker_p003/picker_worker_breakdown_pre_patch.json`
+    - `build/logs/picker_p003/picker_staged_breakdown_post_patch.json`
+- next active priority is now `PATCH-P1-01` large derived data governance
