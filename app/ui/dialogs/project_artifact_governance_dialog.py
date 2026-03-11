@@ -118,6 +118,11 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.copy_telemetry_btn.setEnabled(False)
         buttons_layout.addWidget(self.copy_telemetry_btn)
 
+        self.copy_rebuild_btn = QPushButton("Copy Rebuild CLI")
+        self.copy_rebuild_btn.clicked.connect(self.copy_rebuild_cli)
+        self.copy_rebuild_btn.setEnabled(False)
+        buttons_layout.addWidget(self.copy_rebuild_btn)
+
         self.docs_btn = QPushButton("Open Lifecycle Contract")
         self.docs_btn.clicked.connect(self.open_lifecycle_contract)
         buttons_layout.addWidget(self.docs_btn)
@@ -233,6 +238,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
         )
         self._rebuild_cards(summary.artifacts)
         self._refresh_telemetry_button_state(summary.artifacts)
+        self._refresh_rebuild_button_state(summary.artifacts)
         self._refresh_status_text()
 
     def _rebuild_cards(self, metrics: list[DerivedArtifactMetricDTO]) -> None:
@@ -327,6 +333,17 @@ class ProjectArtifactGovernanceDialog(QDialog):
         enabled = bool(processor_metric and processor_metric.maintenance_cli_hint)
         self.copy_telemetry_btn.setEnabled(enabled)
 
+    def _refresh_rebuild_button_state(self, metrics: list[DerivedArtifactMetricDTO]) -> None:
+        reset_metric = next(
+            (
+                metric
+                for metric in metrics
+                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_cli_hint
+            ),
+            None,
+        )
+        self.copy_rebuild_btn.setEnabled(bool(reset_metric))
+
     def on_worker_status(self, request_id: int, message: str) -> None:
         if int(request_id) != self._active_request_id:
             return
@@ -413,6 +430,26 @@ class ProjectArtifactGovernanceDialog(QDialog):
         app.clipboard().setText(str(processor_metric.maintenance_cli_hint))
         self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         self.status_label.setText("Telemetry dry-run CLI copied to clipboard.")
+
+    def copy_rebuild_cli(self) -> None:
+        if self._summary is None:
+            return
+        rebuild_metric = next(
+            (
+                metric
+                for metric in self._summary.artifacts
+                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_cli_hint
+            ),
+            None,
+        )
+        if rebuild_metric is None:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.clipboard().setText(str(rebuild_metric.maintenance_cli_hint))
+        self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.status_label.setText("Reference rebuild CLI copied to clipboard.")
 
     def open_lifecycle_contract(self) -> None:
         docs_path = Path(__file__).resolve().parents[3] / "docs" / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"

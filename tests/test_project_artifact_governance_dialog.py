@@ -38,6 +38,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 detail_lines=["Exact project row count via project_id."],
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Use a future project-level reset/rebuild path instead of pruning by age.",
+                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="sentence_nlp_snapshot",
@@ -51,6 +52,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 detail_lines=["Fully covered docs: 119,999 / 387,639."],
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Do not prune snapshots by age.",
+                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="processor_run",
@@ -111,6 +113,7 @@ def test_project_artifact_governance_dialog_renders_cards_and_notes(qtbot):
     assert dialog._cards_layout.count() >= 4
     assert dialog.run_error_value.text() == "15"
     assert dialog.copy_telemetry_btn.isEnabled() is True
+    assert dialog.copy_rebuild_btn.isEnabled() is True
 
 
 def test_project_artifact_governance_dialog_formats_relative_refresh(qtbot):
@@ -153,3 +156,18 @@ def test_project_artifact_governance_dialog_can_copy_telemetry_cli(qtbot):
     text = app.clipboard().text()
     assert "prune_project_telemetry.py" in text
     assert "--project-id 1" in text
+
+
+def test_project_artifact_governance_dialog_can_copy_rebuild_cli(qtbot):
+    dialog = ProjectArtifactGovernanceDialog(1, "Hebrew Wikipedia Baseline", auto_refresh=False)
+    qtbot.addWidget(dialog)
+    dialog.set_summary(_sample_summary())
+
+    app = QApplication.instance()
+    assert app is not None
+    dialog.copy_rebuild_cli()
+
+    text = app.clipboard().text()
+    assert "process_reference_corpus.py" in text
+    assert "--project-id 1" in text
+    assert "--reprocess-all" in text

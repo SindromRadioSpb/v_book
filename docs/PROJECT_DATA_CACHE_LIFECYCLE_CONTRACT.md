@@ -378,6 +378,8 @@ It must not:
   - reference-scale rebuilds should use
     `scripts/process_reference_corpus.py --project-id <id> --reprocess-all`
     rather than any ad-hoc row deletion path
+  - governance UI now exposes that rebuild path as a copyable CLI hint for
+    `reset_rebuild_only` artifacts on reference projects
 
 ## Immediate follow-up recommendations
 

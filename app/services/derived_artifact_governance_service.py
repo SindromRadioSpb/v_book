@@ -103,14 +103,22 @@ class DerivedArtifactGovernanceService:
         processed_docs = int(snapshot_summary.processed_docs or 0)
         artifacts = [
             self._build_lemma_doc_stat_metric(
+                project_id=int(project_id),
+                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
                 lemma_doc_rows=int(lemma_doc_rows or 0),
                 processed_docs=processed_docs,
             ),
             self._build_lemma_project_stat_metric(
+                project_id=int(project_id),
+                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
                 lemma_project_rows=int(lemma_project_rows or 0),
                 processed_docs=processed_docs,
             ),
-            self._build_snapshot_metric(snapshot_summary),
+            self._build_snapshot_metric(
+                snapshot_summary,
+                project_id=int(project_id),
+                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
+            ),
             self._build_processor_run_metric(
                 project_id=int(project_id),
                 processor_run_rows=int(processor_run_rows or 0),
@@ -183,6 +191,8 @@ class DerivedArtifactGovernanceService:
     def _build_lemma_doc_stat_metric(
         self,
         *,
+        project_id: int,
+        is_reference_project: bool,
         lemma_doc_rows: int,
         processed_docs: int,
     ) -> DerivedArtifactMetricDTO:
@@ -211,11 +221,17 @@ class DerivedArtifactGovernanceService:
                 "No age-based retention is recommended. If storage pressure becomes real, use a future "
                 "project-level processing reset/rebuild path rather than pruning rows by age."
             ),
+            maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
+            ),
         )
 
     def _build_lemma_project_stat_metric(
         self,
         *,
+        project_id: int,
+        is_reference_project: bool,
         lemma_project_rows: int,
         processed_docs: int,
     ) -> DerivedArtifactMetricDTO:
@@ -244,11 +260,18 @@ class DerivedArtifactGovernanceService:
                 "No incremental retention is recommended. This aggregate layer should only be removed through "
                 "an explicit project-level reset/rebuild workflow."
             ),
+            maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
+            ),
         )
 
     def _build_snapshot_metric(
         self,
         snapshot_summary,
+        *,
+        project_id: int,
+        is_reference_project: bool,
     ) -> DerivedArtifactMetricDTO:
         status = "no_snapshot_coverage"
         if snapshot_summary.contract_state == "fully_covered":
@@ -281,6 +304,10 @@ class DerivedArtifactGovernanceService:
             maintenance_note=(
                 "Do not prune snapshots by age. If lifecycle pressure becomes real, prefer an explicit "
                 "project-level reset/backfill decision rather than incremental retention."
+            ),
+            maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
             ),
         )
 
@@ -362,6 +389,15 @@ class DerivedArtifactGovernanceService:
                 "Do not prune run_error independently. Cleanup should happen through the parent processor_run "
                 "retention path so evidence relationships stay intact."
             ),
+        )
+
+    @staticmethod
+    def _build_reference_rebuild_cli(*, project_id: int, is_reference_project: bool) -> Optional[str]:
+        if not is_reference_project:
+            return None
+        return (
+            "python scripts\\process_reference_corpus.py "
+            f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all"
         )
 
     @staticmethod

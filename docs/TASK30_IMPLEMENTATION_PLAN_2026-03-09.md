@@ -1719,3 +1719,5 @@ Current execution status:
   - no blanket age-based retention for `lemma_*` or `sentence_nlp_snapshot`
   - future storage work there should be explicit reset/rebuild design, not
     incremental prune
+  - governance UI now exposes copyable reference rebuild CLI guidance for
+    `reset_rebuild_only` artifacts instead of leaving that path only in docs

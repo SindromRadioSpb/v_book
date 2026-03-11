@@ -212,12 +212,15 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert metrics["lemma_doc_stat"].quantity_value == 3
         assert metrics["lemma_doc_stat"].status == "expected_large"
         assert metrics["lemma_doc_stat"].maintenance_mode == "reset_rebuild_only"
+        assert "--reprocess-all" in str(metrics["lemma_doc_stat"].maintenance_cli_hint)
         assert metrics["lemma_project_stat"].quantity_value == 2
         assert metrics["lemma_project_stat"].maintenance_mode == "reset_rebuild_only"
+        assert "--reprocess-all" in str(metrics["lemma_project_stat"].maintenance_cli_hint)
         assert metrics["sentence_nlp_snapshot"].quantity_value == 2
         assert metrics["sentence_nlp_snapshot"].status == "coverage_partial"
         assert metrics["sentence_nlp_snapshot"].maintenance_mode == "reset_rebuild_only"
         assert "Sentence coverage 66.67%" in metrics["sentence_nlp_snapshot"].summary
+        assert "--reprocess-all" in str(metrics["sentence_nlp_snapshot"].maintenance_cli_hint)
         assert metrics["processor_run"].quantity_value == 2
         assert metrics["processor_run"].maintenance_mode == "retention_available"
         assert "prune_project_telemetry.py" in str(metrics["processor_run"].maintenance_cli_hint)
@@ -225,6 +228,34 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert metrics["run_error"].quantity_value == 1
         assert metrics["run_error"].maintenance_mode == "retention_with_parent_runs"
         assert any("processing=1" in line for line in metrics["run_error"].detail_lines)
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_derived_artifact_governance_service_omits_rebuild_cli_for_regular_projects() -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            project_id = _seed_project(session)
+            project = session.get(DictProject, project_id)
+            assert project is not None
+            project.is_general_corpus = 0
+            session.commit()
+
+        service = DerivedArtifactGovernanceService()
+        with db.get_read_session() as session:
+            summary = service.get_project_summary(session, project_id)
+
+        metrics = {metric.artifact_key: metric for metric in summary.artifacts}
+        assert summary.is_reference_project is False
+        assert metrics["lemma_doc_stat"].maintenance_cli_hint is None
+        assert metrics["lemma_project_stat"].maintenance_cli_hint is None
+        assert metrics["sentence_nlp_snapshot"].maintenance_cli_hint is None
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

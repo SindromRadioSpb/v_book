@@ -618,7 +618,8 @@ Remaining note:
     - reference CLI preamble now skips expensive snapshot-audit queries unless
       `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - governance UI now surfaces those maintenance modes explicitly, including a
-  safe telemetry dry-run CLI copy path, while staying observational-only
+  safe telemetry dry-run CLI copy path and reference rebuild CLI copy path,
+  while staying observational-only
 
 ## Decision note
 
