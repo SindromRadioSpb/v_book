@@ -1719,8 +1719,13 @@ Current execution status:
   - no blanket age-based retention for `lemma_*` or `sentence_nlp_snapshot`
   - future storage work there should be explicit reset/rebuild design, not
     incremental prune
-  - governance UI now exposes copyable reference rebuild CLI guidance for
-    `reset_rebuild_only` artifacts as dry-run by default, plus a backup-backed
-    preflight template, instead of leaving that path only in docs
-  - heavy `--reprocess-all` writes now share the same backup/preflight and
-    protected-target override gate as heavy snapshot-backfill writes
+- governance UI now exposes copyable reference rebuild CLI guidance for
+  `reset_rebuild_only` artifacts as dry-run by default, plus a backup-backed
+  preflight template, instead of leaving that path only in docs
+- heavy `--reprocess-all` writes now share the same backup/preflight and
+  protected-target override gate as heavy snapshot-backfill writes
+- later live re-audit on `project_id=1` of the approved dev/test DB showed
+  that the first cold snapshot readiness query can still spike to about `100s`,
+  while warm/repeated readiness calls fall back to about `7.4s` and the full
+  governance summary stays around `11.1s` to `11.4s`; this strengthens the
+  deferred readiness-acceleration branch without reopening it automatically

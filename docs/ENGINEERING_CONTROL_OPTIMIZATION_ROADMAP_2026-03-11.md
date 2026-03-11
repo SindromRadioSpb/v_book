@@ -379,6 +379,13 @@ Deferred optimization branch (preserved design option, not active now):
     contract
   - existing `SnapshotReadinessService.get_project_summary()` remained usable at
     about `9.5s`
+- later live re-audit on the approved dev/test DB exposed a much worse
+  cold-tail for the first snapshot readiness query:
+  - first cold `SnapshotReadinessService.get_project_summary()` on
+    `project_id=1` measured about `100s`
+  - warm/repeated snapshot readiness calls then fell back to about `7.4s`
+  - full governance summary in the same process stayed around `11.1s` to
+    `11.4s`
 - therefore this branch is explicitly deferred until governance latency becomes
   a real workflow blocker
 - preserve this branch as design context only:
