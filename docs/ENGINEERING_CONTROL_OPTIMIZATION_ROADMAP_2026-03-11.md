@@ -618,8 +618,9 @@ Remaining note:
     - reference CLI preamble now skips expensive snapshot-audit queries unless
       `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - governance UI now surfaces those maintenance modes explicitly, including a
-  safe telemetry dry-run CLI copy path and reference rebuild dry-run CLI copy path,
-  while staying observational-only
+  safe telemetry dry-run CLI copy path, a reference rebuild dry-run CLI copy
+  path, and a backup-backed rebuild preflight template, while staying
+  observational-only
 - heavy reference rebuild execution is now also aligned with the safety gate:
   actual `--reprocess-all` writes require backup/preflight readiness and use the
   same protected-target override gate as heavy snapshot-backfill writes

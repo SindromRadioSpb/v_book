@@ -123,6 +123,11 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.copy_rebuild_btn.setEnabled(False)
         buttons_layout.addWidget(self.copy_rebuild_btn)
 
+        self.copy_rebuild_preflight_btn = QPushButton("Copy Rebuild Preflight CLI")
+        self.copy_rebuild_preflight_btn.clicked.connect(self.copy_rebuild_preflight_cli)
+        self.copy_rebuild_preflight_btn.setEnabled(False)
+        buttons_layout.addWidget(self.copy_rebuild_preflight_btn)
+
         self.docs_btn = QPushButton("Open Lifecycle Contract")
         self.docs_btn.clicked.connect(self.open_lifecycle_contract)
         buttons_layout.addWidget(self.docs_btn)
@@ -310,11 +315,18 @@ class ProjectArtifactGovernanceDialog(QDialog):
             layout.addWidget(maintenance)
 
         if metric.maintenance_cli_hint:
-            cli_hint = QLabel(f"CLI: {metric.maintenance_cli_hint}")
+            cli_hint = QLabel(f"Dry-run CLI: {metric.maintenance_cli_hint}")
             cli_hint.setWordWrap(True)
             cli_hint.setStyleSheet("color: #0f766e;")
             cli_hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(cli_hint)
+
+        if metric.maintenance_preflight_hint:
+            preflight_hint = QLabel(f"Preflight CLI: {metric.maintenance_preflight_hint}")
+            preflight_hint.setWordWrap(True)
+            preflight_hint.setStyleSheet("color: #0f766e;")
+            preflight_hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(preflight_hint)
 
         return card
 
@@ -334,7 +346,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.copy_telemetry_btn.setEnabled(enabled)
 
     def _refresh_rebuild_button_state(self, metrics: list[DerivedArtifactMetricDTO]) -> None:
-        reset_metric = next(
+        dry_run_metric = next(
             (
                 metric
                 for metric in metrics
@@ -342,7 +354,16 @@ class ProjectArtifactGovernanceDialog(QDialog):
             ),
             None,
         )
-        self.copy_rebuild_btn.setEnabled(bool(reset_metric))
+        preflight_metric = next(
+            (
+                metric
+                for metric in metrics
+                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_preflight_hint
+            ),
+            None,
+        )
+        self.copy_rebuild_btn.setEnabled(bool(dry_run_metric))
+        self.copy_rebuild_preflight_btn.setEnabled(bool(preflight_metric))
 
     def on_worker_status(self, request_id: int, message: str) -> None:
         if int(request_id) != self._active_request_id:
@@ -395,7 +416,9 @@ class ProjectArtifactGovernanceDialog(QDialog):
                 )
                 metric_lines.append(f"  {metric.maintenance_note}")
             if metric.maintenance_cli_hint:
-                metric_lines.append(f"  CLI: {metric.maintenance_cli_hint}")
+                metric_lines.append(f"  Dry-run CLI: {metric.maintenance_cli_hint}")
+            if metric.maintenance_preflight_hint:
+                metric_lines.append(f"  Preflight CLI: {metric.maintenance_preflight_hint}")
 
         text = "\n".join(
             [
@@ -450,6 +473,26 @@ class ProjectArtifactGovernanceDialog(QDialog):
         app.clipboard().setText(str(rebuild_metric.maintenance_cli_hint))
         self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         self.status_label.setText("Reference rebuild dry-run CLI copied to clipboard.")
+
+    def copy_rebuild_preflight_cli(self) -> None:
+        if self._summary is None:
+            return
+        rebuild_metric = next(
+            (
+                metric
+                for metric in self._summary.artifacts
+                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_preflight_hint
+            ),
+            None,
+        )
+        if rebuild_metric is None:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.clipboard().setText(str(rebuild_metric.maintenance_preflight_hint))
+        self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.status_label.setText("Reference rebuild preflight CLI copied to clipboard.")
 
     def open_lifecycle_contract(self) -> None:
         docs_path = Path(__file__).resolve().parents[3] / "docs" / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"

@@ -218,10 +218,14 @@ class DerivedArtifactGovernanceService:
             detail_lines=detail_lines,
             maintenance_mode="reset_rebuild_only",
             maintenance_note=(
-                "No age-based retention is recommended. If storage pressure becomes real, use a future "
-                "project-level processing reset/rebuild path rather than pruning rows by age."
+                "No age-based retention is recommended. If storage pressure becomes real, start with a "
+                "dry-run rebuild plan, then run a backup-backed preflight before any real write."
             ),
             maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
+            ),
+            maintenance_preflight_hint=self._build_reference_rebuild_preflight_cli(
                 project_id=project_id,
                 is_reference_project=is_reference_project,
             ),
@@ -257,10 +261,14 @@ class DerivedArtifactGovernanceService:
             detail_lines=detail_lines,
             maintenance_mode="reset_rebuild_only",
             maintenance_note=(
-                "No incremental retention is recommended. This aggregate layer should only be removed through "
-                "an explicit project-level reset/rebuild workflow."
+                "No incremental retention is recommended. This aggregate layer should only be refreshed through "
+                "an explicit project-level reset/rebuild workflow with a dry-run first and backup-backed preflight."
             ),
             maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
+            ),
+            maintenance_preflight_hint=self._build_reference_rebuild_preflight_cli(
                 project_id=project_id,
                 is_reference_project=is_reference_project,
             ),
@@ -303,9 +311,13 @@ class DerivedArtifactGovernanceService:
             maintenance_mode="reset_rebuild_only",
             maintenance_note=(
                 "Do not prune snapshots by age. If lifecycle pressure becomes real, prefer an explicit "
-                "project-level reset/backfill decision rather than incremental retention."
+                "project-level rebuild decision with a dry-run first and backup-backed preflight."
             ),
             maintenance_cli_hint=self._build_reference_rebuild_cli(
+                project_id=project_id,
+                is_reference_project=is_reference_project,
+            ),
+            maintenance_preflight_hint=self._build_reference_rebuild_preflight_cli(
                 project_id=project_id,
                 is_reference_project=is_reference_project,
             ),
@@ -398,6 +410,20 @@ class DerivedArtifactGovernanceService:
         return (
             "python scripts\\process_reference_corpus.py "
             f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all --dry-run"
+        )
+
+    @staticmethod
+    def _build_reference_rebuild_preflight_cli(
+        *,
+        project_id: int,
+        is_reference_project: bool,
+    ) -> Optional[str]:
+        if not is_reference_project:
+            return None
+        return (
+            "python scripts\\process_reference_corpus.py "
+            f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all "
+            "--backup-db-path <healthy-backup.db> --preflight-only"
         )
 
     @staticmethod

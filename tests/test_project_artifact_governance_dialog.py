@@ -39,6 +39,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Use a future project-level reset/rebuild path instead of pruning by age.",
                 maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --dry-run",
+                maintenance_preflight_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --backup-db-path <healthy-backup.db> --preflight-only",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="sentence_nlp_snapshot",
@@ -53,6 +54,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Do not prune snapshots by age.",
                 maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --dry-run",
+                maintenance_preflight_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --backup-db-path <healthy-backup.db> --preflight-only",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="processor_run",
@@ -114,6 +116,7 @@ def test_project_artifact_governance_dialog_renders_cards_and_notes(qtbot):
     assert dialog.run_error_value.text() == "15"
     assert dialog.copy_telemetry_btn.isEnabled() is True
     assert dialog.copy_rebuild_btn.isEnabled() is True
+    assert dialog.copy_rebuild_preflight_btn.isEnabled() is True
 
 
 def test_project_artifact_governance_dialog_formats_relative_refresh(qtbot):
@@ -172,3 +175,20 @@ def test_project_artifact_governance_dialog_can_copy_rebuild_cli(qtbot):
     assert "--project-id 1" in text
     assert "--reprocess-all" in text
     assert "--dry-run" in text
+
+
+def test_project_artifact_governance_dialog_can_copy_rebuild_preflight_cli(qtbot):
+    dialog = ProjectArtifactGovernanceDialog(1, "Hebrew Wikipedia Baseline", auto_refresh=False)
+    qtbot.addWidget(dialog)
+    dialog.set_summary(_sample_summary())
+
+    app = QApplication.instance()
+    assert app is not None
+    dialog.copy_rebuild_preflight_cli()
+
+    text = app.clipboard().text()
+    assert "process_reference_corpus.py" in text
+    assert "--project-id 1" in text
+    assert "--reprocess-all" in text
+    assert "--backup-db-path" in text
+    assert "--preflight-only" in text

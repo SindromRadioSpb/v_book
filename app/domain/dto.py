@@ -215,6 +215,7 @@ class DerivedArtifactMetricDTO:
     maintenance_mode: Optional[str] = None
     maintenance_note: Optional[str] = None
     maintenance_cli_hint: Optional[str] = None
+    maintenance_preflight_hint: Optional[str] = None
 
 
 @dataclass

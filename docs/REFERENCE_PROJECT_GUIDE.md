@@ -251,6 +251,8 @@ Operator note:
   - use `--preflight-only` to validate the package without writing
   - protected baseline/main DB targets stay blocked unless
     `--allow-protected-db-heavy-write` is passed explicitly
+- the governance dialog now exposes both a rebuild dry-run CLI and a rebuild
+  preflight CLI template; it still does not expose a one-click write command
 
 ### Preflight a reference rebuild package without writing
 
