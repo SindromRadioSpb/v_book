@@ -1720,4 +1720,5 @@ Current execution status:
   - future storage work there should be explicit reset/rebuild design, not
     incremental prune
   - governance UI now exposes copyable reference rebuild CLI guidance for
-    `reset_rebuild_only` artifacts instead of leaving that path only in docs
+    `reset_rebuild_only` artifacts as dry-run by default, instead of leaving
+    that path only in docs

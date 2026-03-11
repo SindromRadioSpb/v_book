@@ -38,7 +38,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 detail_lines=["Exact project row count via project_id."],
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Use a future project-level reset/rebuild path instead of pruning by age.",
-                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all",
+                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --dry-run",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="sentence_nlp_snapshot",
@@ -52,7 +52,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 detail_lines=["Fully covered docs: 119,999 / 387,639."],
                 maintenance_mode="reset_rebuild_only",
                 maintenance_note="Do not prune snapshots by age.",
-                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all",
+                maintenance_cli_hint="python scripts\\process_reference_corpus.py --db-path <db-path> --project-id 1 --reprocess-all --dry-run",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="processor_run",
@@ -171,3 +171,4 @@ def test_project_artifact_governance_dialog_can_copy_rebuild_cli(qtbot):
     assert "process_reference_corpus.py" in text
     assert "--project-id 1" in text
     assert "--reprocess-all" in text
+    assert "--dry-run" in text

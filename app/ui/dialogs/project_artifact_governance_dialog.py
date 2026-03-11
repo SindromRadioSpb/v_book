@@ -118,7 +118,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.copy_telemetry_btn.setEnabled(False)
         buttons_layout.addWidget(self.copy_telemetry_btn)
 
-        self.copy_rebuild_btn = QPushButton("Copy Rebuild CLI")
+        self.copy_rebuild_btn = QPushButton("Copy Rebuild Dry-run CLI")
         self.copy_rebuild_btn.clicked.connect(self.copy_rebuild_cli)
         self.copy_rebuild_btn.setEnabled(False)
         buttons_layout.addWidget(self.copy_rebuild_btn)
@@ -449,7 +449,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
             return
         app.clipboard().setText(str(rebuild_metric.maintenance_cli_hint))
         self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
-        self.status_label.setText("Reference rebuild CLI copied to clipboard.")
+        self.status_label.setText("Reference rebuild dry-run CLI copied to clipboard.")
 
     def open_lifecycle_contract(self) -> None:
         docs_path = Path(__file__).resolve().parents[3] / "docs" / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"

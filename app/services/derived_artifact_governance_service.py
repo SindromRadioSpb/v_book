@@ -397,7 +397,7 @@ class DerivedArtifactGovernanceService:
             return None
         return (
             "python scripts\\process_reference_corpus.py "
-            f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all"
+            f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all --dry-run"
         )
 
     @staticmethod

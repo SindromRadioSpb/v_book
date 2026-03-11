@@ -376,7 +376,7 @@ It must not:
   - if storage pressure becomes real for those tables, the correct follow-up is
     an explicit project-level reset/rebuild workflow, not incremental cleanup
   - reference-scale rebuilds should use
-    `scripts/process_reference_corpus.py --project-id <id> --reprocess-all`
+    `scripts/process_reference_corpus.py --project-id <id> --reprocess-all --dry-run`
     rather than any ad-hoc row deletion path
   - governance UI now exposes that rebuild path as a copyable CLI hint for
     `reset_rebuild_only` artifacts on reference projects
