@@ -1,5 +1,6 @@
 ﻿"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
 import logging
+import time
 from pathlib import Path
 from typing import List, Optional, Dict
 
@@ -225,6 +226,9 @@ class DocumentsView(QWidget):
         self._active_request_id = 0
         self._snapshot_request_seq = 0
         self._active_snapshot_request_id = 0
+        self._snapshot_refresh_pending = False
+        self._snapshot_refresh_started_at = 0.0
+        self._snapshot_summary_cache: Dict[int, object] = {}
 
         # Pagination + sorting state (server-side).
         self.current_page = 1
@@ -256,6 +260,10 @@ class DocumentsView(QWidget):
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(300)
         self._filter_timer.timeout.connect(self._on_filter_timeout)
+
+        self._snapshot_status_timer = QTimer(self)
+        self._snapshot_status_timer.setInterval(60_000)
+        self._snapshot_status_timer.timeout.connect(self._refresh_snapshot_staleness_label)
 
         self.init_ui()
         self.load_corpus()
@@ -580,12 +588,30 @@ class DocumentsView(QWidget):
         if panel is None:
             return
 
+        cache = self.__dict__.setdefault("_snapshot_summary_cache", {})
+        cached_summary = cache.get(int(self.project_id))
+        if cached_summary is not None and self._active_snapshot_request_id == 0:
+            panel.set_summary(cached_summary)
+
+        running_worker = self.__dict__.get("snapshot_readiness_worker")
+        if running_worker is not None and running_worker.isRunning():
+            self._snapshot_refresh_pending = True
+            panel.set_loading("Refresh queued; current summary stays visible...")
+            return
+
+        now_monotonic = time.monotonic()
+        if (
+            self._snapshot_refresh_started_at > 0
+            and (now_monotonic - self._snapshot_refresh_started_at) < 0.5
+        ):
+            panel.set_loading("Using recent snapshot readiness request...")
+            return
+
         self._snapshot_request_seq += 1
         request_id = int(self._snapshot_request_seq)
         self._active_snapshot_request_id = request_id
-
-        if self.snapshot_readiness_worker and self.snapshot_readiness_worker.isRunning():
-            self.snapshot_readiness_worker.cancel()
+        self._snapshot_refresh_pending = False
+        self._snapshot_refresh_started_at = now_monotonic
 
         panel.set_loading("Refreshing snapshot readiness...")
 
@@ -607,9 +633,18 @@ class DocumentsView(QWidget):
     def on_snapshot_readiness_loaded(self, request_id: int, summary) -> None:
         if int(request_id) != self._active_snapshot_request_id:
             return
+        cache = self.__dict__.setdefault("_snapshot_summary_cache", {})
+        cache_project_id = int(
+            self.__dict__.get("project_id", getattr(summary, "project_id", 0)) or 0
+        )
+        cache[cache_project_id] = summary
         panel = self.__dict__.get("snapshot_readiness_panel")
         if panel is not None:
             panel.set_summary(summary)
+        status_timer = self.__dict__.get("_snapshot_status_timer")
+        if status_timer is not None:
+            status_timer.start()
+        self._snapshot_refresh_started_at = 0.0
 
     def on_snapshot_readiness_error(self, request_id: int, message: str) -> None:
         if int(request_id) != self._active_snapshot_request_id:
@@ -617,11 +652,15 @@ class DocumentsView(QWidget):
         panel = self.__dict__.get("snapshot_readiness_panel")
         if panel is not None:
             panel.set_error(f"Snapshot readiness unavailable: {message}")
+        self._snapshot_refresh_started_at = 0.0
 
     def _on_snapshot_readiness_worker_finished(self, worker: SnapshotReadinessWorker) -> None:
         if worker is self.snapshot_readiness_worker:
             self.snapshot_readiness_worker = None
         worker.deleteLater()
+        if self._snapshot_refresh_pending:
+            self._snapshot_refresh_pending = False
+            QTimer.singleShot(0, self.refresh_snapshot_readiness)
 
     def _copy_snapshot_coverage_cli(self) -> None:
         app = QApplication.instance()
@@ -646,11 +685,19 @@ class DocumentsView(QWidget):
             show_info(self, "Runbook", f"Open manually:\n{docs_path}")
 
     def _stop_snapshot_readiness_worker(self) -> None:
+        status_timer = self.__dict__.get("_snapshot_status_timer")
+        if status_timer is not None:
+            status_timer.stop()
         if self.snapshot_readiness_worker and self.snapshot_readiness_worker.isRunning():
             logger.info("Stopping snapshot readiness worker on close")
             self.snapshot_readiness_worker.cancel()
             if not self.snapshot_readiness_worker.wait(100):
                 logger.info("Snapshot readiness worker will finish cooperatively after close")
+
+    def _refresh_snapshot_staleness_label(self) -> None:
+        panel = self.__dict__.get("snapshot_readiness_panel")
+        if panel is not None:
+            panel.refresh_staleness()
 
     def load_documents(self):
         """Load current page using server-side pagination (global filters/sort)."""

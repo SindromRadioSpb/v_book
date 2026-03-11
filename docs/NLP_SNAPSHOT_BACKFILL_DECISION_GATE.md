@@ -175,6 +175,8 @@ These UI surfaces are intentionally observational only:
 - they do not imply production approval
 - they do not bypass the heavy-validation decision gate
 - their `Copy Coverage CLI` action only emits the safe `--coverage-only` command
+- the readiness card keeps last known data visible while refresh is in flight
+  and shows a human-readable stale indicator instead of implying live approval
 
 ## Decision rule for freshness/version hardening
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from PyQt6.QtCore import pyqtSignal
@@ -156,6 +157,7 @@ class SnapshotReadinessPanel(QWidget):
 
     def set_loading(self, message: str = "Refreshing snapshot readiness...") -> None:
         self.refresh_btn.setEnabled(False)
+        self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         self.status_label.setText(str(message or "Refreshing snapshot readiness..."))
 
     def set_error(self, message: str) -> None:
@@ -195,7 +197,7 @@ class SnapshotReadinessPanel(QWidget):
         if summary.latest_backfill_last_doc_id is not None:
             latest_bits.append(f"last doc {summary.latest_backfill_last_doc_id}")
         if summary.latest_backfill_finished_at:
-            latest_bits.append(f"finished {summary.latest_backfill_finished_at}")
+            latest_bits.append(f"finished {self._format_timestamp(summary.latest_backfill_finished_at)}")
         if summary.latest_backfill_docs_total:
             latest_bits.append(
                 f"docs {summary.latest_backfill_docs_processed:,}/{summary.latest_backfill_docs_total:,}"
@@ -210,11 +212,54 @@ class SnapshotReadinessPanel(QWidget):
         if summary.summary_note:
             note_lines.append(summary.summary_note)
         self.note_label.setText("\n".join(note_lines) if note_lines else "")
-        refreshed = summary.last_refreshed_at or "n/a"
-        self.status_label.setText(f"Refreshed: {refreshed}")
+        self.refresh_staleness()
+
+    def refresh_staleness(self, now: Optional[datetime] = None) -> None:
+        if self._summary is None:
+            return
+        refreshed_text = self._format_relative_refresh(self._summary.last_refreshed_at, now=now)
+        self.status_label.setText(refreshed_text)
 
     @staticmethod
     def _format_pct(value: Optional[float]) -> str:
         if value is None:
             return "—"
         return f"{float(value):.2f}%"
+
+    @staticmethod
+    def _parse_utc_timestamp(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    @classmethod
+    def _format_timestamp(cls, value: Optional[str]) -> str:
+        parsed = cls._parse_utc_timestamp(value)
+        if parsed is None:
+            return str(value or "n/a")
+        return parsed.strftime("%Y-%m-%d %H:%M UTC")
+
+    @classmethod
+    def _format_relative_refresh(
+        cls,
+        value: Optional[str],
+        *,
+        now: Optional[datetime] = None,
+    ) -> str:
+        parsed = cls._parse_utc_timestamp(value)
+        if parsed is None:
+            return "Refreshed: n/a"
+        current = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
+        delta_seconds = max(int((current - parsed).total_seconds()), 0)
+        if delta_seconds < 10:
+            rel = "just now"
+        elif delta_seconds < 60:
+            rel = f"{delta_seconds}s ago"
+        elif delta_seconds < 3600:
+            rel = f"{delta_seconds // 60}m ago"
+        else:
+            rel = f"{delta_seconds // 3600}h ago"
+        return f"Refreshed {rel} ({parsed.strftime('%Y-%m-%d %H:%M UTC')})"

@@ -1430,6 +1430,9 @@ implemented as read-only reporting instead of new storage work:
 - `DocumentsView` now surfaces that summary in a non-modal readiness card
 - `TermsView` now surfaces the last extraction source mix so snapshot reuse vs
   sentence reparse is visible without CLI/log spelunking
+- the readiness card keeps the last known summary visible during refresh,
+  queues duplicate refresh requests instead of churning workers, and shows a
+  human-readable stale indicator (`just now`, `5m ago`, etc.)
 
 This layer is explicitly **observability only**:
 

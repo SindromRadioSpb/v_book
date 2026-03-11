@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +33,14 @@ class _FakePanel:
 
     def set_error(self, message):
         self.error = message
+
+
+class _FakeWorker:
+    def __init__(self, running=True):
+        self._running = running
+
+    def isRunning(self):
+        return self._running
 
 
 def _sample_summary() -> SnapshotReadinessSummaryDTO:
@@ -94,6 +103,18 @@ def test_snapshot_readiness_panel_renders_bounded_validation_summary(qtbot):
     assert "Observational only" in panel.note_label.text()
 
 
+def test_snapshot_readiness_panel_formats_relative_refresh_time(qtbot):
+    panel = SnapshotReadinessPanel()
+    qtbot.addWidget(panel)
+
+    summary = _sample_summary()
+    panel.set_summary(summary)
+    panel.refresh_staleness(now=datetime(2026, 3, 11, 10, 10, 0, tzinfo=timezone.utc))
+
+    assert "Refreshed 5m ago" in panel.status_label.text()
+    assert "2026-03-11 10:05 UTC" in panel.status_label.text()
+
+
 def test_documents_view_snapshot_readiness_ignores_stale_requests():
     view = DocumentsView.__new__(DocumentsView)
     view.snapshot_readiness_panel = _FakePanel()
@@ -128,3 +149,20 @@ def test_documents_view_copy_snapshot_coverage_cli_uses_safe_command(qtbot):
     assert '--project-id 5' in text
     assert "hewiki test.db" in text
     assert view.status_label.text == "Coverage CLI copied to clipboard."
+
+
+def test_documents_view_snapshot_refresh_queues_when_worker_is_running():
+    view = DocumentsView.__new__(DocumentsView)
+    view.project_id = 5
+    view.snapshot_readiness_panel = _FakePanel()
+    view.snapshot_readiness_worker = _FakeWorker(running=True)
+    view._snapshot_summary_cache = {}
+    view._active_snapshot_request_id = 0
+    view._snapshot_request_seq = 0
+    view._snapshot_refresh_pending = False
+    view._snapshot_refresh_started_at = 0.0
+
+    DocumentsView.refresh_snapshot_readiness(view)
+
+    assert view._snapshot_refresh_pending is True
+    assert view.snapshot_readiness_panel.loading[-1] == "Refresh queued; current summary stays visible..."
