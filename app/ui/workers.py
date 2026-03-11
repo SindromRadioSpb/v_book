@@ -25,6 +25,26 @@ def _flush_mt_usage_queue(reason: str) -> None:
         logger.debug(f"MT usage queue flush skipped ({reason}): {e}")
 
 
+def _format_heavy_operation_busy_error(operation_label: str, error: Exception) -> str:
+    """Build a user-facing busy message from OperationsCenterBusyError."""
+    active_ops = list(getattr(error, "active_ops", []) or [])
+    active_names = [str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)]
+    active_names = [name for name in active_names if name]
+    if active_names:
+        details = "\n".join(f"- {name}" for name in active_names[:5])
+        if len(active_names) > 5:
+            details += f"\n- ... and {len(active_names) - 5} more"
+    else:
+        details = "- Another heavy operation is already running"
+    op_display = (operation_label or "Operation").strip()
+    return (
+        f"Cannot start '{op_display}' right now.\n\n"
+        "Another heavy background operation is already using the SQLite write slot:\n\n"
+        f"{details}\n\n"
+        "Wait for it to finish and try again."
+    )
+
+
 class Worker(QThread):
     """Generic worker thread."""
 
@@ -62,11 +82,15 @@ class IngestWorker(QThread):
 
     def run(self):
         """Run the ingestion process."""
-        from app.services.operations_center import OperationsCenter
-        op_id = OperationsCenter.instance().register(
-            f"Ingest ({len(self.file_paths)} files)", "ingest"
-        )
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Ingest ({len(self.file_paths)} files)",
+                "ingest",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.ingest_service import IngestService
 
@@ -93,11 +117,14 @@ class IngestWorker(QThread):
 
             self.finished.emit(results)
 
+        except OperationsCenterBusyError as e:
+            self.error.emit(_format_heavy_operation_busy_error("Import", e))
         except Exception as e:
             logger.exception("Ingest worker error")
             self.error.emit(str(e))
         finally:
-            OperationsCenter.instance().unregister(op_id)
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
 
 class ProcessWorker(QThread):
@@ -132,11 +159,15 @@ class ProcessWorker(QThread):
 
     def run(self):
         """Run the processing pipeline."""
-        from app.services.operations_center import OperationsCenter
-        op_id = OperationsCenter.instance().register(
-            f"NLP Process ({len(self.doc_ids)} docs)", "nlp_process"
-        )
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"NLP Process ({len(self.doc_ids)} docs)",
+                "nlp_process",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.process_service import ProcessService
 
@@ -181,13 +212,16 @@ class ProcessWorker(QThread):
                 }
             )
 
+        except OperationsCenterBusyError as e:
+            self.error.emit(_format_heavy_operation_busy_error("NLP Process", e))
         except Exception as e:
             logger.exception("Process worker error")
             # Make error message user-friendly
             error_msg = self._make_user_friendly_error(str(e))
             self.error.emit(error_msg)
         finally:
-            OperationsCenter.instance().unregister(op_id)
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
     def _on_state_changed(self, state: Dict[str, Any], sink: Dict[str, Any]) -> None:
         sink.clear()
@@ -307,11 +341,15 @@ class ProjectTermExtractionWorker(QThread):
 
     def run(self):
         """Extract terms for project."""
-        from app.services.operations_center import OperationsCenter
-        op_id = OperationsCenter.instance().register(
-            f"Term Extract (project {self.project_id})", "term_extract"
-        )
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Term Extract (project {self.project_id})",
+                "term_extract",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.term_extraction_service import TermExtractionService
 
@@ -336,11 +374,14 @@ class ProjectTermExtractionWorker(QThread):
 
                 self.finished.emit(report)
 
+        except OperationsCenterBusyError as e:
+            self.error.emit(_format_heavy_operation_busy_error("Term Extraction", e))
         except Exception as e:
             logger.exception("Project term extraction worker error")
             self.error.emit(str(e))
         finally:
-            OperationsCenter.instance().unregister(op_id)
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
 
 class ConcordanceSearchWorker(QThread):
@@ -1125,7 +1166,15 @@ class DocumentDeleteWorker(QThread):
         self.doc_ids = [int(doc_id) for doc_id in doc_ids]
 
     def run(self):
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Delete Documents ({len(self.doc_ids)} docs)",
+                "document_delete",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.ingest_service import IngestService
 
@@ -1148,9 +1197,14 @@ class DocumentDeleteWorker(QThread):
                     "total": len(self.doc_ids),
                 }
             )
+        except OperationsCenterBusyError as e:
+            self.error.emit(_format_heavy_operation_busy_error("Delete Documents", e))
         except Exception as e:
             logger.exception("Document deletion failed")
             self.error.emit(str(e))
+        finally:
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
 
 class DictionarySearchWorker(QThread):
@@ -1571,7 +1625,15 @@ class ImportWorker(QThread):
 
     def run(self):
         """Run import operation."""
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Dictionary Import ({Path(self.file_path).name})",
+                "dictionary_import",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.dictionary_import_service import DictionaryImportService
 
@@ -1604,11 +1666,17 @@ class ImportWorker(QThread):
                 )
                 self.import_complete.emit(report)
 
+        except OperationsCenterBusyError as e:
+            self.log_message.emit("Import blocked: another heavy operation is already running")
+            self.error.emit(_format_heavy_operation_busy_error("Dictionary Import", e))
         except InterruptedError:
             self.log_message.emit("Import cancelled by user")
         except Exception as e:
             logger.exception("Import error")
             self.error.emit(str(e))
+        finally:
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
     def cancel(self):
         """Cancel the import."""
@@ -3590,7 +3658,15 @@ class PronunciationBootstrapWorker(QThread):
         self.stage_updated.emit(f"Generating pronunciations {int(processed):,}/{int(total):,}")
 
     def run(self):
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                "Pronunciation Bootstrap",
+                "pronunciation_bootstrap",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.pronunciation_bootstrap_service import (
                 PhonikudPronunciationGenerator,
@@ -3679,9 +3755,14 @@ class PronunciationBootstrapWorker(QThread):
                     "health_latency_ms": int(health.latency_ms),
                 }
             )
+        except OperationsCenterBusyError as exc:
+            self.error.emit(_format_heavy_operation_busy_error("Pronunciation Bootstrap", exc))
         except Exception as exc:
             logger.error("PronunciationBootstrapWorker error: %s", exc, exc_info=True)
             self.error.emit(str(exc))
+        finally:
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
 
 class SentenceNiqqudBootstrapWorker(QThread):
@@ -3747,7 +3828,15 @@ class SentenceNiqqudBootstrapWorker(QThread):
         self.resumed.emit()
 
     def run(self) -> None:
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Sentence Niqqud ({len(self.sentence_ids)} rows)",
+                "pronunciation_bootstrap",
+                enforce_limit=True,
+            )
             from app.services.db_service import DBService
             from app.services.pronunciation_bootstrap_service import PhonikudPronunciationGenerator
             from app.services.sentence_pronunciation_bootstrap_service import (
@@ -3856,9 +3945,14 @@ class SentenceNiqqudBootstrapWorker(QThread):
                 "elapsed_seconds": result.elapsed_seconds,
                 "summary_lines": result.summary_lines(),
             })
+        except OperationsCenterBusyError as exc:
+            self.error.emit(_format_heavy_operation_busy_error("Sentence Niqqud Bootstrap", exc))
         except Exception as exc:
             logger.error("SentenceNiqqudBootstrapWorker error: %s", exc, exc_info=True)
             self.error.emit(str(exc))
+        finally:
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
 
 # ── Audio Player v2: queue populate worker ─────────────────────────────────────

@@ -168,6 +168,59 @@ Expected output:
 - stronger retry/rollback baseline,
 - lightweight single-writer discipline for high-contention flows.
 
+Status after first implementation wave:
+
+- implemented on `2026-03-11`
+- refined from the broader roadmap note: the repo already had read/write engine
+  separation in `app/infra/db.py` and `app/services/db_service.py`
+- the practical gap was narrower and more runtime-focused:
+  - global heavy-operation slot semantics in `app/services/operations_center.py`
+  - advisory throttler updated to the same global heavy-slot contract in
+    `app/services/pipeline_throttler.py`
+  - hard slot claim at worker runtime for:
+    - NLP processing
+    - term extraction
+    - ingest
+    - document delete
+    - dictionary import
+    - project import
+    - pronunciation / sentence niqqud bootstrap
+
+Concrete output of this wave:
+
+- heavy categories now share one process-wide slot instead of per-category
+  independence
+- workers that mutate the DB now fail fast with a user-facing busy error if the
+  slot is already occupied
+- the advisory UI check and the runtime worker guard now agree on what counts
+  as a conflicting heavy operation
+
+Evidence:
+
+- regressions:
+  - `tests/test_operations_center.py`
+  - `tests/test_pipeline_throttler.py`
+  - `tests/test_documents_process_progress_ui.py`
+  - `tests/test_terms_extract_progress_ui.py`
+  - `tests/test_pronunciation_bootstrap_idempotent_ui.py`
+  - `tests/test_heavy_worker_slot_guard.py`
+  - result: `43 passed`
+- broader governance/import/read-write slice:
+  - `tests/test_import_chunking_write_gate.py`
+  - `tests/test_project_exchange.py`
+  - `tests/test_rw_engine_split.py`
+  - `tests/test_db_retry.py`
+  - `tests/test_sqlite_busy_retry.py`
+
+Remaining note:
+
+- this wave establishes the runtime writer-governance baseline without a large
+  service-layer refactor
+- read/write split remains the architectural baseline
+- broader mutation-path enrollment or a shared write-governance helper may
+  still be a future follow-up if new contention evidence appears
+- the next active priority is now `PATCH-P0-03`
+
 ### PATCH-P0-03: Document picker search SLO recovery
 
 Goal:
@@ -234,10 +287,9 @@ Primary files:
 ## Immediate execution order
 
 1. `PATCH-P0-01` import controllability
-2. `PATCH-P0-02` runtime DB write-governance baseline
-3. `PATCH-P0-03` picker search SLO recovery
-4. `PATCH-P1-01` large derived data governance
-5. `PATCH-P1-02` audio cache contract completion
+2. `PATCH-P0-03` picker search SLO recovery
+3. `PATCH-P1-01` large derived data governance
+4. `PATCH-P1-02` audio cache contract completion
 
 ## Decision note
 

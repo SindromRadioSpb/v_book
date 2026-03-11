@@ -17,6 +17,24 @@ from app.services.project_exchange.dto import (
 logger = logging.getLogger(__name__)
 
 
+def _format_heavy_operation_busy_error(operation_label: str, error: Exception) -> str:
+    active_ops = list(getattr(error, "active_ops", []) or [])
+    active_names = [str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)]
+    active_names = [name for name in active_names if name]
+    if active_names:
+        details = "\n".join(f"- {name}" for name in active_names[:5])
+        if len(active_names) > 5:
+            details += f"\n- ... and {len(active_names) - 5} more"
+    else:
+        details = "- Another heavy operation is already running"
+    return (
+        f"Cannot start '{operation_label}' right now.\n\n"
+        "Another heavy background operation is already using the SQLite write slot:\n\n"
+        f"{details}\n\n"
+        "Wait for it to finish and try again."
+    )
+
+
 class ProjectExportWorker(QThread):
     """Worker thread for project export."""
 
@@ -93,7 +111,15 @@ class ProjectImportWorker(QThread):
 
     def run(self):
         """Run import in background thread."""
+        from app.services.operations_center import OperationsCenter, OperationsCenterBusyError
+
+        op_id = None
         try:
+            op_id = OperationsCenter.instance().register(
+                f"Project Import ({self.bundle_path.name})",
+                "project_import",
+                enforce_limit=True,
+            )
             logger.info(f"Import worker starting for bundle {self.bundle_path}")
             engine = ProjectImportEngine()
 
@@ -109,9 +135,14 @@ class ProjectImportWorker(QThread):
             else:
                 self.error.emit(report.error_message or "Import failed")
 
+        except OperationsCenterBusyError as e:
+            self.error.emit(_format_heavy_operation_busy_error("Project Import", e))
         except Exception as e:
             logger.exception("Import worker error")
             self.error.emit(self._make_user_friendly_error(e))
+        finally:
+            if op_id:
+                OperationsCenter.instance().unregister(op_id)
 
     def _on_progress(self, stage: str, current: int, total: int):
         """Progress callback from engine."""

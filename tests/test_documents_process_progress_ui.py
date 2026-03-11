@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.ui.documents_view import DocumentsView
 from app.ui.workers import ProcessWorker
+from app.services.operations_center import OperationsCenterBusyError, OperationEntry
 
 
 class _FakeToggle:
@@ -178,6 +179,32 @@ def test_process_worker_emits_structured_state_and_finished_report(monkeypatch):
     assert states[0]["run_id"] == 500
     assert finished_reports[0]["success_count"] == 2
     assert finished_reports[0]["cancelled"] is False
+
+
+def test_process_worker_reports_busy_when_global_heavy_slot_taken(monkeypatch):
+    errors = []
+
+    class _FakeOpsCenter:
+        def register(self, *_args, **_kwargs):
+            raise OperationsCenterBusyError(
+                "nlp_process",
+                [OperationEntry(op_id="op-1", name="Import bundle", category="project_import")],
+            )
+
+        def unregister(self, _op_id):
+            return None
+
+    from app.services.operations_center import OperationsCenter
+
+    monkeypatch.setattr(OperationsCenter, "instance", classmethod(lambda cls: _FakeOpsCenter()))
+
+    worker = ProcessWorker(doc_ids=[11, 12], use_mock=True)
+    worker.error.connect(errors.append)
+    worker.run()
+
+    assert errors
+    assert "NLP Process" in errors[0]
+    assert "Import bundle" in errors[0]
 
 
 def test_documents_process_state_updates_progress_ui():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.operations_center import OperationEntry, OperationsCenterBusyError
 from app.ui.workers import PronunciationBootstrapWorker
 
 
@@ -165,3 +166,34 @@ def test_bootstrap_worker_finishes_cancelled_when_health_check_is_cancelled(monk
     assert result["cancelled"] is True
     assert session.commit_calls == 0
     assert session.rollback_calls == 0
+
+
+def test_bootstrap_worker_reports_busy_when_heavy_slot_taken(monkeypatch):
+    class _FakeOpsCenter:
+        def register(self, *_args, **_kwargs):
+            raise OperationsCenterBusyError(
+                "pronunciation_bootstrap",
+                [OperationEntry(op_id="op-1", name="NLP Process (42 docs)", category="nlp_process")],
+            )
+
+        def unregister(self, _op_id):
+            return None
+
+    from app.services.operations_center import OperationsCenter
+
+    monkeypatch.setattr(OperationsCenter, "instance", classmethod(lambda cls: _FakeOpsCenter()))
+
+    worker = PronunciationBootstrapWorker(
+        lang="he",
+        model_path="",
+        enabled=True,
+        chunk_size=100,
+        dry_run=False,
+    )
+    errors = []
+    worker.error.connect(errors.append)
+    worker.run()
+
+    assert errors
+    assert "Pronunciation Bootstrap" in errors[0]
+    assert "NLP Process (42 docs)" in errors[0]

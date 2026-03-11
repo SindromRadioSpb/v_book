@@ -46,12 +46,12 @@ def test_slot_blocked_when_occupied():
     assert t.is_slot_free("nlp_process") is True
 
 
-def test_different_categories_independent():
+def test_different_heavy_categories_share_global_slot():
     t = PipelineThrottler.instance()
     op_id = OperationsCenter.instance().register("Ingest run", "ingest")
     assert t.is_slot_free("ingest") is False
-    # nlp_process slot unaffected
-    assert t.is_slot_free("nlp_process") is True
+    # nlp_process is blocked by the same global heavy slot
+    assert t.is_slot_free("nlp_process") is False
     OperationsCenter.instance().unregister(op_id)
 
 
@@ -97,6 +97,14 @@ def test_format_blocked_reason_shows_running_op():
     op_id = OperationsCenter.instance().register("Big NLP batch", "nlp_process")
     reason = t.format_blocked_reason("nlp_process")
     assert "Big NLP batch" in reason
+    OperationsCenter.instance().unregister(op_id)
+
+
+def test_format_blocked_reason_uses_other_heavy_category_name():
+    t = PipelineThrottler.instance()
+    op_id = OperationsCenter.instance().register("Large Import", "project_import")
+    reason = t.format_blocked_reason("nlp_process")
+    assert reason == "Busy: Large Import"
     OperationsCenter.instance().unregister(op_id)
 
 

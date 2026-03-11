@@ -1,10 +1,10 @@
-"""Tests for PERF-SCALE PATCH-B: OperationsCenter.
+"""Tests for global heavy-operation governance in OperationsCenter.
 
 Covers:
 - register() returns unique op_id; entry appears in active_ops()
 - unregister() removes entry; no-op for unknown id
 - active_count() / heavy_count() track correctly
-- is_slot_available() enforces MAX_HEAVY_CONCURRENT per category
+- is_slot_available() enforces the global heavy-operation slot
 - is_slot_available() always True for non-heavy categories
 - Concurrent register/unregister is thread-safe
 - reset_for_tests() clears state between tests
@@ -20,6 +20,7 @@ from app.services.operations_center import (
     HEAVY_CATEGORIES,
     MAX_HEAVY_CONCURRENT,
     OperationsCenter,
+    OperationsCenterBusyError,
 )
 
 
@@ -129,15 +130,37 @@ def test_slot_available_for_non_heavy_category():
     assert center.is_slot_available("search") is True
 
 
-def test_different_heavy_categories_independent():
-    """Filling ingest slots does not block nlp_process slots."""
+def test_different_heavy_categories_share_global_slot():
+    """Any active heavy op blocks starting another heavy category."""
     center = OperationsCenter.instance()
     for _ in range(MAX_HEAVY_CONCURRENT):
         center.register("ingest op", "ingest")
     # ingest is blocked
     assert center.is_slot_available("ingest") is False
-    # nlp_process is still free
-    assert center.is_slot_available("nlp_process") is True
+    # nlp_process is blocked by the same global heavy slot
+    assert center.is_slot_available("nlp_process") is False
+
+
+def test_register_enforce_limit_raises_when_heavy_slot_busy():
+    center = OperationsCenter.instance()
+    center.register("Existing ingest", "ingest")
+
+    with pytest.raises(OperationsCenterBusyError) as exc_info:
+        center.register("New NLP", "nlp_process", enforce_limit=True)
+
+    assert exc_info.value.category == "nlp_process"
+    assert [op.name for op in exc_info.value.active_ops] == ["Existing ingest"]
+
+
+def test_blocking_ops_returns_all_active_heavy_ops_for_heavy_category():
+    center = OperationsCenter.instance()
+    center.register("Import", "project_import")
+    center.register("NLP", "nlp_process")
+    center.register("Search", "search")
+
+    blocking = center.blocking_ops("term_extract")
+
+    assert [op.name for op in blocking] == ["Import", "NLP"]
 
 
 # ---------------------------------------------------------------------------

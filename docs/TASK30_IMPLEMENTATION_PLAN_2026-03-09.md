@@ -1659,4 +1659,8 @@ Current execution status:
 
 - `PATCH-P0-01` import controllability has started and is now implemented with
   bounded generic table batching and improved cooperative cancel checks
-- next active priority is `PATCH-P0-02` runtime DB write-governance baseline
+- `PATCH-P0-02` runtime DB write-governance baseline is now implemented with:
+  - global heavy-operation slot semantics,
+  - aligned advisory throttling,
+  - runtime slot claim for the main DB-mutating workers/import paths
+- next active priority is `PATCH-P0-03` picker search SLO recovery
