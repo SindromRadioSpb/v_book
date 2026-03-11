@@ -1335,3 +1335,62 @@ Interpretation:
 - this is strong enough to keep moving forward with staged tiering
 - the next evidence step should be another larger tier such as `120k`
   cumulative coverage before attempting any new full-scale rerun
+
+## Real dev/test DB staged coverage extended to 120k docs (2026-03-11)
+
+Files / artifacts:
+
+- `build/logs/nlp_stage_120k/db_open_before_120k.json`
+- `build/logs/nlp_stage_120k/snapshot_backfill_probe_50001_120000.jsonl`
+- `build/logs/nlp_stage_120k/probe_summary_50001_120000.json`
+- `build/logs/nlp_stage_120k/run_summary_50001_120000.json`
+- `build/logs/nlp_stage_120k/coverage_after_120k.log`
+- `build/logs/nlp_stage_120k/db_open_after_120k.json`
+- `build/logs/nlp_stage_120k/postrun_probe_120k.json`
+
+Observed on the approved dev/test DB:
+
+- pre-run state:
+  - `schema_version=40`
+  - `db_open ok`
+  - prior cumulative coverage from the validated `50k` state:
+    - `49999` fully covered docs
+    - `20.1938%` sentence coverage
+    - `12.8983%` doc coverage
+- bounded extension run:
+  - `project_id=1`
+  - `doc_offset=50000`
+  - `max_docs=70000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+  - `integrity_checkpoint_mode=none`
+  - run `387620`
+  - runtime `3495.7 s`
+- result:
+  - `status='ok'`
+  - `stage='completed'`
+  - `docs_processed=70000`
+  - `docs_failed=0`
+  - `chunks_completed=14/14`
+  - `stage_rows_remaining=0`
+  - post-run `db_open` remained healthy
+  - probe summary recorded no `probe_error` and no non-timeout `quick_check`
+    failures
+
+Coverage after the 120k cumulative state:
+
+- `119999` fully covered docs
+- `267640` zero-snapshot docs remain
+- `38.1812%` sentence coverage
+- `30.9564%` full-doc coverage
+
+Interpretation:
+
+- the staged redesign now has real-db evidence through `120k` cumulative docs
+  on the approved dev/test hewiki DB
+- this materially strengthens the case that the storage redesign fixed the
+  earlier direct-write durability issue for bounded large-project runs
+- a fresh full `387639`-doc rerun is still not justified yet; the next rational
+  step should be another materially larger staged tier, e.g. `250k`
+  cumulative docs, before revisiting any full-scale rerun discussion

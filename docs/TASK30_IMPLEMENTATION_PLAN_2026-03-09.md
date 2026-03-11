@@ -1577,3 +1577,49 @@ Operational interpretation:
   `10k` slice
 - the next rational step is a larger staged tier, e.g. `120k` cumulative docs,
   before any fresh full-scale rerun discussion
+
+## Staged tier extended on real dev/test DB to 120k cumulative docs (2026-03-11)
+
+Status:
+
+- completed successfully
+
+Artifacts:
+
+- `build/logs/nlp_stage_120k/db_open_before_120k.json`
+- `build/logs/nlp_stage_120k/snapshot_backfill_probe_50001_120000.jsonl`
+- `build/logs/nlp_stage_120k/probe_summary_50001_120000.json`
+- `build/logs/nlp_stage_120k/run_summary_50001_120000.json`
+- `build/logs/nlp_stage_120k/coverage_after_120k.log`
+- `build/logs/nlp_stage_120k/db_open_after_120k.json`
+- `build/logs/nlp_stage_120k/postrun_probe_120k.json`
+
+Observed:
+
+- extended the approved `hewiki_gpu_processing test.db` from `50k` to `120k`
+  cumulative covered docs by running:
+  - `doc_offset=50000`
+  - `max_docs=70000`
+  - `chunk_size=5000`
+  - `merge_batch_size=1000`
+  - `segment_quick_check_timeout=0.5`
+  - `integrity_checkpoint_mode=none`
+- run `387620` completed with:
+  - `status='ok'`
+  - `docs_processed=70000`
+  - `docs_failed=0`
+  - `chunks_completed=14/14`
+  - `stage_rows_remaining=0`
+  - runtime `3495.7 s`
+- post-run `db_open` stayed healthy
+- coverage on `ID=1` increased to:
+  - `119999` fully covered docs
+  - `38.1812%` sentence coverage
+  - `30.9564%` full-doc coverage
+
+Operational interpretation:
+
+- the redesigned backfill path now has real-db evidence through `120k`
+  cumulative docs on the approved dev/test DB
+- the next rational step is another materially larger staged tier, e.g. `250k`
+  cumulative docs, before any new full-scale rerun discussion
