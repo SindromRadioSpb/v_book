@@ -1394,3 +1394,23 @@ Interpretation:
 - a fresh full `387639`-doc rerun is still not justified yet; the next rational
   step should be another materially larger staged tier, e.g. `250k`
   cumulative docs, before revisiting any full-scale rerun discussion
+
+## Controlled hold-state after 120k bounded validation
+
+The current state is intentionally frozen as:
+
+- bounded large-scale validation accepted
+- full-scale production approval deferred
+- main install DB rollout blocked
+- freshness/version hardening deferred
+
+This is now governed by:
+
+- `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
+
+Use that document as the source of truth for:
+
+- the decision gate for the next heavy validation run
+- the operator run package for `250k` or full-volume validation
+- the explicit rule that `120k` cumulative evidence is not yet a production
+  rollout approval

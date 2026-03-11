@@ -376,6 +376,14 @@ python scripts/process_reference_corpus.py `
   - the approved dev/test DB has since been restored from a safe pre-corruption
     backup and is usable again, but the full `ID=1` backfill must still stay
     blocked until the durability bug itself is fixed
+  - after the later staged redesign evidence wave reached `120k` cumulative
+    docs, the track moved into a controlled hold-state:
+    - bounded validation accepted
+    - full-volume validation deferred
+    - main install DB rollout blocked
+    - freshness/version work blocked
+  - the operator decision gate and future heavy-run package now live in:
+    - `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
 
 ### Inter-chunk sleep
 

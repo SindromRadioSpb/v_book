@@ -1623,3 +1623,17 @@ Operational interpretation:
   cumulative docs on the approved dev/test DB
 - the next rational step is another materially larger staged tier, e.g. `250k`
   cumulative docs, before any new full-scale rerun discussion
+
+## Controlled hold-state for snapshot backfill track
+
+Task30 status after the `120k` cumulative evidence wave:
+
+- bounded validation is sufficient for the current engineering decision
+- no new expensive full run is required immediately
+- full-volume validation is deferred intentionally
+- main DB execution remains blocked
+- freshness/version work remains blocked
+
+The decision gate and future heavy-run package are documented in:
+
+- `docs/NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md`
