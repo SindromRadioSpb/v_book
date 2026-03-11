@@ -941,7 +941,7 @@ class DocumentsView(QWidget):
         # multi-hour write sessions.
         _process_tip = (
             "NLP processing of reference corpus is CLI-only.\n"
-            "Use: python scripts/process_reference_corpus.py --project-id <id>"
+            "Use process_reference_corpus.py; add --reprocess-all for rebuilds."
         )
         for attr in ("process_btn", "reprocess_btn"):
             btn = getattr(self, attr, None)
@@ -1470,7 +1470,8 @@ class DocumentsView(QWidget):
                 self,
                 "Reference Corpus — CLI Only",
                 "NLP re-processing of a reference corpus is not allowed from the UI.\n\n"
-                "Use: python scripts/process_reference_corpus.py --project-id <id>",
+                "Use the CLI rebuild path instead:\n"
+                "  python scripts/process_reference_corpus.py --project-id <id> --reprocess-all",
             )
             return
 

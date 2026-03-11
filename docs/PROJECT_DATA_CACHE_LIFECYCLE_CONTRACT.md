@@ -375,6 +375,9 @@ It must not:
     age-prune candidates
   - if storage pressure becomes real for those tables, the correct follow-up is
     an explicit project-level reset/rebuild workflow, not incremental cleanup
+  - reference-scale rebuilds should use
+    `scripts/process_reference_corpus.py --project-id <id> --reprocess-all`
+    rather than any ad-hoc row deletion path
 
 ## Immediate follow-up recommendations
 

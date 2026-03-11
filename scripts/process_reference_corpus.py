@@ -43,6 +43,11 @@ Backfill snapshots for already processed docs:
         --db-path hdle_premium.db --project-id 1 \\
         --backfill-snapshots --chunk-size 5000 --merge-batch-size 1000
 
+Re-process all currently processed docs:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --reprocess-all --resume-latest
+
 Repeat the same late-scale probe but skip the final WAL checkpoint flush:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 \\
@@ -697,6 +702,11 @@ def main() -> None:
         help="Backfill sentence_nlp_snapshot rows for already processed docs",
     )
     parser.add_argument(
+        "--reprocess-all",
+        action="store_true",
+        help="Re-process all currently processed docs instead of processing only unprocessed docs.",
+    )
+    parser.add_argument(
         "--coverage-only",
         action="store_true",
         help="Report sentence snapshot coverage for the selected project and exit",
@@ -771,6 +781,10 @@ def main() -> None:
         parser.error("--preflight-only and --coverage-only are mutually exclusive")
     if args.preflight_only and args.dry_run:
         parser.error("--preflight-only and --dry-run are mutually exclusive")
+    if args.reprocess_all and args.backfill_snapshots:
+        parser.error("--reprocess-all and --backfill-snapshots are mutually exclusive")
+    if args.reprocess_all and args.coverage_only:
+        parser.error("--reprocess-all and --coverage-only are mutually exclusive")
     if args.coverage_only and int(args.doc_offset or 0) > 0:
         parser.error("--doc-offset is not supported with --coverage-only")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
@@ -889,9 +903,14 @@ def main() -> None:
         wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
         mode_label = "reference_processing"
         source_label = "reference_cli"
+        is_reprocess_mode = bool(args.reprocess_all)
         if args.backfill_snapshots:
             mode_label = "snapshot_backfill"
             source_label = "snapshot_backfill_cli"
+            doc_ids_all = processed_doc_ids
+        elif is_reprocess_mode:
+            mode_label = "reference_reprocess"
+            source_label = "reference_cli_reprocess"
             doc_ids_all = processed_doc_ids
         else:
             doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
@@ -916,6 +935,12 @@ def main() -> None:
                     len(doc_ids_to_process),
                     len(missing_snapshot_doc_ids),
                 )
+            elif is_reprocess_mode:
+                logger.info(
+                    "Resume contract slice: %d processed docs (currently processed: %d)",
+                    len(doc_ids_to_process),
+                    len(processed_doc_ids),
+                )
             else:
                 logger.info(
                     "Resume contract slice: %d docs (remaining currently unprocessed: %d)",
@@ -927,6 +952,11 @@ def main() -> None:
             logger.info(
                 "Snapshot backfill candidate docs in current slice: %d of %d processed docs",
                 len([doc_id for doc_id in missing_snapshot_doc_ids if doc_id in selected_doc_ids]),
+                len(doc_ids_to_process),
+            )
+        elif is_reprocess_mode:
+            logger.info(
+                "Re-process candidate docs in current slice: %d processed docs",
                 len(doc_ids_to_process),
             )
 
@@ -964,6 +994,12 @@ def main() -> None:
                 "Verifying": "Verifying snapshot backfill",
                 "Planning": "Planning snapshot backfill",
                 "Processing": "Backfilling snapshots",
+            }[action_label]
+        elif is_reprocess_mode:
+            action_label = {
+                "Verifying": "Verifying reprocess batch",
+                "Planning": "Planning reprocess batch",
+                "Processing": "Reprocessing",
             }[action_label]
 
         logger.info(
@@ -1017,6 +1053,7 @@ def main() -> None:
                     doc_ids_to_process,
                     use_gpu=use_gpu,
                     use_mock=use_mock,
+                    is_reprocess=is_reprocess_mode,
                     source_label=source_label,
                     resume_latest=bool(args.resume_latest),
                     resume_run_id=args.resume_run_id,
@@ -1051,6 +1088,7 @@ def main() -> None:
                         doc_ids_to_process,
                         use_gpu=use_gpu,
                         use_mock=use_mock,
+                        is_reprocess=is_reprocess_mode,
                         chunk_size=args.chunk_size,
                         chunk_sleep=args.chunk_sleep,
                         state_callback=state_callback,
@@ -1061,7 +1099,11 @@ def main() -> None:
         except Exception as exc:
             logger.error(
                 "%s failed after %.1fs: %s",
-                "Snapshot backfill" if args.backfill_snapshots else "Reference processing",
+                "Snapshot backfill"
+                if args.backfill_snapshots
+                else "Reference re-processing"
+                if is_reprocess_mode
+                else "Reference processing",
                 time.monotonic() - start,
                 exc,
             )

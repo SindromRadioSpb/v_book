@@ -160,8 +160,8 @@ Expected state:
 | Add Files button | Disabled · tooltip: "Cannot add documents to reference corpus (read-only)" |
 | Add Folder button | Disabled · tooltip: same |
 | Delete button | Disabled · tooltip: "Cannot delete documents from reference corpus (read-only)" |
-| Process button | Disabled · tooltip: "NLP processing of reference corpus is CLI-only. Use: `python scripts/process_reference_corpus.py`" |
-| Re-process button | Disabled · same tooltip |
+| Process button | Disabled · tooltip points to `python scripts/process_reference_corpus.py --project-id <id>` |
+| Re-process button | Disabled · tooltip points to `python scripts/process_reference_corpus.py --project-id <id> --reprocess-all` |
 | Document list / search / filters | Fully functional |
 | Terms / Translation / Audio tabs | Fully functional (read-write for overlays) |
 
@@ -227,6 +227,26 @@ python scripts/process_reference_corpus.py `
     --project-id 1 `
     --db-path hdle_premium.db `
     --resume-latest
+```
+
+### Re-process all currently processed docs
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --reprocess-all
+```
+
+### Verify a reprocess resume contract without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --reprocess-all `
+    --resume-run-id 387620 `
+    --verify-only
 ```
 
 ### Resume an explicit interrupted batch run
@@ -300,7 +320,7 @@ python scripts/process_reference_corpus.py `
 | Aspect | UI ProcessWorker | CLI process_reference_corpus.py |
 |--------|-----------------|--------------------------------|
 | Session scope | One session per document | One session per document |
-| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters, deterministic `--resume-latest`, explicit `--resume-run-id`, and `--verify-only` preflight for both processing and snapshot-backfill runs |
+| Run state | Regular-project UI now uses the same DB-backed batch `processor_run` state, but the controls stay blocked for reference corpora | DB-backed batch `processor_run` state with stage/chunk/doc counters, deterministic `--resume-latest`, explicit `--resume-run-id`, and `--verify-only` preflight for processing, `--reprocess-all`, and snapshot-backfill runs |
 | Cancellation | Regular-project UI now has pause/resume/cancel at document checkpoints, but reference corpora must still use the CLI path | Cooperative resume-at-checkpoint model; interrupted work can be resumed only when the stored contract still matches and the persisted run is in `paused`, `cancelled`, or `failed` state |
 | Coverage audit | Not exposed for reference corpora | `--backfill-snapshots --coverage-only` gives a read-only snapshot coverage report before any backfill write |
 | Concurrent use of app | Reasonable for small regular-project selections only | Preferred for long reference-scale runs; app can remain open |

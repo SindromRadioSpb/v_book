@@ -1139,6 +1139,7 @@ Result:
   legacy processed docs can now be enriched through a dedicated CLI-first
   snapshot backfill path instead of waiting for a future full reprocess
 - `process_reference_corpus.py` now supports:
+  - `--reprocess-all` for deterministic CLI rebuild of already processed docs
   - `--backfill-snapshots`
   - `--coverage-only`
   - snapshot-backfill `--verify-only`

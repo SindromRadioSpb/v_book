@@ -491,6 +491,7 @@ Delivered in this wave:
 - `process_documents_batch()` now supports `resume_run_id=` and refuses
   ambiguous `resume_latest + resume_run_id` combinations
 - `scripts/process_reference_corpus.py` now supports:
+  - `--reprocess-all` for deterministic CLI rebuild of already processed docs
   - `--resume-run-id <id>`
   - `--verify-only`
 - CLI verify mode exits without writes and returns:

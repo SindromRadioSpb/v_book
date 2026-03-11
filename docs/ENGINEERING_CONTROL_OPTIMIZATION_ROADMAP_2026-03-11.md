@@ -613,6 +613,8 @@ Remaining note:
     - not eligible for age-based retention
     - operator guidance should point to explicit reset/rebuild workflows instead
       of incremental pruning
+    - reference-scale rebuild path is now preserved via
+      `scripts/process_reference_corpus.py --project-id <id> --reprocess-all`
 - governance UI now surfaces those maintenance modes explicitly, including a
   safe telemetry dry-run CLI copy path, while staying observational-only
 

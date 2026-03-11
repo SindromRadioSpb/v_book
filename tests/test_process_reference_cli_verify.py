@@ -229,6 +229,40 @@ def _create_cancelled_snapshot_backfill_run(db_path: Path, monkeypatch) -> tuple
         _reset_db_service()
 
 
+def _create_cancelled_reprocess_run(db_path: Path, monkeypatch) -> tuple[int, int, list[int]]:
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+    service = ProcessService()
+    monkeypatch.setattr(ProcessService, "get_nlp_engine", lambda self, **kwargs: _Engine())
+
+    cancel_state = {"stop": False}
+    try:
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=3)
+
+            def _progress(current: int, total: int, doc_name: str) -> None:
+                _ = total, doc_name
+                if current >= 2:
+                    cancel_state["stop"] = True
+
+            service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                is_reprocess=True,
+                chunk_size=1,
+                progress_callback=_progress,
+                cancel_check=lambda: bool(cancel_state["stop"]),
+                resume_latest=True,
+                source_label="reference_cli_reprocess",
+            )
+            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            return int(project_id), int(run.run_id), doc_ids
+    finally:
+        _reset_db_service()
+
+
 def _load_script_module():
     scripts_dir = str((Path(__file__).resolve().parent.parent / "scripts"))
     if scripts_dir not in sys.path:
@@ -252,6 +286,26 @@ def test_cli_rejects_conflicting_resume_flags(monkeypatch):
             "--resume-latest",
             "--resume-run-id",
             "10",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+
+
+def test_cli_rejects_reprocess_all_with_backfill_snapshots(monkeypatch):
+    module = _load_script_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "process_reference_corpus.py",
+            "--db-path",
+            "dummy.db",
+            "--project-id",
+            "1",
+            "--reprocess-all",
+            "--backfill-snapshots",
         ],
     )
     with pytest.raises(SystemExit) as exc:
@@ -336,6 +390,77 @@ def test_cli_resume_run_id_resumes_selected_run(monkeypatch):
                 str(db_path),
                 "--project-id",
                 str(project_id),
+                "--resume-run-id",
+                str(run_id),
+            ],
+        )
+
+        module.main()
+
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            run = session.get(ProcessorRun, int(run_id))
+            assert run is not None
+            assert run.status == "ok"
+            assert run.stage == "completed"
+            assert run.docs_total == 3
+            assert run.docs_processed == 3
+            assert run.chunks_completed == 3
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_verify_only_reprocess_run_exits_zero_without_processing(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        project_id, run_id, _doc_ids = _create_cancelled_reprocess_run(db_path, monkeypatch)
+        module = _load_script_module()
+
+        def _unexpected_process(*args, **kwargs):
+            raise AssertionError("verify-only must not call process_documents_batch")
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _unexpected_process)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--resume-run-id",
+                str(run_id),
+                "--verify-only",
+            ],
+        )
+
+        module.main()
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_resume_run_id_resumes_selected_reprocess_run(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        project_id, run_id, _doc_ids = _create_cancelled_reprocess_run(db_path, monkeypatch)
+        module = _load_script_module()
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
                 "--resume-run-id",
                 str(run_id),
             ],
@@ -631,6 +756,58 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
         _reset_db_service()
         db_path.unlink(missing_ok=True)
         backup_db.unlink(missing_ok=True)
+
+
+def test_cli_doc_offset_and_max_docs_select_reprocess_slice(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=5)
+        _reset_db_service()
+
+        module = _load_script_module()
+        captured: dict[str, object] = {}
+
+        def _fake_process_batch(
+            self,
+            session,
+            doc_ids,
+            **kwargs,
+        ):
+            captured["doc_ids"] = list(doc_ids)
+            captured["is_reprocess"] = kwargs.get("is_reprocess")
+            captured["source_label"] = kwargs.get("source_label")
+            return len(doc_ids), 0
+
+        monkeypatch.setattr(ProcessService, "process_documents_batch", _fake_process_batch)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--reprocess-all",
+                "--doc-offset",
+                "1",
+                "--max-docs",
+                "2",
+            ],
+        )
+
+        module.main()
+
+        assert captured["doc_ids"] == doc_ids[1:3]
+        assert captured["is_reprocess"] is True
+        assert captured["source_label"] == "reference_cli_reprocess"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
 
 
 def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkeypatch):
