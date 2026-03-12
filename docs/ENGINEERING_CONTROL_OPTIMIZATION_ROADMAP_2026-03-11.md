@@ -898,6 +898,35 @@ Current status after the wave:
   next narrow subsystem wave;
 - do not reopen Terms work without new approved-target evidence.
 
+## Sixth framework-driven cold-audit wave
+
+The sixth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/CONCORDANCE_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that Concordance is currently
+  blocked by prerequisite `sentence_fts` health rather than by a measured cold
+  latency offender:
+  - `sentence_fts` rows = `1,792`
+  - project-scoped sentence rows for project `1` = `13,387,588`
+  - project-joined `sentence_fts` rows = `0`
+- a bounded raw project-scoped Concordance FTS probe therefore returns no rows
+  quickly, but that is not evidence of a healthy or optimized search surface.
+
+Current status after the wave:
+
+- Concordance cold-audit triage is closed;
+- no Concordance runtime patch branch is opened from this wave;
+- Concordance is now explicitly treated as a `sentence_fts` dependency-health
+  gate, not as an isolated latency branch;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen Concordance work without a separate approved-target
+  `sentence_fts` health gate.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
