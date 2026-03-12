@@ -11,7 +11,7 @@ WAL safety: short read transactions only; writes go through existing services.
 import logging
 from typing import List, Optional, Dict, Set
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
@@ -59,43 +59,21 @@ class SentencesWorkspaceService:
         Returns:
             List of SentenceDTO with overlays populated.
         """
-        # PATCH-Q fast path: use denormalized corpus_id on document_sentence
-        # (migration 031) so the query can use idx_sentence_corpus_sent_id
-        # instead of a 3-table JOIN + TEMP B-TREE sort over 13M rows.
         corpus_ids = self._get_project_corpus_ids(session, project_id)
-        stmt = (
-            select(DocumentSentence, SourceDocument.file_name)
-            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .where(DocumentSentence.corpus_id.in_(corpus_ids))
+        rows = self._load_sentence_page_rows(
+            session,
+            corpus_ids=corpus_ids,
+            doc_id_filter=doc_id_filter,
+            text_search=text_search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            page=page,
+            page_size=page_size,
         )
 
-        if doc_id_filter is not None:
-            stmt = stmt.where(DocumentSentence.doc_id == doc_id_filter)
-
-        if text_search:
-            stmt = stmt.where(DocumentSentence.text.ilike(f"%{text_search}%"))
-
-        # Safe sort allowlist
-        _sort_map = {
-            "sentence_id": DocumentSentence.sentence_id,
-            "doc_id": DocumentSentence.doc_id,
-            "sent_index": DocumentSentence.sent_index,
-        }
-        sort_col = _sort_map.get(sort_by, DocumentSentence.sentence_id)
-        if sort_dir == "desc":
-            stmt = stmt.order_by(sort_col.desc(), DocumentSentence.sent_index.asc())
-        else:
-            stmt = stmt.order_by(sort_col.asc(), DocumentSentence.sent_index.asc())
-
-        # Pagination
-        offset = (page - 1) * page_size
-        stmt = stmt.limit(page_size).offset(offset)
-
-        rows = session.execute(stmt).all()
-
         # Collect sentence IDs and texts for batch overlay lookups
-        sentence_ids = [r[0].sentence_id for r in rows]
-        sentence_texts = [r[0].text for r in rows]
+        sentence_ids = [int(row["sentence_id"]) for row in rows]
+        sentence_texts = [str(row["text"]) for row in rows]
         src_lang = self._get_project_src_lang(session, project_id)
 
         # Batch overlays
@@ -107,17 +85,18 @@ class SentencesWorkspaceService:
         audio_map = self._batch_get_audio(session, src_lang, sentence_texts)
 
         result = []
-        for sent, doc_name in rows:
-            text = sent.text
+        for row in rows:
+            sentence_id = int(row["sentence_id"])
+            text = str(row["text"])
             norm = self._norm(src_lang, text)
             translation_entry = translation_map.get(norm)
-            overlay: Optional[SentenceNiqqudOverlay] = niqqud_map.get(sent.sentence_id)
+            overlay: Optional[SentenceNiqqudOverlay] = niqqud_map.get(sentence_id)
             result.append(
                 SentenceDTO(
-                    sentence_id=sent.sentence_id,
-                    doc_id=sent.doc_id,
-                    doc_name=doc_name or "",
-                    sent_index=sent.sent_index,
+                    sentence_id=sentence_id,
+                    doc_id=int(row["doc_id"]),
+                    doc_name=str(row.get("file_name") or ""),
+                    sent_index=int(row["sent_index"]),
                     text=text,
                     translation=translation_entry[0] if translation_entry else None,
                     translation_status=translation_entry[1] if translation_entry else None,
@@ -341,6 +320,148 @@ class SentencesWorkspaceService:
             return normalize_for_tm(lang, text, "surface").norm
         except Exception:
             return text.strip().lower()
+
+    def _load_sentence_page_rows(
+        self,
+        session: Session,
+        *,
+        corpus_ids: List[int],
+        doc_id_filter: Optional[int],
+        text_search: Optional[str],
+        sort_by: str,
+        sort_dir: str,
+        page: int,
+        page_size: int,
+    ) -> List[dict]:
+        if not corpus_ids:
+            return []
+
+        if self._should_use_sentence_id_pk_scan(
+            doc_id_filter=doc_id_filter,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        ):
+            return self._load_sentence_page_rows_pk_scan(
+                session,
+                corpus_ids=corpus_ids,
+                text_search=text_search,
+                page=page,
+                page_size=page_size,
+            )
+
+        stmt = (
+            select(DocumentSentence, SourceDocument.file_name)
+            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+            .where(DocumentSentence.corpus_id.in_(corpus_ids))
+        )
+
+        if doc_id_filter is not None:
+            stmt = stmt.where(DocumentSentence.doc_id == doc_id_filter)
+
+        if text_search:
+            stmt = stmt.where(DocumentSentence.text.ilike(f"%{text_search}%"))
+
+        # Keep the general ORM path for non-default sorts and doc-scoped queries.
+        _sort_map = {
+            "sentence_id": DocumentSentence.sentence_id,
+            "doc_id": DocumentSentence.doc_id,
+            "sent_index": DocumentSentence.sent_index,
+        }
+        sort_col = _sort_map.get(sort_by, DocumentSentence.sentence_id)
+        if sort_dir == "desc":
+            stmt = stmt.order_by(sort_col.desc(), DocumentSentence.sent_index.asc())
+        else:
+            stmt = stmt.order_by(sort_col.asc(), DocumentSentence.sent_index.asc())
+
+        offset = (page - 1) * page_size
+        stmt = stmt.limit(page_size).offset(offset)
+        return [
+            {
+                "sentence_id": int(sent.sentence_id),
+                "doc_id": int(sent.doc_id),
+                "sent_index": int(sent.sent_index),
+                "text": sent.text,
+                "file_name": doc_name or "",
+            }
+            for sent, doc_name in session.execute(stmt).all()
+        ]
+
+    @staticmethod
+    def _should_use_sentence_id_pk_scan(
+        *,
+        doc_id_filter: Optional[int],
+        sort_by: str,
+        sort_dir: str,
+    ) -> bool:
+        return (
+            doc_id_filter is None
+            and (sort_by or "sentence_id") == "sentence_id"
+            and (sort_dir or "asc").lower() == "asc"
+        )
+
+    def _load_sentence_page_rows_pk_scan(
+        self,
+        session: Session,
+        *,
+        corpus_ids: List[int],
+        text_search: Optional[str],
+        page: int,
+        page_size: int,
+    ) -> List[dict]:
+        # On large multi-corpus projects, SQLite can choose idx_sentence_corpus_sent_id
+        # plus TEMP B-TREE ORDER BY for the default page load. For the actual
+        # user-visible path (sentence_id ASC), a rowid/PK-ordered scan is cheaper.
+        corpus_params = {
+            f"corpus_id_{idx}": int(corpus_id)
+            for idx, corpus_id in enumerate(corpus_ids)
+        }
+        where_parts = [
+            "corpus_id IN ({})".format(
+                ", ".join(f":{name}" for name in corpus_params.keys())
+            )
+        ]
+        params: Dict[str, object] = {
+            **corpus_params,
+            "limit": int(page_size),
+            "offset": int((page - 1) * page_size),
+        }
+        if text_search:
+            where_parts.append("lower(text) LIKE lower(:text_search)")
+            params["text_search"] = f"%{text_search}%"
+
+        stmt = text(
+            f"""
+            SELECT sentence_id, doc_id, sent_index, text
+            FROM document_sentence NOT INDEXED
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY sentence_id ASC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        rows = [dict(row) for row in session.execute(stmt, params).mappings().all()]
+        if not rows:
+            return rows
+
+        doc_name_map = self._get_doc_names_by_ids(
+            session,
+            [int(row["doc_id"]) for row in rows],
+        )
+        for row in rows:
+            row["file_name"] = doc_name_map.get(int(row["doc_id"]), "")
+        return rows
+
+    @staticmethod
+    def _get_doc_names_by_ids(session: Session, doc_ids: List[int]) -> Dict[int, str]:
+        if not doc_ids:
+            return {}
+        unique_doc_ids = sorted({int(doc_id) for doc_id in doc_ids})
+        stmt = select(SourceDocument.doc_id, SourceDocument.file_name).where(
+            SourceDocument.doc_id.in_(unique_doc_ids)
+        )
+        return {
+            int(doc_id): file_name or ""
+            for doc_id, file_name in session.execute(stmt).all()
+        }
 
     @staticmethod
     def _get_project_corpus_ids(session: Session, project_id: int) -> List[int]:

@@ -780,6 +780,7 @@ Current status after the wave:
 The third official task-specific use of the canonical framework is now recorded in:
 
 - `docs/SENTENCES_WORKSPACE_COLD_AUDIT_2026-03-12.md`
+- `docs/SENTENCES_WORKSPACE_REPAIR_2026-03-12.md`
 
 Wave outcome:
 
@@ -794,10 +795,30 @@ Wave outcome:
   do not remove the blocker because rows arrive only after the slow stage-1 page
   query completes.
 
-Current status after the wave:
+Repair outcome:
 
-- the evidence gate is crossed for a new bounded branch;
-- the next active layer is now Sentences workspace cold-path repair;
+- the bounded Sentences repair was implemented in `app/services/sentences_workspace_service.py`
+  without changing the staged UI contract;
+- approved-target strict read-only evidence now shows:
+  - Sentences unfiltered first page ~= `0.219s`
+  - Sentences unfiltered count ~= `0.021s`
+  - Sentences filtered first page with `text_search='wiki'` ~= `2.182s`
+  - Sentences filtered exact count with `text_search='wiki'` ~= `7.889s`
+- the repaired page-query plan no longer shows the old temp-sort pattern:
+  - current fast page plan = `SCAN document_sentence`
+- after-breakdown shows the old dominant blocker is gone:
+  - default `page_rows ~= 0.002s`
+  - default `audio ~= 0.195s`
+  - filtered `page_rows ~= 1.852s`
+  - filtered `count ~= 7.592s`
+
+Current status after repair:
+
+- the Sentences P0 first-page blocker is operationally closed;
+- the remaining filtered search/count tail is explicitly decision-gated, not an
+  automatic follow-up branch;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
 - keep startup, picker, governance/readiness, telemetry, and heavy-validation
   branches closed unless their own future evidence gates are crossed.
 
