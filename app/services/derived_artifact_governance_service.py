@@ -282,16 +282,26 @@ class DerivedArtifactGovernanceService:
         is_reference_project: bool,
     ) -> DerivedArtifactMetricDTO:
         status = "no_snapshot_coverage"
-        if snapshot_summary.contract_state == "fully_covered":
+        if snapshot_summary.contract_state == "stats_rebuild_required":
+            status = "stats_rebuild_required"
+        elif snapshot_summary.contract_state == "fully_covered":
             status = "fully_covered"
         elif snapshot_summary.snapshot_count_total > 0:
             status = "coverage_partial"
 
         detail_lines = [
-            "Quantity comes from the existing snapshot readiness aggregate, not from a direct snapshot table row count.",
+            "Quantity comes from persisted per-document snapshot stats, not from a direct project-scoped snapshot row count.",
             f"Fully covered docs: {int(snapshot_summary.fully_covered_docs):,} / {int(snapshot_summary.processed_docs):,}.",
             f"Remaining uncovered docs: {int(snapshot_summary.remaining_uncovered_docs):,}.",
         ]
+        if int(getattr(snapshot_summary, "stats_unknown_docs", 0) or 0) > 0:
+            detail_lines.append(
+                f"Docs with unknown snapshot stats: {int(snapshot_summary.stats_unknown_docs):,}."
+            )
+        if int(getattr(snapshot_summary, "stats_invalid_docs", 0) or 0) > 0:
+            detail_lines.append(
+                f"Docs with invalid snapshot stats: {int(snapshot_summary.stats_invalid_docs):,}."
+            )
         if snapshot_summary.contract_note:
             detail_lines.append(str(snapshot_summary.contract_note))
 
@@ -301,7 +311,7 @@ class DerivedArtifactGovernanceService:
             ownership="project-owned sentence snapshots",
             quantity_value=int(snapshot_summary.snapshot_count_total or 0),
             quantity_unit="covered sentences",
-            quantity_basis="snapshot readiness aggregate",
+            quantity_basis="persisted document stats aggregate",
             status=status,
             summary=(
                 f"Sentence coverage {self._format_pct(snapshot_summary.sentence_coverage_pct)}; "

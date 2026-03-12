@@ -535,6 +535,116 @@ def test_cli_reprocess_all_dry_run_skips_snapshot_coverage_queries(monkeypatch):
         db_path.unlink(missing_ok=True)
 
 
+def test_cli_verify_snapshot_stats_exits_three_on_missing_stats(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=3)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--verify-snapshot-stats",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 3
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_rebuild_snapshot_stats_requires_backup_path(monkeypatch):
+    db_path = _init_temp_db()
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--rebuild-snapshot-stats",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            module.main()
+        assert exc.value.code == 2
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_cli_rebuild_snapshot_stats_populates_doc_stats(monkeypatch):
+    db_path = _init_temp_db()
+    backup_db = _create_backup_copy(db_path)
+    try:
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            project_id, doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+        _reset_db_service()
+
+        module = _load_script_module()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process_reference_corpus.py",
+                "--db-path",
+                str(db_path),
+                "--project-id",
+                str(project_id),
+                "--rebuild-snapshot-stats",
+                "--backup-db-path",
+                str(backup_db),
+                "--chunk-size",
+                "1",
+            ],
+        )
+        module.main()
+
+        _reset_db_service()
+        DBService.initialize(db_path)
+        db = DBService.get_instance()
+        with db.get_session() as session:
+            docs = session.execute(
+                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
+            ).scalars().all()
+
+        assert [str(doc.snapshot_stats_state or "") for doc in docs] == ["valid", "valid"]
+        assert [int(doc.snapshot_sentence_count or 0) for doc in docs] == [0, 0]
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+
 def test_cli_verify_only_snapshot_backfill_run_exits_zero_without_processing(monkeypatch):
     db_path = _init_temp_db()
     try:

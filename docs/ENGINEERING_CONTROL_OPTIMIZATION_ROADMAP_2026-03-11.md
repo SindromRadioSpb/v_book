@@ -370,7 +370,28 @@ Remaining note:
 - it does not add retention cleanup yet
 - the next active priority is now `PATCH-P1-02`
 
-Deferred optimization branch (preserved design option, not active now):
+Implemented follow-up: per-document snapshot readiness stats
+
+- schema `42` now persists snapshot coverage state on `source_document`:
+  - `snapshot_sentence_count`
+  - `snapshot_stats_state`
+  - `snapshot_stats_updated_at`
+- normal NLP processing and staged snapshot backfill now update those
+  per-document stats transactionally
+- reference CLI now provides the required companion contract:
+  - `--verify-snapshot-stats`
+  - `--rebuild-snapshot-stats`
+  - heavy rebuild writes stay under backup/preflight/protected-db guardrails
+- live evidence on `hewiki_gpu_processing test.db`, `project_id=1`:
+  - cold `SnapshotReadinessService.get_project_summary()` ~= `0.505s`
+  - cold governance summary ~= `3.884s`
+  - remaining dominant cold cost is exact `lemma_doc_stat` count at
+    ~= `3.489s`
+- this means the snapshot-governance bottleneck has been structurally removed
+  for the current layer; any future governance acceleration should first
+  re-audit the remaining exact `lemma_*` counts
+
+Historical pre-implementation note (superseded by the schema 42 doc-stats wave):
 
 - current governance/readiness latency is acceptable for an on-demand
   background-loaded operator dialog:

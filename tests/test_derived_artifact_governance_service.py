@@ -5,17 +5,14 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from app.infra.nlp_snapshot_codec import build_sentence_text_hash
 from app.infra.sa_models import (
     DictProject,
-    DocumentSentence,
     Lemma,
     LemmaDocStat,
     LemmaProjectStat,
     Library,
     ProcessorRun,
     RunError,
-    SentenceNLPSnapshot,
     SourceCorpus,
     SourceDocument,
 )
@@ -82,39 +79,10 @@ def _seed_project(session) -> int:
         session.flush()
         docs.append(doc)
 
-    sentences = []
-    for doc in docs:
-        for sent_index in range(int(doc.sentence_count or 0)):
-            sentence = DocumentSentence(
-                doc_id=doc.doc_id,
-                corpus_id=corpus.corpus_id,
-                sent_index=sent_index,
-                text=f"doc {doc.doc_id} sentence {sent_index}",
-            )
-            session.add(sentence)
-            session.flush()
-            sentences.append(sentence)
-
-    session.add_all(
-        [
-            SentenceNLPSnapshot(
-                sentence_id=sentences[0].sentence_id,
-                engine="fake",
-                engine_version="1",
-                sentence_text_hash=build_sentence_text_hash(sentences[0].text),
-                payload_json='[{"lemma":"a"}]',
-                token_count=1,
-            ),
-            SentenceNLPSnapshot(
-                sentence_id=sentences[1].sentence_id,
-                engine="fake",
-                engine_version="1",
-                sentence_text_hash=build_sentence_text_hash(sentences[1].text),
-                payload_json='[{"lemma":"b"}]',
-                token_count=1,
-            ),
-        ]
-    )
+    docs[0].snapshot_sentence_count = 2
+    docs[0].snapshot_stats_state = "valid"
+    docs[1].snapshot_sentence_count = 0
+    docs[1].snapshot_stats_state = "unknown"
 
     lemma_a = Lemma(project_id=project.project_id, lemma_text="a", pos="NOUN")
     lemma_b = Lemma(project_id=project.project_id, lemma_text="b", pos="VERB")
@@ -222,9 +190,10 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert "--dry-run" in str(metrics["lemma_project_stat"].maintenance_cli_hint)
         assert "--preflight-only" in str(metrics["lemma_project_stat"].maintenance_preflight_hint)
         assert metrics["sentence_nlp_snapshot"].quantity_value == 2
-        assert metrics["sentence_nlp_snapshot"].status == "coverage_partial"
+        assert metrics["sentence_nlp_snapshot"].status == "stats_rebuild_required"
         assert metrics["sentence_nlp_snapshot"].maintenance_mode == "reset_rebuild_only"
         assert "Sentence coverage 66.67%" in metrics["sentence_nlp_snapshot"].summary
+        assert any("unknown snapshot stats: 1" in line.lower() for line in metrics["sentence_nlp_snapshot"].detail_lines)
         assert "--reprocess-all" in str(metrics["sentence_nlp_snapshot"].maintenance_cli_hint)
         assert "--dry-run" in str(metrics["sentence_nlp_snapshot"].maintenance_cli_hint)
         assert "--preflight-only" in str(metrics["sentence_nlp_snapshot"].maintenance_preflight_hint)

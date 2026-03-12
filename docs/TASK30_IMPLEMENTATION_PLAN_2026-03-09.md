@@ -1682,14 +1682,10 @@ Current execution status:
     exact project-scoped snapshot-row-count query on huge DBs
   - governance is observational only and does not start retention cleanup or
     heavy validation
-- the deferred readiness/governance acceleration branch is now explicitly
-  preserved in
-  `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md`:
-  - low-risk query/cache polish stays optional only
-  - per-document snapshot stats remain the preferred future acceleration path
-  - project-level materialized summary remains a higher-risk fallback
-  - none of that branch is active unless it is explicitly reprioritized after
-    `PATCH-P1-02`
+- the old deferred readiness/governance acceleration branch is now historical:
+  - the preferred path (per-document snapshot stats) has been implemented
+  - `docs/ENGINEERING_CONTROL_OPTIMIZATION_ROADMAP_2026-03-11.md` now keeps the
+    pre-implementation reasoning only as superseded context
 - `PATCH-P1-02` is now implemented:
   - `audio_asset` canonical persisted row identity for hashed rows is now
     `(lang, input_hash)`
@@ -1724,8 +1720,23 @@ Current execution status:
   preflight template, instead of leaving that path only in docs
 - heavy `--reprocess-all` writes now share the same backup/preflight and
   protected-target override gate as heavy snapshot-backfill writes
-- later live re-audit on `project_id=1` of the approved dev/test DB showed
-  that the first cold snapshot readiness query can still spike to about `100s`,
-  while warm/repeated readiness calls fall back to about `7.4s` and the full
-  governance summary stays around `11.1s` to `11.4s`; this strengthens the
-  deferred readiness-acceleration branch without reopening it automatically
+- the preferred readiness/governance acceleration branch is now implemented:
+  - schema `42` persists per-document snapshot stats on `source_document`
+  - normal NLP processing and staged snapshot backfill now update those stats
+  - `scripts/process_reference_corpus.py` now provides:
+    - `--verify-snapshot-stats`
+    - `--rebuild-snapshot-stats`
+- post-implementation live re-audit on `project_id=1` of the approved dev/test
+  DB now shows:
+  - cold `SnapshotReadinessService.get_project_summary()` ~= `0.505s`
+  - cold governance summary ~= `3.884s`
+  - remaining dominant cold cost moved to exact `lemma_doc_stat` count at
+    ~= `3.489s`
+- bounded live rebuild proof on the same approved dev/test DB now exists:
+  - `--rebuild-snapshot-stats --max-docs 100` refreshed persisted stats for the
+    first 100 processed docs in about `0.6s`
+  - follow-up `--verify-snapshot-stats --max-docs 100` reported `99` docs ok
+    and one legacy drift on `doc_id=1`
+  - that drift is a pre-existing document inconsistency
+    (`source_document.sentence_count=272` while actual `document_sentence=0`),
+    not a rebuild-loop corruption

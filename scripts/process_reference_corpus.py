@@ -38,6 +38,16 @@ Coverage-only snapshot audit:
         --db-path hdle_premium.db --project-id 1 \\
         --backfill-snapshots --coverage-only
 
+Verify persisted snapshot doc stats:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --verify-snapshot-stats --max-docs 5000
+
+Rebuild persisted snapshot doc stats:
+    python scripts/process_reference_corpus.py \\
+        --db-path hdle_premium.db --project-id 1 \\
+        --rebuild-snapshot-stats --backup-db-path healthy_backup.db --preflight-only
+
 Backfill snapshots for already processed docs:
     python scripts/process_reference_corpus.py \\
         --db-path hdle_premium.db --project-id 1 \\
@@ -508,10 +518,18 @@ def _is_reference_reprocess_write(args: argparse.Namespace) -> bool:
     )
 
 
+def _is_snapshot_stats_rebuild_write(args: argparse.Namespace) -> bool:
+    return bool(
+        args.rebuild_snapshot_stats
+        and not args.dry_run
+    )
+
+
 def _is_reference_heavy_write(args: argparse.Namespace) -> bool:
     return bool(
         _is_snapshot_backfill_write(args)
         or _is_reference_reprocess_write(args)
+        or _is_snapshot_stats_rebuild_write(args)
     )
 
 
@@ -727,6 +745,16 @@ def main() -> None:
         help="Re-process all currently processed docs instead of processing only unprocessed docs.",
     )
     parser.add_argument(
+        "--rebuild-snapshot-stats",
+        action="store_true",
+        help="Rebuild persisted per-document snapshot coverage stats for processed docs.",
+    )
+    parser.add_argument(
+        "--verify-snapshot-stats",
+        action="store_true",
+        help="Verify persisted per-document snapshot coverage stats against source-of-truth tables.",
+    )
+    parser.add_argument(
         "--coverage-only",
         action="store_true",
         help="Report sentence snapshot coverage for the selected project and exit",
@@ -801,10 +829,30 @@ def main() -> None:
         parser.error("--preflight-only and --coverage-only are mutually exclusive")
     if args.preflight_only and args.dry_run:
         parser.error("--preflight-only and --dry-run are mutually exclusive")
+    if args.verify_snapshot_stats and args.verify_only:
+        parser.error("--verify-snapshot-stats and --verify-only are mutually exclusive")
+    if args.verify_snapshot_stats and args.dry_run:
+        parser.error("--verify-snapshot-stats and --dry-run are mutually exclusive")
+    if args.verify_snapshot_stats and args.preflight_only:
+        parser.error("--verify-snapshot-stats and --preflight-only are mutually exclusive")
     if args.reprocess_all and args.backfill_snapshots:
         parser.error("--reprocess-all and --backfill-snapshots are mutually exclusive")
     if args.reprocess_all and args.coverage_only:
         parser.error("--reprocess-all and --coverage-only are mutually exclusive")
+    if args.rebuild_snapshot_stats and args.backfill_snapshots:
+        parser.error("--rebuild-snapshot-stats and --backfill-snapshots are mutually exclusive")
+    if args.rebuild_snapshot_stats and args.reprocess_all:
+        parser.error("--rebuild-snapshot-stats and --reprocess-all are mutually exclusive")
+    if args.rebuild_snapshot_stats and args.coverage_only:
+        parser.error("--rebuild-snapshot-stats and --coverage-only are mutually exclusive")
+    if args.rebuild_snapshot_stats and args.verify_only:
+        parser.error("--rebuild-snapshot-stats and --verify-only are mutually exclusive")
+    if args.verify_snapshot_stats and args.backfill_snapshots:
+        parser.error("--verify-snapshot-stats and --backfill-snapshots are mutually exclusive")
+    if args.verify_snapshot_stats and args.reprocess_all:
+        parser.error("--verify-snapshot-stats and --reprocess-all are mutually exclusive")
+    if args.verify_snapshot_stats and args.coverage_only:
+        parser.error("--verify-snapshot-stats and --coverage-only are mutually exclusive")
     if args.coverage_only and int(args.doc_offset or 0) > 0:
         parser.error("--doc-offset is not supported with --coverage-only")
     if args.resume_run_id is not None and int(args.resume_run_id) <= 0:
@@ -827,12 +875,16 @@ def main() -> None:
         parser.error("--probe-every-chunks requires --probe-out")
     if args.integrity_checkpoint_mode is not None and not args.backfill_snapshots:
         parser.error("--integrity-checkpoint-mode requires --backfill-snapshots")
-    if args.preflight_only and not (args.backfill_snapshots or args.reprocess_all):
-        parser.error("--preflight-only requires --backfill-snapshots or --reprocess-all")
-    if args.backup_db_path and not (args.backfill_snapshots or args.reprocess_all):
-        parser.error("--backup-db-path requires --backfill-snapshots or --reprocess-all")
-    if args.allow_protected_db_heavy_write and not (args.backfill_snapshots or args.reprocess_all):
-        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots or --reprocess-all")
+    if (args.resume_latest or args.resume_run_id is not None) and (
+        args.rebuild_snapshot_stats or args.verify_snapshot_stats
+    ):
+        parser.error("--resume-latest/--resume-run-id are not supported for snapshot stats rebuild/verify")
+    if args.preflight_only and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
+        parser.error("--preflight-only requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
+    if args.backup_db_path and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
+        parser.error("--backup-db-path requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
+    if args.allow_protected_db_heavy_write and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
+        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
 
     db_path = Path(args.db_path)
     if not db_path.exists():
@@ -846,6 +898,8 @@ def main() -> None:
     use_gpu = args.use_gpu
     wants_resume = bool(args.resume_latest or args.resume_run_id is not None)
     is_reprocess_mode = bool(args.reprocess_all)
+    is_snapshot_stats_rebuild_mode = bool(args.rebuild_snapshot_stats)
+    is_snapshot_stats_verify_mode = bool(args.verify_snapshot_stats)
     needs_snapshot_audit = bool(args.backfill_snapshots or args.coverage_only)
 
     from app.services.db_service import DBService
@@ -896,7 +950,7 @@ def main() -> None:
             missing_snapshot_doc_ids: list[int] = []
             snapshot_coverage: dict[str, Any] | None = None
 
-            if args.backfill_snapshots or is_reprocess_mode:
+            if args.backfill_snapshots or is_reprocess_mode or is_snapshot_stats_rebuild_mode or is_snapshot_stats_verify_mode:
                 processed_doc_ids = _get_processed_doc_ids(session, project_id)
             elif wants_resume:
                 project_doc_ids = _get_project_doc_ids(session, project_id)
@@ -945,6 +999,10 @@ def main() -> None:
             mode_label = "reference_reprocess"
             source_label = "reference_cli_reprocess"
             doc_ids_all = processed_doc_ids
+        elif is_snapshot_stats_rebuild_mode or is_snapshot_stats_verify_mode:
+            mode_label = "snapshot_stats"
+            source_label = "snapshot_stats"
+            doc_ids_all = processed_doc_ids
         else:
             doc_ids_all = project_doc_ids if wants_resume else remaining_doc_ids
         if args.doc_offset > 0:
@@ -992,6 +1050,11 @@ def main() -> None:
                 "Re-process candidate docs in current slice: %d processed docs",
                 len(doc_ids_to_process),
             )
+        elif is_snapshot_stats_rebuild_mode or is_snapshot_stats_verify_mode:
+            logger.info(
+                "Snapshot stats candidate docs in current slice: %d processed docs",
+                len(doc_ids_to_process),
+            )
 
         if doc_ids_to_process:
             logger.info(
@@ -1009,6 +1072,8 @@ def main() -> None:
                 if args.backfill_snapshots
                 else "reference reprocess"
                 if is_reprocess_mode
+                else "snapshot stats rebuild"
+                if is_snapshot_stats_rebuild_mode
                 else "reference write"
             )
             preflight = _run_reference_heavy_write_preflight(
@@ -1042,6 +1107,13 @@ def main() -> None:
                 "Planning": "Planning reprocess batch",
                 "Processing": "Reprocessing",
             }[action_label]
+        elif is_snapshot_stats_rebuild_mode:
+            action_label = {
+                "Planning": "Planning snapshot stats rebuild",
+                "Processing": "Rebuilding snapshot stats",
+            }[action_label]
+        elif is_snapshot_stats_verify_mode:
+            action_label = "Verifying snapshot stats"
 
         logger.info(
             "%s %d docs | chunk=%d sleep=%.1fs mock=%s gpu=%s%s",
@@ -1074,6 +1146,9 @@ def main() -> None:
             return
 
         process_service = ProcessService()
+        from app.services.snapshot_doc_stats_service import SnapshotDocStatsService
+
+        snapshot_doc_stats_service = SnapshotDocStatsService()
         start = time.monotonic()
         state_tracker = {"run_id": None, "chunks_completed": None}
         state_callback = lambda state: _log_batch_state(state, state_tracker)
@@ -1103,6 +1178,75 @@ def main() -> None:
             _log_batch_verification(report)
             if not report.get("ok"):
                 sys.exit(3)
+            return
+
+        if is_snapshot_stats_verify_mode:
+            with db_service.get_read_session() as session:
+                verification = snapshot_doc_stats_service.verify_document_stats(
+                    session,
+                    doc_ids_to_process,
+                )
+            logger.info(
+                "Snapshot stats verify | docs_checked=%d docs_ok=%d docs_with_drift=%d sentence_count_mismatches=%d snapshot_count_mismatches=%d state_mismatches=%d sample_doc_ids=%s",
+                verification.docs_checked,
+                verification.docs_ok,
+                verification.docs_with_drift,
+                verification.sentence_count_mismatches,
+                verification.snapshot_count_mismatches,
+                verification.state_mismatches,
+                verification.sample_doc_ids[:10],
+            )
+            if verification.docs_with_drift > 0:
+                sys.exit(3)
+            return
+
+        if is_snapshot_stats_rebuild_mode:
+            total_success = 0
+            total_invalid = 0
+            chunks = [
+                doc_ids_to_process[i : i + args.chunk_size]
+                for i in range(0, len(doc_ids_to_process), args.chunk_size)
+            ]
+            for chunk_idx, chunk in enumerate(chunks, 1):
+                with db_service.get_session() as session:
+                    refresh_result = snapshot_doc_stats_service.refresh_document_stats(
+                        session,
+                        chunk,
+                    )
+                    session.commit()
+                total_success += int(refresh_result.docs_valid)
+                total_invalid += int(refresh_result.docs_invalid)
+                logger.info(
+                    "Snapshot stats rebuild chunk %d/%d | docs=%d valid=%d invalid=%d snapshot_sentence_total=%d",
+                    chunk_idx,
+                    len(chunks),
+                    len(chunk),
+                    refresh_result.docs_valid,
+                    refresh_result.docs_invalid,
+                    refresh_result.snapshot_sentence_total,
+                )
+                if args.chunk_sleep > 0 and chunk_idx < len(chunks):
+                    time.sleep(args.chunk_sleep)
+
+            with db_service.get_read_session() as session:
+                verification = snapshot_doc_stats_service.verify_document_stats(
+                    session,
+                    doc_ids_to_process,
+                )
+            logger.info(
+                "Snapshot stats rebuild finished | docs=%d valid=%d invalid=%d verify_drift=%d time=%.1fs",
+                len(doc_ids_to_process),
+                total_success,
+                total_invalid,
+                verification.docs_with_drift,
+                time.monotonic() - start,
+            )
+            if verification.docs_with_drift > 0:
+                logger.error(
+                    "Snapshot stats rebuild verify failed | sample_doc_ids=%s",
+                    verification.sample_doc_ids[:10],
+                )
+                sys.exit(2)
             return
 
         try:

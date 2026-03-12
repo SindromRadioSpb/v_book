@@ -137,6 +137,10 @@ class SourceDocument(Base):
     # NLP processing metrics (Migration 003)
     sentence_count = Column(Integer, nullable=False, default=0)
     token_count = Column(Integer, nullable=False, default=0)
+    # Snapshot readiness stats (Migration 042)
+    snapshot_sentence_count = Column(Integer, nullable=False, default=0)
+    snapshot_stats_state = Column(Text, nullable=False, default="unknown")
+    snapshot_stats_updated_at = Column(Text)
 
     # Document metadata (Migration 023)
     tag = Column(String)        # Free-text label (max 200 chars, service-validated)
@@ -154,7 +158,16 @@ class SourceDocument(Base):
             "level IS NULL OR level IN ('aleph','bet','gimel','he')",
             name="ck_document_level",
         ),
+        CheckConstraint(
+            "snapshot_sentence_count >= 0",
+            name="ck_document_snapshot_sentence_count",
+        ),
+        CheckConstraint(
+            "snapshot_stats_state IN ('unknown','valid','invalid')",
+            name="ck_document_snapshot_stats_state",
+        ),
         Index("idx_doc_corpus_status", "corpus_id", "status"),
+        Index("idx_doc_corpus_status_snapshot_state", "corpus_id", "status", "snapshot_stats_state"),
         Index("idx_doc_level", "level"),
         Index("idx_doc_tag", "tag"),
     )

@@ -115,6 +115,24 @@ def test_snapshot_readiness_panel_formats_relative_refresh_time(qtbot):
     assert "2026-03-11 10:05 UTC" in panel.status_label.text()
 
 
+def test_snapshot_readiness_panel_reports_stats_rebuild_required(qtbot):
+    panel = SnapshotReadinessPanel()
+    qtbot.addWidget(panel)
+
+    summary = _sample_summary()
+    summary.contract_state = "stats_rebuild_required"
+    summary.contract_note = "Persisted snapshot doc stats require rebuild or verification."
+    summary.stats_valid_docs = 50000
+    summary.stats_unknown_docs = 70000
+    summary.stats_invalid_docs = 0
+    summary.coverage_is_degraded = True
+    panel.set_summary(summary)
+
+    assert panel.badge_label.text() == "Stats rebuild required"
+    assert panel.subtitle_label.text() == "Persisted snapshot stats need rebuild or verification"
+    assert "rebuild or verification" in panel.note_label.text()
+
+
 def test_documents_view_snapshot_readiness_ignores_stale_requests():
     view = DocumentsView.__new__(DocumentsView)
     view.snapshot_readiness_panel = _FakePanel()

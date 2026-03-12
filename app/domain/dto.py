@@ -186,6 +186,11 @@ class SnapshotReadinessSummaryDTO:
     snapshot_count_total: int
     sentence_coverage_pct: Optional[float]
     doc_coverage_pct: Optional[float]
+    stats_valid_docs: int = 0
+    stats_unknown_docs: int = 0
+    stats_invalid_docs: int = 0
+    coverage_is_degraded: bool = False
+    coverage_source: str = "snapshot_doc_stats"
     latest_backfill_run_id: Optional[int] = None
     latest_backfill_status: Optional[str] = None
     latest_backfill_stage: Optional[str] = None

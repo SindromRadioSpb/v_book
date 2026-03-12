@@ -308,6 +308,29 @@ Therefore the online governance surface must:
 This is intentional. It keeps the operator surface useful on huge DBs without
 quietly reopening a heavy validation path.
 
+#### Persisted snapshot stats are now the online source of truth
+
+The snapshot aggregate is now backed by persisted per-document stats on
+`source_document`:
+
+- `snapshot_sentence_count`
+- `snapshot_stats_state`
+- `snapshot_stats_updated_at`
+
+Those stats are updated by:
+
+- normal NLP processing
+- staged snapshot backfill merge
+- reprocess/reset preparation paths
+
+The companion contract is now implemented through:
+
+- `scripts/process_reference_corpus.py --verify-snapshot-stats`
+- `scripts/process_reference_corpus.py --rebuild-snapshot-stats`
+
+If stats are missing or drifted, the UI/service contract must surface explicit
+degraded state instead of silently reporting trusted coverage.
+
 #### Deferred acceleration options are preserved, not active
 
 The current online contract is intentionally accepted as:
@@ -316,16 +339,14 @@ The current online contract is intentionally accepted as:
 - background-loaded
 - honest about bounded validation rather than artificially "instant"
 
-Future acceleration options are preserved in the roadmap, but must stay
-deferred until the current latency becomes a real workflow blocker:
+The old acceleration branch is now partially implemented:
 
-- low-risk query/cache polish for modest wins only
-- preferred future path: per-document snapshot stats
-- higher-risk fallback: project-level materialized summary
+- per-document snapshot stats are the active online source of truth
+- the required rebuild/verify/repair companion now exists
 
-If per-document or project-level persisted stats are ever introduced, they must
-ship together with an explicit rebuild/verify/repair contract. Faster but
-unverifiable summary data is not acceptable for this layer.
+If future acceleration is needed again, it should start from a new audit of the
+remaining exact `lemma_*` counts. Faster but unverifiable summary data is still
+not acceptable for this layer.
 
 ### UI contract
 
@@ -342,12 +363,32 @@ It may surface:
 - exact project counts where affordable
 - ownership/lifecycle notes
 - latest coverage/backfill contract notes already established elsewhere
+- explicit degraded-state notes when persisted snapshot stats are missing or
+  invalid
 
 It must not:
 
 - start backfill
 - compact or delete data
 - trigger heavy validation implicitly
+
+### Current cold-path evidence after persisted stats
+
+On the approved `hewiki_gpu_processing test.db`, `project_id=1`:
+
+- cold `SnapshotReadinessService.get_project_summary()` is now about `0.505s`
+- full cold governance summary is now about `3.884s`
+- the remaining dominant cold query is the exact `lemma_doc_stat` project count
+  at about `3.489s`
+- bounded live rebuild proof now also exists on the same DB:
+  - `--rebuild-snapshot-stats --max-docs 100` refreshed persisted stats for the
+    first 100 processed docs
+  - `--verify-snapshot-stats --max-docs 100` then reported `99` clean docs and
+    one legacy inconsistency on `doc_id=1`
+
+Therefore the snapshot-governance bottleneck has been structurally removed for
+the current layer. Any future governance acceleration should first re-audit the
+remaining exact `lemma_*` counts rather than revisiting snapshot-row joins.
 
 ### Current limitations
 

@@ -62,6 +62,11 @@ class SnapshotReadinessService:
             snapshot_count_total=int(coverage["snapshot_count_total"]),
             sentence_coverage_pct=coverage["sentence_snapshot_coverage_pct"],
             doc_coverage_pct=coverage["doc_full_coverage_pct"],
+            stats_valid_docs=int(coverage["stats_valid_docs"]),
+            stats_unknown_docs=int(coverage["stats_unknown_docs"]),
+            stats_invalid_docs=int(coverage["stats_invalid_docs"]),
+            coverage_is_degraded=bool(coverage["coverage_is_degraded"]),
+            coverage_source=str(coverage["coverage_source"]),
             latest_backfill_run_id=(
                 int(latest_run.run_id) if latest_run is not None else None
             ),
@@ -176,26 +181,33 @@ class SnapshotReadinessService:
     def _get_snapshot_coverage(self, session: Session, project_id: int) -> dict[str, Any]:
         row = session.execute(
             text(
-                "WITH processed_docs AS ("
-                "  SELECT sd.doc_id, COALESCE(sd.sentence_count, 0) AS sentence_count"
-                "  FROM source_document sd"
-                "  JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
-                "  WHERE sc.project_id = :pid AND sd.status = 'processed'"
-                "), snapshot_counts AS ("
-                "  SELECT ds.doc_id, COUNT(*) AS snapshot_count"
-                "  FROM sentence_nlp_snapshot sns"
-                "  JOIN document_sentence ds ON ds.sentence_id = sns.sentence_id"
-                "  GROUP BY ds.doc_id"
-                ") "
                 "SELECT "
-                "  COUNT(pd.doc_id) AS processed_docs,"
-                "  COALESCE(SUM(pd.sentence_count), 0) AS sentence_count_total,"
-                "  COALESCE(SUM(COALESCE(snap.snapshot_count, 0)), 0) AS snapshot_count_total,"
-                "  SUM(CASE WHEN pd.sentence_count > 0 AND COALESCE(snap.snapshot_count, 0) >= pd.sentence_count THEN 1 ELSE 0 END) AS fully_covered_docs,"
-                "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) = 0 THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
-                "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) > 0 AND COALESCE(snap.snapshot_count, 0) < pd.sentence_count THEN 1 ELSE 0 END) AS partial_snapshot_docs "
-                "FROM processed_docs pd "
-                "LEFT JOIN snapshot_counts snap ON snap.doc_id = pd.doc_id"
+                "  COUNT(sd.doc_id) AS processed_docs,"
+                "  COALESCE(SUM(COALESCE(sd.sentence_count, 0)), 0) AS sentence_count_total,"
+                "  COALESCE(SUM(CASE "
+                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                "    THEN COALESCE(sd.snapshot_sentence_count, 0) "
+                "    ELSE 0 END), 0) AS snapshot_count_total,"
+                "  SUM(CASE "
+                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                "      AND COALESCE(sd.sentence_count, 0) > 0 "
+                "      AND COALESCE(sd.snapshot_sentence_count, 0) >= COALESCE(sd.sentence_count, 0) "
+                "    THEN 1 ELSE 0 END) AS fully_covered_docs,"
+                "  SUM(CASE "
+                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                "      AND COALESCE(sd.snapshot_sentence_count, 0) = 0 "
+                "    THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
+                "  SUM(CASE "
+                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                "      AND COALESCE(sd.snapshot_sentence_count, 0) > 0 "
+                "      AND COALESCE(sd.snapshot_sentence_count, 0) < COALESCE(sd.sentence_count, 0) "
+                "    THEN 1 ELSE 0 END) AS partial_snapshot_docs,"
+                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' THEN 1 ELSE 0 END) AS stats_valid_docs,"
+                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'unknown' THEN 1 ELSE 0 END) AS stats_unknown_docs,"
+                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'invalid' THEN 1 ELSE 0 END) AS stats_invalid_docs "
+                "FROM source_document sd "
+                "JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id "
+                "WHERE sc.project_id = :pid AND sd.status = 'processed'"
             ),
             {"pid": int(project_id)},
         ).mappings().one()
@@ -204,6 +216,24 @@ class SnapshotReadinessService:
         sentence_count_total = int(row["sentence_count_total"] or 0)
         snapshot_count_total = int(row["snapshot_count_total"] or 0)
         fully_covered_docs = int(row["fully_covered_docs"] or 0)
+        stats_valid_docs = int(row["stats_valid_docs"] or 0)
+        stats_unknown_docs = int(row["stats_unknown_docs"] or 0)
+        stats_invalid_docs = int(row["stats_invalid_docs"] or 0)
+        coverage_is_degraded = (stats_unknown_docs + stats_invalid_docs) > 0
+        if coverage_is_degraded and stats_valid_docs <= 0:
+            sentence_coverage_pct = None
+            doc_full_coverage_pct = None
+        else:
+            sentence_coverage_pct = (
+                round(snapshot_count_total / sentence_count_total * 100.0, 4)
+                if sentence_count_total
+                else None
+            )
+            doc_full_coverage_pct = (
+                round(fully_covered_docs / processed_docs * 100.0, 4)
+                if processed_docs
+                else None
+            )
         return {
             "processed_docs": processed_docs,
             "sentence_count_total": sentence_count_total,
@@ -211,16 +241,13 @@ class SnapshotReadinessService:
             "fully_covered_docs": fully_covered_docs,
             "zero_snapshot_docs": int(row["zero_snapshot_docs"] or 0),
             "partial_snapshot_docs": int(row["partial_snapshot_docs"] or 0),
-            "sentence_snapshot_coverage_pct": (
-                round(snapshot_count_total / sentence_count_total * 100.0, 4)
-                if sentence_count_total
-                else None
-            ),
-            "doc_full_coverage_pct": (
-                round(fully_covered_docs / processed_docs * 100.0, 4)
-                if processed_docs
-                else None
-            ),
+            "stats_valid_docs": stats_valid_docs,
+            "stats_unknown_docs": stats_unknown_docs,
+            "stats_invalid_docs": stats_invalid_docs,
+            "coverage_is_degraded": coverage_is_degraded,
+            "coverage_source": "source_document.snapshot_stats",
+            "sentence_snapshot_coverage_pct": sentence_coverage_pct,
+            "doc_full_coverage_pct": doc_full_coverage_pct,
         }
 
     def _resolve_contract_state(
@@ -233,6 +260,8 @@ class SnapshotReadinessService:
         processed_docs = int(coverage["processed_docs"])
         fully_covered_docs = int(coverage["fully_covered_docs"])
         snapshot_count_total = int(coverage["snapshot_count_total"])
+        if bool(coverage.get("coverage_is_degraded")):
+            return "stats_rebuild_required"
 
         if processed_docs <= 0:
             return "no_processed_docs"
@@ -257,6 +286,16 @@ class SnapshotReadinessService:
     ) -> str:
         if contract_state == "no_processed_docs":
             return "No processed documents exist for this project yet."
+        if contract_state == "stats_rebuild_required":
+            valid_docs = int(coverage.get("stats_valid_docs") or 0)
+            unknown_docs = int(coverage.get("stats_unknown_docs") or 0)
+            invalid_docs = int(coverage.get("stats_invalid_docs") or 0)
+            return (
+                "Persisted snapshot doc stats require rebuild or verification before this project can be "
+                "treated as fully observed. "
+                f"Validated docs: {valid_docs:,}; unknown stats: {unknown_docs:,}; invalid stats: {invalid_docs:,}. "
+                "Coverage shown here is limited to currently validated document stats."
+            )
         if contract_state == "fully_covered":
             return "All processed documents currently have sentence snapshots."
         if contract_state == "bounded_validated":

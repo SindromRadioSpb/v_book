@@ -253,6 +253,12 @@ Operator note:
     `--allow-protected-db-heavy-write` is passed explicitly
 - the governance dialog now exposes both a rebuild dry-run CLI and a rebuild
   preflight CLI template; it still does not expose a one-click write command
+- persisted per-document snapshot stats now back the normal
+  readiness/governance snapshot summary path
+- operators now also have explicit companion commands for those stats:
+  - `--verify-snapshot-stats` to detect drift without writing
+  - `--rebuild-snapshot-stats` to refresh stats under the existing backup /
+    preflight / protected-target contract
 
 ### Preflight a reference rebuild package without writing
 
@@ -303,6 +309,28 @@ python scripts/process_reference_corpus.py `
     --db-path hdle_premium.db `
     --backfill-snapshots `
     --coverage-only
+```
+
+### Verify persisted snapshot stats without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --verify-snapshot-stats `
+    --max-docs 5000
+```
+
+### Preflight a persisted snapshot-stats rebuild package without writing
+
+```powershell
+python scripts/process_reference_corpus.py `
+    --project-id 1 `
+    --db-path hdle_premium.db `
+    --rebuild-snapshot-stats `
+    --backup-db-path path\\to\\healthy_backup.db `
+    --preflight-only `
+    --max-docs 5000
 ```
 
 ### Backfill sentence snapshots for already processed docs

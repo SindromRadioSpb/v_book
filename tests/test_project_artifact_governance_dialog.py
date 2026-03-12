@@ -192,3 +192,17 @@ def test_project_artifact_governance_dialog_can_copy_rebuild_preflight_cli(qtbot
     assert "--reprocess-all" in text
     assert "--backup-db-path" in text
     assert "--preflight-only" in text
+
+
+def test_project_artifact_governance_dialog_renders_stats_rebuild_required_status(qtbot):
+    dialog = ProjectArtifactGovernanceDialog(1, "Hebrew Wikipedia Baseline", auto_refresh=False)
+    qtbot.addWidget(dialog)
+    summary = _sample_summary()
+    summary.artifacts[1].status = "stats_rebuild_required"
+    summary.artifacts[1].detail_lines.append("Docs with unknown snapshot stats: 267,640.")
+    dialog.set_summary(summary)
+
+    snapshot_card = dialog._cards_layout.itemAt(1).widget()
+    assert snapshot_card is not None
+    labels = snapshot_card.findChildren(type(dialog.badge_label))
+    assert any(label.text() == "Stats rebuild required" for label in labels)

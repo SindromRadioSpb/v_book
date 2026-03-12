@@ -132,6 +132,7 @@ class SnapshotReadinessPanel(QWidget):
             "bounded_validated": ("#264b7d", "#dbeafe", "#93c5fd"),
             "fully_covered": ("#0f766e", "#ccfbf1", "#99f6e4"),
             "partial_coverage": ("#92400e", "#fef3c7", "#fcd34d"),
+            "stats_rebuild_required": ("#9a3412", "#ffedd5", "#fdba74"),
             "no_processed_docs": ("#475569", "#e2e8f0", "#cbd5e1"),
             "no_snapshot_coverage": ("#7c2d12", "#ffedd5", "#fdba74"),
         }
@@ -150,6 +151,7 @@ class SnapshotReadinessPanel(QWidget):
             "bounded_validated": "Bounded validated",
             "fully_covered": "Fully covered",
             "partial_coverage": "Partial coverage",
+            "stats_rebuild_required": "Stats rebuild required",
             "no_processed_docs": "No processed docs",
             "no_snapshot_coverage": "No snapshot coverage",
         }
@@ -174,7 +176,9 @@ class SnapshotReadinessPanel(QWidget):
         self.badge_label.setStyleSheet(self._badge_style(summary.contract_state))
 
         subtitle = "Full-scale validation deferred"
-        if summary.contract_state == "fully_covered":
+        if summary.contract_state == "stats_rebuild_required":
+            subtitle = "Persisted snapshot stats need rebuild or verification"
+        elif summary.contract_state == "fully_covered":
             subtitle = "Coverage is complete for currently processed documents"
         elif summary.contract_state == "no_processed_docs":
             subtitle = "No processed documents available yet"

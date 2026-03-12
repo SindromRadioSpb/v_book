@@ -1436,6 +1436,16 @@ implemented as read-only reporting instead of new storage work:
 - the readiness card keeps the last known summary visible during refresh,
   queues duplicate refresh requests instead of churning workers, and shows a
   human-readable stale indicator (`just now`, `5m ago`, etc.)
+- the cold-path acceleration branch is now implemented through persisted
+  per-document snapshot stats on `source_document`:
+  - `snapshot_sentence_count`
+  - `snapshot_stats_state`
+  - `snapshot_stats_updated_at`
+- companion commands now exist in `scripts/process_reference_corpus.py`:
+  - `--verify-snapshot-stats`
+  - `--rebuild-snapshot-stats`
+- degraded readiness is now explicit when those persisted stats are missing or
+  invalid; the UI does not silently treat unknown stats as trusted coverage
 
 This layer is explicitly **observability only**:
 

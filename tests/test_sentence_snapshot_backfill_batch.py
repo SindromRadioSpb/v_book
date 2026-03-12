@@ -152,6 +152,8 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
         assert len(snapshots) == 4
         assert staged_rows == []
         assert all(str(doc.status) == "processed" for doc in docs)
+        assert [str(doc.snapshot_stats_state or "") for doc in docs] == ["valid", "valid"]
+        assert [int(doc.snapshot_sentence_count or 0) for doc in docs] == [2, 2]
         assert lemmas == []
     finally:
         _reset_db_service()

@@ -360,6 +360,38 @@ def test_batch_reprocess_uses_batch_run_without_extra_per_doc_runs(monkeypatch) 
         db_path.unlink(missing_ok=True)
 
 
+def test_batch_process_populates_snapshot_doc_stats(monkeypatch) -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        service = ProcessService()
+        monkeypatch.setattr(service, "get_nlp_engine", lambda **kwargs: _Engine())
+
+        with db.get_session() as session:
+            doc_ids = _seed_docs(session, count=2)
+            ok_count, err_count = service.process_documents_batch(
+                session,
+                doc_ids,
+                use_mock=True,
+                chunk_size=1,
+                resume_latest=True,
+                source_label="test_batch",
+            )
+            docs = session.execute(
+                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
+            ).scalars().all()
+
+        assert (ok_count, err_count) == (2, 0)
+        assert [str(doc.snapshot_stats_state or "") for doc in docs] == ["valid", "valid"]
+        assert [int(doc.snapshot_sentence_count or 0) for doc in docs] == [1, 1]
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
 def test_verify_batch_run_contract_reports_selected_run(monkeypatch) -> None:
     db_path = _init_temp_db()
     _reset_db_service()

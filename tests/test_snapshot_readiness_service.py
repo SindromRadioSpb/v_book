@@ -5,13 +5,10 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from app.infra.nlp_snapshot_codec import build_sentence_text_hash
 from app.infra.sa_models import (
     DictProject,
-    DocumentSentence,
     Library,
     ProcessorRun,
-    SentenceNLPSnapshot,
     SourceCorpus,
     SourceDocument,
 )
@@ -64,8 +61,11 @@ def _seed_snapshot_project(session) -> tuple[int, int, int]:
         ("d2.txt", 2, "processed"),
         ("d3.txt", 1, "processed"),
     ]
-    sentence_ids = []
-    for idx, (name, sentence_count, status) in enumerate(doc_specs, start=1):
+    snapshot_counts = (2, 1, 0)
+    for idx, ((name, sentence_count, status), snapshot_count) in enumerate(
+        zip(doc_specs, snapshot_counts),
+        start=1,
+    ):
         doc = SourceDocument(
             corpus_id=corpus.corpus_id,
             file_path=f"/tmp/{name}",
@@ -76,48 +76,11 @@ def _seed_snapshot_project(session) -> tuple[int, int, int]:
             status=status,
             sentence_count=sentence_count,
             token_count=sentence_count * 2,
+            snapshot_sentence_count=int(snapshot_count),
+            snapshot_stats_state="valid",
         )
         session.add(doc)
         session.flush()
-        for sent_index in range(sentence_count):
-            sentence = DocumentSentence(
-                doc_id=doc.doc_id,
-                corpus_id=corpus.corpus_id,
-                sent_index=sent_index,
-                text=f"doc {idx} sentence {sent_index}",
-            )
-            session.add(sentence)
-            session.flush()
-            sentence_ids.append(int(sentence.sentence_id))
-
-    session.add_all(
-        [
-            SentenceNLPSnapshot(
-                sentence_id=sentence_ids[0],
-                engine="fake",
-                engine_version="1",
-                sentence_text_hash=build_sentence_text_hash("doc 1 sentence 0"),
-                payload_json="[]",
-                token_count=2,
-            ),
-            SentenceNLPSnapshot(
-                sentence_id=sentence_ids[1],
-                engine="fake",
-                engine_version="1",
-                sentence_text_hash=build_sentence_text_hash("doc 1 sentence 1"),
-                payload_json="[]",
-                token_count=2,
-            ),
-            SentenceNLPSnapshot(
-                sentence_id=sentence_ids[2],
-                engine="fake",
-                engine_version="1",
-                sentence_text_hash=build_sentence_text_hash("doc 2 sentence 0"),
-                payload_json="[]",
-                token_count=2,
-            ),
-        ]
-    )
     bounded_run = ProcessorRun(
         project_id=project.project_id,
         engine="fake",
@@ -253,6 +216,35 @@ def test_snapshot_readiness_service_uses_read_only_session_without_commit() -> N
 
         assert summary.project_id == project_id
         assert summary.latest_backfill_status == "ok"
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_snapshot_readiness_service_reports_degraded_state_when_doc_stats_missing() -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            project_id, _bounded_run_id, _latest_run_id = _seed_snapshot_project(session)
+            docs = session.query(SourceDocument).order_by(SourceDocument.doc_id.asc()).all()
+            docs[1].snapshot_stats_state = "unknown"
+            docs[1].snapshot_sentence_count = 0
+            session.commit()
+
+        service = SnapshotReadinessService()
+        with db.get_read_session() as session:
+            summary = service.get_project_summary(session, project_id)
+
+        assert summary.contract_state == "stats_rebuild_required"
+        assert summary.coverage_is_degraded is True
+        assert summary.stats_valid_docs == 2
+        assert summary.stats_unknown_docs == 1
+        assert summary.stats_invalid_docs == 0
+        assert "require rebuild or verification" in (summary.contract_note or "")
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

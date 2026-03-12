@@ -40,6 +40,7 @@ from app.domain.preprocessing import preprocess_text
 from app.domain.sentence_splitter import split_into_sentences
 from app.services.db_service import DBService
 from app.services.entity_classifier import classify_text
+from app.services.snapshot_doc_stats_service import SnapshotDocStatsService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class ProcessService:
     def __init__(self):
         self.db_service = DBService.get_instance()
         self._engine: Optional[NLPEngine] = None
+        self.snapshot_doc_stats_service = SnapshotDocStatsService()
         logger.info("ProcessService initialized")
 
     def get_nlp_engine(self, use_gpu: bool = False, use_mock: bool = False) -> NLPEngine:
@@ -1008,6 +1010,10 @@ class ProcessService:
             doc.processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             doc.sentence_count = len(sentences)
             doc.token_count = total_tokens
+            self.snapshot_doc_stats_service.set_document_valid(
+                document=doc,
+                snapshot_sentence_count=len(sentences),
+            )
             session.commit()
 
             # Update run
@@ -1593,11 +1599,23 @@ class ProcessService:
 
             try:
                 with self.db_service.get_session() as merge_session:
+                    if current_chunk_stage_rows > 0:
+                        self.snapshot_doc_stats_service.mark_documents_unknown(
+                            merge_session,
+                            current_chunk_doc_ids,
+                        )
+                        merge_session.commit()
                     merged_rows = self._merge_sentence_nlp_snapshot_stage(
                         merge_session,
                         run_id=int(run.run_id),
                         merge_batch_size=int(merge_batch_size),
                     )
+                    if current_chunk_stage_rows > 0:
+                        self.snapshot_doc_stats_service.refresh_document_stats(
+                            merge_session,
+                            current_chunk_doc_ids,
+                        )
+                        merge_session.commit()
             except Exception as exc:
                 logger.exception(
                     "Failed to merge staged sentence snapshot chunk for run %s",
@@ -2403,6 +2421,9 @@ class ProcessService:
             # We need to temporarily reset status to 'imported' so process_document works
             doc.status = 'imported'
             doc.processed_at = None
+            doc.snapshot_sentence_count = 0
+            doc.snapshot_stats_state = "unknown"
+            doc.snapshot_stats_updated_at = self._utc_now()
             session.flush()
 
             # Process
