@@ -359,9 +359,10 @@ Evidence:
   - exact `sentence_nlp_snapshot` row count by naïve project join took about
     `212s`, so it was intentionally excluded from the online governance
     contract
-  - existing `SnapshotReadinessService.get_project_summary()` remained usable at
-    about `9.5s`
-  - exact `lemma_doc_stat` project count remained practical at about `3.3s`
+- existing `SnapshotReadinessService.get_project_summary()` remained usable at
+  about `9.5s`
+- exact `lemma_doc_stat` project count remained practical but still dominated
+  cold governance at about `3.3s` before the follow-up narrow patch
 
 Remaining note:
 
@@ -384,12 +385,25 @@ Implemented follow-up: per-document snapshot readiness stats
   - heavy rebuild writes stay under backup/preflight/protected-db guardrails
 - live evidence on `hewiki_gpu_processing test.db`, `project_id=1`:
   - cold `SnapshotReadinessService.get_project_summary()` ~= `0.505s`
-  - cold governance summary ~= `3.884s`
-  - remaining dominant cold cost is exact `lemma_doc_stat` count at
-    ~= `3.489s`
+  - first implementation left cold governance at ~= `3.884s` because exact
+    `lemma_doc_stat` counting still dominated at ~= `3.489s`
 - this means the snapshot-governance bottleneck has been structurally removed
   for the current layer; any future governance acceleration should first
   re-audit the remaining exact `lemma_*` counts
+
+Follow-up narrow cold-governance patch:
+
+- implemented on `2026-03-12`
+- `lemma_doc_stat` governance volume is now derived from
+  `SUM(lemma_project_stat.doc_freq)` instead of a cold `COUNT(*)` over the
+  104M-row `lemma_doc_stat` table
+- live evidence on the same `hewiki_gpu_processing test.db`, `project_id=1`:
+  - cold readiness ~= `0.512s`
+  - cold `lemma_*` aggregate ~= `0.112s`
+  - full cold governance summary ~= `0.636s`
+- this removes the last known cold-path blocker in the current governance
+  layer and shifts the next active priority to telemetry retention apply
+  validation
 
 Historical pre-implementation note (superseded by the schema 42 doc-stats wave):
 
@@ -551,7 +565,7 @@ Evidence:
 
 ## Immediate execution order
 
-1. future retention/cleanup policy for project telemetry and other large derived artifacts
+1. telemetry retention apply validation on a safe target / disposable copy
 2. future heavy validation only by explicit decision gate
 
 ### PATCH-P1-03: Telemetry-first retention for `processor_run` / `run_error`

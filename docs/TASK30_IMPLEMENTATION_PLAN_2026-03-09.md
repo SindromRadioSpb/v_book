@@ -1726,17 +1726,26 @@ Current execution status:
   - `scripts/process_reference_corpus.py` now provides:
     - `--verify-snapshot-stats`
     - `--rebuild-snapshot-stats`
-- post-implementation live re-audit on `project_id=1` of the approved dev/test
-  DB now shows:
-  - cold `SnapshotReadinessService.get_project_summary()` ~= `0.505s`
-  - cold governance summary ~= `3.884s`
-  - remaining dominant cold cost moved to exact `lemma_doc_stat` count at
-    ~= `3.489s`
-- bounded live rebuild proof on the same approved dev/test DB now exists:
-  - `--rebuild-snapshot-stats --max-docs 100` refreshed persisted stats for the
-    first 100 processed docs in about `0.6s`
-  - follow-up `--verify-snapshot-stats --max-docs 100` reported `99` docs ok
-    and one legacy drift on `doc_id=1`
-  - that drift is a pre-existing document inconsistency
-    (`source_document.sentence_count=272` while actual `document_sentence=0`),
-    not a rebuild-loop corruption
+  - post-implementation live re-audit on `project_id=1` of the approved dev/test
+    DB now shows:
+    - cold `SnapshotReadinessService.get_project_summary()` ~= `0.505s`
+    - first implementation left cold governance summary ~= `3.884s`
+    - remaining dominant cold cost moved to exact `lemma_doc_stat` count at
+      ~= `3.489s`
+  - bounded live rebuild proof on the same approved dev/test DB now exists:
+    - `--rebuild-snapshot-stats --max-docs 100` refreshed persisted stats for the
+      first 100 processed docs in about `0.6s`
+    - follow-up `--verify-snapshot-stats --max-docs 100` reported `99` docs ok
+      and one legacy drift on `doc_id=1`
+    - that drift is a pre-existing document inconsistency
+      (`source_document.sentence_count=272` while actual `document_sentence=0`),
+      not a rebuild-loop corruption
+- follow-up narrow governance patch on `2026-03-12` replaced the cold
+  `lemma_doc_stat` count with `SUM(lemma_project_stat.doc_freq)` on the same
+  DB/project:
+  - cold readiness ~= `0.512s`
+  - cold `lemma_*` aggregate ~= `0.112s`
+  - full cold governance summary ~= `0.636s`
+- result: the current readiness/governance layer is no longer the main
+  operator-cost blocker; the next active priority moves to telemetry retention
+  apply validation on a safe target

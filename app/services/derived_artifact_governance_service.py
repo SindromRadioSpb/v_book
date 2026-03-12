@@ -50,16 +50,19 @@ class DerivedArtifactGovernanceService:
         snapshot_summary = SnapshotReadinessService().get_project_summary(session, int(project_id))
         timings["snapshot_summary_s"] = round(time.perf_counter() - snapshot_started, 3)
 
-        lemma_doc_rows, timings["lemma_doc_rows_s"] = self._scalar(
+        lemma_stats_row, timings["lemma_stats_s"] = self._mapping(
             session,
-            text("SELECT COUNT(*) FROM lemma_doc_stat WHERE project_id = :pid"),
+            text(
+                "SELECT "
+                "  COUNT(*) AS lemma_project_rows, "
+                "  COALESCE(SUM(doc_freq), 0) AS lemma_doc_rows "
+                "FROM lemma_project_stat "
+                "WHERE project_id = :pid"
+            ),
             {"pid": int(project_id)},
         )
-        lemma_project_rows, timings["lemma_project_rows_s"] = self._scalar(
-            session,
-            text("SELECT COUNT(*) FROM lemma_project_stat WHERE project_id = :pid"),
-            {"pid": int(project_id)},
-        )
+        lemma_project_rows = int(lemma_stats_row.get("lemma_project_rows") or 0)
+        lemma_doc_rows = int(lemma_stats_row.get("lemma_doc_rows") or 0)
         processor_run_rows, timings["processor_run_rows_s"] = self._scalar(
             session,
             text("SELECT COUNT(*) FROM processor_run WHERE project_id = :pid"),
@@ -179,6 +182,12 @@ class DerivedArtifactGovernanceService:
         return rows, round(time.perf_counter() - started_at, 3)
 
     @staticmethod
+    def _mapping(session: Session, stmt, params: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], float]:
+        started_at = time.perf_counter()
+        row = dict(session.execute(stmt, params or {}).mappings().one())
+        return row, round(time.perf_counter() - started_at, 3)
+
+    @staticmethod
     def _utc_now() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -197,7 +206,8 @@ class DerivedArtifactGovernanceService:
         processed_docs: int,
     ) -> DerivedArtifactMetricDTO:
         detail_lines = [
-            "Exact project row count via `lemma_doc_stat.project_id`.",
+            "Exact project row count derived from `SUM(lemma_project_stat.doc_freq)`.",
+            "This reuses already-maintained per-lemma project aggregates instead of a cold full-table count over `lemma_doc_stat`.",
             "Project-owned derived rows; explicit set-based delete path is already required on project deletion.",
         ]
         ratio = self._format_ratio(lemma_doc_rows, processed_docs)
@@ -209,7 +219,7 @@ class DerivedArtifactGovernanceService:
             ownership="project-owned stats",
             quantity_value=int(lemma_doc_rows),
             quantity_unit="rows",
-            quantity_basis="exact project count",
+            quantity_basis="exact count derived from lemma_project_stat.doc_freq",
             status="expected_large",
             summary=(
                 "This table is expected to be very large at reference scale. The goal is governance and "
@@ -241,6 +251,7 @@ class DerivedArtifactGovernanceService:
     ) -> DerivedArtifactMetricDTO:
         detail_lines = [
             "Exact project row count via `lemma_project_stat.project_id`.",
+            "The same aggregate table also supplies the derived exact `lemma_doc_stat` total via `SUM(doc_freq)`.",
             "Represents project-level aggregates, not raw per-document evidence rows.",
         ]
         ratio = self._format_ratio(lemma_project_rows, processed_docs)

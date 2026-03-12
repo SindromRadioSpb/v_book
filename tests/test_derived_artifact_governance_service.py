@@ -178,6 +178,7 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert "Snapshot volume reuses the existing readiness aggregate" in summary.storage_note
 
         assert metrics["lemma_doc_stat"].quantity_value == 3
+        assert metrics["lemma_doc_stat"].quantity_basis == "exact count derived from lemma_project_stat.doc_freq"
         assert metrics["lemma_doc_stat"].status == "expected_large"
         assert metrics["lemma_doc_stat"].maintenance_mode == "reset_rebuild_only"
         assert "--reprocess-all" in str(metrics["lemma_doc_stat"].maintenance_cli_hint)
@@ -257,6 +258,37 @@ def test_derived_artifact_governance_service_uses_read_only_session_without_comm
 
         assert summary.project_id == project_id
         assert len(summary.artifacts) == 5
+    finally:
+        _reset_db_service()
+        db_path.unlink(missing_ok=True)
+
+
+def test_derived_artifact_governance_service_avoids_cold_lemma_doc_stat_count() -> None:
+    db_path = _init_temp_db()
+    _reset_db_service()
+    DBService.initialize(db_path)
+    db = DBService.get_instance()
+
+    try:
+        with db.get_session() as session:
+            project_id = _seed_project(session)
+
+        service = DerivedArtifactGovernanceService()
+        with db.get_read_session() as session:
+            original_execute = session.execute
+            seen_sql: list[str] = []
+
+            def recording_execute(*args, **kwargs):
+                if args:
+                    seen_sql.append(str(args[0]))
+                return original_execute(*args, **kwargs)
+
+            session.execute = recording_execute  # type: ignore[assignment]
+            summary = service.get_project_summary(session, project_id)
+
+        assert summary.project_id == project_id
+        assert all("FROM lemma_doc_stat WHERE project_id" not in sql for sql in seen_sql)
+        assert any("SUM(doc_freq)" in sql and "FROM lemma_project_stat" in sql for sql in seen_sql)
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)

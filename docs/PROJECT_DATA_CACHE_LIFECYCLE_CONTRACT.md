@@ -377,9 +377,9 @@ It must not:
 On the approved `hewiki_gpu_processing test.db`, `project_id=1`:
 
 - cold `SnapshotReadinessService.get_project_summary()` is now about `0.505s`
-- full cold governance summary is now about `3.884s`
-- the remaining dominant cold query is the exact `lemma_doc_stat` project count
-  at about `3.489s`
+- cold `lemma_doc_stat` governance volume is now derived from
+  `SUM(lemma_project_stat.doc_freq)` in about `0.112s`
+- full cold governance summary is now about `0.636s`
 - bounded live rebuild proof now also exists on the same DB:
   - `--rebuild-snapshot-stats --max-docs 100` refreshed persisted stats for the
     first 100 processed docs
@@ -387,8 +387,8 @@ On the approved `hewiki_gpu_processing test.db`, `project_id=1`:
     one legacy inconsistency on `doc_id=1`
 
 Therefore the snapshot-governance bottleneck has been structurally removed for
-the current layer. Any future governance acceleration should first re-audit the
-remaining exact `lemma_*` counts rather than revisiting snapshot-row joins.
+the current layer. The next active priority moves to telemetry retention apply
+validation rather than another governance cold-path optimization wave.
 
 ### Current limitations
 
