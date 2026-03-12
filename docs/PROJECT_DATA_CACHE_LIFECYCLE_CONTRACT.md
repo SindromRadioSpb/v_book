@@ -430,6 +430,10 @@ governance/telemetry write wave queued from this branch.
       - after apply: `215` total runs, `200` ok, `15` non-ok, `0` prunable ok rows
       - noted/evidence rows and `run_error` rows were preserved
       - source `hewiki_gpu_processing test.db` remained untouched
+  - disposable-clone housekeeping is also complete:
+    - deleted `build\bench\hewiki_telemetry_apply_validation_20260312.db`
+    - checked `.db-wal`, `.db-shm`, `.db-journal` sidecars; none were present
+    - source DB, backup DB, JSON evidence, and docs evidence were preserved
   - large project-owned derived tables are intentionally not treated as
     age-prune candidates
   - if storage pressure becomes real for those tables, the correct follow-up is
@@ -446,6 +450,8 @@ governance/telemetry write wave queued from this branch.
 Decision update:
 
 - telemetry retention apply validation is complete on a disposable clone
+- disposable clone housekeeping is complete
+- no active operator write slice remains open on this branch
 - future heavy validation remains opt-in through an explicit decision gate
 
 ## Immediate follow-up recommendations

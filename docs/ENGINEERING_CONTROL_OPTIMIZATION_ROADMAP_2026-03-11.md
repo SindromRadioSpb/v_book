@@ -565,7 +565,8 @@ Evidence:
 
 ## Immediate execution order
 
-1. future heavy validation only by explicit decision gate
+1. no active operator write slice remains open on this branch
+2. future heavy validation only by explicit decision gate
 
 ### PATCH-P1-03: Telemetry-first retention for `processor_run` / `run_error`
 
@@ -657,6 +658,14 @@ Evidence:
     - `run_error` stayed at `15`
     - file size stayed unchanged until explicit `VACUUM`, as designed
     - source `hewiki_gpu_processing test.db` stayed untouched
+- housekeeping on `2026-03-12`:
+  - disposable clone `build\bench\hewiki_telemetry_apply_validation_20260312.db`
+    was deleted after validation closed
+  - checked sidecars:
+    - `.db-wal` -> not present
+    - `.db-shm` -> not present
+    - `.db-journal` -> not present
+  - source DB, backup DB, JSON evidence, and docs evidence were preserved
 
 Remaining note:
 
@@ -692,7 +701,9 @@ Remaining note:
 Decision update:
 
 - telemetry retention apply validation is complete on a disposable clone
+- disposable clone housekeeping is complete; no disposable validation DB remains
 - no automatic write follow-up is queued from this layer
+- the next active layer is decision-gate triage only, not a reopened write branch
 - future heavy validation remains an explicit decision-gate item only
 
 ## Decision note

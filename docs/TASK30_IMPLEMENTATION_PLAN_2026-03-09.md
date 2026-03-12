@@ -1764,6 +1764,11 @@ Current execution status:
   - after apply: `215` total runs, `200` ok, `15` non-ok, `0` prunable ok rows
   - noted/evidence ok rows and `run_error` rows were preserved
   - source `hewiki_gpu_processing test.db` remained untouched
+- disposable clone housekeeping is complete:
+  - deleted `build\bench\hewiki_telemetry_apply_validation_20260312.db`
+  - checked `.db-wal`, `.db-shm`, `.db-journal` sidecars; none were present
+  - preserved source DB, backup DB, JSON evidence, and docs evidence
 - next state after this validation:
   - no further automatic telemetry write wave is queued
+  - no active operator write slice remains open on this branch
   - future heavy validation stays behind an explicit decision gate
