@@ -387,8 +387,9 @@ On the approved `hewiki_gpu_processing test.db`, `project_id=1`:
     one legacy inconsistency on `doc_id=1`
 
 Therefore the snapshot-governance bottleneck has been structurally removed for
-the current layer. The next active priority moves to telemetry retention apply
-validation rather than another governance cold-path optimization wave.
+the current layer. The telemetry retention apply validation follow-up is now
+also complete on a disposable clone, so there is no further automatic
+governance/telemetry write wave queued from this branch.
 
 ### Current limitations
 
@@ -420,6 +421,15 @@ validation rather than another governance cold-path optimization wave.
     - result: preflight ok on `project_id=1`, schema `42` target vs schema `41`
       backup, with `387,398` prunable successful rows and no direct
       `run_error` retention candidates
+  - live apply evidence now also exists on a disposable schema `42` clone of
+    the same DB:
+    - artifact: `build/logs/telemetry_retention/project1_apply_validation_summary.json`
+    - result:
+      - before apply: `387,613` total runs, `387,398` prunable ok rows
+      - apply deleted exactly `387,398` ok rows in about `5.388s`
+      - after apply: `215` total runs, `200` ok, `15` non-ok, `0` prunable ok rows
+      - noted/evidence rows and `run_error` rows were preserved
+      - source `hewiki_gpu_processing test.db` remained untouched
   - large project-owned derived tables are intentionally not treated as
     age-prune candidates
   - if storage pressure becomes real for those tables, the correct follow-up is
@@ -432,6 +442,11 @@ validation rather than another governance cold-path optimization wave.
   - governance UI also exposes a copyable backup-backed `--preflight-only`
     template so the next safe operator step is explicit without surfacing a
     one-click write command
+
+Decision update:
+
+- telemetry retention apply validation is complete on a disposable clone
+- future heavy validation remains opt-in through an explicit decision gate
 
 ## Immediate follow-up recommendations
 

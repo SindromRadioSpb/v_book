@@ -1755,5 +1755,15 @@ Current execution status:
   - cold `lemma_*` aggregate ~= `0.112s`
   - full cold governance summary ~= `0.636s`
 - result: the current readiness/governance layer is no longer the main
-  operator-cost blocker; the next active priority moves to telemetry retention
-  apply validation on a safe target
+  operator-cost blocker
+- telemetry retention apply validation is now complete on a safe disposable
+  clone:
+  - artifact: `build/logs/telemetry_retention/project1_apply_validation_summary.json`
+  - before apply: `387,613` total runs, `387,398` prunable ok rows
+  - apply deleted exactly `387,398` ok rows in about `5.388s`
+  - after apply: `215` total runs, `200` ok, `15` non-ok, `0` prunable ok rows
+  - noted/evidence ok rows and `run_error` rows were preserved
+  - source `hewiki_gpu_processing test.db` remained untouched
+- next state after this validation:
+  - no further automatic telemetry write wave is queued
+  - future heavy validation stays behind an explicit decision gate

@@ -401,9 +401,9 @@ Follow-up narrow cold-governance patch:
   - cold readiness ~= `0.512s`
   - cold `lemma_*` aggregate ~= `0.112s`
   - full cold governance summary ~= `0.636s`
-- this removes the last known cold-path blocker in the current governance
-  layer and shifts the next active priority to telemetry retention apply
-  validation
+- this removed the last known cold-path blocker in the current governance
+  layer; telemetry retention apply validation is now the completed follow-up
+  evidence wave for the same operator-cost branch
 
 Historical pre-implementation note (superseded by the schema 42 doc-stats wave):
 
@@ -565,8 +565,7 @@ Evidence:
 
 ## Immediate execution order
 
-1. telemetry retention live apply on a disposable copy after the new preflight gate
-2. future heavy validation only by explicit decision gate
+1. future heavy validation only by explicit decision gate
 
 ### PATCH-P1-03: Telemetry-first retention for `processor_run` / `run_error`
 
@@ -646,6 +645,18 @@ Evidence:
     - backup probe ok on schema `41`
     - `protected_target = false`
     - `prunable_ok_runs = 387,398`
+- live `--apply` validation on `2026-03-12` using a disposable clone of the
+  same DB:
+  - artifact: `build/logs/telemetry_retention/project1_apply_validation_summary.json`
+  - result:
+    - before apply: `387,613` total runs, `387,598` ok, `15` non-ok, `3`
+      noted/evidence ok rows, `387,398` prunable ok rows
+    - apply deleted exactly `387,398` ok rows in about `5.388s`
+    - after apply: `215` total runs, `200` ok, `15` non-ok, `3`
+      noted/evidence ok rows, `0` prunable ok rows
+    - `run_error` stayed at `15`
+    - file size stayed unchanged until explicit `VACUUM`, as designed
+    - source `hewiki_gpu_processing test.db` stayed untouched
 
 Remaining note:
 
@@ -677,6 +688,12 @@ Remaining note:
 - heavy reference rebuild execution is now also aligned with the safety gate:
   actual `--reprocess-all` writes require backup/preflight readiness and use the
   same protected-target override gate as heavy snapshot-backfill writes
+
+Decision update:
+
+- telemetry retention apply validation is complete on a disposable clone
+- no automatic write follow-up is queued from this layer
+- future heavy validation remains an explicit decision-gate item only
 
 ## Decision note
 
