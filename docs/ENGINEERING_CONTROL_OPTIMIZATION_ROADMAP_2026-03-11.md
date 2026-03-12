@@ -829,6 +829,46 @@ Current status after repair:
 - keep startup, picker, governance/readiness, telemetry, and heavy-validation
   branches closed unless their own future evidence gates are crossed.
 
+## Fourth framework-driven cold-audit wave
+
+The fourth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/DICTIONARY_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- strict read-only evidence on the approved hewiki test DB shows:
+  - Dictionary default first page ~= `0.003s`
+  - Dictionary exact count (cold) ~= `0.129s`
+  - Dictionary exact count (cached) ~= `0.000s`
+- the default Dictionary cold path is therefore not a blocker;
+- Dictionary staged first-paint and deferred exact-count behavior remain intact
+  by code and targeted regression coverage.
+
+Approved-target search/parity outcome:
+
+- `lemma_fts` exists, but current approved-target parity is not healthy:
+  - `lemma` rows = `2,071,947`
+  - `lemma_fts` rows = `2,076,909`
+  - extra `lemma_fts` rows = `4,962`
+- in the recorded 12-term approved-target parity sample:
+  - `LIKE` count was non-zero for `12 / 12` terms;
+  - service search count was non-zero for `0 / 12` terms;
+  - `lemma_id IN (SELECT rowid FROM lemma_fts MATCH ...)` was non-zero for
+    `0 / 12` terms.
+
+Current status after the wave:
+
+- Dictionary default cold-path triage is closed;
+- no Dictionary performance patch branch is opened from this wave;
+- Dictionary search/FTS health is a separate `P1` decision-gated topic, not an
+  automatically active branch;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen Dictionary work without new approved-target evidence and an
+  explicit search/FTS health gate.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
