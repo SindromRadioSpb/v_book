@@ -121,6 +121,10 @@ What stays decision-gated:
 - any FTS health or rebuild work
 - any broader Sentences redesign
 
+Decision note for that residual tail:
+
+- `docs/SENTENCES_FILTERED_SEARCH_DECISION_2026-03-12.md`
+
 The next active engineering action is therefore:
 
 - return to the canonical cold-audit framework for the next narrow subsystem wave,

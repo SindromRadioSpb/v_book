@@ -781,6 +781,7 @@ The third official task-specific use of the canonical framework is now recorded 
 
 - `docs/SENTENCES_WORKSPACE_COLD_AUDIT_2026-03-12.md`
 - `docs/SENTENCES_WORKSPACE_REPAIR_2026-03-12.md`
+- `docs/SENTENCES_FILTERED_SEARCH_DECISION_2026-03-12.md`
 
 Wave outcome:
 
@@ -817,6 +818,12 @@ Current status after repair:
 - the Sentences P0 first-page blocker is operationally closed;
 - the remaining filtered search/count tail is explicitly decision-gated, not an
   automatic follow-up branch;
+- the filtered search decision note currently classifies that residual tail as
+  `P1`, not blocker, because:
+  - filtered first page is secondary and no longer the default user-visible blocker;
+  - exact filtered count remains async stage-2 work;
+  - `sentence_fts` is not healthy enough on the approved target for a bounded
+    FTS-backed follow-up patch;
 - the next active work returns to the canonical cold-audit framework for the
   next narrow subsystem wave;
 - keep startup, picker, governance/readiness, telemetry, and heavy-validation
