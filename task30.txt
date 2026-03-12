@@ -1,0 +1,456 @@
+# Claude Code Prompt — Infrastructure Audit, End-to-End Functional Verification, Performance Profiling, and Large-Scale Readiness
+
+## Goal
+
+Execute a disciplined repository-wide audit and implementation-planning iteration for a **professional premium desktop application**.  
+Before proposing any patch plan or touching code, you must fully understand the current architecture, operational constraints, performance bottlenecks, and regression risks.
+
+This iteration is **not allowed** to be superficial.  
+You must first study the repository documentation and code entry points in depth, verify prerequisites, identify blind spots, and reduce ambiguity before planning or implementation.
+
+The outcome must be a **traceable, reproducible, evidence-based technical plan** with logs, timings, risk analysis, and concrete recommendations for both incremental optimization and more radical architectural options for very large databases and projects.
+
+---
+
+## Repository-first discipline requirements
+
+Before planning or implementation, you must:
+
+1. Read all relevant repository documentation needed for this task.
+2. Audit the actual code entry points involved in:
+   - Niqqud generation / phonikud / diacritization
+   - Translation flows
+   - TTS / audio generation / playback-related generation paths
+   - Background workers / long operations
+   - Caching
+   - Database access
+   - Project loading
+   - Large-table pagination / counts / filtering / refreshes
+   - Installed runtime / resource resolution if relevant
+   - Logging / diagnostics / profiling / timing collection
+3. Verify that all prerequisite infrastructure is present and actually wired:
+   - required models/resources
+   - provider registrations
+   - worker-safe execution paths
+   - DB schema/migrations
+   - indexes
+   - runtime settings
+   - caches
+   - feature flags
+   - logging paths
+4. Explicitly check whether something is only partially documented, implied, or implemented inconsistently.
+5. Identify blind spots and unresolved details **before** proposing implementation steps.
+6. Minimize regression risk wherever possible and reasonable.
+7. Prefer bounded, reproducible diagnostics over vague assumptions.
+8. Do not assume that previously mentioned documentation is complete or current — verify against the repository.
+
+---
+
+## Mandatory operating context
+
+Use this exact database path for testing:
+
+```powershell
+python -m app.main --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db"
+```
+
+All analysis must be performed with **traceable logs** and **comparable timing evidence** so that “before vs after” can be evaluated later.
+
+---
+
+## Primary objectives
+
+### A. Infrastructure research
+Research the real infrastructure and execution flow for:
+- niqqud generation
+- translation
+- TTS / audio generation
+- all tabs/views where these capabilities are available
+- worker execution model
+- database access patterns
+- pagination / filters / sorting / refresh logic
+- caching opportunities and risks
+- handling of large projects / large databases
+
+### B. Functional test coverage
+Run end-to-end tests of niqqud, translation, and TTS across all relevant tabs/views in the application.
+
+The analysis must answer:
+- Which tabs/views expose each capability?
+- Are they using the same or different execution paths?
+- Are all flows worker-safe and non-blocking?
+- Are there duplicate implementations or inconsistent pipelines?
+- Are some tabs significantly slower than others?
+- Are there avoidable repeated DB reads, counts, refreshes, or provider initializations?
+
+### C. Timing and bottleneck profiling
+Measure and document timings for:
+- application startup on the target DB
+- project opening / project switching
+- tab opening
+- initial load of heavy views
+- pagination changes
+- filtering / search
+- niqqud request execution
+- translation request execution
+- TTS request execution
+- repeated execution with warm state
+- repeated execution with cache hits where applicable
+- refreshes after batch operations
+- counts on large tables
+- any expensive overlay / reconciliation logic
+
+You must identify:
+- cold-path costs
+- warm-path costs
+- repeated costs that should be cached
+- UI-thread work that must move off-thread
+- DB queries that are acceptable vs pathological
+- operations that degrade non-linearly with project size
+
+### D. Cache strategy analysis
+Determine what is actually reasonable to cache when the application is connected to a **large DB with very large projects**.
+
+Analyze candidates such as:
+- provider/resource initialization state
+- model availability/resource checks
+- expensive metadata summaries
+- project statistics
+- total counts
+- filtered counts
+- last-used view state
+- normalized text / lookup keys
+- translation results
+- niqqud results
+- TTS metadata / audio asset metadata
+- reusable query results
+- frequently accessed small dictionaries / mapping tables
+- UI-visible DTO snapshots for current page only
+- precomputed aggregates
+- background-populated summary tables
+
+For every cache candidate, specify:
+- what can be cached
+- cache key design
+- invalidation triggers
+- stale-data risks
+- expected win
+- memory footprint risk
+- whether cache belongs in RAM, SQLite table, persisted app cache, or precomputed materialized structure
+
+### E. Large-scale readiness
+Answer the hard question:
+
+**What must be done if a project contains millions of rows and simple optimizations are not enough?**
+
+Propose requirements and strategies needed so the application remains responsive without freezes or hangs.
+
+Include:
+- strict UI-thread safety requirements
+- bounded page loading
+- async count strategies
+- delayed / background totals
+- summary tables / pre-aggregates
+- selective hydration
+- lazy detail loading
+- projection-only queries
+- covering indexes
+- denormalized helper tables where justified
+- write-path implications
+- memory ceilings
+- cache ceilings
+- cancellation / pause / resumability
+- progress visibility
+- batch size constraints
+- large-project UX adaptations
+
+### F. Radical options
+If simple optimizations, conventional caching, indexing, and workerization are still insufficient, propose more radical architectural options.
+
+Examples of the kind of options to consider:
+- materialized summary tables
+- background indexing pipelines
+- offline precomputation stages
+- project sharding / logical partitioning
+- archive / cold-storage mode for stale data
+- split “active project” vs “historical corpus” storage
+- separate analytics DB or read-optimized mirror
+- per-project derived caches
+- service-process separation for heavy NLP/TTS/translation work
+- queue-based job orchestration
+- out-of-process workers
+- incremental view models
+- snapshotting
+- project-open warmup pipelines
+- optional “large project mode”
+- reduced live totals / deferred expensive metrics
+- hard UX limits for pathological cases
+
+For each radical option, describe:
+- what problem it solves
+- migration cost
+- implementation complexity
+- regression risk
+- operational cost
+- user experience trade-offs
+- whether it should be optional or mandatory
+
+---
+
+## Required work style
+
+You must work in the following disciplined order:
+
+1. **Repository audit first**
+2. **Documentation audit second**
+3. **Code entry point mapping**
+4. **Prerequisite verification**
+5. **Blind spot and ambiguity analysis**
+6. **Functional test design**
+7. **Instrumentation/logging design**
+8. **Execution of bounded tests**
+9. **Timing analysis**
+10. **Cache strategy analysis**
+11. **Large-scale architecture analysis**
+12. **Patch/implementation recommendations**
+13. **Regression-risk review**
+14. **Deliver final structured report**
+
+Do not jump directly to code changes.
+
+If something important is unclear, do not hand-wave it.  
+Investigate it in the repository and state clearly what is confirmed, what is inferred, and what remains unresolved.
+
+---
+
+## Logging and reproducibility requirements
+
+All analysis must be reproducible.
+
+You must:
+- produce explicit commands used
+- identify log files and log locations
+- add temporary diagnostics only in a disciplined, removable way
+- capture timings in a structured form
+- make comparisons reproducible
+- distinguish cold vs warm runs
+- note DB size / project size context where relevant
+- avoid destructive changes unless clearly justified
+- keep evidence suitable for “before/after” comparison
+
+Preferred evidence format:
+- command
+- environment
+- target path
+- scenario
+- timing
+- result
+- notes / anomalies
+
+---
+
+## Output format
+
+Your response must be structured exactly as:
+
+# 1. Repo audit findings
+
+Include:
+- skills / internal methodology used
+- relevant docs reviewed
+- key code entry points confirmed
+- prerequisite status
+- confirmed architecture facts
+- confirmed inconsistencies
+- confirmed blind spots
+- confirmed performance risk areas
+- confirmed regression risk areas
+
+# 2. Functional coverage map
+
+For niqqud, translation, and TTS:
+- which tabs/views support them
+- which services/workers/providers they use
+- whether flows are unified or divergent
+- whether execution is worker-safe
+- whether duplicate logic exists
+- whether behavior differs by view
+
+# 3. Instrumentation and test plan
+
+Include:
+- exact commands
+- logging plan
+- scenarios to run
+- cold/warm separation
+- large-project scenarios
+- what metrics will be collected
+- what is intentionally out of scope
+
+# 4. Test execution results
+
+For each scenario:
+- command / action
+- observed behavior
+- logs
+- timings
+- anomalies
+- traceability notes
+
+# 5. Timing and bottleneck analysis
+
+Include:
+- startup
+- tab load
+- pagination
+- filter/search
+- niqqud
+- translation
+- TTS
+- refresh flows
+- counts
+- repeated operations
+- cacheable repeated costs
+- bottleneck ranking by severity
+
+# 6. Cache strategy recommendations
+
+For each cache candidate:
+- item
+- why cache it
+- cache scope
+- invalidation
+- risk
+- expected impact
+- recommended priority
+
+# 7. Large-project readiness requirements
+
+Define the non-negotiable requirements for millions-of-rows projects:
+- UI constraints
+- DB constraints
+- worker constraints
+- cache constraints
+- logging constraints
+- pagination/counting rules
+- long-op behavior
+- failure/recovery requirements
+- UX rules for very large projects
+
+# 8. Radical options if incremental optimization is insufficient
+
+Provide serious architectural alternatives with trade-offs.
+
+# 9. Patch plan
+
+Provide a disciplined patch plan with:
+- PATCH-01, PATCH-02, ...
+- file targets
+- rationale
+- expected effect
+- regression risks
+- validation strategy
+- whether diagnostic-only or production change
+
+# 10. Tests
+
+List:
+- automated tests to add/update
+- smoke tests
+- large-project tests
+- timing regression tests
+- manual verification scenarios
+- installed-runtime verification if relevant
+
+# 11. DoD
+
+Definition of Done must include:
+- reproducible logs
+- before/after comparability
+- verified prerequisite coverage
+- no unresolved blind spots in changed areas
+- bounded regression risk
+- worker-safe long operations
+- no UI freezes in target scenarios
+- explicit behavior on very large projects
+- documentation updated
+- rollback/removal path for temporary diagnostics
+
+---
+
+## Patch steps requirements
+
+When proposing patch steps:
+- keep them bounded
+- separate diagnostics from product behavior changes
+- prefer minimal-regression refactors
+- preserve existing architecture unless there is strong evidence to change it
+- identify any migration/index impact explicitly
+- identify any install/runtime implications explicitly
+- state whether each patch is safe for production DBs
+- include rollback notes where appropriate
+
+---
+
+## Tests requirements
+
+Your test strategy must include, where relevant:
+- unit tests
+- service tests
+- worker tests
+- regression tests
+- large-project smoke tests
+- cold/warm timing comparisons
+- pagination/count behavior tests
+- cancellation/pause/resume tests for long operations
+- cache hit/miss behavior tests
+- view-to-view consistency tests for niqqud/translation/TTS
+- installed runtime smoke tests if packaging/runtime paths are involved
+
+---
+
+## DoD requirements
+
+The final DoD must be strict.
+
+At minimum:
+- all relevant documentation for the touched area has been reviewed
+- all prerequisite conditions have been verified
+- blind spots have been explicitly identified and either resolved or isolated
+- timing evidence is reproducible
+- logs are sufficient for future comparison
+- recommendations distinguish “confirmed” from “proposed”
+- large-project handling rules are explicit
+- no unjustified UI-thread heavy work remains in the audited flows
+- no avoidable repeated heavy counts remain on hot paths
+- cache recommendations include invalidation rules
+- all proposed changes have clear regression boundaries
+
+---
+
+## Additional constraints
+
+- Treat this as a **premium production application**, not a prototype.
+- Be conservative with regressions.
+- Be explicit about unknowns.
+- Prefer evidence over intuition.
+- Avoid shallow summaries.
+- Minimize risk from places where the repository mentions something too briefly.
+- If docs and code disagree, say so explicitly.
+- If an optimization helps small projects but harms very large ones, call that out.
+- If a “fast” path is only fast under warm cache conditions, state that explicitly.
+- If true responsiveness cannot be achieved within the current architecture, say so clearly and propose the next architectural tier.
+
+---
+
+## Deliverable quality bar
+
+The final output must be good enough that it can be used as:
+- a repository audit artifact
+- a performance investigation record
+- a reproducible benchmark note
+- a patch-planning document
+- an implementation handoff for disciplined engineering work
+
+Do not provide a casual answer.  
+Provide a production-grade engineering artifact.

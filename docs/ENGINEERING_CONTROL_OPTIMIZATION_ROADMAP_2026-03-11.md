@@ -775,6 +775,32 @@ Current status after the wave:
 - do not reopen picker work without a new approved-target breach, real UI
   first-usable-state regression, or fallback-drift evidence.
 
+## Third framework-driven cold-audit wave
+
+The third official task-specific use of the canonical framework is now recorded in:
+
+- `docs/SENTENCES_WORKSPACE_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- strict read-only evidence on the approved hewiki test DB shows:
+  - Sentences first page ~= `3.56s` to `4.10s`
+  - Sentences unfiltered total count ~= `0.016s` to `0.024s`
+  - Sentences filtered count with `text_search='wiki'` ~= `8.31s` to `8.72s`
+- the dominant current blocker is the Sentences page query itself:
+  - current breakdown shows `page_query ~= 3.68s`
+  - current query plan still uses `USE TEMP B-TREE FOR ORDER BY`
+- staged first-paint and anti-stale request handling are still correct, but they
+  do not remove the blocker because rows arrive only after the slow stage-1 page
+  query completes.
+
+Current status after the wave:
+
+- the evidence gate is crossed for a new bounded branch;
+- the next active layer is now Sentences workspace cold-path repair;
+- keep startup, picker, governance/readiness, telemetry, and heavy-validation
+  branches closed unless their own future evidence gates are crossed.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
