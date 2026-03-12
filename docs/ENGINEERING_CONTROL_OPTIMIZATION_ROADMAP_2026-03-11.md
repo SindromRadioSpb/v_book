@@ -869,6 +869,35 @@ Current status after the wave:
 - do not reopen Dictionary work without new approved-target evidence and an
   explicit search/FTS health gate.
 
+## Fifth framework-driven cold-audit wave
+
+The fifth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/TERMS_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- strict read-only evidence on the approved hewiki test DB shows:
+  - Terms default first page ~= `0.003s` first run and `0.056s` repeat probe
+  - Terms default exact count ~= `0.009s` first run and `0.002s` repeat probe
+  - Terms representative search page ~= `0.001s` first run and `0.003s` repeat
+    probe
+  - Terms representative search exact count ~= `0.001s`
+- the current Terms subsystem is therefore not a cold blocker on the approved
+  target.
+
+Current status after the wave:
+
+- Terms cold-path triage is closed;
+- no Terms runtime patch branch is opened from this wave;
+- the historical perf note that described Terms as count-before-emit is now
+  explicitly treated as historical context only, not current canonical
+  behavior;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen Terms work without new approved-target evidence.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
