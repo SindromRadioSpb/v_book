@@ -565,7 +565,7 @@ Evidence:
 
 ## Immediate execution order
 
-1. telemetry retention apply validation on a safe target / disposable copy
+1. telemetry retention live apply on a disposable copy after the new preflight gate
 2. future heavy validation only by explicit decision gate
 
 ### PATCH-P1-03: Telemetry-first retention for `processor_run` / `run_error`
@@ -615,7 +615,10 @@ Concrete output of this wave:
   - `scripts/prune_project_telemetry.py`
 - runtime contract:
   - dry-run is default
-  - `--apply` requires `--confirm-project-id`
+  - `--preflight-only` requires `--backup-db-path`
+  - `--apply` requires both `--backup-db-path` and `--confirm-project-id`
+  - the protected baseline/main reference DB stays blocked unless
+    `--allow-protected-db-telemetry-apply` is passed explicitly
   - only successful rows with empty note metadata are prunable
   - noted/evidence rows and all non-ok rows are preserved
   - no automatic `VACUUM`
@@ -625,7 +628,7 @@ Evidence:
 - targeted regressions:
   - `tests/test_project_telemetry_retention_service.py`
   - `tests/test_prune_project_telemetry_cli.py`
-  - result: `5 passed`
+  - result: `10 passed`
 - live dry-run on `hewiki_gpu_processing test.db`, `project_id=1`:
   - artifact: `build/logs/telemetry_retention/project1_prune_dry_run.json`
   - with `keep_latest_ok = 200`:
@@ -635,6 +638,14 @@ Evidence:
       - `200` recent successful rows
       - `3` noted/evidence successful rows
       - `15` non-ok rows
+- live preflight on the same DB with explicit backup path:
+  - artifact: `build/logs/telemetry_retention/project1_prune_preflight.json`
+  - result:
+    - `operation_mode = preflight_only`
+    - target probe ok on schema `42`
+    - backup probe ok on schema `41`
+    - `protected_target = false`
+    - `prunable_ok_runs = 387,398`
 
 Remaining note:
 
@@ -661,8 +672,8 @@ Remaining note:
       `--backfill-snapshots` or `--coverage-only` is explicitly requested
 - governance UI now surfaces those maintenance modes explicitly, including a
   safe telemetry dry-run CLI copy path, a reference rebuild dry-run CLI copy
-  path, and a backup-backed rebuild preflight template, while staying
-  observational-only
+  path, a telemetry preflight CLI hint, and a backup-backed rebuild preflight
+  template, while staying observational-only
 - heavy reference rebuild execution is now also aligned with the safety gate:
   actual `--reprocess-all` writes require backup/preflight readiness and use the
   same protected-target override gate as heavy snapshot-backfill writes

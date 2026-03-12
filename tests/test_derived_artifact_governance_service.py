@@ -201,6 +201,8 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert metrics["processor_run"].quantity_value == 2
         assert metrics["processor_run"].maintenance_mode == "retention_available"
         assert "prune_project_telemetry.py" in str(metrics["processor_run"].maintenance_cli_hint)
+        assert "--preflight-only" in str(metrics["processor_run"].maintenance_preflight_hint)
+        assert "--backup-db-path" in str(metrics["processor_run"].maintenance_preflight_hint)
         assert any("ok=1" in line and "failed=1" in line for line in metrics["processor_run"].detail_lines)
         assert metrics["run_error"].quantity_value == 1
         assert metrics["run_error"].maintenance_mode == "retention_with_parent_runs"

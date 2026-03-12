@@ -400,7 +400,10 @@ validation rather than another governance cold-path optimization wave.
   - service: `app/services/project_telemetry_retention_service.py`
   - CLI: `scripts/prune_project_telemetry.py`
   - dry-run is the default
-  - `--apply` requires `--confirm-project-id`
+  - `--preflight-only` requires `--backup-db-path`
+  - `--apply` requires both `--backup-db-path` and `--confirm-project-id`
+  - the protected baseline/main reference DB stays blocked unless
+    `--allow-protected-db-telemetry-apply` is passed explicitly
   - only successful rows with empty note metadata are prunable
   - recent successful rows, noted evidence rows, and all non-ok rows are preserved
 - governance/reporting now surfaces explicit maintenance modes for the remaining
@@ -412,6 +415,11 @@ validation rather than another governance cold-path optimization wave.
   - `run_error` -> `retention_with_parent_runs`
 - this means:
   - telemetry cleanup is actionable and previewable
+  - live preflight evidence now exists on the approved hewiki dev/test DB:
+    - artifact: `build/logs/telemetry_retention/project1_prune_preflight.json`
+    - result: preflight ok on `project_id=1`, schema `42` target vs schema `41`
+      backup, with `387,398` prunable successful rows and no direct
+      `run_error` retention candidates
   - large project-owned derived tables are intentionally not treated as
     age-prune candidates
   - if storage pressure becomes real for those tables, the correct follow-up is

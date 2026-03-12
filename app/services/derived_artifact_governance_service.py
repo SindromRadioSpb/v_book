@@ -161,8 +161,8 @@ class DerivedArtifactGovernanceService:
             ),
             lifecycle_note=(
                 "These artifacts remain project-owned today and are removed by explicit project delete paths. "
-                "Processor telemetry still needs a future retention policy; this view is meant to make that "
-                "growth visible before it becomes opaque."
+                "Processor telemetry now has a dry-run/apply retention path; use backup-backed preflight "
+                "before real writes so growth stays visible and controllable."
             ),
             snapshot_contract_note=snapshot_summary.contract_note,
             last_refreshed_at=self._utc_now(),
@@ -354,7 +354,8 @@ class DerivedArtifactGovernanceService:
     ) -> DerivedArtifactMetricDTO:
         detail_lines = [
             "Exact project row count via `processor_run.project_id`.",
-            "Operational telemetry is project-owned today; retention policy is still a future follow-up.",
+            "Operational telemetry is project-owned today; dry-run/apply retention is available, "
+            "and real writes should use backup-backed preflight first.",
         ]
         ratio = self._format_ratio(processor_run_rows, processed_docs)
         if ratio is not None:
@@ -378,12 +379,14 @@ class DerivedArtifactGovernanceService:
             detail_lines=detail_lines,
             maintenance_mode="retention_available",
             maintenance_note=(
-                "Safe dry-run/apply retention is available. Old successful rows with empty note metadata "
-                "can be pruned while preserving recent successful rows, all non-ok rows, and noted evidence rows."
+                "Safe dry-run/apply retention is available. Use backup-backed preflight before real writes; "
+                "old successful rows with empty note metadata can be pruned while preserving recent successful "
+                "rows, all non-ok rows, and noted evidence rows."
             ),
             maintenance_cli_hint=(
                 f"python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id {int(project_id)} --keep-latest-ok 200"
             ),
+            maintenance_preflight_hint=self._build_telemetry_retention_preflight_cli(project_id=project_id),
         )
 
     def _build_run_error_metric(
@@ -444,6 +447,14 @@ class DerivedArtifactGovernanceService:
         return (
             "python scripts\\process_reference_corpus.py "
             f"--db-path <db-path> --project-id {int(project_id)} --reprocess-all "
+            "--backup-db-path <healthy-backup.db> --preflight-only"
+        )
+
+    @staticmethod
+    def _build_telemetry_retention_preflight_cli(*, project_id: int) -> str:
+        return (
+            "python scripts\\prune_project_telemetry.py "
+            f"--db-path <db-path> --project-id {int(project_id)} --keep-latest-ok 200 "
             "--backup-db-path <healthy-backup.db> --preflight-only"
         )
 

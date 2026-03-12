@@ -69,6 +69,7 @@ def _sample_summary() -> DerivedArtifactGovernanceSummaryDTO:
                 maintenance_mode="retention_available",
                 maintenance_note="Use telemetry retention dry-run/apply, preserving non-ok and noted evidence rows.",
                 maintenance_cli_hint="python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id 1 --keep-latest-ok 200",
+                maintenance_preflight_hint="python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id 1 --keep-latest-ok 200 --backup-db-path <healthy-backup.db> --preflight-only",
             ),
             DerivedArtifactMetricDTO(
                 artifact_key="run_error",

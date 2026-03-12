@@ -1696,7 +1696,10 @@ Current execution status:
   - new service: `app/services/project_telemetry_retention_service.py`
   - new CLI: `scripts/prune_project_telemetry.py`
   - dry-run remains the default
-  - `--apply` requires `--confirm-project-id`
+  - `--preflight-only` requires `--backup-db-path`
+  - `--apply` requires both `--backup-db-path` and `--confirm-project-id`
+  - the protected baseline/main reference DB stays blocked unless
+    `--allow-protected-db-telemetry-apply` is passed explicitly
   - only successful rows with empty note metadata are prunable
   - recent successful rows, all non-ok rows, and noted evidence rows are
     preserved
@@ -1704,6 +1707,11 @@ Current execution status:
     - `processor_run = 387,613`
     - `run_error = 15`
     - `prunable_ok_runs = 387,398` with `keep_latest_ok = 200`
+  - live preflight now also exists on the same DB with an explicit backup path:
+    - artifact: `build/logs/telemetry_retention/project1_prune_preflight.json`
+    - target probe ok on schema `42`
+    - backup probe ok on schema `41`
+    - `protected_target = false`
 - governance observability now also distinguishes explicit maintenance modes for
   the remaining large derived artifacts:
   - `processor_run` -> `retention_available`
