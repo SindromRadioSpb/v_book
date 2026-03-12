@@ -112,3 +112,15 @@ Release users should use:
 python -m app.main --db-path "J:\Project_Vibe\V_book\hdle_premium.db"
 $env:HDLE_DB_PATH="C:\Data\hdle_custom.db"; python -m app.main
 ```
+
+## Cold-audit note
+
+The first framework-driven startup cold-audit wave is recorded in:
+
+- `docs/STARTUP_DB_OPEN_COLD_AUDIT_2026-03-12.md`
+
+Current bounded outcome:
+
+- the repo-local CLI `db_open` probe is sub-`100 ms`;
+- the documented deferred-startup guard remains the active fallback contract;
+- no startup patch branch is justified from this note alone.

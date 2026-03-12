@@ -728,6 +728,53 @@ Roadmap role after this handoff:
 - do not reopen closed governance/readiness/telemetry branches without a new
   evidence gate framed through the canonical cold-audit doc.
 
+## First framework-driven cold-audit wave
+
+The first official task-specific use of the canonical framework is now recorded in:
+
+- `docs/STARTUP_DB_OPEN_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- bounded startup `db_open` probe on the repo-local `hdle_premium.db` measured
+  `82 ms` first probe and `66 ms` repeat probe;
+- the probe isolates DB-open only and does not claim full UI first-usable-state;
+- startup defer behavior for huge legacy `SETTINGS` DBs remains aligned across
+  code, docs, and tests;
+- no startup patch branch is opened from this wave.
+
+Current status after the wave:
+
+- startup DB-open triage on the local repo target is closed;
+- next startup-related layer is decision-gate triage only;
+- do not reopen a startup branch without new Level 7 UI evidence,
+  approved reference-scale startup evidence, or degraded-path drift evidence.
+
+## Second framework-driven cold-audit wave
+
+The second official task-specific use of the canonical framework is now recorded in:
+
+- `docs/DOCUMENT_PICKER_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- current approved-target picker evidence on
+  `hewiki_gpu_processing test.db` shows:
+  - `picker_page_empty p95 ~= 0.152s`
+  - `picker_page_search p95 ~= 0.120s`
+- the picker still has structural query-plan residue, including TEMP B-TREE use,
+  but it is no longer a current blocker;
+- staged first-paint behavior remains intact by code and targeted regression
+  coverage;
+- no picker patch branch is reopened from this wave.
+
+Current status after the wave:
+
+- picker cold-audit triage is closed;
+- picker remains historical optimization context, not an active branch;
+- do not reopen picker work without a new approved-target breach, real UI
+  first-usable-state regression, or fallback-drift evidence.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
