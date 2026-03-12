@@ -927,6 +927,40 @@ Current status after the wave:
 - do not reopen Concordance work without a separate approved-target
   `sentence_fts` health gate.
 
+## Seventh framework-driven cold-audit wave
+
+The seventh official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/TM_PANEL_COLD_AUDIT_2026-03-12.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that the current TM panel
+  default page query is already healthy after migration `030`, but first usable
+  state is still blocked by exact count:
+  - default page runs: `0.050s` to `0.137s`
+  - default exact count runs: `7.545s` to `10.490s`
+  - default rows-gate runs: `7.594s` to `10.628s`
+- representative search shows the same dominant layer rather than a separate
+  first fix:
+  - search page runs: `0.706s` to `0.814s`
+  - search exact count runs: `8.502s` to `8.733s`
+  - search rows-gate runs: `9.208s` to `9.450s`
+- query-plan evidence confirms that:
+  - default page uses `idx_tm_entry_proj_updated_at(project_id, updated_at DESC)`
+  - count paths still spend seconds-scale time on exact total evaluation over
+    the project-scoped TM slice
+
+Current status after the wave:
+
+- TM panel cold-audit evidence gate is crossed;
+- the next active layer is now `TM panel staged first paint / deferred exact count repair`;
+- do not widen the next branch into a broad TM search redesign or TM write-path
+  refactor without new evidence;
+- startup, picker, Sentences filtered-tail, Dictionary, Terms, and Concordance
+  cold-audit branches remain closed unless their own gates are crossed again.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
