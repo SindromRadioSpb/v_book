@@ -706,6 +706,28 @@ Decision update:
 - the next active layer is decision-gate triage only, not a reopened write branch
 - future heavy validation remains an explicit decision-gate item only
 
+## Cold-Audit Framework Handoff
+
+The canonical repository-wide cold-audit framework now lives in:
+
+- `docs/COLD_AUDIT_FRAMEWORK.md`
+
+Use that document for:
+
+- cold terminology (`cold-path`, `cold governance`, `cold breakdown`,
+  `cold-tail`, `decision gate`, `evidence-first patch`);
+- Levels 1-10 cold-audit research scope;
+- A-G research matrix;
+- prioritization (`P0`/`P1`/`P2`/`P3`, blocker vs residual tail vs deferred);
+- repo contract for evidence naming, closure markers, and decision-gate usage.
+
+Roadmap role after this handoff:
+
+- keep current-layer status and next-layer priority here;
+- do not duplicate the full framework here;
+- do not reopen closed governance/readiness/telemetry branches without a new
+  evidence gate framed through the canonical cold-audit doc.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,

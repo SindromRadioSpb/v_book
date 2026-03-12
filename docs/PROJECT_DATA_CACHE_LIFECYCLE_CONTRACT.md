@@ -454,6 +454,20 @@ Decision update:
 - no active operator write slice remains open on this branch
 - future heavy validation remains opt-in through an explicit decision gate
 
+## Cold-Audit Framework Link
+
+The canonical cold-audit framework now lives in:
+
+- `docs/COLD_AUDIT_FRAMEWORK.md`
+
+Lifecycle-contract role after this handoff:
+
+- keep data-lifecycle, operator-safety, and maintenance semantics here;
+- use the canonical cold-audit doc for terminology, measurement levels,
+  research matrix, and prioritization rules;
+- do not reinterpret closed governance/readiness/telemetry layers as open work
+  unless a new evidence gate explicitly promotes them.
+
 ## Immediate follow-up recommendations
 
 1. Keep project-owned sentence/document/lemma cleanup strict and complete.

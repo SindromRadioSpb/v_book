@@ -1772,3 +1772,19 @@ Current execution status:
   - no further automatic telemetry write wave is queued
   - no active operator write slice remains open on this branch
   - future heavy validation stays behind an explicit decision gate
+
+## Cold-Audit Framework Handoff
+
+The canonical cold-audit framework for follow-up research and prioritization now
+lives in:
+
+- `docs/COLD_AUDIT_FRAMEWORK.md`
+
+Task 30 plan role after this handoff:
+
+- remain the historical implementation and evidence ledger for this branch;
+- keep closed-wave details here;
+- do not expand this file into a second general cold-audit framework;
+- future cold bottleneck research should use the canonical framework first and
+  then open a new bounded evidence-first patch only if that framework promotes a
+  new active layer.
