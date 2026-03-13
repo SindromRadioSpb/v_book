@@ -977,6 +977,51 @@ Current status after the wave:
 - startup, picker, Sentences filtered-tail, Dictionary, Terms, and Concordance
   cold-audit branches remain closed unless their own gates are crossed again.
 
+## Eighth framework-driven cold-audit wave
+
+The eighth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/COVERAGE_PANEL_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that the current Coverage
+  panel is blocked by lemma coverage exact-count work on the large project
+  lemma slice, not by cluster coverage or untranslated-list loading:
+  - `lemma` rows for `project_id=1`: `2,071,947`
+  - lemma total count runs in `0.073s`
+  - term-cluster coverage runs in `0.068s`
+  - untranslated lemmas top `100` runs in `0.185s`
+  - untranslated term clusters top `100` runs in `0.068s`
+  - raw exact covered-lemma count did not complete within `120s`
+  - full read-only service probe did not complete within `600s`
+- current query-plan evidence confirms the hot layer:
+  - `USE TEMP B-TREE FOR count(DISTINCT)`
+  - `SEARCH l USING COVERING INDEX idx_lemma_project_text (project_id=?)`
+  - `SEARCH t USING INDEX idx_tm_entry_lookup ... LEFT-JOIN`
+- the current UI/worker contract makes the blocker user-visible:
+  - `CoveragePanel` auto-loads on open
+  - `CoverageWorker` executes lemma coverage first
+  - one terminal `results_ready(dict)` payload is emitted only after all four
+    coverage steps complete
+  - the panel therefore has no staged first usable state today
+
+Current status after the wave:
+
+- Coverage panel cold-audit evidence gate is crossed;
+- the current Coverage panel is a real `P0` blocker on the approved target;
+- the blocker is sharply localized to lemma coverage exact-count work plus the
+  one-shot emit contract;
+- cluster coverage and untranslated lists are already fast comparison layers and
+  should not be treated as the main repair target;
+- the next active layer is now `Coverage panel staged first usable state / lemma coverage repair`;
+- do not widen this into general metrics redesign, historical P2 doc cleanup,
+  or TM/search work without a new evidence gate;
+- startup, picker, Sentences filtered-tail, Dictionary, Terms, Concordance, and
+  TM residual-tail branches remain closed unless their own gates are crossed
+  again.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
