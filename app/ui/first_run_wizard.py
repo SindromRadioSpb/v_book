@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -31,8 +32,8 @@ from app.infra.db_path_resolver import (
 from app.infra.resource_paths import ResourcePaths
 from app.infra.settings import SettingsService
 from app.services.db_service import DBService
-from app.services.health_check_service import HealthCheckService
 from app.services.resources import ResourceRegistry
+from app.ui.workers import UnifiedHealthCheckWorker
 
 
 class FirstRunWizardDialog(QDialog):
@@ -52,12 +53,15 @@ class FirstRunWizardDialog(QDialog):
         self.setMinimumSize(760, 520)
         self.settings = SettingsService.get_instance()
         self.registry = ResourceRegistry(settings=self.settings)
-        self.health_service = HealthCheckService(settings=self.settings)
         self.open_resources_manager = open_resources_manager
         self.open_mt_settings = open_mt_settings
         self.open_audio_settings = open_audio_settings
         self.restart_with_db_path = restart_with_db_path
         self._restart_candidate_path: Optional[Path] = None
+        self._health_worker: Optional[UnifiedHealthCheckWorker] = None
+        self._health_request_seq = 0
+        self._active_health_request_id = 0
+        self._health_refresh_pending = False
 
         self._pages = QStackedWidget()
         self._page_count = 0
@@ -214,11 +218,15 @@ class FirstRunWizardDialog(QDialog):
         page6 = QWidget()
         l6 = QVBoxLayout(page6)
         l6.addWidget(QLabel("<b>Step 6/6 - Health Check</b>"))
-        refresh_health_btn = QPushButton("Run Health Check")
-        refresh_health_btn.clicked.connect(self._refresh_health_summary)
-        l6.addWidget(refresh_health_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.health_status_label = QLabel("Health summary will load in background after the wizard opens.")
+        self.health_status_label.setWordWrap(True)
+        l6.addWidget(self.health_status_label)
+        self.refresh_health_btn = QPushButton("Run Health Check")
+        self.refresh_health_btn.clicked.connect(self._refresh_health_summary)
+        l6.addWidget(self.refresh_health_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         self.health_text = QTextEdit()
         self.health_text.setReadOnly(True)
+        self.health_text.setPlainText("Checking health summary in background...")
         l6.addWidget(self.health_text, 1)
         self._pages.addWidget(page6)
 
@@ -226,7 +234,10 @@ class FirstRunWizardDialog(QDialog):
         self._refresh_db_step_paths()
         self._update_db_step_state()
         self._refresh_resource_status()
-        self._refresh_health_summary()
+        self._set_health_summary_loading(
+            "Health summary will load in background after the wizard opens."
+        )
+        QTimer.singleShot(0, self._refresh_health_summary)
 
     def _browse_data_root(self) -> None:
         start = self.data_root_edit.text().strip() or str(ResourcePaths.resolve_data_root(create=True))
@@ -378,7 +389,46 @@ class FirstRunWizardDialog(QDialog):
         )
 
     def _refresh_health_summary(self) -> None:
-        report = self.health_service.run_all()
+        worker = self._health_worker
+        if worker is not None and worker.isRunning():
+            self._health_refresh_pending = True
+            self._set_health_summary_loading(
+                "Health check already running; refresh queued...",
+                preserve_text=True,
+            )
+            return
+
+        self._health_request_seq += 1
+        request_id = int(self._health_request_seq)
+        self._active_health_request_id = request_id
+        self._health_refresh_pending = False
+        self._set_health_summary_loading("Checking health summary in background...", preserve_text=True)
+
+        worker = UnifiedHealthCheckWorker()
+        app = QApplication.instance()
+        if app is not None:
+            worker.setParent(app)
+        self._health_worker = worker
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+        worker.finished.connect(lambda report, seq=request_id: self._on_health_summary_loaded(report, seq))
+        worker.error.connect(lambda message, seq=request_id: self._on_health_summary_error(message, seq))
+        worker.finished.connect(
+            lambda _report, current=worker, seq=request_id: self._on_health_worker_finished(current, seq)
+        )
+        worker.error.connect(
+            lambda _message, current=worker, seq=request_id: self._on_health_worker_finished(current, seq)
+        )
+        worker.start()
+
+    def _set_health_summary_loading(self, status_text: str, *, preserve_text: bool = False) -> None:
+        self.health_status_label.setText(status_text)
+        self.refresh_health_btn.setEnabled(False)
+        if preserve_text and self.health_text.toPlainText().strip():
+            return
+        self.health_text.setPlainText("Checking health summary in background...")
+
+    def _render_health_summary(self, report: dict) -> None:
         lines = [f"Overall: {report.get('overall', 'unknown')}"]
         for row in report.get("items", []):
             title = row.get("title", row.get("check_id", "check"))
@@ -389,6 +439,30 @@ class FirstRunWizardDialog(QDialog):
             if remediation:
                 lines.append(f"  remediation: {remediation}")
         self.health_text.setPlainText("\n".join(lines))
+        self.health_status_label.setText(f"Health summary ready ({report.get('overall', 'unknown')}).")
+        self.refresh_health_btn.setEnabled(True)
+
+    def _on_health_summary_loaded(self, report: dict, request_id: int) -> None:
+        if int(request_id) != self._active_health_request_id:
+            return
+        self._render_health_summary(report)
+
+    def _on_health_summary_error(self, message: str, request_id: int) -> None:
+        if int(request_id) != self._active_health_request_id:
+            return
+        self.health_status_label.setText(f"Health check failed: {message}")
+        self.health_text.setPlainText(f"Health check failed.\n\n{message}")
+        self.refresh_health_btn.setEnabled(True)
+
+    def _on_health_worker_finished(self, worker: UnifiedHealthCheckWorker, request_id: int) -> None:
+        if self._health_worker is worker:
+            self._health_worker = None
+        if int(request_id) != self._active_health_request_id:
+            return
+        self.refresh_health_btn.setEnabled(True)
+        if self._health_refresh_pending:
+            self._health_refresh_pending = False
+            QTimer.singleShot(0, self._refresh_health_summary)
 
     def _open_resources_manager(self) -> None:
         if callable(self.open_resources_manager):

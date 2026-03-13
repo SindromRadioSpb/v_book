@@ -1479,6 +1479,7 @@ The nineteenth official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/FIRST_RUN_WIZARD_COLD_AUDIT_2026-03-13.md`
+- `docs/FIRST_RUN_WIZARD_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -1499,21 +1500,32 @@ Wave outcome:
 
 Current status after the wave:
 
-- `FirstRunWizardDialog` is now formally classified from current evidence;
-- current classification is:
-  - `blocker = yes`
-  - `priority = P0`
-- the current blocker is not DB-path metadata, resource registry refresh, or
-  the remaining visible onboarding dialogs;
-- the current blocker is synchronous health-summary work on the constructor path;
-- the next active layer is now:
-  - `First-run wizard staged health summary / first usable state repair`
+- first-run wizard cold-audit evidence gate was crossed and the bounded repair
+  was opened;
+- the first-run wizard `P0` blocker is now operationally closed:
+  - `FirstRunWizardDialog` init now returns in `0.034s`;
+  - health summary now completes later in `5.254s`;
+  - the wizard opens immediately usable on page `0 / 6`;
+  - the health section now opens in:
+    - `Checking health summary in background...`
+  - the final background summary still resolves to:
+    - `Health summary ready (warn).`
+- the repaired contract keeps the right scope boundaries:
+  - DB/profile inspection remains immediate;
+  - resource status remains immediate;
+  - `HealthCheckService` semantics remain unchanged;
+  - the heavy health probes remain stage-2 completeness work only;
+- approved-target after evidence still records `db_mtime_unchanged=true`;
+- no immediate residual first-run branch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
 - do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
   Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
   generic Documents work, ProjectView, standalone `Term Cards`,
   `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
   `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
-  `ReferenceSetupWizard`, or `HelpCenterDialog` without new evidence gates.
+  `ReferenceSetupWizard`, `HelpCenterDialog`, or generic first-run work
+  without new evidence gates.
 
 ## Decision note
 

@@ -12,6 +12,10 @@ from app.infra.settings import SettingsService
 from app.ui.first_run_wizard import FirstRunWizardDialog
 
 
+def _disable_background_health(monkeypatch) -> None:
+    monkeypatch.setattr(FirstRunWizardDialog, "_refresh_health_summary", lambda self: None)
+
+
 def _write_manifest(path: Path) -> None:
     payload = {
         "manifest_version": "1.0",
@@ -49,11 +53,12 @@ def _write_manifest(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_first_run_wizard_shows_missing_models_and_can_skip(qtbot, tmp_path):
+def test_first_run_wizard_shows_missing_models_and_can_skip(monkeypatch, qtbot, tmp_path):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()
     settings.sync()
+    _disable_background_health(monkeypatch)
 
     manifest_path = tmp_path / "resource_manifest.json"
     _write_manifest(manifest_path)

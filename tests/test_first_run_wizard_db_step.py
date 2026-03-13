@@ -16,6 +16,10 @@ from app.infra.settings import SettingsService
 from app.ui.first_run_wizard import FirstRunWizardDialog
 
 
+def _disable_background_health(monkeypatch) -> None:
+    monkeypatch.setattr(FirstRunWizardDialog, "_refresh_health_summary", lambda self: None)
+
+
 def _write_manifest(path: Path) -> None:
     payload = {
         "manifest_version": "1.0",
@@ -39,11 +43,12 @@ def _create_db(path: Path, schema_version: int) -> Path:
     return path
 
 
-def test_first_run_wizard_db_step_saves_selected_path(qtbot, tmp_path):
+def test_first_run_wizard_db_step_saves_selected_path(monkeypatch, qtbot, tmp_path):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()
     settings.sync()
+    _disable_background_health(monkeypatch)
 
     manifest_path = tmp_path / "resource_manifest.json"
     _write_manifest(manifest_path)
@@ -65,11 +70,12 @@ def test_first_run_wizard_db_step_saves_selected_path(qtbot, tmp_path):
     assert settings.get_string(SETTINGS_KEY_ACTIVE_DB_PATH, "") == str(selected_db.resolve())
 
 
-def test_first_run_wizard_clears_deferred_db_guard_on_selection(qtbot, tmp_path):
+def test_first_run_wizard_clears_deferred_db_guard_on_selection(monkeypatch, qtbot, tmp_path):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()
     settings.sync()
+    _disable_background_health(monkeypatch)
 
     manifest_path = tmp_path / "resource_manifest.json"
     _write_manifest(manifest_path)
