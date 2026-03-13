@@ -1030,6 +1030,53 @@ Current status after the wave:
   TM residual-tail branches remain closed unless their own gates are crossed
   again.
 
+## Ninth framework-driven cold-audit wave
+
+The ninth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/AUDIO_ADD_ALL_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that the main Audio Player
+  dock is not the blocker, but the Add-All dialog cold open path is:
+  - queue rows: `0`
+  - history rows: `0`
+  - playlists: `1`
+  - project list load: `0.019s`
+  - `project_id=1` processed-doc query: `0.818s`
+  - `project_id=1` exact sentence estimate: `18.499s`
+  - offscreen dialog init: `48.989s`
+- approved-target row volume explains the blocker:
+  - `project_id=1` processed docs: `387,639`
+  - `project_id=1` sentence estimate: `13,387,588`
+- query-plan evidence confirms the hot layers:
+  - document list still uses `USE TEMP B-TREE FOR ORDER BY`
+  - exact estimate walks the project-scoped sentence slice via
+    `idx_sentence_doc`
+- the current dialog contract makes the blocker user-visible:
+  - projects load on dialog init
+  - the default `sentence` kind immediately loads the full processed-doc list
+  - one `QListWidgetItem` is materialized per document
+  - the exact sentence estimate also runs before the dialog becomes useful
+
+Current status after the wave:
+
+- Audio Add-All dialog cold-audit evidence gate is now crossed;
+- this is a real current `P0` blocker, but it is tightly localized:
+  - base Audio Player dock remains closed as a non-blocking surface;
+  - the blocker is the Add-All dialog open contract on the large project slice;
+- the next active layer is now:
+  - `Audio Add-All dialog staged first usable state / deferred estimate repair`
+- the implied bounded repair scope is:
+  - do not hold dialog usability behind exact sentence estimate;
+  - avoid eager full materialization of the `387,639`-row document list on cold open;
+  - keep queue/playlists/history behavior and heavy validation out of scope;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary,
+  Terms, Concordance, TM residual-tail, or Coverage residual-tail branches
+  without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
