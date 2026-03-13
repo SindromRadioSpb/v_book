@@ -983,6 +983,7 @@ The eighth official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/COVERAGE_PANEL_COLD_AUDIT_2026-03-13.md`
+- `docs/COVERAGE_PANEL_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -1009,14 +1010,21 @@ Wave outcome:
 
 Current status after the wave:
 
-- Coverage panel cold-audit evidence gate is crossed;
-- the current Coverage panel is a real `P0` blocker on the approved target;
-- the blocker is sharply localized to lemma coverage exact-count work plus the
-  one-shot emit contract;
-- cluster coverage and untranslated lists are already fast comparison layers and
-  should not be treated as the main repair target;
-- the next active layer is now `Coverage panel staged first usable state / lemma coverage repair`;
-- do not widen this into general metrics redesign, historical P2 doc cleanup,
+- Coverage panel cold-audit evidence gate was crossed and the bounded repair was opened;
+- the Coverage panel `P0` first-usable-state blocker is now operationally closed:
+  - cluster coverage and untranslated lists render before lemma coverage
+  - stage-1 partial-ready state now arrives in `0.391s`
+  - the panel no longer waits for terminal `results_ready(dict)` before showing
+    useful state
+- the remaining residual tail is explicitly decision-gated:
+  - exact lemma coverage total still uses the old `COUNT(DISTINCT)` + join path
+  - query shape was intentionally unchanged in this repair
+  - the residual tail is now stage-2 completeness work rather than panel-open
+    gating work
+- no immediate second Coverage patch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not widen this into general metrics redesign, historical P2 docs cleanup,
   or TM/search work without a new evidence gate;
 - startup, picker, Sentences filtered-tail, Dictionary, Terms, Concordance, and
   TM residual-tail branches remain closed unless their own gates are crossed

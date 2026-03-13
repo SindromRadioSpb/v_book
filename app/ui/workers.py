@@ -1556,6 +1556,8 @@ class CrossViewOverlayWorker(QThread):
 class CoverageWorker(QThread):
     """P2: Worker for computing coverage metrics (non-blocking)."""
 
+    partial_ready = pyqtSignal(dict)  # {cluster_metrics, untranslated_lemmas, untranslated_clusters}
+    lemma_metrics_ready = pyqtSignal(object)  # CoverageMetrics
     results_ready = pyqtSignal(dict)  # {metrics, untranslated_lemmas, untranslated_clusters}
     error = pyqtSignal(str)
     progress = pyqtSignal(str)  # status message
@@ -1588,17 +1590,6 @@ class CoverageWorker(QThread):
             coverage_service = CoverageService()
 
             with db_service.get_session() as session:
-                if self._cancelled:
-                    return
-
-                # Compute lemma coverage
-                self.progress.emit("Computing lemma coverage...")
-                lemma_metrics = coverage_service.compute_lemma_coverage(
-                    session,
-                    self.project_id,
-                    include_draft=self.include_draft,
-                )
-
                 if self._cancelled:
                     return
 
@@ -1636,14 +1627,37 @@ class CoverageWorker(QThread):
                     include_draft=self.include_draft,
                 )
 
-                if not self._cancelled:
-                    results = {
-                        "lemma_metrics": lemma_metrics,
-                        "cluster_metrics": cluster_metrics,
-                        "untranslated_lemmas": untranslated_lemmas,
-                        "untranslated_clusters": untranslated_clusters,
-                    }
-                    self.results_ready.emit(results)
+                if self._cancelled:
+                    return
+
+                partial_results = {
+                    "cluster_metrics": cluster_metrics,
+                    "untranslated_lemmas": untranslated_lemmas,
+                    "untranslated_clusters": untranslated_clusters,
+                }
+                self.partial_ready.emit(partial_results)
+
+                if self._cancelled:
+                    return
+
+                # Compute lemma coverage last so the panel can render the fast
+                # comparison layers before the expensive exact count finishes.
+                self.progress.emit("Computing lemma coverage...")
+                lemma_metrics = coverage_service.compute_lemma_coverage(
+                    session,
+                    self.project_id,
+                    include_draft=self.include_draft,
+                )
+
+                if self._cancelled:
+                    return
+
+                self.lemma_metrics_ready.emit(lemma_metrics)
+                results = {
+                    "lemma_metrics": lemma_metrics,
+                    **partial_results,
+                }
+                self.results_ready.emit(results)
 
         except Exception as e:
             logger.exception("Coverage calculation error")

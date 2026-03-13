@@ -42,6 +42,10 @@ class CoveragePanel(QWidget):
         super().__init__()
         self.project_id = project_id
         self.worker: Optional[CoverageWorker] = None
+        self._coverage_request_seq = 0
+        self._active_coverage_seq = 0
+        self._coverage_retry_pending = False
+        self._coverage_cancel_requested = False
         self.init_ui()
         self.load_coverage()
 
@@ -212,11 +216,22 @@ class CoveragePanel(QWidget):
     def load_coverage(self):
         """Load coverage metrics and untranslated lists."""
         if self.worker and self.worker.isRunning():
-            logger.warning("Coverage calculation already in progress")
+            logger.info("Coverage calculation already in progress; queueing refresh")
+            self._coverage_retry_pending = True
+            self._coverage_cancel_requested = False
+            self.worker.cancel()
+            self.status_label.setText("Coverage refresh queued...")
             return
+
+        self._coverage_request_seq += 1
+        request_seq = self._coverage_request_seq
+        self._active_coverage_seq = request_seq
+        self._coverage_retry_pending = False
+        self._coverage_cancel_requested = False
 
         self.status_label.setText("Loading coverage data...")
         self.cancel_btn.setEnabled(True)
+        self._set_lemma_metrics_pending()
 
         include_draft = self.include_draft_check.isChecked()
         lemma_order = self.lemma_order_combo.currentText()
@@ -228,15 +243,27 @@ class CoveragePanel(QWidget):
             lemma_order=lemma_order,
             cluster_order=cluster_order,
         )
-        self.worker.results_ready.connect(self.on_coverage_results)
-        self.worker.error.connect(self.on_coverage_error)
-        self.worker.finished.connect(lambda: self.cancel_btn.setEnabled(False))
+        self.worker.partial_ready.connect(
+            lambda results, seq=request_seq: self.on_coverage_partial_results(results, seq)
+        )
+        self.worker.lemma_metrics_ready.connect(
+            lambda metrics, seq=request_seq: self.on_lemma_metrics_ready(metrics, seq)
+        )
+        self.worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_coverage_error(error_msg, seq)
+        )
+        self.worker.finished.connect(
+            lambda seq=request_seq, worker=self.worker: self._on_coverage_worker_finished(worker, seq)
+        )
         self.worker.start()
 
-    def on_coverage_results(self, results: dict):
-        """Handle coverage results."""
-        # Update lemma metrics
-        lemma_metrics: CoverageMetrics = results["lemma_metrics"]
+    def _set_lemma_metrics_pending(self) -> None:
+        self.lemma_pct_label.setText("...")
+        self.lemma_progress.setRange(0, 0)
+        self.lemma_detail_label.setText("Counting exact coverage...")
+
+    def _apply_lemma_metrics(self, lemma_metrics: CoverageMetrics) -> None:
+        self.lemma_progress.setRange(0, 100)
         self.lemma_pct_label.setText(f"{lemma_metrics.coverage_pct:.1f}%")
         self.lemma_progress.setValue(int(lemma_metrics.coverage_pct))
         self.lemma_detail_label.setText(
@@ -244,8 +271,7 @@ class CoveragePanel(QWidget):
             f"({lemma_metrics.uncovered} untranslated)"
         )
 
-        # Update cluster metrics
-        cluster_metrics: CoverageMetrics = results["cluster_metrics"]
+    def _apply_cluster_metrics(self, cluster_metrics: CoverageMetrics) -> None:
         self.cluster_pct_label.setText(f"{cluster_metrics.coverage_pct:.1f}%")
         self.cluster_progress.setValue(int(cluster_metrics.coverage_pct))
         self.cluster_detail_label.setText(
@@ -253,8 +279,7 @@ class CoveragePanel(QWidget):
             f"({cluster_metrics.uncovered} untranslated)"
         )
 
-        # Update untranslated lemmas table
-        lemmas: List[LemmaCoverageRow] = results["untranslated_lemmas"]
+    def _apply_untranslated_lemmas(self, lemmas: List[LemmaCoverageRow]) -> None:
         self.lemmas_table.setRowCount(len(lemmas))
         for row_idx, lemma in enumerate(lemmas):
             self.lemmas_table.setItem(row_idx, 0, QTableWidgetItem(lemma.lemma_text))
@@ -264,8 +289,7 @@ class CoveragePanel(QWidget):
 
         self.lemmas_table.resizeColumnsToContents()
 
-        # Update untranslated clusters table
-        clusters: List[TermClusterCoverageRow] = results["untranslated_clusters"]
+    def _apply_untranslated_clusters(self, clusters: List[TermClusterCoverageRow]) -> None:
         self.clusters_table.setRowCount(len(clusters))
         for row_idx, cluster in enumerate(clusters):
             self.clusters_table.setItem(row_idx, 0, QTableWidgetItem(cluster.representative_he))
@@ -276,30 +300,89 @@ class CoveragePanel(QWidget):
 
         self.clusters_table.resizeColumnsToContents()
 
+    def on_coverage_partial_results(self, results: dict, request_seq: Optional[int] = None):
+        """Render the fast coverage layers before lemma coverage is ready."""
+        if request_seq is not None and request_seq != self._active_coverage_seq:
+            logger.debug(
+                "Ignoring stale coverage partial results: seq=%s, active=%s",
+                request_seq,
+                self._active_coverage_seq,
+            )
+            return
+
+        cluster_metrics: CoverageMetrics = results["cluster_metrics"]
+        lemmas: List[LemmaCoverageRow] = results["untranslated_lemmas"]
+        clusters: List[TermClusterCoverageRow] = results["untranslated_clusters"]
+
+        self._apply_cluster_metrics(cluster_metrics)
+        self._apply_untranslated_lemmas(lemmas)
+        self._apply_untranslated_clusters(clusters)
+        self._set_lemma_metrics_pending()
+        self.status_label.setText("Coverage tables ready. Counting lemma coverage...")
+
+    def on_lemma_metrics_ready(self, lemma_metrics: CoverageMetrics, request_seq: Optional[int] = None):
+        """Apply the expensive lemma metric after the panel is already usable."""
+        if request_seq is not None and request_seq != self._active_coverage_seq:
+            logger.debug(
+                "Ignoring stale lemma coverage metrics: seq=%s, active=%s",
+                request_seq,
+                self._active_coverage_seq,
+            )
+            return
+
+        self._apply_lemma_metrics(lemma_metrics)
         self.status_label.setText("Ready")
         logger.info("Coverage data loaded successfully")
 
-    def on_coverage_error(self, error_msg: str):
+    def on_coverage_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle coverage error."""
+        if request_seq is not None and request_seq != self._active_coverage_seq:
+            logger.debug(
+                "Ignoring stale coverage error: seq=%s, active=%s",
+                request_seq,
+                self._active_coverage_seq,
+            )
+            return
+
         self.status_label.setText(f"Error: {error_msg}")
         logger.error(f"Coverage error: {error_msg}")
+
+    def _on_coverage_worker_finished(self, worker: Optional[CoverageWorker], request_seq: int) -> None:
+        if self.worker is worker:
+            self.worker = None
+
+        self.cancel_btn.setEnabled(False)
+
+        if request_seq != self._active_coverage_seq:
+            return
+
+        if self._coverage_retry_pending:
+            self._coverage_retry_pending = False
+            QTimer.singleShot(0, self.load_coverage)
+            return
+
+        if self._coverage_cancel_requested:
+            self._coverage_cancel_requested = False
+            self.status_label.setText("Coverage calculation canceled")
 
     def on_cancel_coverage(self):
         """Cancel ongoing coverage calculation."""
         if self.worker and self.worker.isRunning():
             logger.info("Canceling coverage worker")
-            self.worker.terminate()
-            self.worker.wait()
-            self.worker = None
-            self.status_label.setText("Coverage calculation canceled")
+            self._coverage_retry_pending = False
+            self._coverage_cancel_requested = True
+            self.worker.cancel()
+            self.status_label.setText("Canceling coverage calculation...")
             self.cancel_btn.setEnabled(False)
 
     def closeEvent(self, event):
         """Handle panel close - stop workers."""
         if self.worker and self.worker.isRunning():
             logger.info("Stopping coverage worker on panel close")
-            self.worker.terminate()
-            self.worker.wait()
+            self.worker.cancel()
+            if not self.worker.wait(200):
+                self.worker.terminate()
+                self.worker.wait()
         event.accept()
 
     def on_back(self):
