@@ -1572,6 +1572,52 @@ Current status after the wave:
   `ReferenceSetupWizard`, `HelpCenterDialog`, generic first-run work, or
   `AudioProviderSettingsDialog` without new evidence gates.
 
+## Twenty-first framework-driven cold-audit wave
+
+The twenty-first official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/SENTENCE_NIQQUD_BOOTSTRAP_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- after the audio-provider-settings wave, a bounded remaining-dialog sweep
+  compared:
+  - `sentence_niqqud_bootstrap_dialog`: `0.039s`
+  - `command_palette_dialog`: `0.021s`
+  - `pronunciation_bootstrap_dialog`: `0.011s`
+  - `translate_text_dialog`: `0.006s`
+- the dedicated dialog-open probe then confirmed the actual constructor path:
+  - full `SentenceNiqqudBootstrapDialog` init: `0.020s`
+  - `_load_settings()`: `0.000s`
+  - default scope on open: `selected`
+  - `Run Bootstrap` enabled: `true`
+  - cached health label on open:
+    - `Mode: real_inference (ok)`
+  - `has_worker_on_open = false`
+  - `has_health_worker_on_open = false`
+
+Current status after the wave:
+
+- `SentenceNiqqudBootstrapDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `SentenceNiqqudBootstrapDialog` repair branch is opened from this wave;
+- the dialog open path is already bounded:
+  - shell construction is fast;
+  - cached health-state restore is negligible;
+  - no health-check or bootstrap worker is started on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`, or
+  `SentenceNiqqudBootstrapDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
