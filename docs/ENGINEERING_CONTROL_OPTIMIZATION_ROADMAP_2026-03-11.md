@@ -1036,6 +1036,7 @@ The ninth official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/AUDIO_ADD_ALL_DIALOG_COLD_AUDIT_2026-03-13.md`
+- `docs/AUDIO_ADD_ALL_DIALOG_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -1063,19 +1064,22 @@ Wave outcome:
 
 Current status after the wave:
 
-- Audio Add-All dialog cold-audit evidence gate is now crossed;
-- this is a real current `P0` blocker, but it is tightly localized:
-  - base Audio Player dock remains closed as a non-blocking surface;
-  - the blocker is the Add-All dialog open contract on the large project slice;
-- the next active layer is now:
-  - `Audio Add-All dialog staged first usable state / deferred estimate repair`
-- the implied bounded repair scope is:
-  - do not hold dialog usability behind exact sentence estimate;
-  - avoid eager full materialization of the `387,639`-row document list on cold open;
-  - keep queue/playlists/history behavior and heavy validation out of scope;
-- do not reopen startup, picker, Sentences filtered-tail, Dictionary,
-  Terms, Concordance, TM residual-tail, or Coverage residual-tail branches
-  without new evidence gates.
+- Audio Add-All dialog cold-audit evidence gate was crossed and the bounded
+  repair was opened;
+- the Audio Add-All dialog `P0` blocker is now operationally closed:
+  - strict read-only offscreen dialog init is now `0.238s`;
+  - the dialog no longer eagerly materializes the `387,639`-row processed-doc list;
+  - open-time sentence estimate is now an approximate planning value and runs in `0.032s`;
+  - representative processed-document search is now on-demand and staged:
+    - first page (`wiki`): `0.226s`
+    - total count (`wiki`): `0.110s`
+- queue population semantics remain exact after dialog acceptance;
+- no immediate residual Audio branch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, or Audio Add-All
+  work without new evidence gates.
 
 ## Decision note
 

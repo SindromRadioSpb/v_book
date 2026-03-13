@@ -1006,6 +1006,7 @@ class ProjectDocumentsPageWorker(QThread):
         tag_filter: Optional[str] = None,
         topic_filter: Optional[str] = None,
         level_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
         tag_match_mode: str = "any",
         page_size: int,
         page_index: int,
@@ -1020,6 +1021,7 @@ class ProjectDocumentsPageWorker(QThread):
         self.tag_filter = (tag_filter or "").strip() or None
         self.topic_filter = (topic_filter or "").strip() or None
         self.level_filter = (level_filter or "").strip() or None
+        self.status_filter = (status_filter or "").strip() or None
         self.tag_match_mode = str(tag_match_mode or "any").strip().lower() or "any"
         self.page_size = max(1, int(page_size))
         self.page_index = max(1, int(page_index))
@@ -1064,6 +1066,7 @@ class ProjectDocumentsPageWorker(QThread):
                     tag_filter=self.tag_filter,
                     topic_filter=self.topic_filter,
                     level_filter=self.level_filter,
+                    status_filter=self.status_filter,
                     tag_match_mode=self.tag_match_mode,
                     sort_by=sort_by,
                     sort_dir=sort_dir,
@@ -1085,6 +1088,7 @@ class ProjectDocumentsPageWorker(QThread):
                     tag_filter=self.tag_filter,
                     topic_filter=self.topic_filter,
                     level_filter=self.level_filter,
+                    status_filter=self.status_filter,
                     tag_match_mode=self.tag_match_mode,
                 )
 

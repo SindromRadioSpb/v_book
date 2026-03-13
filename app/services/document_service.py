@@ -328,6 +328,7 @@ class DocumentService:
         tag_filter: Optional[str] = None,
         topic_filter: Optional[str] = None,
         level_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
         tag_match_mode: str = "any",
         session: Optional[Session] = None,
     ):
@@ -370,6 +371,10 @@ class DocumentService:
         if level_filter_clean:
             stmt = stmt.where(SourceDocument.level == level_filter_clean)
 
+        status_filter_clean = (status_filter or "").strip()
+        if status_filter_clean:
+            stmt = stmt.where(SourceDocument.status == status_filter_clean)
+
         return stmt
 
     def build_project_documents_query(
@@ -382,6 +387,7 @@ class DocumentService:
         tag_filter: Optional[str] = None,
         topic_filter: Optional[str] = None,
         level_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
         tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
@@ -424,6 +430,7 @@ class DocumentService:
                 tag_filter=tag_filter,
                 topic_filter=topic_filter,
                 level_filter=level_filter,
+                status_filter=status_filter,
                 tag_match_mode=tag_match_mode,
                 session=session,
             )
@@ -432,6 +439,10 @@ class DocumentService:
                 stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
                 .where(SourceCorpus.project_id == int(project_id))
             )
+
+        status_filter_clean = (status_filter or "").strip()
+        if status_filter_clean and not explicit_filters_active:
+            stmt = stmt.where(SourceDocument.status == status_filter_clean)
 
         stmt = self._apply_documents_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
         return stmt
@@ -447,6 +458,7 @@ class DocumentService:
         tag_filter: Optional[str] = None,
         topic_filter: Optional[str] = None,
         level_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
         tag_match_mode: str = "any",
     ) -> int:
         """Return project-scoped count for document picker search."""
@@ -466,7 +478,16 @@ class DocumentService:
                 search_query=query,
                 session=session,
             )
-            stmt = select(func.count()).select_from(doc_ids_subquery)
+            status_filter_clean = (status_filter or "").strip()
+            if status_filter_clean:
+                stmt = (
+                    select(func.count())
+                    .select_from(SourceDocument)
+                    .join(doc_ids_subquery, SourceDocument.doc_id == doc_ids_subquery.c.doc_id)
+                    .where(SourceDocument.status == status_filter_clean)
+                )
+            else:
+                stmt = select(func.count()).select_from(doc_ids_subquery)
         else:
             stmt = select(func.count(SourceDocument.doc_id)).select_from(SourceDocument)
             if explicit_filters_active:
@@ -478,6 +499,7 @@ class DocumentService:
                     tag_filter=tag_filter,
                     topic_filter=topic_filter,
                     level_filter=level_filter,
+                    status_filter=status_filter,
                     tag_match_mode=tag_match_mode,
                     session=session,
                 )
@@ -486,6 +508,9 @@ class DocumentService:
                     stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
                     .where(SourceCorpus.project_id == int(project_id))
                 )
+                status_filter_clean = (status_filter or "").strip()
+                if status_filter_clean:
+                    stmt = stmt.where(SourceDocument.status == status_filter_clean)
 
         return int(session.execute(stmt).scalar() or 0)
 
@@ -500,6 +525,7 @@ class DocumentService:
         tag_filter: Optional[str] = None,
         topic_filter: Optional[str] = None,
         level_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
         tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
@@ -515,6 +541,7 @@ class DocumentService:
             tag_filter=tag_filter,
             topic_filter=topic_filter,
             level_filter=level_filter,
+            status_filter=status_filter,
             tag_match_mode=tag_match_mode,
             sort_by=sort_by,
             sort_dir=sort_dir,

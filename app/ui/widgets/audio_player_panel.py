@@ -57,6 +57,7 @@ from PyQt6.QtWidgets import (
 from app.infra.settings import SettingsService
 from app.services.audio_player_service import AudioPlayerService
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
+from app.ui.workers import ProjectDocumentsPageWorker
 
 logger = logging.getLogger(__name__)
 
@@ -581,6 +582,10 @@ class AddAllToQueueDialog(QDialog):
         ("lemma", False),
         ("term", False),
     ]
+    _DOC_ROLE_ID = Qt.ItemDataRole.UserRole
+    _DOC_ROLE_NAME = Qt.ItemDataRole.UserRole + 1
+    _DOC_ROLE_SENTENCES = Qt.ItemDataRole.UserRole + 2
+    _DOC_PAGE_SIZE = 200
 
     def __init__(self, *, parent=None) -> None:
         super().__init__(parent)
@@ -589,12 +594,24 @@ class AddAllToQueueDialog(QDialog):
         self.setMinimumHeight(420)
 
         self._project_ids: List[int] = []
+        self._estimate_cache: Dict[Tuple[int, str], int] = {}
+        self._selected_doc_meta: Dict[int, Tuple[str, int]] = {}
+        self._doc_request_id = 0
+        self._doc_worker: Optional[ProjectDocumentsPageWorker] = None
+        self._doc_count_pending = False
+        self._doc_total_matches = 0
+        self._doc_rows: List[Any] = []
         self._db = None
         try:
             from app.services.db_service import DBService
             self._db = DBService.get_instance()
         except Exception as exc:
             logger.warning("AddAllToQueueDialog: no DBService: %s", exc)
+
+        self._doc_search_timer = QTimer(self)
+        self._doc_search_timer.setSingleShot(True)
+        self._doc_search_timer.setInterval(250)
+        self._doc_search_timer.timeout.connect(self._reload_doc_matches)
 
         self._build_ui()
         self._load_projects()
@@ -627,14 +644,22 @@ class AddAllToQueueDialog(QDialog):
         # Search bar
         search_row = QHBoxLayout()
         search_row.setSpacing(4)
-        search_lbl = QLabel("🔍")
-        search_lbl.setFixedWidth(18)
+        search_lbl = QLabel("Search")
+        search_lbl.setFixedWidth(42)
         self.doc_search = QLineEdit()
-        self.doc_search.setPlaceholderText("Type to filter documents…")
+        self.doc_search.setPlaceholderText("Type to search project documents...")
         self.doc_search.setClearButtonEnabled(True)
         search_row.addWidget(search_lbl)
         search_row.addWidget(self.doc_search)
         doc_vl.addLayout(search_row)
+
+        self.doc_hint_label = QLabel(
+            "Type to search specific processed documents. Leave search empty and "
+            "selection empty to use all project documents."
+        )
+        self.doc_hint_label.setWordWrap(True)
+        self.doc_hint_label.setStyleSheet("color: #666; font-size: 11px;")
+        doc_vl.addWidget(self.doc_hint_label)
 
         # Document list
         self.doc_list = QListWidget()
@@ -642,24 +667,28 @@ class AddAllToQueueDialog(QDialog):
         self.doc_list.setAlternatingRowColors(True)
         self.doc_list.setMinimumHeight(160)
         self.doc_list.setToolTip(
-            "Select specific documents (Ctrl+Click for multi-select).\n"
-            "Leave nothing selected to use all documents."
+            "Search loads processed documents for selection.\n"
+            "Leave nothing selected to use all project documents."
         )
         doc_vl.addWidget(self.doc_list, 1)
 
         # Buttons + count
         btn_row = QHBoxLayout()
-        self.select_all_btn = QPushButton("Select All")
-        self.select_all_btn.setFixedWidth(80)
+        self.select_all_btn = QPushButton("Select Results")
+        self.select_all_btn.setFixedWidth(96)
         self.clear_sel_btn = QPushButton("Clear")
         self.clear_sel_btn.setFixedWidth(60)
-        self.doc_sel_label = QLabel("Selected: 0 / 0")
+        self.doc_sel_label = QLabel("All project documents (none selected)")
         self.doc_sel_label.setStyleSheet("color: gray; font-size: 11px;")
         btn_row.addWidget(self.select_all_btn)
         btn_row.addWidget(self.clear_sel_btn)
         btn_row.addStretch()
         btn_row.addWidget(self.doc_sel_label)
         doc_vl.addLayout(btn_row)
+        self.doc_status_label = QLabel("Type to search project documents for specific selection.")
+        self.doc_status_label.setWordWrap(True)
+        self.doc_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        doc_vl.addWidget(self.doc_status_label)
         root.addWidget(self.doc_group)
 
         # ── Add mode ──────────────────────────────────────────────────
@@ -691,16 +720,23 @@ class AddAllToQueueDialog(QDialog):
         # ── Connect signals ───────────────────────────────────────────
         self.kind_combo.currentIndexChanged.connect(self._on_kind_changed)
         self.project_combo.currentIndexChanged.connect(self._on_project_changed)
-        self.doc_search.textChanged.connect(self._filter_docs)
+        self.doc_search.textChanged.connect(self._on_doc_search_text_changed)
         self.select_all_btn.clicked.connect(self._select_all_docs)
-        self.clear_sel_btn.clicked.connect(self.doc_list.clearSelection)
-        self.doc_list.itemSelectionChanged.connect(self._update_sel_label)
-        self.doc_list.itemSelectionChanged.connect(self._update_estimate)
+        self.clear_sel_btn.clicked.connect(self._clear_doc_selection)
+        self.doc_list.itemSelectionChanged.connect(self._on_doc_selection_changed)
 
         # Initial state
         self._on_kind_changed(0)
 
     # ── Data loading ──────────────────────────────────────────────────
+
+    def _session_scope(self):
+        if not self._db:
+            raise RuntimeError("database unavailable")
+        get_read_session = getattr(self._db, "get_read_session", None)
+        if callable(get_read_session):
+            return get_read_session()
+        return self._db.get_session()
 
     def _load_projects(self) -> None:
         self.project_combo.blockSignals(True)
@@ -712,7 +748,7 @@ class AddAllToQueueDialog(QDialog):
             return
         try:
             from app.services.project_service import ProjectService
-            with self._db.get_session() as session:
+            with self._session_scope() as session:
                 projects = ProjectService().list_projects(session)
             for p in projects:
                 name = getattr(p, "name", None) or f"Project {p.project_id}"
@@ -724,45 +760,39 @@ class AddAllToQueueDialog(QDialog):
         self.project_combo.blockSignals(False)
         self._on_project_changed(self.project_combo.currentIndex())
 
-    def _load_documents(self, project_id: int) -> None:
-        """Populate doc_list for the given project (sentences kind only)."""
+    def _clear_doc_results(self, status_text: str) -> None:
+        self._doc_search_timer.stop()
+        self._doc_rows = []
+        self._doc_total_matches = 0
+        self._doc_count_pending = False
         self.doc_list.clear()
-        if not self._db or project_id < 0:
-            return
-        try:
-            from sqlalchemy import select
-            from app.infra.sa_models import SourceDocument, SourceCorpus
-            with self._db.get_session() as session:
-                stmt = (
-                    select(
-                        SourceDocument.doc_id,
-                        SourceDocument.file_name,
-                        SourceDocument.sentence_count,
-                        SourceDocument.level,
-                    )
-                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                    .where(SourceCorpus.project_id == project_id)
-                    .where(SourceDocument.status == "processed")
-                    .order_by(SourceDocument.file_name.asc())
-                )
-                rows = session.execute(stmt).all()
-            for doc_id, file_name, sent_count, level in rows:
-                count_str = f"{sent_count:,}" if sent_count else "?"
-                level_str = f"  [{level}]" if level else ""
-                label = f"{file_name}    {count_str} sent.{level_str}"
-                item = QListWidgetItem(label)
-                item.setData(Qt.ItemDataRole.UserRole, doc_id)
-                item.setToolTip(f"doc_id={doc_id}  •  {count_str} sentences{level_str}")
-                self.doc_list.addItem(item)
-        except Exception as exc:
-            logger.warning("AddAllToQueueDialog: load docs failed: %s", exc)
+        self.doc_status_label.setText(status_text)
         self._update_sel_label()
+
+    def _cancel_doc_worker(self) -> None:
+        self._doc_search_timer.stop()
+        worker = self._doc_worker
+        if worker and worker.isRunning():
+            worker.cancel()
+            worker.wait(200)
+        self._doc_worker = None
 
     # ── Slot handlers ─────────────────────────────────────────────────
 
     def _on_kind_changed(self, index: int) -> None:
         _, show_docs = self._KIND_META[index] if index < len(self._KIND_META) else ("sentence", True)
         self.doc_group.setVisible(show_docs)
+        if show_docs:
+            self._clear_doc_results("Type to search project documents for specific selection.")
+            if self.doc_search.text().strip():
+                self._schedule_doc_search(immediate=True)
+        else:
+            self._cancel_doc_worker()
+            self._selected_doc_meta.clear()
+            self.doc_search.blockSignals(True)
+            self.doc_search.clear()
+            self.doc_search.blockSignals(False)
+            self._clear_doc_results("Document filter is available for Sentences only.")
         self._update_estimate()
 
     def _on_project_changed(self, index: int) -> None:
@@ -770,38 +800,223 @@ class AddAllToQueueDialog(QDialog):
         kind_idx = self.kind_combo.currentIndex()
         _, show_docs = self._KIND_META[kind_idx] if kind_idx < len(self._KIND_META) else ("sentence", True)
         if show_docs:
-            self._load_documents(pid)
+            self._cancel_doc_worker()
+            self._selected_doc_meta.clear()
+            if pid < 0:
+                self._clear_doc_results("Select a project to search documents.")
+            elif self.doc_search.text().strip():
+                self._schedule_doc_search(immediate=True)
+            else:
+                self._clear_doc_results("Type to search project documents for specific selection.")
         self._update_estimate()
 
-    def _filter_docs(self, text: str) -> None:
-        """Live filter: hide items that don't match the search text."""
-        lc = text.lower()
-        for i in range(self.doc_list.count()):
-            item = self.doc_list.item(i)
-            item.setHidden(lc not in item.text().lower())
+    def _on_doc_search_text_changed(self, _text: str) -> None:
+        if self.selected_kind() != "sentence":
+            return
+        if not self.doc_search.text().strip():
+            self._cancel_doc_worker()
+            self._clear_doc_results("Search cleared. Leave selection empty to use all project documents.")
+            return
+        self._schedule_doc_search()
+
+    def _schedule_doc_search(self, *, immediate: bool = False) -> None:
+        if self.selected_kind() != "sentence":
+            return
+        if self.selected_project_id() < 0:
+            self._clear_doc_results("Select a project to search documents.")
+            return
+        if not self.doc_search.text().strip():
+            self._clear_doc_results("Type to search project documents for specific selection.")
+            return
+        self.doc_status_label.setText("Searching processed documents...")
+        if immediate:
+            self._doc_search_timer.stop()
+            self._reload_doc_matches()
+            return
+        self._doc_search_timer.start()
+
+    def _reload_doc_matches(self) -> None:
+        if self.selected_kind() != "sentence":
+            return
+        pid = self.selected_project_id()
+        query = self.doc_search.text().strip()
+        if pid < 0 or not query:
+            return
+
+        self._doc_request_id += 1
+        request_id = self._doc_request_id
+        self._cancel_doc_worker()
+        self._doc_count_pending = True
+        self.doc_status_label.setText("Loading matching processed documents...")
+
+        worker = ProjectDocumentsPageWorker(
+            request_id=request_id,
+            project_id=pid,
+            search_query=query,
+            status_filter="processed",
+            page_size=self._DOC_PAGE_SIZE,
+            page_index=1,
+            include_frequent_tags=False,
+        )
+        worker.status.connect(self._on_doc_worker_status)
+        worker.rows_loaded.connect(self._on_doc_rows_loaded)
+        worker.count_loaded.connect(self._on_doc_count_loaded)
+        worker.error.connect(self._on_doc_error)
+        self._doc_worker = worker
+        worker.start()
+
+    def _on_doc_worker_status(self, request_id: int, text: str) -> None:
+        if int(request_id) != self._doc_request_id:
+            return
+        self.doc_status_label.setText(text)
+
+    def _on_doc_rows_loaded(self, request_id: int, rows: list) -> None:
+        if int(request_id) != self._doc_request_id:
+            return
+        self._doc_rows = list(rows or [])
+        self.doc_list.blockSignals(True)
+        self.doc_list.clear()
+        for doc in self._doc_rows:
+            count_str = f"{int(doc.sentence_count or 0):,}" if doc.sentence_count is not None else "?"
+            level_str = f"  [{doc.level}]" if getattr(doc, "level", None) else ""
+            label = f"{doc.file_name}    {count_str} sent.{level_str}"
+            item = QListWidgetItem(label)
+            doc_id = int(doc.doc_id)
+            item.setData(self._DOC_ROLE_ID, doc_id)
+            item.setData(self._DOC_ROLE_NAME, doc.file_name or f"Document #{doc_id}")
+            item.setData(self._DOC_ROLE_SENTENCES, int(doc.sentence_count or 0))
+            item.setToolTip(f"doc_id={doc_id}  |  {count_str} sentences{level_str}")
+            self.doc_list.addItem(item)
+            if doc_id in self._selected_doc_meta:
+                item.setSelected(True)
+        self.doc_list.blockSignals(False)
         self._update_sel_label()
+        if not self._doc_rows:
+            self.doc_status_label.setText("No matching processed documents on this page; calculating total...")
+            return
+        self.doc_status_label.setText(
+            f"Loaded {len(self._doc_rows):,} matching processed documents; calculating total..."
+        )
+
+    def _on_doc_count_loaded(self, request_id: int, total_count: int) -> None:
+        if int(request_id) != self._doc_request_id:
+            return
+        self._doc_total_matches = int(total_count or 0)
+        self._doc_count_pending = False
+        self._update_sel_label()
+        if self._doc_total_matches <= 0:
+            self.doc_status_label.setText("No matching processed documents.")
+            return
+        shown = len(self._doc_rows)
+        if shown and self._doc_total_matches > shown:
+            self.doc_status_label.setText(
+                f"Showing first {shown:,} of {self._doc_total_matches:,} matching processed documents."
+            )
+            return
+        self.doc_status_label.setText(
+            f"Showing {max(shown, self._doc_total_matches):,} matching processed documents."
+        )
+
+    def _on_doc_error(self, request_id: int, message: str) -> None:
+        if int(request_id) != self._doc_request_id:
+            return
+        self._doc_count_pending = False
+        logger.error("AddAllToQueueDialog document search failed: %s", message)
+        self.doc_status_label.setText(f"Document search failed: {message}")
 
     def _select_all_docs(self) -> None:
-        """Select all currently visible items."""
         self.doc_list.clearSelection()
         for i in range(self.doc_list.count()):
+            self.doc_list.item(i).setSelected(True)
+
+    def _clear_doc_selection(self) -> None:
+        self._selected_doc_meta.clear()
+        self.doc_list.clearSelection()
+        self._update_sel_label()
+        self._update_estimate()
+
+    def _on_doc_selection_changed(self) -> None:
+        for i in range(self.doc_list.count()):
             item = self.doc_list.item(i)
-            if not item.isHidden():
-                item.setSelected(True)
+            doc_id = int(item.data(self._DOC_ROLE_ID))
+            if item.isSelected():
+                self._selected_doc_meta[doc_id] = (
+                    str(item.data(self._DOC_ROLE_NAME) or f"Document #{doc_id}"),
+                    int(item.data(self._DOC_ROLE_SENTENCES) or 0),
+                )
+            else:
+                self._selected_doc_meta.pop(doc_id, None)
+        self._update_sel_label()
+        self._update_estimate()
 
     def _update_sel_label(self) -> None:
-        selected = len(self.doc_list.selectedItems())
-        visible = sum(1 for i in range(self.doc_list.count()) if not self.doc_list.item(i).isHidden())
-        total = self.doc_list.count()
-        if total == 0:
-            self.doc_sel_label.setText("No documents")
-        elif selected == 0:
-            self.doc_sel_label.setText(f"All {visible:,} shown  (none selected = all docs)")
-        else:
-            self.doc_sel_label.setText(f"Selected: {selected:,} / {visible:,} shown  ({total:,} total)")
+        selected = len(self._selected_doc_meta)
+        query = self.doc_search.text().strip()
+        shown = len(self._doc_rows)
+        if selected:
+            self.doc_sel_label.setText(f"Selected: {selected:,} document(s)")
+            return
+        if not query:
+            self.doc_sel_label.setText("All project documents (none selected)")
+            return
+        if self._doc_count_pending:
+            if shown:
+                self.doc_sel_label.setText(
+                    f"No selection. Showing {shown:,} matching docs; none selected = all docs."
+                )
+            else:
+                self.doc_sel_label.setText("Searching processed documents...")
+            return
+        if self._doc_total_matches <= 0:
+            self.doc_sel_label.setText("No matching processed documents")
+            return
+        if self._doc_total_matches > shown:
+            self.doc_sel_label.setText(
+                f"No selection. Showing first {shown:,} of {self._doc_total_matches:,} matches; none selected = all docs."
+            )
+            return
+        self.doc_sel_label.setText(
+            f"No selection. {self._doc_total_matches:,} matches; none selected = all docs."
+        )
+
+    def _get_cached_project_estimate(self, project_id: int, kind: str) -> int:
+        cache_key = (int(project_id), str(kind))
+        if cache_key not in self._estimate_cache:
+            self._estimate_cache[cache_key] = self._query_project_estimate(project_id, kind)
+        return int(self._estimate_cache[cache_key])
+
+    def _query_project_estimate(self, project_id: int, kind: str) -> int:
+        from sqlalchemy import func, select
+
+        with self._session_scope() as session:
+            if kind == "sentence":
+                from app.infra.sa_models import SourceCorpus, SourceDocument
+
+                stmt = (
+                    select(func.coalesce(func.sum(SourceDocument.sentence_count), 0))
+                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(SourceCorpus.project_id == int(project_id))
+                )
+            elif kind == "lemma":
+                from app.infra.sa_models import Lemma
+
+                stmt = (
+                    select(func.count(Lemma.lemma_id))
+                    .where(Lemma.project_id == int(project_id))
+                    .where(Lemma.is_noise == 0)
+                )
+            else:
+                from app.infra.sa_models import TermCluster
+
+                stmt = (
+                    select(func.count(TermCluster.cluster_id))
+                    .where(TermCluster.project_id == int(project_id))
+                    .where(TermCluster.is_noise == 0)
+                    .where(TermCluster.curation_status != "rejected")
+                )
+            return int(session.execute(stmt).scalar() or 0)
 
     def _update_estimate(self) -> None:
-        """Fast COUNT estimate shown in the dialog."""
         pid = self._get_project_id(self.project_combo.currentIndex())
         kind_idx = self.kind_combo.currentIndex()
         kind, _ = self._KIND_META[kind_idx] if kind_idx < len(self._KIND_META) else ("sentence", True)
@@ -810,39 +1025,22 @@ class AddAllToQueueDialog(QDialog):
             self.estimate_label.setText("(select a project to see estimate)")
             return
         try:
-            from sqlalchemy import select, func
-            with self._db.get_session() as session:
-                if kind == "sentence":
-                    from app.infra.sa_models import DocumentSentence, SourceDocument, SourceCorpus
-                    doc_ids = self.selected_doc_ids()
-                    stmt = (
-                        select(func.count(DocumentSentence.sentence_id))
-                        .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-                        .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                        .where(SourceCorpus.project_id == pid)
+            if kind == "sentence":
+                doc_ids = self.selected_doc_ids()
+                if doc_ids:
+                    count = sum(int(meta[1] or 0) for meta in self._selected_doc_meta.values())
+                    self.estimate_label.setText(
+                        f"~{count:,} sentences from {len(doc_ids):,} selected document(s)"
                     )
-                    if doc_ids:
-                        stmt = stmt.where(DocumentSentence.doc_id.in_(doc_ids))
-                    count = session.execute(stmt).scalar() or 0
-                    src = f"{len(doc_ids)} document(s)" if doc_ids else "all documents"
-                    self.estimate_label.setText(f"~{count:,} sentences from {src}")
-                elif kind == "lemma":
-                    from app.infra.sa_models import Lemma
-                    count = session.execute(
-                        select(func.count(Lemma.lemma_id))
-                        .where(Lemma.project_id == pid)
-                        .where(Lemma.is_noise == 0)
-                    ).scalar() or 0
-                    self.estimate_label.setText(f"~{count:,} lemmas (project-wide)")
-                else:  # term
-                    from app.infra.sa_models import TermCluster
-                    count = session.execute(
-                        select(func.count(TermCluster.cluster_id))
-                        .where(TermCluster.project_id == pid)
-                        .where(TermCluster.is_noise == 0)
-                        .where(TermCluster.curation_status != "rejected")
-                    ).scalar() or 0
-                    self.estimate_label.setText(f"~{count:,} terms (project-wide)")
+                else:
+                    count = self._get_cached_project_estimate(pid, kind)
+                    self.estimate_label.setText(f"~{count:,} sentences from all documents")
+            elif kind == "lemma":
+                count = self._get_cached_project_estimate(pid, kind)
+                self.estimate_label.setText(f"~{count:,} lemmas (project-wide)")
+            else:
+                count = self._get_cached_project_estimate(pid, kind)
+                self.estimate_label.setText(f"~{count:,} terms (project-wide)")
         except Exception as exc:
             logger.debug("AddAllToQueueDialog estimate failed: %s", exc)
             self.estimate_label.setText("(estimate unavailable)")
@@ -863,16 +1061,16 @@ class AddAllToQueueDialog(QDialog):
         return self._get_project_id(self.project_combo.currentIndex())
 
     def selected_doc_ids(self) -> List[int]:
-        """Return list of selected doc_ids, or [] for all documents."""
-        return [
-            item.data(Qt.ItemDataRole.UserRole)
-            for item in self.doc_list.selectedItems()
-            if item.data(Qt.ItemDataRole.UserRole) is not None
-        ]
+        """Return selected doc_ids across searches, or [] for all documents."""
+        return sorted(int(doc_id) for doc_id in self._selected_doc_meta)
 
     def selected_add_mode(self) -> str:
         idx = self.mode_combo.currentIndex()
         return ["append", "after_current", "prepend"][max(0, idx)]
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._cancel_doc_worker()
+        super().closeEvent(event)
 
 
 class AddQueueToPlaylistDialog(QDialog):
