@@ -1527,6 +1527,51 @@ Current status after the wave:
   `ReferenceSetupWizard`, `HelpCenterDialog`, or generic first-run work
   without new evidence gates.
 
+## Twentieth framework-driven cold-audit wave
+
+The twentieth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/AUDIO_PROVIDER_SETTINGS_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- after first-run repair returned the branch to the framework, the next
+  remaining visible candidate from the bounded sweep was:
+  - `audio_provider_settings`: `0.121s`
+- dedicated current-state evidence then confirmed the actual contract:
+  - full `AudioProviderSettingsDialog` init: `0.138s`
+  - `_load_settings()`: `0.106s`
+  - `_load_google_advanced_settings()`: `0.104s`
+  - `_refresh_usage("google_cloud_tts")`: `0.001s`
+- current dialog state stayed bounded:
+  - tabs: `4`
+  - chain rows: `5`
+  - master enabled: `true`
+  - current advanced provider: `google_cloud_tts`
+- the only drift surfaced during open was separate dependency health:
+  - current-machine warning:
+    - `Failed to read credential audio_provider:google_cloud_tts:service_account_json: Failed to decrypt credential: Decryption failed: authentication tag invalid (data corrupted or tampered)`
+
+Current status after the wave:
+
+- `AudioProviderSettingsDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `AudioProviderSettingsDialog` repair branch is opened from this wave;
+- the decrypt warning is tracked as a separate audio credential-health gate,
+  not as a cold-latency branch;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  `ReferenceSetupWizard`, `HelpCenterDialog`, generic first-run work, or
+  `AudioProviderSettingsDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
