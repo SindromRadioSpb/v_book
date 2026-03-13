@@ -898,6 +898,63 @@ class TMSearchWorker(QThread):
         self._cancelled = True
 
 
+class NLPEngineReadinessWorker(QThread):
+    """Background worker for optional NLP engine capability checks."""
+
+    result_ready = pyqtSignal(int, bool, bool)  # request_id, stanza_available, cuda_available
+
+    def __init__(self, *, request_id: int):
+        super().__init__()
+        self.request_id = int(request_id)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def _probe_stanza_available(self) -> bool:
+        try:
+            import stanza  # noqa: F401
+
+            return True
+        except ImportError:
+            return False
+        except Exception as exc:
+            logger.warning(
+                "Stanza readiness check failed; DocumentsView will use Mock engine: %s",
+                exc,
+            )
+            return False
+
+    def _probe_cuda_available(self) -> bool:
+        try:
+            import torch
+
+            return bool(torch.cuda.is_available())
+        except ImportError:
+            return False
+        except Exception as exc:
+            logger.warning("CUDA readiness check failed; GPU NLP disabled: %s", exc)
+            return False
+
+    def run(self) -> None:
+        try:
+            stanza_available = self._probe_stanza_available()
+            if self._cancelled:
+                return
+            cuda_available = self._probe_cuda_available() if stanza_available else False
+        except Exception:
+            logger.exception("NLP engine readiness worker failed")
+            stanza_available = False
+            cuda_available = False
+
+        if not self._cancelled:
+            self.result_ready.emit(
+                self.request_id,
+                bool(stanza_available),
+                bool(cuda_available),
+            )
+
+
 class DocumentsPageWorker(QThread):
     """Worker for Documents server-side count + page fetch (global filters/sort).
 

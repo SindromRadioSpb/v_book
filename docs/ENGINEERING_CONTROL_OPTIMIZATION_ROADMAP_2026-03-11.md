@@ -1087,6 +1087,7 @@ The tenth official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/DOCUMENTS_VIEW_COLD_AUDIT_2026-03-13.md`
+- `docs/DOCUMENTS_VIEW_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -1113,20 +1114,28 @@ Wave outcome:
 
 Current status after the wave:
 
-- Documents view cold-audit evidence gate is now crossed;
-- this is a real current `P0` blocker, but it is tightly localized:
-  - the blocker is synchronous engine-capability probing on view open;
-  - the async documents page path and snapshot readiness path are not the main
-    blocker layers in this wave;
-- the next active layer is now:
-  - `Documents view staged NLP engine readiness check / first usable state repair`
-- the implied bounded repair scope is:
-  - remove `stanza` / `torch` import work from the cold-open critical path;
-  - keep async page loading and snapshot readiness behavior intact;
-  - keep schema, NLP processing semantics, and heavy validation out of scope;
+- Documents view cold-audit evidence gate was crossed and the bounded repair
+  was opened;
+- the Documents view `P0` blocker is now operationally closed:
+  - `DocumentsView` init now returns in `0.077s`;
+  - first page now arrives in `0.376s`;
+  - NLP engine readiness completes later at `2.045s`;
+  - the view opens usable while the engine label stays in
+    `Checking NLP engine readiness...` state;
+  - after background completion the first page still reaches:
+    - `25` rows
+    - `387,639` total documents;
+- the repaired contract keeps the right scope boundaries:
+  - async documents paging remains intact;
+  - snapshot readiness remains async and unchanged;
+  - process/re-process buttons stay disabled only until readiness is known;
+- approved-target after evidence still records `db_mtime_unchanged=true`;
+- no immediate residual Documents branch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
 - do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
   Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All, or
-  generic Documents SQL redesign without new evidence gates.
+  generic Documents work without new evidence gates.
 
 ## Decision note
 

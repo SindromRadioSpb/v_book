@@ -41,6 +41,7 @@ from app.ui.workers import (
     ProcessWorker,
     DocumentsPageWorker,
     DocumentDeleteWorker,
+    NLPEngineReadinessWorker,
     SnapshotReadinessWorker,
 )
 from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
@@ -204,6 +205,8 @@ class DocumentsView(QWidget):
         self.project_id = project_id
         self.corpus_id = None
         self.is_reference_corpus = False  # Track if this is a reference corpus
+        self.stanza_available = False
+        self.cuda_available = False
 
         self.db_service = DBService.get_instance()
         self.project_service = ProjectService()
@@ -218,12 +221,18 @@ class DocumentsView(QWidget):
         self.documents_worker: Optional[DocumentsPageWorker] = None
         self.delete_worker: Optional[DocumentDeleteWorker] = None
         self.delete_progress: Optional[QProgressDialog] = None
+        self.nlp_engine_check_worker: Optional[NLPEngineReadinessWorker] = None
         self.snapshot_readiness_worker: Optional[SnapshotReadinessWorker] = None
         self.snapshot_readiness_panel: Optional[SnapshotReadinessPanel] = None
+        self.nlp_engine_status_label: Optional[QLabel] = None
+        self.gpu_checkbox: Optional[QCheckBox] = None
 
         self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
         self._active_request_id = 0
+        self._nlp_engine_request_seq = 0
+        self._active_nlp_engine_request_id = 0
+        self._nlp_engine_check_pending = True
         self._snapshot_request_seq = 0
         self._active_snapshot_request_id = 0
         self._snapshot_refresh_pending = False
@@ -268,6 +277,7 @@ class DocumentsView(QWidget):
         self.init_ui()
         self.load_corpus()
         self.load_documents()
+        QTimer.singleShot(0, self.start_nlp_engine_readiness_check)
 
         # Enable drag and drop (will check is_reference_corpus in dragEnterEvent)
         self.setAcceptDrops(True)
@@ -342,26 +352,16 @@ class DocumentsView(QWidget):
         # NLP options
         nlp_layout = QHBoxLayout()
 
-        # Check if Stanza is available
-        self.stanza_available = self._check_stanza_available()
-        self.cuda_available = self._check_cuda_available() if self.stanza_available else False
+        self.nlp_engine_status_label = QLabel("Checking NLP engine readiness...")
+        self.nlp_engine_status_label.setStyleSheet("color: #666;")
+        nlp_layout.addWidget(self.nlp_engine_status_label)
 
-        # Engine info label
-        if self.stanza_available:
-            engine_label = QLabel(f"вњ… Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})")
-            engine_label.setStyleSheet("color: green;")
-        else:
-            engine_label = QLabel("вљ пёЏ Stanza not available - using Mock engine")
-            engine_label.setStyleSheet("color: orange;")
-        nlp_layout.addWidget(engine_label)
-
-        # GPU checkbox (only if CUDA available)
-        if self.cuda_available:
-            self.gpu_checkbox = QCheckBox("Use GPU for NLP")
-            self.gpu_checkbox.setChecked(True)
-            nlp_layout.addWidget(self.gpu_checkbox)
-        else:
-            self.gpu_checkbox = None
+        self.gpu_checkbox = QCheckBox("Use GPU for NLP")
+        self.gpu_checkbox.setChecked(True)
+        self.gpu_checkbox.setVisible(False)
+        self.gpu_checkbox.setEnabled(False)
+        self.gpu_checkbox.setToolTip("GPU option appears after NLP engine readiness check completes.")
+        nlp_layout.addWidget(self.gpu_checkbox)
 
         nlp_layout.addStretch()
         layout.addLayout(nlp_layout)
@@ -526,32 +526,123 @@ class DocumentsView(QWidget):
         layout.addLayout(action_layout)
 
         self.setLayout(layout)
+        self._apply_nlp_engine_ui_state()
+        self._update_nlp_process_action_state(has_unprocessed=False, has_processed=False)
         self._update_sort_header_labels()
         self.update_pagination_controls(is_loading=False)
 
-    def _check_stanza_available(self):
-        """Check if Stanza is available."""
-        try:
-            import stanza
-            return True
-        except ImportError:
-            return False
-        except Exception as exc:
-            # Handle native dependency load failures (e.g. torch DLL init errors)
-            # so project opening stays operational without NLP acceleration.
-            logger.warning("Stanza check failed; NLP features will be disabled: %s", exc)
-            return False
+    def _reference_corpus_process_tooltip(self) -> str:
+        return (
+            "NLP processing of reference corpus is CLI-only.\n"
+            "Use process_reference_corpus.py; add --reprocess-all for rebuilds."
+        )
 
-    def _check_cuda_available(self):
-        """Check if CUDA is available."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-        except Exception as exc:
-            logger.warning("CUDA availability check failed; GPU NLP disabled: %s", exc)
-            return False
+    def _process_tooltip_for_current_engine(self) -> str:
+        if self.is_reference_corpus:
+            return self._reference_corpus_process_tooltip()
+        if self._nlp_engine_check_pending:
+            return "Checking NLP engine readiness..."
+        if self.stanza_available:
+            if self.cuda_available:
+                return "Stanza engine ready. GPU NLP is available."
+            return "Stanza engine ready. CUDA unavailable; processing will use CPU NLP."
+        return "Stanza not available; processing will use Mock engine."
+
+    def _reprocess_tooltip_for_current_engine(self) -> str:
+        if self.is_reference_corpus:
+            return self._reference_corpus_process_tooltip()
+        if self._nlp_engine_check_pending:
+            return "Checking NLP engine readiness..."
+        if self.stanza_available:
+            if self.cuda_available:
+                return "Re-process selected documents with Stanza NLP (GPU available)."
+            return "Re-process selected documents with Stanza NLP (CPU only)."
+        return "Re-process selected documents with Mock engine (updates statistics)."
+
+    def _apply_nlp_engine_ui_state(self) -> None:
+        label = self.__dict__.get("nlp_engine_status_label")
+        checkbox = self.__dict__.get("gpu_checkbox")
+        if label is None:
+            return
+
+        if self._nlp_engine_check_pending:
+            label.setText("Checking NLP engine readiness...")
+            label.setStyleSheet("color: #666;")
+            if checkbox is not None:
+                checkbox.setVisible(False)
+                checkbox.setEnabled(False)
+            return
+
+        if self.stanza_available:
+            label.setText(
+                f"Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})"
+            )
+            label.setStyleSheet("color: green;")
+            if checkbox is not None:
+                checkbox.setVisible(bool(self.cuda_available))
+                checkbox.setEnabled(bool(self.cuda_available))
+                if self.cuda_available and not checkbox.isChecked():
+                    checkbox.setChecked(True)
+        else:
+            label.setText("Stanza not available - using Mock engine")
+            label.setStyleSheet("color: orange;")
+            if checkbox is not None:
+                checkbox.setVisible(False)
+                checkbox.setEnabled(False)
+
+    def _update_nlp_process_action_state(
+        self,
+        *,
+        has_unprocessed: bool,
+        has_processed: bool,
+    ) -> None:
+        self.process_btn.setToolTip(self._process_tooltip_for_current_engine())
+        self.reprocess_btn.setToolTip(self._reprocess_tooltip_for_current_engine())
+
+        if self.is_reference_corpus or self._process_worker_active or self._nlp_engine_check_pending:
+            self.process_btn.setEnabled(False)
+            self.reprocess_btn.setEnabled(False)
+            return
+
+        self.process_btn.setEnabled(bool(has_unprocessed))
+        self.reprocess_btn.setEnabled(bool(has_processed))
+
+    def start_nlp_engine_readiness_check(self) -> None:
+        worker = self.__dict__.get("nlp_engine_check_worker")
+        if worker is not None and worker.isRunning():
+            return
+
+        self._nlp_engine_request_seq += 1
+        request_id = int(self._nlp_engine_request_seq)
+        self._active_nlp_engine_request_id = request_id
+        self._nlp_engine_check_pending = True
+        self._apply_nlp_engine_ui_state()
+        self._update_nlp_process_action_state(has_unprocessed=False, has_processed=False)
+
+        worker = NLPEngineReadinessWorker(request_id=request_id)
+        app = QApplication.instance()
+        if app is not None:
+            worker.setParent(app)
+        self.nlp_engine_check_worker = worker
+        worker.finished.connect(worker.deleteLater)
+        worker.result_ready.connect(self.on_nlp_engine_readiness_loaded)
+        worker.start()
+
+    def on_nlp_engine_readiness_loaded(
+        self,
+        request_id: int,
+        stanza_available: bool,
+        cuda_available: bool,
+    ) -> None:
+        if int(request_id) != self._active_nlp_engine_request_id:
+            return
+
+        self._nlp_engine_check_pending = False
+        self.stanza_available = bool(stanza_available)
+        self.cuda_available = bool(cuda_available) if self.stanza_available else False
+        self.nlp_engine_check_worker = None
+        self._apply_nlp_engine_ui_state()
+        self.on_selection_changed()
 
     def load_corpus(self):
         """Load the default corpus for this project."""
@@ -693,6 +784,19 @@ class DocumentsView(QWidget):
             self.snapshot_readiness_worker.cancel()
             if not self.snapshot_readiness_worker.wait(100):
                 logger.info("Snapshot readiness worker will finish cooperatively after close")
+
+    def _stop_nlp_engine_check_worker(self) -> None:
+        worker = self.__dict__.get("nlp_engine_check_worker")
+        if worker is None:
+            return
+        if worker.isRunning():
+            logger.info("Stopping NLP engine readiness worker on close")
+            worker.cancel()
+            if not worker.wait(3000):
+                logger.info("NLP engine readiness worker will finish after close")
+                self.nlp_engine_check_worker = None
+                return
+        self.nlp_engine_check_worker = None
 
     def _refresh_snapshot_staleness_label(self) -> None:
         panel = self.__dict__.get("snapshot_readiness_panel")
@@ -1104,11 +1208,15 @@ class DocumentsView(QWidget):
                     has_processed = True
                 else:
                     has_unprocessed = True
-            self.process_btn.setEnabled(has_unprocessed and not self._process_worker_active)
-            self.reprocess_btn.setEnabled(has_processed and not self._process_worker_active)
+            self._update_nlp_process_action_state(
+                has_unprocessed=has_unprocessed,
+                has_processed=has_processed,
+            )
         else:
-            self.process_btn.setEnabled(False)
-            self.reprocess_btn.setEnabled(False)
+            self._update_nlp_process_action_state(
+                has_unprocessed=False,
+                has_processed=False,
+            )
 
     def _selected_document_rows(self) -> list[int]:
         """Return selected model rows in stable visual order."""
@@ -1221,6 +1329,14 @@ class DocumentsView(QWidget):
                 "  python scripts/process_reference_corpus.py --project-id <id>\n\n"
                 "This protects against accidental multi-hour write sessions that would\n"
                 "block all other operations.",
+            )
+            return
+
+        if self._nlp_engine_check_pending:
+            show_info(
+                self,
+                "NLP Engine Check In Progress",
+                "Documents view is still checking NLP engine readiness. Try again in a moment.",
             )
             return
 
@@ -1472,6 +1588,14 @@ class DocumentsView(QWidget):
                 "NLP re-processing of a reference corpus is not allowed from the UI.\n\n"
                 "Use the CLI rebuild path instead:\n"
                 "  python scripts/process_reference_corpus.py --project-id <id> --reprocess-all",
+            )
+            return
+
+        if self._nlp_engine_check_pending:
+            show_info(
+                self,
+                "NLP Engine Check In Progress",
+                "Documents view is still checking NLP engine readiness. Try again in a moment.",
             )
             return
 
@@ -1778,6 +1902,7 @@ class DocumentsView(QWidget):
             if self.documents_worker.isRunning():
                 self.documents_worker.terminate()
 
+        self._stop_nlp_engine_check_worker()
         self._stop_snapshot_readiness_worker()
 
         self.table_layout_controller.save_now()

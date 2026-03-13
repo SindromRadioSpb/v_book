@@ -37,6 +37,7 @@ def _make_view(monkeypatch, qtbot) -> DocumentsView:
     )
     monkeypatch.setattr(DocumentsView, "load_corpus", lambda self: setattr(self, "corpus_id", 1))
     monkeypatch.setattr(DocumentsView, "load_documents", lambda self: None)
+    monkeypatch.setattr(DocumentsView, "start_nlp_engine_readiness_check", lambda self: None)
     view = DocumentsView(project_id=1)
     qtbot.addWidget(view)
     return view

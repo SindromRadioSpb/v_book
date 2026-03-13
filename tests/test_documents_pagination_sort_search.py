@@ -150,6 +150,11 @@ def test_documents_request_id_cancels_stale_updates(monkeypatch, qtbot):
         "reload_documents",
         lambda self, reset_page=False: None,
     )
+    monkeypatch.setattr(
+        DocumentsView,
+        "start_nlp_engine_readiness_check",
+        lambda self: None,
+    )
 
     view = DocumentsView(project_id=1)
     qtbot.addWidget(view)
