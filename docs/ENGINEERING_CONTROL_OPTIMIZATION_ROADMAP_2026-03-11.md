@@ -1618,6 +1618,53 @@ Current status after the wave:
   generic first-run work, `AudioProviderSettingsDialog`, or
   `SentenceNiqqudBootstrapDialog` without new evidence gates.
 
+## Twenty-second framework-driven cold-audit wave
+
+The twenty-second official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/COMMAND_PALETTE_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- after the sentence-niqqud wave, the bounded remaining-dialog sweep still
+  showed:
+  - `command_palette_dialog`: `0.021s`
+  - `pronunciation_bootstrap_dialog`: `0.011s`
+  - `translate_text_dialog`: `0.006s`
+- because the sweep used an empty palette registry, a dedicated
+  representative-action-set probe was required for a real conclusion;
+- the dedicated probe then confirmed the actual open/search contract:
+  - full `CommandPaletteDialog` init: `0.128s`
+  - registry actions: `16`
+  - initial results count: `16`
+  - initial status:
+    - `16 action(s)`
+  - representative search query `audio`: `0.001s`
+  - filtered results count: `2`
+
+Current status after the wave:
+
+- `CommandPaletteDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `CommandPaletteDialog` repair branch is opened from this wave;
+- the palette contract is already bounded:
+  - open is fully in-memory;
+  - initial population is small;
+  - representative live filtering is effectively instant;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, or `CommandPaletteDialog` without new
+  evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
