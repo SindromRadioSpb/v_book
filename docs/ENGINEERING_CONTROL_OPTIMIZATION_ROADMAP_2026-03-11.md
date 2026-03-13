@@ -1435,6 +1435,44 @@ Current status after the wave:
   `ProviderSettingsDialog`, or `ResourcesManagerDialog` without new evidence
   gates.
 
+## Eighteenth framework-driven cold-audit wave
+
+The eighteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/IMPORT_WIZARD_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- the bounded candidate sweep had only one remaining visible candidate:
+  - `import_wizard`: `0.007s`
+- strict read-only dedicated evidence then confirmed the actual contract:
+  - `ProjectService.list_projects()`: `0.043s`
+  - project count on target: `4`
+  - full `ImportWizard` init: `0.006s`
+  - `project_combo` count after open: `4`
+- current open state remained fully idle and usable:
+  - `Run Import` enabled: `true`
+  - `Cancel` enabled: `false`
+  - no worker or file parsing begins on open
+
+Current status after the wave:
+
+- `ImportWizard` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `ImportWizard` repair branch is opened from this wave;
+- the original bounded visible candidate sweep is now fully exhausted;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  `ProviderSettingsDialog`, `ResourcesManagerDialog`, or `ImportWizard`
+  without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
