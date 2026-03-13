@@ -1395,6 +1395,46 @@ Current status after the wave:
   `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`, or
   `ProviderSettingsDialog` without new evidence gates.
 
+## Seventeenth framework-driven cold-audit wave
+
+The seventeenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/RESOURCES_MANAGER_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- the bounded candidate sweep already kept `ResourcesManagerDialog` as the next
+  remaining visible candidate:
+  - `resources_manager_dialog`: `0.035s`
+- dedicated current-state evidence then confirmed the actual contract:
+  - full `ResourcesManagerDialog` init: `0.025s`
+  - table rows after open: `3`
+  - `ResourceRegistry.list_entries()`: `0.010s`
+  - each `get_status()` stayed at `0.001s`
+- current resource state stayed bounded:
+  - installed required resources: `2`
+  - missing optional baseline bundle: `1`
+    - `hewiki_baseline_processed_bundle`
+
+Current status after the wave:
+
+- `ResourcesManagerDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `ResourcesManagerDialog` repair branch is opened from this wave;
+- the only missing row is an optional baseline bundle, not an open-time
+  blocker;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  `ProviderSettingsDialog`, or `ResourcesManagerDialog` without new evidence
+  gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
