@@ -1273,6 +1273,46 @@ Current status after the wave:
   generic Documents work, ProjectView, standalone `Term Cards`, or
   `VerificationPanel` without new evidence gates.
 
+## Fourteenth framework-driven cold-audit wave
+
+The fourteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/USER_DICTIONARIES_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- the bounded candidate sweep already kept `UserDictionariesView` as the next
+  visible candidate after `VerificationPanel`:
+  - `user_dictionaries_view`: `0.198s`
+- strict read-only approved-target evidence then confirmed the actual contract:
+  - full `UserDictionariesView(project_id=1)` init: `0.058s`
+  - first page ready: `0.164s`
+  - `list_dictionaries()`: `0.043s`
+  - `query_items()`: `0.053s`
+  - `get_dictionary_review_summary()`: `0.002s`
+- dataset-tier evidence also stayed tiny:
+  - dictionaries on target: `1`
+  - total `user_dictionary_item` rows: `18`
+  - explicit project-scope replay remained identical:
+    - project-scope first page total: `18`
+
+Current status after the wave:
+
+- `UserDictionariesView` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `UserDictionariesView` repair branch is opened from this wave;
+- the approved target is not scale-viable for a major user-dictionary cold-path
+  claim;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, or `UserDictionariesView` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,

@@ -160,14 +160,16 @@ def test_review_play_audio_uses_current_card(monkeypatch, qtbot):
 
         captured = {}
 
-        def _capture_play(items, *, play_mode):
+        def _capture_play(items, *, play_mode, start_immediately=False):
             captured["items"] = items
             captured["play_mode"] = play_mode
+            captured["start_immediately"] = start_immediately
 
         monkeypatch.setattr(view, "_play_audio_items", _capture_play)
         view.review_play_audio_btn.click()
 
-        assert captured["play_mode"] == "interrupt"
+        assert captured["play_mode"] == "enqueue"
+        assert captured["start_immediately"] is True
         assert captured["items"] == [
             {
                 "src_lang": "he",
