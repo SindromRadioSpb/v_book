@@ -1352,6 +1352,49 @@ Current status after the wave:
   `VerificationPanel`, `UserDictionariesView`, or `DatabaseSwitchDialog`
   without new evidence gates.
 
+## Sixteenth framework-driven cold-audit wave
+
+The sixteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/PROVIDER_SETTINGS_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- the bounded candidate sweep already kept `ProviderSettingsDialog` as the next
+  remaining visible candidate:
+  - `provider_settings_dialog`: `0.119s`
+- strict read-only dedicated evidence then confirmed the actual contract:
+  - full `ProviderSettingsDialog` init: `0.117s`
+  - chain rows after init: `7`
+  - master enabled state: `true`
+- current settings also exposed a separate dependency-health issue:
+  - auth mode: `service_account_json`
+  - configured credential ID:
+    - `mt_provider:google_cloud_translate:service_account_json`
+  - open-time warning:
+    - `Failed to get credential ... Failed to decrypt credential: Decryption failed: authentication tag invalid (data corrupted or tampered)`
+  - preview fallback text:
+    - `No Service Account JSON configured`
+
+Current status after the wave:
+
+- `ProviderSettingsDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `ProviderSettingsDialog` cold-open repair branch is opened from
+  this wave;
+- the decrypt warning is tracked as a separate credential-health gate, not as a
+  cold-latency branch;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`, or
+  `ProviderSettingsDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
