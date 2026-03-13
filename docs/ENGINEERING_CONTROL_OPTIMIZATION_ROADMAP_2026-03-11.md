@@ -1313,6 +1313,45 @@ Current status after the wave:
   generic Documents work, ProjectView, standalone `Term Cards`,
   `VerificationPanel`, or `UserDictionariesView` without new evidence gates.
 
+## Fifteenth framework-driven cold-audit wave
+
+The fifteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/DATABASE_SWITCH_DIALOG_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- the bounded candidate sweep already kept `DatabaseSwitchDialog` as the next
+  largest remaining visible candidate:
+  - `database_switch_dialog`: `0.128s`
+- strict read-only dedicated evidence then confirmed the actual contract:
+  - `inspect_db_path(current_db_path)`: `0.009s`
+  - `inspect_db_path(default_db_path)`: `0.014s`
+  - full `DatabaseSwitchDialog` init: `0.033s`
+- metadata context stayed bounded:
+  - current profile: `Custom`
+  - current schema: `42`
+  - default DB exists: `true`
+  - default DB schema: `26`
+  - baseline quick-pick available: `true`
+
+Current status after the wave:
+
+- `DatabaseSwitchDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `DatabaseSwitchDialog` repair branch is opened from this wave;
+- metadata inspection remains bounded and does not justify runtime work;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, or `DatabaseSwitchDialog`
+  without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
