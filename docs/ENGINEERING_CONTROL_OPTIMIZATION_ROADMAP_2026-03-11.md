@@ -1473,6 +1473,48 @@ Current status after the wave:
   `ProviderSettingsDialog`, `ResourcesManagerDialog`, or `ImportWizard`
   without new evidence gates.
 
+## Nineteenth framework-driven cold-audit wave
+
+The nineteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/FIRST_RUN_WIZARD_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- after the original bounded visible candidate sweep was exhausted, a new
+  bounded remaining-surface sweep compared:
+  - `first_run_wizard`: `4.273s`
+  - `audio_provider_settings`: `0.121s`
+  - `reference_setup_wizard`: `0.017s`
+  - `help_center`: `0.006s`
+- strict read-only approved-target-backed breakdown then confirmed the actual
+  blocker shape:
+  - full `FirstRunWizardDialog` cold open: `4.273s`
+  - `HealthCheckService.run_all()`: `3.992s`
+  - `PhonikudAdapter` pronunciation bootstrap check: `2.378s`
+  - sentence niqqud bootstrap check: `1.970s`
+  - DB/profile inspection: `0.005s`
+  - resource status refreshes: `0.001s` to `0.003s`
+
+Current status after the wave:
+
+- `FirstRunWizardDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = yes`
+  - `priority = P0`
+- the current blocker is not DB-path metadata, resource registry refresh, or
+  the remaining visible onboarding dialogs;
+- the current blocker is synchronous health-summary work on the constructor path;
+- the next active layer is now:
+  - `First-run wizard staged health summary / first usable state repair`
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  `ReferenceSetupWizard`, or `HelpCenterDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
