@@ -1190,6 +1190,48 @@ Current status after the wave:
   Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
   generic Documents work, or ProjectView without new evidence gates.
 
+## Twelfth framework-driven cold-audit wave
+
+The twelfth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/TERM_CARDS_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that the next visible
+  candidate after the `ProjectView` repair is standalone `Term Cards`
+  activation:
+  - standalone `TermCardView` cold open: `1.043s`
+  - queue rows after init: `760`
+- the current cold path is not a raw queue SQL problem:
+  - raw `term_cluster` queue query: `0.011s`
+  - queue plan: `SEARCH term_cluster USING INDEX idx_cluster_freq (project_id=?)`
+  - exact queue count: `0.001s`
+- the dominant current layer is synchronous enrichment:
+  - `TermCardService.list_review_queue()`: `0.330s`
+  - `resolve_cross_view_status()`: `0.606s`
+  - `resolve_pronunciation_overlay()`: `0.002s`
+- the current `Term Cards` contract still blocks first usable state on full
+  queue enrichment:
+  - there is no staged rows-first / overlays-later contract today;
+  - queue SQL and exact count are already cheap, so a future bounded repair
+    would likely target UI/service staging rather than indexing
+
+Current status after the wave:
+
+- standalone `Term Cards` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P1`
+- no immediate `Term Cards` repair branch is opened from this wave;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, or standalone `Term Cards` without new
+  evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
