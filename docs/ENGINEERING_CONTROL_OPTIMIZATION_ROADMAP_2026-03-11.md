@@ -1081,6 +1081,53 @@ Current status after the wave:
   Concordance, TM residual-tail, Coverage residual-tail, or Audio Add-All
   work without new evidence gates.
 
+## Tenth framework-driven cold-audit wave
+
+The tenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/DOCUMENTS_VIEW_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that `ProjectDashboard` is
+  not the next bottleneck:
+  - `ProjectDashboard` open: `0.166s`
+- the next justified surface is `DocumentsView`, and the current blocker is not
+  the async documents page or snapshot readiness workers:
+  - full `DocumentsView` cold open: `2.300s`
+  - same path without NLP engine checks: `0.063s`
+  - isolated engine-check delta: `2.237s`
+  - after async worker completion the first page reaches:
+    - `25` rows
+    - `387,639` total documents
+- current runtime evidence localizes the blocking layer:
+  - `stanza` import: `2.298s`
+  - fresh-process `torch` import: `1.685s`
+  - `torch.cuda.is_available()`: effectively `0.000s`
+- the current Documents open contract makes the blocker user-visible:
+  - `DocumentsView.init_ui()` performs synchronous NLP engine capability checks
+    in the UI thread before starting background loading
+  - only after those checks do `load_corpus()`, `DocumentsPageWorker`, and
+    `SnapshotReadinessWorker` proceed
+
+Current status after the wave:
+
+- Documents view cold-audit evidence gate is now crossed;
+- this is a real current `P0` blocker, but it is tightly localized:
+  - the blocker is synchronous engine-capability probing on view open;
+  - the async documents page path and snapshot readiness path are not the main
+    blocker layers in this wave;
+- the next active layer is now:
+  - `Documents view staged NLP engine readiness check / first usable state repair`
+- the implied bounded repair scope is:
+  - remove `stanza` / `torch` import work from the cold-open critical path;
+  - keep async page loading and snapshot readiness behavior intact;
+  - keep schema, NLP processing semantics, and heavy validation out of scope;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All, or
+  generic Documents SQL redesign without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
