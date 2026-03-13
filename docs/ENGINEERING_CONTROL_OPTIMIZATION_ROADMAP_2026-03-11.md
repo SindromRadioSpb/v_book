@@ -1665,6 +1665,55 @@ Current status after the wave:
   `SentenceNiqqudBootstrapDialog`, or `CommandPaletteDialog` without new
   evidence gates.
 
+## Twenty-third framework-driven cold-audit wave
+
+The twenty-third official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/PRONUNCIATION_BOOTSTRAP_DIALOG_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the command-palette wave, the bounded remaining-dialog sweep still
+  showed:
+  - `pronunciation_bootstrap_dialog`: `0.011s`
+  - `translate_text_dialog`: `0.006s`
+- the dedicated representative-selection probe then confirmed the actual
+  constructor path:
+  - full `PronunciationBootstrapDialog` init: `0.115s`
+  - `_load_settings()`: `0.000s`
+  - representative selected items: `3`
+  - selection scope:
+    - `Selection scope: 3 row(s) from current table.`
+  - `Run Bootstrap` enabled: `true`
+  - cached health label on open:
+    - `Mode: real_inference (ok)`
+  - `has_health_worker_on_open = false`
+  - `has_bootstrap_worker_on_open = false`
+
+Current status after the wave:
+
+- `PronunciationBootstrapDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `PronunciationBootstrapDialog` repair branch is opened from this wave;
+- the dialog open path is already bounded:
+  - shell construction is fast;
+  - cached health-state restore is negligible;
+  - representative selection-state restore is negligible;
+  - no health-check or bootstrap worker is started on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`, or
+  `PronunciationBootstrapDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
