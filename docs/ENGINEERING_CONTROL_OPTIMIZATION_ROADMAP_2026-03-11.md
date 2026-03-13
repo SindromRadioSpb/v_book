@@ -934,6 +934,7 @@ recorded in:
 
 - `docs/TM_PANEL_COLD_AUDIT_2026-03-12.md`
 - `docs/TM_PANEL_REPAIR_2026-03-13.md`
+- `docs/TM_PANEL_COUNT_TAIL_DECISION_2026-03-13.md`
 
 Wave outcome:
 
@@ -962,6 +963,12 @@ Current status after the wave:
 - the remaining exact-count/search tail is explicitly decision-gated:
   - default exact total still completes at `7.594s` to `10.628s`
   - representative search exact total still completes at `9.208s` to `9.450s`
+- the follow-up decision note currently classifies that residual tail as `P1`,
+  not blocker, because:
+  - rows already render at the healthy page-ready layer;
+  - exact total is now stage-2 UX completeness work rather than first render;
+  - any further improvement would mix performance work with count semantics
+    decisions, not just a narrow read-path fix;
 - no immediate second TM patch is opened from this repair;
 - the next active work returns to the canonical cold-audit framework for the
   next narrow subsystem wave;
