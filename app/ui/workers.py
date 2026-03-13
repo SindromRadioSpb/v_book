@@ -823,7 +823,9 @@ class TMSearchWorker(QThread):
     Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
     """
 
-    results_ready = pyqtSignal(list, int)  # (entries: List[TMEntryDTO], total_count: int)
+    page_ready = pyqtSignal(list)          # stage 1: rows
+    count_ready = pyqtSignal(int)          # stage 2: exact total
+    results_ready = pyqtSignal(list, int)  # legacy compat: full result after count
     error = pyqtSignal(str)
     progress = pyqtSignal(str)  # status message
 
@@ -849,7 +851,7 @@ class TMSearchWorker(QThread):
             from app.services.db_service import DBService
             from app.services.translation_admin_service import TranslationAdminService
 
-            self.progress.emit("Searching TM entries...")
+            self.progress.emit("Loading TM entries...")
 
             db_service = DBService.get_instance()
             admin_service = TranslationAdminService()
@@ -871,13 +873,20 @@ class TMSearchWorker(QThread):
                 if self._cancelled:
                     return
 
-                # Get total count
+                self.page_ready.emit(entries)
+
+                if self._cancelled:
+                    return
+
+                self.progress.emit("Counting TM entries...")
+
                 total_count = admin_service.count_tm_entries(
                     session,
                     filters=self.filters,
                 )
 
                 if not self._cancelled:
+                    self.count_ready.emit(total_count)
                     self.results_ready.emit(entries, total_count)
 
         except Exception as e:

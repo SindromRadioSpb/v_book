@@ -933,6 +933,7 @@ The seventh official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/TM_PANEL_COLD_AUDIT_2026-03-12.md`
+- `docs/TM_PANEL_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -954,10 +955,18 @@ Wave outcome:
 
 Current status after the wave:
 
-- TM panel cold-audit evidence gate is crossed;
-- the next active layer is now `TM panel staged first paint / deferred exact count repair`;
-- do not widen the next branch into a broad TM search redesign or TM write-path
-  refactor without new evidence;
+- TM panel cold-audit evidence gate was crossed and the bounded repair was opened;
+- the TM panel P0 first-paint blocker is now operationally closed:
+  - rows are no longer held behind exact count
+  - default page-ready state now matches the already-healthy page query layer
+- the remaining exact-count/search tail is explicitly decision-gated:
+  - default exact total still completes at `7.594s` to `10.628s`
+  - representative search exact total still completes at `9.208s` to `9.450s`
+- no immediate second TM patch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not widen TM work into a broad search redesign or TM write-path refactor
+  without new evidence;
 - startup, picker, Sentences filtered-tail, Dictionary, Terms, and Concordance
   cold-audit branches remain closed unless their own gates are crossed again.
 

@@ -346,6 +346,10 @@ class TranslationManagementPanel(QWidget):
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(500)  # 500ms debounce
         self.search_timer.timeout.connect(self.perform_search)
+        self._search_request_seq = 0
+        self._active_search_seq = 0
+        self._search_retry_pending = False
+        self._count_pending = False
 
         # Settings service for persistence
         self.settings = SettingsService.get_instance()
@@ -975,7 +979,8 @@ class TranslationManagementPanel(QWidget):
 
     def update_pagination_controls(self):
         """Update pagination control states based on current page and total."""
-        total = self.total_pages
+        row_count = len(self.model.entries)
+        total = self.total_pages if not self._count_pending else max(1, self.current_page)
 
         # Update spinbox range
         self.page_spinbox.blockSignals(True)
@@ -984,21 +989,28 @@ class TranslationManagementPanel(QWidget):
         self.page_spinbox.blockSignals(False)
 
         # Update page count label
-        self.page_count_label.setText(f"of {total}")
+        self.page_count_label.setText("of ?" if self._count_pending else f"of {total}")
 
         # Update button states
         self.first_btn.setEnabled(self.current_page > 1)
         self.prev_btn.setEnabled(self.current_page > 1)
-        self.next_btn.setEnabled(self.current_page < total)
-        self.last_btn.setEnabled(self.current_page < total)
+        self.next_btn.setEnabled((not self._count_pending) and self.current_page < total)
+        self.last_btn.setEnabled((not self._count_pending) and self.current_page < total)
 
         # Update range label
-        if self.total_count == 0:
-            self.range_label.setText("Showing 0–0 of 0")
+        if self._count_pending:
+            if row_count <= 0:
+                self.range_label.setText("Showing 0-0 (counting total...)")
+            else:
+                start = self.current_offset + 1
+                end = self.current_offset + row_count
+                self.range_label.setText(f"Showing {start}-{end} (counting total...)")
+        elif self.total_count == 0:
+            self.range_label.setText("Showing 0-0 of 0")
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + self.page_size, self.total_count)
-            self.range_label.setText(f"Showing {start}–{end} of {self.total_count}")
+            self.range_label.setText(f"Showing {start}-{end} of {self.total_count}")
 
     def on_header_clicked(self, logical_index: int):
         """Handle column header click for server-side sorting.
@@ -1101,10 +1113,19 @@ class TranslationManagementPanel(QWidget):
     def perform_search(self):
         """Perform search with current filters and pagination."""
         if self.worker and self.worker.isRunning():
-            logger.warning("Search already in progress, skipping")
-            return
+            self.worker.cancel()
+            if not self.worker.wait(100):
+                self._search_retry_pending = True
+                return
+
+        self._search_retry_pending = False
 
         self.current_filters = self.build_filters()
+        self._search_request_seq += 1
+        request_seq = self._search_request_seq
+        self._active_search_seq = request_seq
+        self._count_pending = True
+        self.total_count = 0
         self.status_label.setText("Searching...")
         self.cancel_btn.setEnabled(True)
 
@@ -1116,23 +1137,87 @@ class TranslationManagementPanel(QWidget):
             sort_column=self.sort_column,
             sort_direction=self.sort_direction,
         )
-        self.worker.results_ready.connect(self.on_search_results)
-        self.worker.error.connect(self.on_search_error)
-        self.worker.finished.connect(lambda: self.cancel_btn.setEnabled(False))
+        self.worker.page_ready.connect(lambda entries, seq=request_seq: self.on_search_results(entries, seq))
+        self.worker.count_ready.connect(
+            lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
+        )
+        self.worker.error.connect(lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq))
+        self.worker.finished.connect(
+            lambda seq=request_seq, worker=self.worker: self._on_search_worker_finished(worker, seq)
+        )
         self.worker.start()
 
-    def on_search_results(self, entries: List[TMEntryDTO], total_count: int):
-        """Handle search results."""
-        self.total_count = total_count
-        self.model.update_entries(entries, total_count)
-        self.results_label.setText(self._build_results_label(len(entries), total_count))
-        self.status_label.setText("Ready")
+    def _on_search_worker_finished(self, worker: Optional[TMSearchWorker], request_seq: int):
+        """Clean up completed worker and replay any queued search."""
+        if worker is self.worker:
+            self.worker = None
+
+        if worker is not None:
+            worker.deleteLater()
+
+        self.cancel_btn.setEnabled(False)
+
+        if self._search_retry_pending and request_seq == self._active_search_seq:
+            self._search_retry_pending = False
+            QTimer.singleShot(0, self.perform_search)
+
+    def _build_pending_results_label(self, page_count: int) -> str:
+        return f"TM entries: {page_count} (counting total...)"
+
+    def on_search_results(self, entries: List[TMEntryDTO], request_seq: Optional[int] = None):
+        """Handle page rows from worker (count arrives asynchronously)."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale TM search rows: seq=%s, active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
+        self._count_pending = True
+        self.total_count = 0
+        self.model.update_entries(entries, 0)
+        self.results_label.setText(self._build_pending_results_label(len(entries)))
+        if not entries:
+            self.status_label.setText("Counting total...")
+        else:
+            start = self.current_offset + 1
+            end = self.current_offset + len(entries)
+            self.status_label.setText(f"Loaded {start}-{end} entries (counting total...)")
         self.update_pagination_controls()
         self.on_selection_changed()
-        logger.info(f"Search completed: {len(entries)} entries")
+        logger.info(f"TM page loaded: {len(entries)} entries")
 
-    def on_search_error(self, error_msg: str):
+    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+        """Handle deferred exact count from worker."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale TM count: seq=%s, active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
+        self._count_pending = False
+        self.total_count = int(total_count or 0)
+        self.model.total_count = self.total_count
+        page_count = len(self.model.entries)
+        self.results_label.setText(self._build_results_label(page_count, self.total_count))
+        self.status_label.setText("Ready" if self.total_count > 0 or page_count > 0 else "No TM entries found")
+        self.update_pagination_controls()
+        logger.info(f"TM count completed: total={self.total_count}")
+
+    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
         """Handle search error."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            logger.debug(
+                "Ignoring stale TM search error: seq=%s, active=%s",
+                request_seq,
+                self._active_search_seq,
+            )
+            return
+
+        self._count_pending = False
         self.status_label.setText(f"Error: {error_msg}")
         QMessageBox.warning(self, "Search Error", f"Failed to search TM entries:\n{error_msg}")
         logger.error(f"Search error: {error_msg}")
@@ -1237,9 +1322,13 @@ class TranslationManagementPanel(QWidget):
         """Cancel ongoing search."""
         if self.worker and self.worker.isRunning():
             logger.info("Canceling search worker")
-            self.worker.terminate()
-            self.worker.wait()
+            self._search_retry_pending = False
+            self.worker.cancel()
+            if not self.worker.wait(1000):
+                self.worker.terminate()
+                self.worker.wait()
             self.worker = None
+            self._count_pending = False
             self.status_label.setText("Search canceled")
             self.cancel_btn.setEnabled(False)
 
@@ -1247,8 +1336,10 @@ class TranslationManagementPanel(QWidget):
         """Handle panel close - stop workers and save preferences."""
         if self.worker and self.worker.isRunning():
             logger.info("Stopping TM search worker on panel close")
-            self.worker.terminate()
-            self.worker.wait()
+            self.worker.cancel()
+            if not self.worker.wait(1000):
+                self.worker.terminate()
+                self.worker.wait()
 
         if self.export_worker and self.export_worker.isRunning():
             logger.info("Stopping TM export worker on panel close")
