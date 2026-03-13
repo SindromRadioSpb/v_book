@@ -1137,6 +1137,50 @@ Current status after the wave:
   Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All, or
   generic Documents work without new evidence gates.
 
+## Eleventh framework-driven cold-audit wave
+
+The eleventh official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/PROJECT_VIEW_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- strict read-only approved-target evidence shows that the next justified
+  surface is the real project-open workflow, not another isolated tab:
+  - full `ProjectView` cold open: `1.627s`
+  - shell-only `ProjectView` with all tabs stubbed: `0.071s`
+- child-localization evidence shows that the visible default tab is no longer
+  the blocker:
+  - `ProjectView` with only `DocumentsView` real: `0.089s`
+  - `ProjectView` with only `UserDictionariesView` real: `0.087s`
+- the dominant current open-time layer is a hidden child tab:
+  - `ProjectView` with only `TermCardView` real: `1.593s`
+  - standalone `TermCardView` cold open: `1.553s`
+  - `TermCardView` queue rows on open: `760`
+- the current project-open contract makes the blocker user-visible:
+  - `ProjectView` returns on the `Documents` tab
+  - but `TermCardView.load_review_queue()` still runs synchronously during
+    `ProjectView.init_ui()`
+  - the open-project workflow is therefore paying almost entirely for hidden
+    `Term Cards` work
+
+Current status after the wave:
+
+- ProjectView cold-audit evidence gate is now crossed;
+- this is a real current `P0` blocker, tightly localized to eager hidden
+  `TermCardView` loading during project open;
+- the next active layer is now:
+  - `ProjectView deferred hidden Term Cards load / first usable state repair`
+- the implied bounded repair scope is:
+  - remove hidden `TermCardView` queue load from the sync project-open path;
+  - keep the visible `Documents` default-tab path intact;
+  - avoid broad lazy-tab refactors unless new evidence requires them;
+- approved-target evidence still records `db_mtime_unchanged=true`;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All, or
+  generic Documents work without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
