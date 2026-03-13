@@ -1143,6 +1143,7 @@ The eleventh official task-specific use of the canonical framework is now
 recorded in:
 
 - `docs/PROJECT_VIEW_COLD_AUDIT_2026-03-13.md`
+- `docs/PROJECT_VIEW_REPAIR_2026-03-13.md`
 
 Wave outcome:
 
@@ -1167,19 +1168,27 @@ Wave outcome:
 
 Current status after the wave:
 
-- ProjectView cold-audit evidence gate is now crossed;
-- this is a real current `P0` blocker, tightly localized to eager hidden
-  `TermCardView` loading during project open;
-- the next active layer is now:
-  - `ProjectView deferred hidden Term Cards load / first usable state repair`
-- the implied bounded repair scope is:
-  - remove hidden `TermCardView` queue load from the sync project-open path;
-  - keep the visible `Documents` default-tab path intact;
-  - avoid broad lazy-tab refactors unless new evidence requires them;
-- approved-target evidence still records `db_mtime_unchanged=true`;
+- ProjectView cold-audit evidence gate was crossed and the bounded repair was
+  opened;
+- the ProjectView `P0` blocker is now operationally closed:
+  - full `ProjectView` cold open is now `0.442s`;
+  - the visible tab on open remains `Documents`;
+  - hidden `Term Cards` no longer load on open:
+    - `term_cards_loaded_on_open = false`
+    - status on open: `Review queue loads when tab is opened`;
+  - first explicit `Term Cards` activation now takes `1.197s`;
+  - the queue still reaches `760` rows after activation;
+- the repaired contract keeps the right scope boundaries:
+  - no broad lazy-tab framework was introduced;
+  - `Documents` stays the visible default tab;
+  - hidden `Term Cards` load only when the tab is actually opened;
+- approved-target after evidence still records `db_mtime_unchanged=true`;
+- no immediate residual ProjectView branch is opened from this repair;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
 - do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
-  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All, or
-  generic Documents work without new evidence gates.
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, or ProjectView without new evidence gates.
 
 ## Decision note
 

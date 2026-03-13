@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class TermCardView(QWidget):
     """Term card curation view (M8)."""
 
-    def __init__(self, project_id: int):
+    def __init__(self, project_id: int, *, defer_initial_load: bool = False):
         super().__init__()
         self.project_id = project_id
         self.db_service = DBService.get_instance()
@@ -45,9 +45,14 @@ class TermCardView(QWidget):
 
         self.current_card: Optional[TermCardDTO] = None
         self.current_queue_index = -1
+        self._review_queue_loaded = False
+        self._defer_initial_load = bool(defer_initial_load)
 
         self.init_ui()
-        self.load_review_queue()
+        if self._defer_initial_load:
+            self.queue_status_label.setText("Review queue loads when tab is opened")
+        else:
+            self.ensure_review_queue_loaded()
 
     def init_ui(self):
         """Initialize the UI."""
@@ -315,6 +320,7 @@ class TermCardView(QWidget):
 
                 self.queue_model.update_cards(cards)
                 self.queue_status_label.setText(f"Showing {len(cards)} terms")
+                self._review_queue_loaded = True
                 self.on_queue_selection_changed()
 
                 # If there are cards and no current card, load first one
@@ -325,8 +331,15 @@ class TermCardView(QWidget):
                     self.clear_card_display()
 
         except Exception as e:
+            self._review_queue_loaded = False
             logger.exception("Failed to load review queue")
             show_error(self, "Error", f"Failed to load review queue: {e}")
+
+    def ensure_review_queue_loaded(self) -> None:
+        """Load the review queue once when the tab becomes active."""
+        if self._review_queue_loaded:
+            return
+        self.load_review_queue()
 
     def _apply_study_overlays(self, session, cards: list) -> None:
         """Attach saved-to-UD + study tooltip metadata for visible review queue rows."""

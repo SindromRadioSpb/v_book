@@ -82,7 +82,7 @@ class ProjectView(QWidget):
         self.concordance_view.navigate_to_document.connect(self.on_navigate_to_document)
 
         # Term Cards tab
-        self.term_card_view = TermCardView(self.project_id)
+        self.term_card_view = TermCardView(self.project_id, defer_initial_load=True)
         self.tabs.addTab(self.term_card_view, "Term Cards")
 
         # User Dictionaries tab (P0)
@@ -101,6 +101,7 @@ class ProjectView(QWidget):
         # Export tab
         self.export_view = ExportView(self.project_id)
         self.tabs.addTab(self.export_view, "Export")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self.tabs)
 
@@ -157,7 +158,15 @@ class ProjectView(QWidget):
         if target is None:
             return False
         self.tabs.setCurrentWidget(target)
+        if target is self.term_card_view:
+            self.term_card_view.ensure_review_queue_loaded()
         return True
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Load hidden Term Cards state only when the tab is actually opened."""
+        widget = self.tabs.widget(index)
+        if widget is self.term_card_view:
+            self.term_card_view.ensure_review_queue_loaded()
 
     def on_navigate_to_document(self, doc_id: int, sentence_id: int):
         """
