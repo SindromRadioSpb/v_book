@@ -15,27 +15,41 @@ from PyQt6.QtWidgets import QDialogButtonBox
 from app.ui.provider_settings_dialog import ProviderSettingsDialog
 
 
+def _make_test_settings() -> QSettings:
+    settings = QSettings(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        "HDLE_Test",
+        "ProviderSettings",
+    )
+    return settings
+
+
 @pytest.fixture
 def settings(qtbot):
     """Create temporary QSettings for testing."""
-    settings = QSettings("HDLE_Test", "ProviderSettings")
+    settings = _make_test_settings()
     settings.clear()
+    settings.sync()
     yield settings
     settings.clear()
+    settings.sync()
 
 
 @pytest.fixture
 def dialog(qtbot):
     """Create ProviderSettingsDialog for testing."""
     # Create test settings
-    settings = QSettings("HDLE_Test", "ProviderSettings")
+    settings = _make_test_settings()
     settings.clear()
+    settings.sync()
 
     # Pass settings to dialog
     dialog = ProviderSettingsDialog(settings=settings)
     qtbot.addWidget(dialog)
     yield dialog
     settings.clear()
+    settings.sync()
 
 
 # ============================================================================
@@ -128,7 +142,8 @@ def test_save_settings(dialog, qtbot):
     dialog.accept()
 
     # Check settings saved
-    settings = QSettings("HDLE_Test", "ProviderSettings")
+    settings = _make_test_settings()
+    settings.sync()
     assert settings.value("mt/providers/deepl/rate_limit", type=int) == 120
     assert settings.value("mt/providers/deepl/enabled", type=bool) is False
 
@@ -136,8 +151,9 @@ def test_save_settings(dialog, qtbot):
 def test_cancel_does_not_save(dialog, qtbot):
     """Rejecting dialog does not save settings."""
     # Set initial value
-    settings = QSettings("HDLE_Test", "ProviderSettings")
+    settings = _make_test_settings()
     settings.setValue("mt/providers/deepl/rate_limit", 60)
+    settings.sync()
 
     # Change value in dialog
     deepl_widgets = dialog.provider_widgets["deepl"]
@@ -147,6 +163,7 @@ def test_cancel_does_not_save(dialog, qtbot):
     dialog.reject()
 
     # Check settings not changed
+    settings.sync()
     assert settings.value("mt/providers/deepl/rate_limit", type=int) == 60
 
 
@@ -270,10 +287,11 @@ def test_restore_defaults_cancelled(dialog, qtbot, monkeypatch):
 def test_load_saved_settings(qtbot):
     """Dialog loads previously saved settings."""
     # Save settings
-    settings = QSettings("HDLE_Test", "ProviderSettings")
+    settings = _make_test_settings()
     settings.clear()
     settings.setValue("mt/providers/deepl/rate_limit", 150)
     settings.setValue("mt/providers/deepl/enabled", False)
+    settings.sync()
 
     # Create new dialog with saved settings
     dialog = ProviderSettingsDialog(settings=settings)
@@ -285,3 +303,4 @@ def test_load_saved_settings(qtbot):
     assert deepl_widgets["enabled"].isChecked() is False
 
     settings.clear()
+    settings.sync()
