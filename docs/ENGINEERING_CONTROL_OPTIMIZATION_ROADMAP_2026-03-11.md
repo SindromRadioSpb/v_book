@@ -1232,6 +1232,47 @@ Current status after the wave:
   generic Documents work, ProjectView, or standalone `Term Cards` without new
   evidence gates.
 
+## Thirteenth framework-driven cold-audit wave
+
+The thirteenth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/VERIFICATION_PANEL_COLD_AUDIT_2026-03-13.md`
+
+Wave outcome:
+
+- a bounded candidate sweep across remaining untriaged surfaces kept
+  `VerificationPanel` as the next largest visible candidate:
+  - `verification_panel`: `0.219s`
+  - `user_dictionaries_view`: `0.198s`
+  - `database_switch_dialog`: `0.128s`
+  - `provider_settings_dialog`: `0.119s`
+  - `resources_manager_dialog`: `0.035s`
+  - `import_wizard`: `0.007s`
+- strict read-only approved-target evidence then localized the panel contract:
+  - full `VerificationPanel` cold open: `0.244s`
+  - `load_db_path()`: `0.000s`
+  - `load_projects()`: `0.001s`
+  - `dict_project` rows on target: `4`
+  - project combo items after init: `5`
+- the panel keeps heavy work off the cold-open path:
+  - `P1VerificationWorker` is not started on open;
+  - cold-open work is just layout + DB-path label + project combo population
+
+Current status after the wave:
+
+- `VerificationPanel` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `VerificationPanel` repair branch is opened from this wave;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage residual-tail, Audio Add-All,
+  generic Documents work, ProjectView, standalone `Term Cards`, or
+  `VerificationPanel` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
