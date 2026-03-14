@@ -2378,3 +2378,33 @@ Engineering meaning:
 - the next meaningful application-layer revalidation remains:
   - Concordance on healthy FTS
   - Sentences filtered search/count on healthy FTS
+
+## Concordance revalidation on healthy sentence_fts
+
+The post-repair Concordance revalidation is now recorded in:
+
+- `docs/CONCORDANCE_REVALIDATION_2026-03-14.md`
+
+Outcome on the repaired heavy baseline DB:
+
+- raw project-scoped Concordance page runs:
+  - `0.033s`, `0.021s`, `0.021s`
+- raw project-scoped Concordance count runs:
+  - `0.011s`, `0.010s`, `0.011s`
+- `page_row_count = 100`
+- `count_total = 665`
+
+Current classification after revalidation:
+
+- `status = closed`
+- `priority = P3`
+- `open runtime patch now = no`
+
+Engineering meaning:
+
+- the old Concordance dependency-health gate is now crossed on healthy
+  `sentence_fts`;
+- the revalidated Concordance query path is already bounded and fast;
+- no further Concordance runtime/cold branch is justified from current evidence;
+- the next meaningful revalidation remains Sentences filtered search/count on
+  the same healthy substrate.
