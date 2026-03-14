@@ -123,7 +123,7 @@ class TestMethodSignatures:
 class TestBasicLogic:
     """Test basic logic without DB."""
 
-    def test_write_mode_constants(self):
+    def test_write_mode_constants(self, qtbot):
         """Test write mode strings are as expected."""
         # These are the write modes used throughout the code
         write_modes = ["FILL_EMPTY", "OVERWRITE", "SKIP_NON_EMPTY"]
@@ -132,15 +132,17 @@ class TestBasicLogic:
         from app.ui.dialogs.batch_translate_dialog import BatchTranslateDialog
 
         dialog = BatchTranslateDialog()
+        qtbot.addWidget(dialog)
         result = dialog.get_write_mode()
         assert result in write_modes, f"Write mode should be one of {write_modes}"
 
-    def test_scope_constants(self):
+    def test_scope_constants(self, qtbot):
         """Test scope strings are as expected."""
         scopes = ["current_page", "all_filtered"]
 
         from app.ui.dialogs.batch_translate_dialog import BatchTranslateDialog
 
         dialog = BatchTranslateDialog()
+        qtbot.addWidget(dialog)
         result = dialog.get_scope()
         assert result in scopes, f"Scope should be one of {scopes}"
