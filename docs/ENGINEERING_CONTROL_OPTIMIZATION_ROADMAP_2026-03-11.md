@@ -1763,6 +1763,55 @@ Current status after the wave:
   `PronunciationBootstrapDialog`, or `TranslateTextDialog` without new
   evidence gates.
 
+## Twenty-fifth framework-driven cold-audit wave
+
+The twenty-fifth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/REFERENCE_SETUP_WIZARD_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the bounded dialog sweep was exhausted, the next largest still
+  unformalized visible candidate from the prior remaining-visible sweep was:
+  - `reference_setup_wizard`: `0.017s`
+  - lower remaining candidate:
+    - `help_center`: `0.006s`
+- because the coarse sweep undercounted the real open contract, a dedicated
+  follow-up probe was required;
+- the dedicated probe then confirmed the actual constructor path:
+  - full `ReferenceSetupWizard` init: `0.224s`
+  - page count: `3`
+  - current page on open: `0`
+  - selected mode on open: `download`
+  - `Next` enabled: `true`
+  - `Back` enabled: `false`
+  - `Cancel` enabled: `true`
+  - `has_worker_on_open = false`
+
+Current status after the wave:
+
+- `ReferenceSetupWizard` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `ReferenceSetupWizard` repair branch is opened from this wave;
+- the wizard open path is already bounded:
+  - shell/page construction is cheap;
+  - default mode state is deterministic;
+  - no setup worker starts on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`, or
+  `ReferenceSetupWizard` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
