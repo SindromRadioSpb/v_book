@@ -2308,3 +2308,32 @@ Engineering meaning:
   unhealthy target DB;
 - only after that should the repo decide whether any residual Sentences code
   work is still justified.
+
+## Lower-layer sentence_fts recovery completed on approved target
+
+The approved-target lower-layer recovery is now recorded in:
+
+- `docs/SENTENCE_FTS_LOWER_LAYER_REVALIDATION_2026-03-14.md`
+
+Operational outcome:
+
+- the canonical `sentence_fts` repair path was hardened first so dry-run would
+  detect row-count drift, not only malformed-schema defects;
+- the approved target DB then completed a real backed-up repair:
+  - before: `sentence_fts = 1,792`, `document_sentence = 13,389,383`
+  - after: `sentence_fts = 13,389,383`, `document_sentence = 13,389,383`
+- post-repair revalidation now shows:
+  - `sentence_fts MATCH 'wiki' = 140`
+  - project `1` joined FTS rows = `13,387,588`
+  - project `1` sentence rows = `13,387,588`
+
+Engineering meaning:
+
+- the old approved-target `sentence_fts` health gate is now actually crossed;
+- Concordance is no longer blocked by zero project-joined FTS coverage on the
+  repaired large DB;
+- Sentences filtered-tail follow-up is no longer blocked by the previously
+  unhealthy substrate;
+- the next active stage, if work continues, is post-repair revalidation:
+  - Concordance first
+  - Sentences filtered search/count second
