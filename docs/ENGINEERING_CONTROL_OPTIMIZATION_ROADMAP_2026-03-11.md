@@ -1812,6 +1812,56 @@ Current status after the wave:
   `PronunciationBootstrapDialog`, `TranslateTextDialog`, or
   `ReferenceSetupWizard` without new evidence gates.
 
+## Twenty-sixth framework-driven cold-audit wave
+
+The twenty-sixth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/HELP_CENTER_DIALOG_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the reference-setup wave, the last remaining visible candidate from
+  that bounded sweep was:
+  - `help_center`: `0.006s`
+- because the coarse sweep undercounted the real open contract, a dedicated
+  follow-up probe was required;
+- the dedicated probe then confirmed the actual constructor path:
+  - full `HelpCenterDialog` init: `0.129s`
+  - tab count: `5`
+  - tab titles:
+    - `Overview`
+    - `Shortcuts`
+    - `Keyboard Flows`
+    - `Translation`
+    - `Audio`
+  - markdown views: `5`
+  - window title:
+    - `Help Center`
+
+Current status after the wave:
+
+- `HelpCenterDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `HelpCenterDialog` repair branch is opened from this wave;
+- the dialog open path is already bounded:
+  - local markdown reads are cheap;
+  - tab construction is cheap;
+  - no DB, worker, or network dependency exists on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`,
+  `ReferenceSetupWizard`, or `HelpCenterDialog` without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
