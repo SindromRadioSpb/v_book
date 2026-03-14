@@ -1714,6 +1714,55 @@ Current status after the wave:
   `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`, or
   `PronunciationBootstrapDialog` without new evidence gates.
 
+## Twenty-fourth framework-driven cold-audit wave
+
+The twenty-fourth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/TRANSLATE_TEXT_DIALOG_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the pronunciation-bootstrap wave, the last remaining dialog candidate
+  from the bounded sweep was:
+  - `translate_text_dialog`: `0.006s`
+- because the coarse sweep undercounted the real open contract, a dedicated
+  follow-up probe was required;
+- the dedicated probe then confirmed the actual constructor path:
+  - full `TranslateTextDialog` init: `0.198s`
+  - source-language count: `12`
+  - target-language count: `12`
+  - representative initial text length: `9`
+  - selected source language: `he`
+  - selected target language: `en`
+  - `Translate` enabled: `true`
+  - metadata label on open:
+    - `No translation yet`
+  - `has_worker_on_open = false`
+
+Current status after the wave:
+
+- `TranslateTextDialog` is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `TranslateTextDialog` repair branch is opened from this wave;
+- the dialog open path is already bounded:
+  - eager `TranslationService()` construction is local and cheap;
+  - language-combo population is small;
+  - no worker/provider runtime work starts on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, or `TranslateTextDialog` without new
+  evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
