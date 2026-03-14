@@ -2157,3 +2157,42 @@ Current status after the wave:
 The roadmap above is intentionally about **controllability and optimization**,
 not about reopening the bounded snapshot-backfill track. That track remains in
 hold-state until a separate decision gate is triggered.
+
+## Residual decision note: Dictionary lemma_fts parity-health
+
+The narrow post-hunt residual decision for Dictionary search is now recorded in:
+
+- `docs/DICTIONARY_LEMMA_FTS_DECISION_2026-03-14.md`
+
+Current status from canonical evidence and current code inspection:
+
+- Dictionary default cold-open work remains closed:
+  - default first page ~= `0.003s`
+  - default exact count (cold) ~= `0.129s`
+- the remaining Dictionary issue is not cold-open latency:
+  - it is approved-target `lemma_fts` parity-health drift
+  - `lemma` rows = `2,071,947`
+  - `lemma_fts` rows = `2,076,909`
+  - extra `lemma_fts` rows = `4,962`
+- current repo behavior still depends on rowid parity:
+  - Dictionary search uses
+    `lemma_id IN (SELECT rowid FROM lemma_fts MATCH ...)`
+- current repo repair surface is not sufficient for this branch:
+  - `ensure_lemma_fts_health()` creates/populates when missing but does not
+    repair already-populated parity drift
+  - `scripts/repair_fts_schema.py` covers `sentence_fts` and `term_fts`, not
+    `lemma_fts`
+
+Current classification:
+
+- `status = decision-gated`
+- `priority = P1`
+- `open runtime patch now = no`
+
+Engineering meaning:
+
+- this remains a real candidate only as a **bounded Dictionary
+  correctness/FTS-health branch**
+- it is not an automatic continuation of the cold-open program
+- do not reopen generic Dictionary cold work or generic `P3` sweeps from this
+  note
