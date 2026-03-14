@@ -2408,3 +2408,43 @@ Engineering meaning:
 - no further Concordance runtime/cold branch is justified from current evidence;
 - the next meaningful revalidation remains Sentences filtered search/count on
   the same healthy substrate.
+
+## Sentences filtered search/count revalidation on healthy substrate
+
+The post-repair Sentences filtered-tail revalidation is now recorded in:
+
+- `docs/SENTENCES_FILTERED_REVALIDATION_2026-03-14.md`
+
+Outcome on the repaired heavy baseline DB:
+
+- raw ordered filtered page runs:
+  - `4.372s`, `1.484s`, `1.459s`
+- raw unordered filtered page runs:
+  - `1.470s`, `1.467s`, `1.474s`
+- raw exact filtered count runs:
+  - `16.531s`, `6.702s`, `6.688s`
+- service filtered page runs:
+  - `2.090s`, `1.892s`, `1.958s`
+- service filtered count runs:
+  - `7.769s`, `7.606s`, `7.656s`
+- `row_count = 100`
+- `total = 585`
+
+Current classification after revalidation:
+
+- `status = decision-gated`
+- `priority = P1`
+- `open second Sentences runtime patch now = no`
+
+Engineering meaning:
+
+- healthy `sentence_fts` removed the old dependency-health uncertainty;
+- the Sentences filtered branch is now honestly measured on a healthy substrate;
+- the residual tail remains real, but it still belongs to current `LIKE`
+  search semantics and exact-count expectations rather than to a newly revealed
+  bounded runtime defect;
+- no immediate second Sentences runtime patch is justified from current
+  evidence;
+- the meaningful application-layer cold revalidation stage is now complete;
+- the next operational step, if work continues, is the separate lower-layer
+  recovery cycle for the unhealthy `hewiki_gpu_processing test.db`.
