@@ -173,6 +173,43 @@ def test_export_cancel_returns_cancelled_report(populated_project, tmp_path):
     assert not out_path.exists()
 
 
+def test_export_fails_fast_when_source_db_corruption_probe_fails(populated_project, tmp_path, monkeypatch):
+    """Export must stop before payload creation if the source DB looks corrupt."""
+    engine = ProjectExportEngine()
+    out_path = tmp_path / "corrupt_export.hdleproj"
+    payload_called = {"value": False}
+
+    monkeypatch.setattr(
+        engine,
+        "_probe_host_db_corruption",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "quick_check_rows": ["database disk image is malformed"],
+            "quick_check_error": "database disk image is malformed",
+            "tm_entry_probe_ok": False,
+            "tm_entry_probe_error": "database disk image is malformed",
+        },
+    )
+
+    def _unexpected_payload(*args, **kwargs):
+        payload_called["value"] = True
+        raise AssertionError("_create_payload should not run for corrupt source DBs")
+
+    monkeypatch.setattr(engine, "_create_payload", _unexpected_payload)
+
+    report = engine.export_project(
+        project_id=populated_project,
+        out_path=out_path,
+        options=ExportOptions(),
+    )
+
+    assert report.success is False
+    assert payload_called["value"] is False
+    assert "corrupted or unreadable" in (report.error_message or "").lower()
+    assert "repair_db_corruption.py" in (report.error_message or "")
+    assert not out_path.exists()
+
+
 def test_import_cancel_returns_cancelled_report(populated_project, temp_db):
     """Cancel check should stop import quickly with a friendly report."""
     with tempfile.TemporaryDirectory() as tmpdir:

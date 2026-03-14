@@ -56,6 +56,7 @@ class ProjectExportEngine:
     """Handles export of projects to .hdleproj bundles."""
 
     _SQLITE_FALLBACK_MAX_VARIABLES = 999
+    _CORRUPTION_PROBE_TIMEOUT_SEC = 5.0
 
     def __init__(self):
         self.db_service = DBService.get_instance()
@@ -198,8 +199,15 @@ class ProjectExportEngine:
             if not result or result[0] == 0:
                 raise ValueError(f"Project {project_id} not found")
 
-        # Check disk space (rough estimate: 2x current DB size)
         db_path = Path(self.db_service.db_manager.db_path)
+        corruption_probe = self._probe_host_db_corruption(
+            db_path,
+            quick_check_timeout_sec=self._CORRUPTION_PROBE_TIMEOUT_SEC,
+        )
+        if not bool(corruption_probe.get("ok", True)):
+            raise ValueError(self._format_host_db_corruption_error(db_path, corruption_probe))
+
+        # Check disk space (rough estimate: 2x current DB size)
         db_size = db_path.stat().st_size
         required_space = db_size * 2
 
@@ -213,6 +221,100 @@ class ProjectExportEngine:
             )
 
         logger.info("Preflight checks passed")
+
+    @staticmethod
+    def _probe_host_db_corruption(
+        db_path: Path,
+        *,
+        quick_check_timeout_sec: float,
+    ) -> dict[str, object]:
+        """Run a bounded corruption probe before heavy export work starts."""
+        probe: dict[str, object] = {
+            "ok": True,
+            "quick_check_rows": [],
+            "quick_check_error": None,
+            "quick_check_timed_out": False,
+            "quick_check_timeout_sec": float(quick_check_timeout_sec),
+            "tm_entry_probe_ok": True,
+            "tm_entry_probe_error": None,
+        }
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+            conn.execute("PRAGMA busy_timeout=15000")
+            try:
+                quick_started = time.perf_counter()
+
+                def _progress_handler() -> int:
+                    if quick_check_timeout_sec <= 0:
+                        return 0
+                    elapsed = time.perf_counter() - quick_started
+                    return 1 if elapsed >= quick_check_timeout_sec else 0
+
+                conn.set_progress_handler(_progress_handler, 10_000)
+                quick_rows: list[str] = []
+                try:
+                    quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+                except sqlite3.OperationalError as exc:
+                    msg = str(exc).lower()
+                    if "interrupted" in msg and quick_check_timeout_sec > 0:
+                        probe["quick_check_timed_out"] = True
+                        quick_rows = []
+                    else:
+                        raise
+                finally:
+                    conn.set_progress_handler(None, 0)
+
+                probe["quick_check_rows"] = quick_rows
+                if probe["quick_check_timed_out"]:
+                    probe["quick_check_error"] = (
+                        f"quick_check timed out after {quick_check_timeout_sec:.1f}s; treated as inconclusive"
+                    )
+                elif not quick_rows or any(row.lower() != "ok" for row in quick_rows):
+                    probe["ok"] = False
+                    probe["quick_check_error"] = "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+
+                try:
+                    conn.execute("SELECT 1 FROM tm_entry LIMIT 1").fetchone()
+                except sqlite3.Error as exc:
+                    probe["ok"] = False
+                    probe["tm_entry_probe_ok"] = False
+                    probe["tm_entry_probe_error"] = str(exc)
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            probe["ok"] = False
+            probe["quick_check_error"] = str(exc)
+            probe["tm_entry_probe_ok"] = False
+            if probe["tm_entry_probe_error"] is None:
+                probe["tm_entry_probe_error"] = str(exc)
+
+        return probe
+
+    @staticmethod
+    def _format_host_db_corruption_error(db_path: Path, probe: dict[str, object]) -> str:
+        """Format an actionable export error for corrupt or unreadable source DBs."""
+        details: list[str] = []
+        quick_rows = [str(value) for value in (probe.get("quick_check_rows") or []) if str(value).strip()]
+        quick_error = str(probe.get("quick_check_error") or "").strip()
+        tm_error = str(probe.get("tm_entry_probe_error") or "").strip()
+
+        if quick_rows:
+            details.append(quick_rows[0])
+        elif quick_error:
+            details.append(quick_error)
+
+        if tm_error and tm_error not in details:
+            details.append(tm_error)
+
+        detail_text = details[0] if details else "bounded corruption probe failed"
+        repair_cmd = f'python scripts/repair_db_corruption.py --db-path "{db_path}"'
+        return (
+            "Source database appears corrupted or unreadable for export.\n\n"
+            f"Database: {db_path}\n"
+            f"Probe result: {detail_text}\n\n"
+            "Repair the database first, then retry export.\n"
+            f"Suggested command: {repair_cmd}"
+        )
 
     def _create_payload(
         self,

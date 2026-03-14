@@ -90,6 +90,8 @@ class ProjectExportWorker(QThread):
             return f"Export failed: Not enough disk space. {error_str}"
         elif "Project" in error_str and "not found" in error_str:
             return "Export failed: Project not found. It may have been deleted."
+        elif "malformed" in error_str.lower() or "corrupt" in error_str.lower():
+            return f"Export failed: {error_str}"
         elif "Permission denied" in error_str or "Access is denied" in error_str:
             return "Export failed: Permission denied. Check file permissions and try again."
         else:
