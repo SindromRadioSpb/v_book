@@ -2196,3 +2196,40 @@ Engineering meaning:
 - it is not an automatic continuation of the cold-open program
 - do not reopen generic Dictionary cold work or generic `P3` sweeps from this
   note
+
+## Bounded Dictionary lemma_fts repair branch
+
+The bounded repair follow-up for the Dictionary parity issue is now recorded in:
+
+- `docs/DICTIONARY_LEMMA_FTS_REPAIR_2026-03-14.md`
+
+Repair outcome:
+
+- Dictionary open remains objectively not a cold blocker:
+  - default first page ~= `0.003s`
+  - default exact count (cold) ~= `0.129s`
+- the repo now contains a canonical repair path for `lemma_fts` parity drift:
+  - `inspect_lemma_fts_parity()` in `app/infra/fts_manager.py`
+  - `rebuild_lemma_fts()` in `app/infra/fts_manager.py`
+  - `scripts/repair_lemma_fts.py`
+- the repair path is bounded and explicit:
+  - no silent startup parity rebuild was added
+  - no generic fallback/semantics rewrite was opened
+- regression-locked synthetic before/after evidence now proves the intended
+  branch effect:
+  - before repair:
+    - service search = `0`
+    - `LIKE` = `1`
+    - raw `lemma_fts MATCH` = `1`
+  - after repair:
+    - service search = `1`
+    - parity probe becomes healthy
+
+Current status after the branch:
+
+- Dictionary cold-open work remains closed;
+- Dictionary `lemma_fts` parity-health is no longer just an undocumented
+  residual issue;
+- a canonical bounded repair path now exists;
+- applying that repair to a concrete unhealthy DB is an explicit operator step,
+  not a new wide cold-audit program.

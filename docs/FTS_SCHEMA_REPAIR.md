@@ -6,6 +6,13 @@ On startup, diagnostics, or benchmark probe:
 
 `malformed database schema (sentence_fts) - table sentence_fts already exists`
 
+For Dictionary-specific `lemma_fts` rowid parity drift, use the dedicated tool
+instead:
+
+```powershell
+python scripts/repair_lemma_fts.py --db-path "<path-to-db>"
+```
+
 Typical impact:
 
 - app startup FTS self-check fails for the target DB,
