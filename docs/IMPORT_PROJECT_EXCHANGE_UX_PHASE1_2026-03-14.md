@@ -17,13 +17,21 @@ redesign.
   dialog
 - fixed import success details so the completion report is visible
 - made `Go to Project` actually navigate to the imported project after success
+- added bounded export fail-fast corruption detection against the current host
+  DB before payload creation starts
+- surfaced an actionable export remediation path that points operators to
+  `scripts/repair_db_corruption.py` instead of failing late after long payload
+  work
 
 ## Files
 
 - `app/services/project_exchange/dto.py`
 - `app/services/project_exchange/import_engine.py`
+- `app/services/project_exchange/export_engine.py`
+- `app/services/project_exchange/worker.py`
 - `app/ui/dialogs/project_exchange_dialogs.py`
 - `app/ui/app_window.py`
+- `tests/test_project_exchange.py`
 - `tests/test_project_exchange_preflight.py`
 - `tests/test_project_exchange_dialogs.py`
 - `tests/test_workspace_app_window_contract.py`

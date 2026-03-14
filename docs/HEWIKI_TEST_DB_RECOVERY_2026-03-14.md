@@ -135,3 +135,38 @@ What is not justified automatically:
 - reopening broad cold-hunt
 - reopening generic P3 sweeps
 - opening new runtime patches without fresh product-facing evidence
+
+## Follow-up: manual export validation on the same DB
+
+During later manual `.hdleproj` export validation against the same DB, export
+failed again with:
+
+- `sqlite3.DatabaseError: database disk image is malformed`
+
+Bounded diagnosis confirmed the new failing object was again inside the FTS
+namespace:
+
+- `PRAGMA quick_check(10)` returned corruption rows
+- rootpage mapping pointed to `sentence_fts_docsize`
+
+Bounded operational response:
+
+- reran canonical FTS repair:
+  - `python scripts/repair_fts_schema.py --db-path "<hewiki-test-db>"`
+- post-repair dry-run returned:
+  - `status = OK`
+  - `issues_detected = []`
+
+Product-facing hardening added in the same development window:
+
+- export preflight now probes source DB corruption before payload creation;
+- corrupt source DBs now fail fast with an explicit remediation hint pointing to
+  `scripts/repair_db_corruption.py`;
+- export no longer spends long payload time before surfacing a malformed source
+  DB.
+
+Latest practical export result after the repeat FTS repair:
+
+- export no longer fails with `database disk image is malformed`
+- the next blocking condition observed was only:
+  - `Insufficient disk space`

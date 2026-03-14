@@ -2506,7 +2506,18 @@ Bounded Phase 1 target:
 - improve `.hdleproj` preview clarity before import starts
 - surface a visible import completion summary
 - make `Go to Project` navigate to the imported project after success
+- fail fast on corrupt source DBs during export and point operators to the
+  canonical DB recovery tool instead of failing late after payload work
 
 Implementation note for the selected wave:
 
 - `docs/IMPORT_PROJECT_EXCHANGE_UX_PHASE1_2026-03-14.md`
+
+Manual validation note from the same wave:
+
+- later manual export testing on `hewiki_gpu_processing test.db` surfaced a
+  repeat malformed `sentence_fts` condition;
+- canonical `repair_fts_schema.py` restored the DB again;
+- export now fails fast on corrupt source DBs with an explicit
+  `repair_db_corruption.py` remediation hint instead of failing late after
+  payload assembly.
