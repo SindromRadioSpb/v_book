@@ -6,7 +6,7 @@ Ensures FTS5 virtual tables and triggers exist and are consistent.
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +253,198 @@ LEMMA_FTS_TRIGGERS = [
     END;
     """,
 ]
+
+LEMMA_FTS_TRIGGER_NAMES = (
+    "trg_lemma_fts_ai",
+    "trg_lemma_fts_au",
+    "trg_lemma_fts_ad",
+)
+
+
+def inspect_lemma_fts_parity(
+    conn: sqlite3.Connection,
+    schema: str = "main",
+    sample_limit: int = 5,
+) -> dict[str, Any]:
+    """Inspect lemma_fts rowid parity against lemma.lemma_id.
+
+    This is intentionally a bounded, explicit health probe for the Dictionary
+    search contract. It is not used on the hot search path.
+    """
+    prefix = f"{schema}." if schema != "main" else ""
+    issues: list[str] = []
+
+    table_exists = conn.execute(
+        f"SELECT name FROM {schema}.sqlite_master"
+        " WHERE type='table' AND name='lemma_fts'"
+    ).fetchone() is not None
+
+    trigger_rows = conn.execute(
+        f"SELECT name FROM {schema}.sqlite_master"
+        " WHERE type='trigger' AND name IN (?, ?, ?)",
+        LEMMA_FTS_TRIGGER_NAMES,
+    ).fetchall()
+    trigger_names = sorted(str(row[0]) for row in trigger_rows)
+    missing_triggers = sorted(set(LEMMA_FTS_TRIGGER_NAMES) - set(trigger_names))
+
+    lemma_count = int(conn.execute(
+        f"SELECT COUNT(*) FROM {prefix}lemma"
+    ).fetchone()[0])
+
+    lemma_fts_count: int | None
+    missing_in_fts_count: int | None
+    extra_in_fts_count: int | None
+    sample_missing_ids: list[int] = []
+    sample_extra_rowids: list[int] = []
+
+    if table_exists:
+        lemma_fts_count = int(conn.execute(
+            f"SELECT COUNT(*) FROM {prefix}lemma_fts"
+        ).fetchone()[0])
+        missing_in_fts_count = int(conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {prefix}lemma AS l
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {prefix}lemma_fts AS f
+                WHERE f.rowid = l.lemma_id
+            )
+            """
+        ).fetchone()[0])
+        extra_in_fts_count = int(conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {prefix}lemma_fts AS f
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {prefix}lemma AS l
+                WHERE l.lemma_id = f.rowid
+            )
+            """
+        ).fetchone()[0])
+        sample_missing_ids = [
+            int(row[0]) for row in conn.execute(
+                f"""
+                SELECT l.lemma_id
+                FROM {prefix}lemma AS l
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM {prefix}lemma_fts AS f
+                    WHERE f.rowid = l.lemma_id
+                )
+                ORDER BY l.lemma_id
+                LIMIT ?
+                """,
+                (sample_limit,),
+            ).fetchall()
+        ]
+        sample_extra_rowids = [
+            int(row[0]) for row in conn.execute(
+                f"""
+                SELECT f.rowid
+                FROM {prefix}lemma_fts AS f
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM {prefix}lemma AS l
+                    WHERE l.lemma_id = f.rowid
+                )
+                ORDER BY f.rowid
+                LIMIT ?
+                """,
+                (sample_limit,),
+            ).fetchall()
+        ]
+    else:
+        lemma_fts_count = None
+        missing_in_fts_count = None
+        extra_in_fts_count = None
+
+    if not table_exists:
+        issues.append("missing_lemma_fts")
+    if missing_triggers:
+        issues.append(f"missing_triggers:{missing_triggers}")
+    if lemma_fts_count is not None and lemma_fts_count != lemma_count:
+        issues.append(
+            f"row_count_mismatch:lemma={lemma_count},lemma_fts={lemma_fts_count}"
+        )
+    if missing_in_fts_count:
+        issues.append(f"missing_rowids_in_fts:{missing_in_fts_count}")
+    if extra_in_fts_count:
+        issues.append(f"extra_rowids_in_fts:{extra_in_fts_count}")
+
+    healthy = (
+        table_exists
+        and not missing_triggers
+        and missing_in_fts_count == 0
+        and extra_in_fts_count == 0
+        and lemma_fts_count == lemma_count
+    )
+
+    return {
+        "healthy": healthy,
+        "table_exists": table_exists,
+        "trigger_names": trigger_names,
+        "missing_triggers": missing_triggers,
+        "lemma_count": lemma_count,
+        "lemma_fts_count": lemma_fts_count,
+        "missing_in_fts_count": missing_in_fts_count,
+        "extra_in_fts_count": extra_in_fts_count,
+        "sample_missing_ids": sample_missing_ids,
+        "sample_extra_rowids": sample_extra_rowids,
+        "issues": issues,
+    }
+
+
+def rebuild_lemma_fts(
+    conn: sqlite3.Connection,
+    schema: str = "main",
+) -> dict[str, Any]:
+    """Drop, recreate, and rebuild lemma_fts with post-check verification."""
+    prefix = f"{schema}." if schema != "main" else ""
+    before = inspect_lemma_fts_parity(conn, schema=schema)
+
+    try:
+        for trigger_name in LEMMA_FTS_TRIGGER_NAMES:
+            qualified_trigger = (
+                f"{schema}.{trigger_name}" if schema != "main" else trigger_name
+            )
+            conn.execute(f"DROP TRIGGER IF EXISTS {qualified_trigger}")
+
+        conn.execute(f"DROP TABLE IF EXISTS {prefix}lemma_fts")
+        conn.execute(
+            LEMMA_FTS_DDL.replace("lemma_fts", f"{prefix}lemma_fts").replace(
+                "content=lemma", f"content={prefix}lemma"
+            )
+        )
+        for trigger_ddl in LEMMA_FTS_TRIGGERS:
+            conn.execute(trigger_ddl)
+
+        row_count = int(conn.execute(
+            f"SELECT COUNT(*) FROM {prefix}lemma"
+        ).fetchone()[0])
+        if row_count > 0:
+            conn.execute(
+                f"INSERT INTO {prefix}lemma_fts(lemma_fts) VALUES('rebuild')"
+            )
+
+        after = inspect_lemma_fts_parity(conn, schema=schema)
+        if not after["healthy"]:
+            raise RuntimeError(
+                "lemma_fts post-rebuild parity check failed: "
+                + ", ".join(after["issues"])
+            )
+
+        conn.commit()
+        return {
+            "action": "drop_recreate_rebuild",
+            "row_count_rebuilt": row_count,
+            "before": before,
+            "after": after,
+        }
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def ensure_lemma_fts_health(
