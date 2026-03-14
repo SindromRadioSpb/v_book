@@ -2337,3 +2337,44 @@ Engineering meaning:
 - the next active stage, if work continues, is post-repair revalidation:
   - Concordance first
   - Sentences filtered search/count second
+
+## Heavy baseline / reconnect target lower-layer recovery
+
+The heavy baseline / reconnect target revalidation is now recorded in:
+
+- `docs/HEWIKI_BASELINE_RECONNECT_REVALIDATION_2026-03-14.md`
+
+Target:
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+
+Operational outcome:
+
+- before repair:
+  - `schema_version = 41`
+  - `sentence_fts = 0`
+  - `document_sentence = 13,387,588`
+  - project `1` joined FTS rows = `0`
+- canonical dry-run correctly classified the defect after the repair-tool
+  hardening:
+  - `sentence_fts_row_mismatch: sentence_fts=0, document_sentence=13387588`
+- real repair completed with backup:
+  - `hewiki_gpu_processing.fts_repair_20260314_165952.db.bak`
+- after repair:
+  - `sentence_fts = 13,387,588`
+  - `document_sentence = 13,387,588`
+  - `sentence_fts MATCH 'wiki' = 140`
+  - project `1` joined FTS rows = `13,387,313`
+- runtime self-check:
+  - `db_open = ok`
+  - `health` still reports non-DB issues (bootstrap/provider/resource layer),
+    not lower-layer FTS failure
+
+Engineering meaning:
+
+- the heavy reconnect target is now healthy at the DB/FTS layer;
+- any remaining reconnect/health issues are no longer explained by the old
+  `sentence_fts` defect;
+- the next meaningful application-layer revalidation remains:
+  - Concordance on healthy FTS
+  - Sentences filtered search/count on healthy FTS
