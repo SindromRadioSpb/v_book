@@ -2270,3 +2270,41 @@ Engineering meaning:
   the unhealthy target DB;
 - Concordance latency/UI work should stay closed until that dependency-health
   gate is crossed.
+
+## Residual decision note: Sentences filtered search/count tail
+
+The narrow residual decision for the Sentences filtered tail is now recorded in:
+
+- `docs/SENTENCES_FILTERED_TAIL_DECISION_2026-03-14.md`
+
+Current status from canonical evidence and current repo inspection:
+
+- the remaining filtered tail is still real on the approved target:
+  - filtered first page ~= `1.782s` to `2.262s`
+  - filtered exact count ~= `7.945s` to `8.604s`
+- but the branch remains a residual workflow tail, not a default-path blocker;
+- the blocked structural acceleration layer is still `sentence_fts`, and the
+  approved target remains unhealthy there:
+  - `document_sentence` rows = `13,389,383`
+  - `sentence_fts` rows = `1,792`
+  - `sentence_fts MATCH 'wiki'` = `0`
+- unlike a missing-tooling branch, the repo already contains the relevant repair
+  surface:
+  - `scripts/repair_fts_schema.py`
+  - `docs/FTS_SCHEMA_REPAIR.md`
+  - `tests/test_repair_fts_schema.py`
+
+Current classification:
+
+- `status = decision-gated`
+- `priority = P1`
+- `open new runtime patch now = no`
+
+Engineering meaning:
+
+- no second Sentences runtime patch should open from current evidence;
+- if this branch is ever prioritized, the next valid step is explicit
+  application/revalidation of the existing `sentence_fts` repair path on the
+  unhealthy target DB;
+- only after that should the repo decide whether any residual Sentences code
+  work is still justified.
