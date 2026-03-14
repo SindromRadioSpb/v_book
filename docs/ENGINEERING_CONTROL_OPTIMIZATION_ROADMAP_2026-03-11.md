@@ -2003,6 +2003,56 @@ Current status after the wave:
   trigger-path work, `About HDLE Premium` trigger-path work, or
   `BatchTranslateDialog` cold-open work without new evidence gates.
 
+## Thirtieth framework-driven cold-audit wave
+
+The thirtieth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/BATCH_AUDIO_DIALOG_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the batch-translate dialog wave closed, one remaining unformalized
+  user-visible cold candidate was:
+  - `BatchAudioDialog`
+- the dedicated representative probe then confirmed the actual open contract:
+  - full `BatchAudioDialog` init: `0.187s`
+  - representative selected rows: `25`
+  - representative filtered count: `387,639`
+  - restored provider mode:
+    - `force:google_cloud_tts`
+  - restored write mode:
+    - `REGENERATE_ALL`
+  - provider count:
+    - `5`
+  - `has_worker_on_open = false`
+
+Current status after the wave:
+
+- `BatchAudioDialog` cold-open path is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `BatchAudioDialog` repair branch is opened from this wave;
+- the dialog open contract is already bounded:
+  - local widget construction is cheap;
+  - provider-registry listing is cheap;
+  - no DB, worker, or network dependency exists on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`,
+  `ReferenceSetupWizard`, `HelpCenterDialog`, `System Health Check`
+  trigger-path work, `About HDLE Premium` trigger-path work,
+  `BatchTranslateDialog` cold-open work, or `BatchAudioDialog` cold-open work
+  without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
