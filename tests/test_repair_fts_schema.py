@@ -169,3 +169,53 @@ def test_repair_fts_schema_is_idempotent(tmp_path: Path) -> None:
     assert first["status"] == "REPAIRED"
     assert second["status"] == "OK"
     assert not second["issues_detected"]
+
+
+def test_repair_fts_schema_dry_run_detects_sentence_row_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "sentence_mismatch_dry_run.db"
+    _create_minimal_db(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM sentence_fts WHERE rowid = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = repair_mod.repair_fts_schema(
+        db_path=db_path,
+        dry_run=True,
+        backup=False,
+    )
+
+    assert summary["status"] == "FAILED"
+    assert any("sentence_fts_row_mismatch" in issue for issue in summary["issues_detected"])
+
+
+def test_repair_fts_schema_repairs_sentence_row_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "sentence_mismatch_repair.db"
+    _create_minimal_db(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM sentence_fts WHERE rowid = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = repair_mod.repair_fts_schema(
+        db_path=db_path,
+        dry_run=False,
+        backup=False,
+    )
+
+    assert summary["status"] == "REPAIRED"
+    assert summary["error"] is None
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sentence_count = conn.execute("SELECT COUNT(*) FROM document_sentence").fetchone()[0]
+        sentence_fts_count = conn.execute("SELECT COUNT(*) FROM sentence_fts").fetchone()[0]
+        assert sentence_count == sentence_fts_count
+    finally:
+        conn.close()

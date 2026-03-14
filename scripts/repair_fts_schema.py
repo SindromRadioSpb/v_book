@@ -249,6 +249,31 @@ def inspect_fts_health(db_path: Path, *, include_base_counts: bool = False) -> d
             issues.append(f"probe_error:{key}: {value}")
         for key, value in term_snapshot.probe_errors.items():
             issues.append(f"probe_error:{key}: {value}")
+        if include_base_counts:
+            sentence_fts_count = sentence_snapshot.row_counts.get("sentence_fts")
+            document_sentence_count = sentence_snapshot.row_counts.get("document_sentence")
+            if (
+                sentence_fts_count is not None
+                and document_sentence_count is not None
+                and sentence_fts_count != document_sentence_count
+            ):
+                issues.append(
+                    "sentence_fts_row_mismatch: "
+                    f"sentence_fts={sentence_fts_count}, "
+                    f"document_sentence={document_sentence_count}"
+                )
+
+            term_fts_count = term_snapshot.row_counts.get("term_fts")
+            term_search_count = term_snapshot.row_counts.get("term_search")
+            if (
+                term_fts_count is not None
+                and term_search_count is not None
+                and term_fts_count != term_search_count
+            ):
+                issues.append(
+                    "term_fts_row_mismatch: "
+                    f"term_fts={term_fts_count}, term_search={term_search_count}"
+                )
 
         return {
             "schema_parse_error": parse_error,
@@ -473,7 +498,7 @@ def repair_fts_schema(
     }
 
     try:
-        before = inspect_fts_health(db_path, include_base_counts=False)
+        before = inspect_fts_health(db_path, include_base_counts=True)
         summary["before"] = before
         issues = list(before.get("issues", []))
         summary["issues_detected"] = issues
@@ -563,7 +588,7 @@ def repair_fts_schema(
             conn.close()
 
         if summary["status"] != "FAILED":
-            after = inspect_fts_health(db_path, include_base_counts=False)
+            after = inspect_fts_health(db_path, include_base_counts=True)
             summary["after"] = {
                 **summary.get("after", {}),
                 "post_inspection": after,

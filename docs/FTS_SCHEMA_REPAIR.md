@@ -43,6 +43,8 @@ Useful flags:
 ## What the Repair Does
 
 1. Inspects FTS health (`sentence_fts`, `term_fts`, triggers, probe queries).
+   Dry-run also reports row-count parity issues such as
+   `sentence_fts_row_mismatch` and `term_fts_row_mismatch`.
 2. Detects duplicate `sqlite_master` entries in FTS namespace.
 3. Optionally creates DB backup (default enabled).
 4. Removes duplicate master rows deterministically (keeps lowest `rowid`).
