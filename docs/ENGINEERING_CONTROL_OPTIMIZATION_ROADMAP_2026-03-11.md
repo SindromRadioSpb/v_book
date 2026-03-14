@@ -2233,3 +2233,40 @@ Current status after the branch:
 - a canonical bounded repair path now exists;
 - applying that repair to a concrete unhealthy DB is an explicit operator step,
   not a new wide cold-audit program.
+
+## Residual decision note: Concordance sentence_fts dependency-health
+
+The narrow residual decision for the Concordance dependency gate is now
+recorded in:
+
+- `docs/CONCORDANCE_SENTENCE_FTS_DECISION_2026-03-14.md`
+
+Current status from canonical evidence and current repo inspection:
+
+- Concordance remains blocked by prerequisite `sentence_fts` health on the
+  approved target:
+  - `sentence_fts` rows = `1,792`
+  - project `1` sentence rows = `13,387,588`
+  - project-joined `sentence_fts` rows = `0`
+- this remains a real `P1` dependency-health topic if Concordance still
+  matters;
+- unlike the Dictionary `lemma_fts` branch, the repo already contains a
+  canonical repair path:
+  - `scripts/repair_fts_schema.py`
+  - `docs/FTS_SCHEMA_REPAIR.md`
+  - `tests/test_repair_fts_schema.py`
+
+Current classification:
+
+- `status = decision-gated`
+- `priority = P1`
+- `open new runtime patch now = no`
+
+Engineering meaning:
+
+- no new repair-tool branch is justified from this point;
+- the next valid step, if this branch is ever prioritized, is explicit
+  application/revalidation of the existing `sentence_fts` repair path against
+  the unhealthy target DB;
+- Concordance latency/UI work should stay closed until that dependency-health
+  gate is crossed.
