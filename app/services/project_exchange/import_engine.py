@@ -24,6 +24,7 @@ from app.services.project_exchange.constants import (
 from app.services.project_exchange.dto import (
     ImportOptions,
     ImportReport,
+    ImportPreflightReport,
 )
 from app.infra.fts_manager import ensure_fts_tables
 from app.infra.write_gate import run_serialized_db_write, get_waiting_writer_count
@@ -201,6 +202,36 @@ class ProjectImportEngine:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
             self._gate_trace_path = None
+
+    def preflight_import(
+        self,
+        bundle_path: Path,
+        options: ImportOptions = ImportOptions(),
+    ) -> ImportPreflightReport:
+        """Build a read-only import preview against the current host DB."""
+        manifest = bundle_format.peek_manifest(bundle_path)
+        self._preflight_checks(manifest)
+
+        warnings: list[str] = []
+        final_project_name = self._resolve_project_name(
+            manifest.project_name,
+            options,
+            warnings,
+        )
+
+        host_schema_version = self._get_host_schema_version()
+        name_conflict = self._project_name_exists(manifest.project_name)
+        total_rows = int(sum((manifest.table_counts or {}).values()))
+
+        return ImportPreflightReport(
+            manifest=manifest,
+            host_schema_version=host_schema_version,
+            original_project_name=str(manifest.project_name),
+            final_project_name=str(final_project_name),
+            name_conflict=bool(name_conflict),
+            total_rows=total_rows,
+            warnings=list(warnings),
+        )
 
     @staticmethod
     def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
@@ -462,12 +493,7 @@ class ProjectImportEngine:
             )
 
         # Check schema compatibility (payload schema must be <= host schema)
-        from sqlalchemy import text
-        with self.db_service.get_session() as session:
-            result = session.execute(
-                text("SELECT value FROM schema_meta WHERE key = 'schema_version'")
-            ).fetchone()
-            host_schema_version = int(result[0]) if result else 0
+        host_schema_version = self._get_host_schema_version()
 
         if manifest.schema_version > host_schema_version:
             raise ValueError(
@@ -494,15 +520,7 @@ class ProjectImportEngine:
             return options.custom_name
 
         # Check for name conflict
-        from sqlalchemy import text
-        with self.db_service.get_session() as session:
-            result = session.execute(
-                text("SELECT COUNT(*) FROM dict_project WHERE name = :name"),
-                {"name": original_name},
-            ).fetchone()
-            name_exists = result and result[0] > 0
-
-        if name_exists:
+        if self._project_name_exists(original_name):
             if options.rename_if_conflict:
                 timestamp = datetime.now().strftime("%Y-%m-%d")
                 new_name = f"{original_name} (imported {timestamp})"
@@ -512,6 +530,25 @@ class ProjectImportEngine:
                 raise ValueError(f"Project name '{original_name}' already exists")
 
         return original_name
+
+    def _get_host_schema_version(self) -> int:
+        from sqlalchemy import text
+
+        with self.db_service.get_session() as session:
+            result = session.execute(
+                text("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+            ).fetchone()
+            return int(result[0]) if result else 0
+
+    def _project_name_exists(self, project_name: str) -> bool:
+        from sqlalchemy import text
+
+        with self.db_service.get_session() as session:
+            result = session.execute(
+                text("SELECT COUNT(*) FROM dict_project WHERE name = :name"),
+                {"name": project_name},
+            ).fetchone()
+            return bool(result and result[0] > 0)
 
     def _preflight_payload_document_uniqueness(self, payload_conn: sqlite3.Connection) -> None:
         """Reject bundles that contain duplicate documents for the same corpus/content key."""

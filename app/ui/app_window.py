@@ -1713,7 +1713,7 @@ class AppWindow(QMainWindow):
         """Import .hdleproj bundle."""
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
         from pathlib import Path
-        from app.services.project_exchange import bundle_format
+        from app.services.project_exchange.import_engine import ProjectImportEngine
         from app.services.project_exchange.worker import ProjectImportWorker
         from app.services.project_exchange.dto import ImportOptions
         from app.ui.dialogs.project_exchange_dialogs import (
@@ -1734,19 +1734,21 @@ class AppWindow(QMainWindow):
 
         bundle_path = Path(path)
 
-        # Peek manifest for preview
+        options = ImportOptions(rename_if_conflict=True)
+
+        # Build a read-only import preview against the current host DB.
         try:
-            manifest = bundle_format.peek_manifest(bundle_path)
+            preflight = ProjectImportEngine().preflight_import(bundle_path, options)
         except Exception as e:
             QMessageBox.critical(
                 self,
-                "Invalid Bundle",
-                f"Failed to read bundle:\n\n{e}"
+                "Import Preflight Failed",
+                f"Failed to validate bundle for import:\n\n{e}"
             )
             return
 
         # Show preview dialog
-        preview_dialog = ImportPreviewDialog(manifest, self)
+        preview_dialog = ImportPreviewDialog(preflight, self)
         if preview_dialog.exec() != ImportPreviewDialog.DialogCode.Accepted:
             return
 
@@ -1756,7 +1758,7 @@ class AppWindow(QMainWindow):
         # Create worker
         options = ImportOptions(
             rename_if_conflict=True,
-            custom_name=custom_name if custom_name != manifest.project_name else None
+            custom_name=custom_name if custom_name != preflight.manifest.project_name else None
         )
         worker = ProjectImportWorker(bundle_path, options)
 
@@ -1775,6 +1777,7 @@ class AppWindow(QMainWindow):
         # Start
         worker.start()
         progress_dialog.exec()
+        self._maybe_open_imported_project(progress_dialog)
 
     def _on_import_finished(self, report, dialog):
         """Handle successful import."""
@@ -1783,6 +1786,15 @@ class AppWindow(QMainWindow):
         # Refresh dashboard (if visible)
         if hasattr(self, "dashboard") and isinstance(self.stack.currentWidget(), type(self.dashboard)):
             self.dashboard.load_projects()
+
+    def _maybe_open_imported_project(self, dialog) -> None:
+        """Open the imported project when the user explicitly requests it."""
+        if dialog is None or not getattr(dialog, "should_open_project", lambda: False)():
+            return
+        project_id = getattr(dialog, "get_new_project_id", lambda: None)()
+        if project_id is None:
+            return
+        self.open_project(project_id)
 
     def _on_import_error(self, error: str, dialog):
         """Handle import error."""

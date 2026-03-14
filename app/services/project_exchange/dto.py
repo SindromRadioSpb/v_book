@@ -22,6 +22,19 @@ class ImportOptions:
 
 
 @dataclass
+class ImportPreflightReport:
+    """Read-only import preview against the current host DB."""
+
+    manifest: "ManifestInfo"
+    host_schema_version: int
+    original_project_name: str
+    final_project_name: str
+    name_conflict: bool = False
+    total_rows: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ManifestInfo:
     """Bundle manifest metadata."""
 

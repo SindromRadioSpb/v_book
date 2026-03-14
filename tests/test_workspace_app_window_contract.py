@@ -145,3 +145,20 @@ def test_sidebar_audio_workspace_click_toggles_panel_visibility(monkeypatch, qtb
     window._on_sidebar_action("workspace.audio")
     assert window.audio_player_dock.isVisible() is False
     assert window._current_workspace_key() != "workspace.audio"
+
+
+def test_maybe_open_imported_project_routes_to_new_project(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+
+    opened = []
+    monkeypatch.setattr(window, "open_project", lambda project_id: opened.append(int(project_id)))
+
+    class _Dialog:
+        def should_open_project(self):
+            return True
+
+        def get_new_project_id(self):
+            return 77
+
+    window._maybe_open_imported_project(_Dialog())
+    assert opened == [77]
