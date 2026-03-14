@@ -1907,6 +1907,54 @@ Current status after the wave:
   `ReferenceSetupWizard`, `HelpCenterDialog`, or `System Health Check`
   trigger-path work without new evidence gates.
 
+## Twenty-eighth framework-driven cold-audit wave
+
+The twenty-eighth official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/ABOUT_DIALOG_ACTION_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the top-level action sweep recorded:
+  - `system_health_check_action`: `0.000408s`
+  - `about_dialog_action`: `0.000003s`
+- the dedicated about-action probe then confirmed the actual trigger contract:
+  - about trigger path: `0.000005s`
+  - detail lines: `6`
+  - title:
+    - `About HDLE Premium`
+  - runtime payload fields:
+    - `version = 1.0.0`
+    - `commit = unknown`
+    - `dirty = 0`
+    - `built_at_utc = unknown`
+
+Current status after the wave:
+
+- `About HDLE Premium` trigger path is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `About HDLE Premium` trigger-path repair branch is opened from this wave;
+- the action contract is already bounded:
+  - trigger path is effectively instant;
+  - runtime build-meta formatting is tiny;
+  - no DB, worker, or network dependency exists on the action path;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`,
+  `ReferenceSetupWizard`, `HelpCenterDialog`, `System Health Check`
+  trigger-path work, or `About HDLE Premium` trigger-path work without new
+  evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
