@@ -2487,3 +2487,26 @@ Engineering meaning:
 - the lower-layer recovery stage is complete;
 - any further work should now be chosen from product-facing priorities rather
   than from unresolved cold/lower-layer blockers.
+
+## Product-facing priority selection
+
+The post-cold, post-recovery product-facing shortlist is now recorded in:
+
+- `docs/PRODUCT_PRIORITY_SELECTION_2026-03-14.md`
+
+Current decision:
+
+- the next implementation wave is `Import and project-exchange UX completion`
+- do not reopen generic cold-hunt or broad `P3` sweeps
+- do not reopen lower-layer FTS recovery by default
+
+Bounded Phase 1 target:
+
+- add a real read-only import preflight against the current host DB
+- improve `.hdleproj` preview clarity before import starts
+- surface a visible import completion summary
+- make `Go to Project` navigate to the imported project after success
+
+Implementation note for the selected wave:
+
+- `docs/IMPORT_PROJECT_EXCHANGE_UX_PHASE1_2026-03-14.md`
