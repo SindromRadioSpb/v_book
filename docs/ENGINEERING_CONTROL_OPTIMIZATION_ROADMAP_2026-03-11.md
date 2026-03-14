@@ -2103,6 +2103,55 @@ Current status after the wave:
   `BatchTranslateDialog` cold-open work, `BatchAudioDialog` cold-open work, or
   `AddToUserDictionaryDialog` cold-open work without new evidence gates.
 
+## Thirty-second framework-driven cold-audit wave
+
+The thirty-second official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/EDIT_PRONUNCIATION_DIALOG_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after the add-to-user-dictionary dialog wave closed, one remaining
+  unformalized user-visible cold candidate was:
+  - `EditPronunciationDialog`
+- the dedicated approved-target read-only reject-path probe then confirmed the
+  actual trigger/open contract:
+  - full reject-path trigger: `0.170s`
+  - `get_entry()`: `0.070s`
+  - dialog init: `0.169s`
+  - existing entry found:
+    - `false`
+  - `changed = false`
+  - `db_mtime_unchanged = true`
+
+Current status after the wave:
+
+- `EditPronunciationDialog` cold-open path is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `EditPronunciationDialog` repair branch is opened from this wave;
+- the dialog trigger/open contract is already bounded:
+  - one DB-backed pronunciation lookup exists before open;
+  - that lookup is still cheap on the approved target;
+  - no worker, write path, or network dependency exists on open;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`,
+  `ReferenceSetupWizard`, `HelpCenterDialog`, `System Health Check`
+  trigger-path work, `About HDLE Premium` trigger-path work,
+  `BatchTranslateDialog` cold-open work, `BatchAudioDialog` cold-open work,
+  `AddToUserDictionaryDialog` cold-open work, or `EditPronunciationDialog`
+  cold-open work without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
