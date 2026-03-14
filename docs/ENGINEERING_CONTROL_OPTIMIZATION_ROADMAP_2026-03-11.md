@@ -2448,3 +2448,42 @@ Engineering meaning:
 - the meaningful application-layer cold revalidation stage is now complete;
 - the next operational step, if work continues, is the separate lower-layer
   recovery cycle for the unhealthy `hewiki_gpu_processing test.db`.
+
+## Hewiki test DB lower-layer recovery
+
+The separate recovery cycle for the approved-target hewiki test DB is now
+recorded in:
+
+- `docs/HEWIKI_TEST_DB_RECOVERY_2026-03-14.md`
+
+Target:
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+
+Operational outcome:
+
+- before repair, canonical dry-run reported:
+  - `probe_error:count_sentence_fts: database disk image is malformed`
+- real repair completed with backup:
+  - `hewiki_gpu_processing test.fts_repair_20260314_181314.db.bak`
+- after repair:
+  - `schema_version = 65`
+  - `sentence_fts = 13,389,383`
+  - `document_sentence = 13,389,383`
+  - `sentence_fts MATCH 'wiki' = 140`
+  - project `1` joined FTS rows = `13,387,588`
+- runtime self-check:
+  - `db_open = ok`
+  - `health = warn`
+  - remaining health warnings are now higher-layer optional/provider issues, not
+    lower-layer FTS failure
+
+Engineering meaning:
+
+- the approved-target hewiki test DB is now again healthy at the lower FTS
+  layer;
+- both large hewiki DB artifacts used during the cold program now have healthy
+  `sentence_fts` substrates;
+- the lower-layer recovery stage is complete;
+- any further work should now be chosen from product-facing priorities rather
+  than from unresolved cold/lower-layer blockers.
