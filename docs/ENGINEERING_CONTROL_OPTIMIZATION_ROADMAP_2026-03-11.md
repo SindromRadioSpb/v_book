@@ -1862,6 +1862,51 @@ Current status after the wave:
   `PronunciationBootstrapDialog`, `TranslateTextDialog`,
   `ReferenceSetupWizard`, or `HelpCenterDialog` without new evidence gates.
 
+## Twenty-seventh framework-driven cold-audit wave
+
+The twenty-seventh official task-specific use of the canonical framework is now
+recorded in:
+
+- `docs/SYSTEM_HEALTH_CHECK_ACTION_COLD_AUDIT_2026-03-14.md`
+
+Wave outcome:
+
+- after visible/dialog sweeps were closed, a new bounded top-level action sweep
+  compared:
+  - `system_health_check_action`: `0.000408s`
+  - `about_dialog_action`: `0.000003s`
+- the dedicated trigger-path probe then confirmed the actual contract:
+  - system health check trigger path: `0.000408s`
+  - immediate status message:
+    - `Running health check...`
+  - worker created: `true`
+  - worker started: `true`
+  - worker cleared immediately: `false`
+
+Current status after the wave:
+
+- `System Health Check` trigger path is now formally classified from current evidence;
+- current classification is:
+  - `blocker = no`
+  - `priority = P3`
+- no immediate `System Health Check` trigger-path repair branch is opened from this wave;
+- the action contract is already bounded:
+  - trigger path is effectively instant;
+  - heavy health work stays background-only;
+  - immediate operator feedback is present;
+- the next active work returns to the canonical cold-audit framework for the
+  next narrow subsystem wave or a new bounded candidate sweep;
+- do not reopen startup, picker, Sentences filtered-tail, Dictionary, Terms,
+  Concordance, TM residual-tail, Coverage lemma-count residual-tail,
+  Audio Add-All, generic Documents work, ProjectView, standalone `Term Cards`,
+  `VerificationPanel`, `UserDictionariesView`, `DatabaseSwitchDialog`,
+  MT `ProviderSettingsDialog`, `ResourcesManagerDialog`, `ImportWizard`,
+  generic first-run work, `AudioProviderSettingsDialog`,
+  `SentenceNiqqudBootstrapDialog`, `CommandPaletteDialog`,
+  `PronunciationBootstrapDialog`, `TranslateTextDialog`,
+  `ReferenceSetupWizard`, `HelpCenterDialog`, or `System Health Check`
+  trigger-path work without new evidence gates.
+
 ## Decision note
 
 The roadmap above is intentionally about **controllability and optimization**,
