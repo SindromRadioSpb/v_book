@@ -2372,6 +2372,35 @@ Engineering meaning:
 - the next product-facing move can shift to reconnect guidance without losing
   self-check rigor.
 
+## Guided reconnect-path guidance phase 2
+
+The next bounded follow-up after installed/dist self-check contract hardening
+is recorded in:
+
+- `docs/GUIDED_RECONNECT_PATH_PHASE2_2026-03-15.md`
+
+Current status after the wave:
+
+- deferred startup guard now explains the intentional reconnect path more
+  concretely:
+  - choose one migrated DB
+  - switch once
+  - let one restart complete
+- `Switch Database` now distinguishes:
+  - safest immediate default-local path
+  - lowest-risk current-schema reconnect case
+  - heavy DB backup-first guidance
+  - legacy-schema longer-restart warning
+  - baseline quick-pick as explicit reference-workspace reconnect
+- first-run wizard DB step now mirrors the same reconnect/restart guidance
+
+Engineering meaning:
+
+- this improves operator clarity without changing DB switching mechanics;
+- it does not reopen lower-layer recovery or startup cold work;
+- any future reconnect work should focus on broader flow integration rather
+  than another round of basic restart messaging.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now

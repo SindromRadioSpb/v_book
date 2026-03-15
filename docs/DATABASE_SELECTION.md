@@ -67,6 +67,11 @@ Dialog shows:
 - quick options (Default, Browse existing file, Baseline quick-pick when available),
 - `Switch & Restart`,
 - `Open DB Folder`, `Copy Path`, `Make Backup...`.
+- richer reconnect guidance for:
+  - deferred startup DBs,
+  - heavy baseline/custom DBs,
+  - restart expectations,
+  - legacy-schema migration expectations.
 
 Schema safeguards:
 
@@ -124,3 +129,21 @@ Current bounded outcome:
 - the repo-local CLI `db_open` probe is sub-`100 ms`;
 - the documented deferred-startup guard remains the active fallback contract;
 - no startup patch branch is justified from this note alone.
+
+## Reconnect guidance phase 2
+
+Bounded operator guidance was extended in:
+
+- `docs/GUIDED_RECONNECT_PATH_PHASE2_2026-03-15.md`
+
+Current operator-facing contract:
+
+- startup guard explains that reconnect should be a single deliberate
+  `Switch Database -> restart` action, not repeated DB hopping;
+- `Switch Database` now explains:
+  - when default local DB is the safer immediate path,
+  - when a current-schema DB is the lowest-risk reconnect case,
+  - when a heavy DB should be backed up first,
+  - when a legacy DB may spend one longer restart on backup + migration;
+- first-run wizard DB selection now mirrors the same guidance so the restart
+  expectation is visible before the operator finishes setup.
