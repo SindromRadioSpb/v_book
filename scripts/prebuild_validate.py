@@ -58,6 +58,10 @@ def _unique_export_project_name() -> str:
     return f"__EXPORT_TEST__{ts}_{suffix}"
 
 
+def _repair_db_corruption_command(db_path: Path) -> str:
+    return f'python scripts/repair_db_corruption.py --db-path "{db_path}"'
+
+
 def check_required_local_modules() -> bool:
     """Check that required local runtime modules are importable."""
     logger.info("=" * 70)
@@ -85,6 +89,42 @@ def check_required_local_modules() -> bool:
         logger.error("[!!] Required local module import checks failed")
 
     return all_ok
+
+
+def check_db_corruption_probe(db_path: Path) -> CheckResult:
+    """Run a bounded corruption probe before write-heavy prebuild checks."""
+    logger.info("\n" + "=" * 70)
+    logger.info("CHECK 1: DB Corruption Probe")
+    logger.info("=" * 70)
+
+    from scripts import repair_db_corruption as repair_mod
+
+    try:
+        diagnosis = repair_mod.diagnose_db_corruption(db_path, deep=False)
+    except Exception as exc:
+        logger.exception("Corruption probe failed unexpectedly: %s", exc)
+        details = f"Probe failed unexpectedly: {exc}"
+        return CheckResult(name="DB Corruption Probe", status=CHECK_FAILED, details=details)
+
+    if diagnosis.get("status") == "OK":
+        logger.info("[OK] DB corruption probe passed")
+        return CheckResult(name="DB Corruption Probe", status=CHECK_PASSED)
+
+    failing_objects = list(diagnosis.get("failing_objects") or [])
+    object_hint = ", ".join(str(value) for value in failing_objects[:3]) if failing_objects else "database"
+    quick_rows = list((diagnosis.get("quick_check") or {}).get("rows") or [])
+    quick_error = str((diagnosis.get("quick_check") or {}).get("error") or "").strip()
+    detail_hint = str(quick_rows[0]).strip() if quick_rows else quick_error or "corruption probe failed"
+    remediation = _repair_db_corruption_command(db_path)
+
+    logger.error("  Corruption probe detected issues in: %s", object_hint)
+    logger.error("  Probe detail: %s", detail_hint)
+    logger.error("  Remediation: %s", remediation)
+    return CheckResult(
+        name="DB Corruption Probe",
+        status=CHECK_FAILED,
+        details=f"{object_hint}; {detail_hint}; repair: {remediation}",
+    )
 
 
 def check_fts_presence(db_path: Path) -> bool:
@@ -393,6 +433,59 @@ def run_prebuild_validation(
             status=_status_from_bool(check_required_local_modules()),
         )
     )
+    corruption_result = check_db_corruption_probe(db_path)
+    results.append(corruption_result)
+    if corruption_result.status == CHECK_FAILED:
+        remediation = _repair_db_corruption_command(db_path)
+        results.append(
+            CheckResult(
+                name="FTS Presence",
+                status=CHECK_SKIPPED,
+                details=f"Skipped because DB corruption probe failed. Repair first: {remediation}",
+            )
+        )
+        if profile == PROFILE_REFERENCE_RO:
+            results.append(
+                CheckResult(
+                    name="Project Lifecycle",
+                    status=CHECK_SKIPPED,
+                    details="Skipped in reference-ro profile (write check).",
+                )
+            )
+            if not skip_export_import:
+                results.append(
+                    CheckResult(
+                        name="Export/Import",
+                        status=CHECK_SKIPPED,
+                        details="Skipped in reference-ro profile (write check).",
+                    )
+                )
+        else:
+            results.append(
+                CheckResult(
+                    name="Project Lifecycle",
+                    status=CHECK_SKIPPED,
+                    details=f"Skipped because DB corruption probe failed. Repair first: {remediation}",
+                )
+            )
+            if not skip_export_import:
+                results.append(
+                    CheckResult(
+                        name="Export/Import",
+                        status=CHECK_SKIPPED,
+                        details=f"Skipped because DB corruption probe failed. Repair first: {remediation}",
+                    )
+                )
+        results.append(
+            CheckResult(
+                name="Database Integrity",
+                status=CHECK_SKIPPED,
+                details=f"Skipped because DB corruption probe failed. Repair first: {remediation}",
+            )
+        )
+        final_status = _compute_final_status(results)
+        return final_status, results
+
     results.append(
         CheckResult(
             name="FTS Presence",
