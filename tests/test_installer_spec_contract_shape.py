@@ -47,3 +47,11 @@ def test_installer_spec_uses_script_collections_for_exe_calls():
     assert len(exe_script_args) >= 2
     for value in exe_script_args:
         assert isinstance(value, list), "Spec must pass script collection (e.g. a.scripts), not single tuple"
+
+
+def test_installer_spec_bundles_phonikud_onnx_model():
+    spec_path = Path(__file__).resolve().parents[1] / "hdle_premium_installer.spec"
+    source = spec_path.read_text(encoding="utf-8-sig")
+
+    assert "installer' / 'resources' / 'local_models' / 'phonikud' / '*.onnx" in source
+    assert "'resources/models/phonikud/'" in source

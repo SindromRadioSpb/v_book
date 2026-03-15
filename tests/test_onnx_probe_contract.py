@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from types import SimpleNamespace
+from pathlib import Path
 
 from app.tools import onnx_probe
 
@@ -60,3 +61,27 @@ def test_onnx_probe_probe_mode_fails_on_identity_output(monkeypatch, tmp_path):
     assert payload["ok"] is False
     assert payload["stage"] == "infer"
     assert "without niqqud" in payload["error"].lower()
+
+
+def test_onnx_probe_discovers_bundled_model_when_data_root_missing(monkeypatch, tmp_path):
+    bundled_root = tmp_path / "resources" / "models" / "phonikud"
+    bundled_root.mkdir(parents=True)
+    preferred = bundled_root / "phonikud-1.0.int8.onnx"
+    preferred.write_text("dummy", encoding="utf-8")
+
+    class _FakeResourcePaths:
+        @staticmethod
+        def build(*, create: bool = True):
+            assert create is False
+            return SimpleNamespace(models_root=tmp_path / "missing_models")
+
+        @staticmethod
+        def resolve_bundled_resources_root():
+            return tmp_path / "resources"
+
+    monkeypatch.setitem(sys.modules, "app.infra.resource_paths", SimpleNamespace(ResourcePaths=_FakeResourcePaths))
+
+    discovered = onnx_probe._discover_default_model_path()
+
+    assert isinstance(discovered, Path)
+    assert discovered == preferred

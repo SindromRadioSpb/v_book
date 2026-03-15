@@ -110,9 +110,14 @@ def _discover_default_model_path() -> Path | None:
     try:
         from app.infra.resource_paths import ResourcePaths
 
-        models_root = ResourcePaths.build(create=False).models_root
-        phonikud_dir = models_root / "phonikud"
-        if phonikud_dir.exists():
+        models_roots = [
+            ResourcePaths.build(create=False).models_root,
+            ResourcePaths.resolve_bundled_resources_root() / "models",
+        ]
+        for models_root in models_roots:
+            phonikud_dir = models_root / "phonikud"
+            if not phonikud_dir.exists():
+                continue
             preferred = sorted(phonikud_dir.glob("*int8.onnx"))
             if preferred:
                 return preferred[0]

@@ -1,5 +1,6 @@
 """Tests for deterministic resource path resolution."""
 
+import sys
 from pathlib import Path
 
 from app.infra.resource_paths import ResourcePaths
@@ -27,3 +28,13 @@ def test_resource_paths_resolution_is_deterministic(monkeypatch, tmp_path):
     assert path_one.models_root.exists()
     assert path_one.datasets_root.exists()
 
+
+def test_resolve_bundled_resources_root_prefers_internal_resources_in_frozen_runtime(monkeypatch, tmp_path):
+    exe_root = tmp_path / "HDLE_Premium"
+    internal_resources = exe_root / "_internal" / "resources"
+    internal_resources.mkdir(parents=True)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_root / "HDLE_Premium.exe"))
+
+    assert ResourcePaths.resolve_bundled_resources_root() == internal_resources

@@ -38,7 +38,12 @@ class ResourcePaths:
     @classmethod
     def resolve_bundled_resources_root(cls) -> Path:
         """Resolve bundled resource root inside the installed app payload."""
-        return cls.resolve_app_root() / "resources"
+        app_root = cls.resolve_app_root()
+        if bool(getattr(sys, "frozen", False)):
+            internal_resources = app_root / "_internal" / "resources"
+            if internal_resources.exists():
+                return internal_resources
+        return app_root / "resources"
 
     @classmethod
     def _default_data_root(cls) -> Path:

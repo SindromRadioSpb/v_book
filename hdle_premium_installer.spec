@@ -32,6 +32,8 @@ a = Analysis(
         (str(project_root / 'app' / 'ui' / 'dialogs.py'), 'app/ui/'),
         # Resource manifest for Resources Manager / Health checks
         (str(project_root / 'app' / 'resources' / '*.json'), 'app/resources/'),
+        # Bundled local pronunciation model for frozen ONNX probe / bootstrap
+        (str(project_root / 'installer' / 'resources' / 'local_models' / 'phonikud' / '*.onnx'), 'resources/models/phonikud/'),
     ],
     hiddenimports=[
         # PyQt6 core
