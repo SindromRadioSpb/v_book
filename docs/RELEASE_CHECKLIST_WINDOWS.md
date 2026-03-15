@@ -27,6 +27,7 @@ This checklist ensures that the Windows installer works correctly on clean syste
 - [ ] Do not use older sqlite3 binaries that fail with:
   - `unknown command or invalid arguments: "recover"`
 - [ ] `python scripts/prebuild_validate.py --db-path "<release-candidate-db>"` does not fail on the new corruption probe
+- [ ] `python scripts/prebuild_validate.py --db-path "<release-candidate-db>" --report-json-out "build\\verify\\prebuild_validate.json"` writes a JSON release-evidence artifact
 - [ ] If prebuild validation stops on corruption probe, repair first:
   - `python scripts/repair_db_corruption.py --db-path "<release-candidate-db>"`
 

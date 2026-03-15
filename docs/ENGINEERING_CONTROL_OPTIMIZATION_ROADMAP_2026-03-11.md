@@ -2309,6 +2309,34 @@ Engineering meaning:
 - any future onboarding work should now focus on broader flow coherence rather
   than raw health-summary visibility.
 
+## Release / ship gate phase 2
+
+The next bounded release-facing follow-up after the corruption gate adds
+machine-readable prebuild evidence aggregation without widening the validation
+scope.
+
+This wave is recorded in:
+
+- `docs/RELEASE_SHIP_GATE_PHASE2_2026-03-15.md`
+
+Current status after the wave:
+
+- `scripts/prebuild_validate.py` can now write a canonical JSON report with:
+  - final status
+  - selected DB path and size
+  - profile / skip flags
+  - per-check status + details
+  - build metadata (`version`, `commit`, `dirty`, `built_at_utc`)
+- release/prebuild docs now point to the JSON artifact path as the preferred
+  release evidence handoff
+
+Engineering meaning:
+
+- this does not add new checks or reopen release redesign work;
+- it makes ship-gate results archivable and comparable across runs;
+- the next release-facing decision can now focus on artifact quality and real
+  candidate DB readiness, not on reconstructing evidence from console logs.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now

@@ -12,6 +12,12 @@ Before building the HDLE Premium installer, run comprehensive validation to ensu
 python scripts/prebuild_validate.py
 ```
 
+To persist machine-readable release evidence:
+
+```bash
+python scripts/prebuild_validate.py --report-json-out build/verify/prebuild_validate.json
+```
+
 Current ship-gate note:
 
 - prebuild validation now runs a bounded DB corruption probe before the
@@ -38,6 +44,13 @@ SUMMARY
 
 [OK] ALL CHECKS PASSED - Ready for build
 ```
+
+**JSON artifact contains:**
+- final status
+- db path + db size
+- selected profile / skip flags
+- per-check statuses and details
+- build metadata (`version`, `commit`, `dirty`, `built_at_utc`)
 
 ### Option 2: Fast Validation (Skip Export/Import)
 
