@@ -13,11 +13,13 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import ClassVar, List, Tuple
 
 from sqlalchemy import select, func, or_, text
 from sqlalchemy.orm import Session
 
+from app.infra.fts_manager import inspect_lemma_fts_parity
 from app.infra.sa_models import Lemma, LemmaProjectStat, TMEntry
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 #: briefly behind writes; the Dictionary view refreshes on every search change
 #: anyway, so stale counts are only visible in rare concurrent-write scenarios.
 COUNT_CACHE_TTL: float = 30.0
+LEMMA_FTS_HEALTH_TTL: float = 60.0
 
 
 class DictionaryService:
@@ -39,6 +42,9 @@ class DictionaryService:
     # Class-level TTL count cache: key → (count, expires_monotonic)
     _count_cache: ClassVar[dict[str, tuple[int, float]]] = {}
     _cache_lock: ClassVar[threading.Lock] = threading.Lock()
+    _lemma_fts_health_cache: ClassVar[dict[str, tuple[bool, str, float]]] = {}
+    _lemma_fts_health_lock: ClassVar[threading.Lock] = threading.Lock()
+    _lemma_fts_warning_emitted: ClassVar[set[str]] = set()
 
     # ------------------------------------------------------------------
     # FTS5 helpers
@@ -64,6 +70,83 @@ class DictionaryService:
             )
         ).fetchone()
         return result is not None
+
+    @staticmethod
+    def _get_db_path(session: Session) -> str:
+        """Return a stable cache key for the current DB, preferring file path."""
+        bind = session.get_bind()
+        bind_url = getattr(bind, "url", None)
+        db_path = getattr(bind_url, "database", None)
+        if db_path:
+            return str(Path(db_path))
+        return "<unknown-db>"
+
+    @staticmethod
+    def _get_sqlite_connection(session: Session):
+        """Return the raw sqlite3 connection behind the SQLAlchemy session."""
+        connection = session.connection()
+        raw_conn = getattr(connection.connection, "driver_connection", None)
+        if raw_conn is None:
+            raw_conn = getattr(connection.connection, "dbapi_connection", None)
+        if raw_conn is None:
+            raw_conn = connection.connection
+        return raw_conn
+
+    @classmethod
+    def _get_cached_lemma_fts_health(cls, cache_key: str) -> tuple[bool, str] | None:
+        with cls._lemma_fts_health_lock:
+            entry = cls._lemma_fts_health_cache.get(cache_key)
+            if entry is None:
+                return None
+            healthy, detail, expires = entry
+            if time.monotonic() > expires:
+                del cls._lemma_fts_health_cache[cache_key]
+                return None
+            return healthy, detail
+
+    @classmethod
+    def _set_cached_lemma_fts_health(
+        cls,
+        cache_key: str,
+        healthy: bool,
+        detail: str,
+    ) -> None:
+        with cls._lemma_fts_health_lock:
+            cls._lemma_fts_health_cache[cache_key] = (
+                healthy,
+                detail,
+                time.monotonic() + LEMMA_FTS_HEALTH_TTL,
+            )
+
+    @classmethod
+    def _get_lemma_fts_health(cls, session: Session) -> tuple[bool, str]:
+        """Return cached lemma_fts parity-health for runtime search routing."""
+        cache_key = cls._get_db_path(session)
+        cached = cls._get_cached_lemma_fts_health(cache_key)
+        if cached is not None:
+            return cached
+
+        raw_conn = cls._get_sqlite_connection(session)
+        parity = inspect_lemma_fts_parity(raw_conn, schema="main")
+        detail = ", ".join(parity["issues"]) if parity["issues"] else "healthy"
+        healthy = bool(parity["healthy"])
+        cls._set_cached_lemma_fts_health(cache_key, healthy, detail)
+
+        if not healthy:
+            with cls._lemma_fts_health_lock:
+                if cache_key not in cls._lemma_fts_warning_emitted:
+                    logger.warning(
+                        "lemma_fts parity unhealthy for Dictionary search on %s; "
+                        "falling back to LIKE. Repair with: "
+                        "python scripts/repair_lemma_fts.py --db-path \"%s\". "
+                        "Details: %s",
+                        cache_key,
+                        cache_key,
+                        detail,
+                    )
+                    cls._lemma_fts_warning_emitted.add(cache_key)
+
+        return healthy, detail
 
     # ------------------------------------------------------------------
     # Count cache helpers
@@ -111,6 +194,9 @@ class DictionaryService:
                 # Cache keys are MD5 hashes, so we can't filter by project_id
                 # without re-hashing. Clear all to be safe; cache is small.
                 cls._count_cache.clear()
+        with cls._lemma_fts_health_lock:
+            cls._lemma_fts_health_cache.clear()
+            cls._lemma_fts_warning_emitted.clear()
 
     def search_lemmas(
         self,
@@ -244,7 +330,10 @@ class DictionaryService:
         # Search filter: FTS5 path when available, LIKE fallback otherwise.
         search = filters.get("search", "").strip()
         if search:
+            use_fts = False
             if session is not None and self._is_lemma_fts_available(session):
+                use_fts, _detail = self._get_lemma_fts_health(session)
+            if use_fts:
                 fts_term = self._fts5_escape_term(search)
                 stmt = stmt.where(
                     text(

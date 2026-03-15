@@ -229,6 +229,101 @@ def test_like_fallback_finds_matching_lemmas(plain_engine):
     assert all("unique_term" in r[0].lemma_text for r in results)
 
 
+def test_like_fallback_used_when_lemma_fts_parity_unhealthy(tmp_path):
+    db_path = tmp_path / "dictionary_unhealthy_lemma_fts.db"
+    engine = _make_engine(str(db_path))
+    raw = engine.raw_connection()
+    try:
+        ensure_lemma_fts_health(raw, schema="main", rebuild=True)
+    finally:
+        raw.close()
+
+    svc = DictionaryService()
+    DictionaryService.invalidate_count_cache()
+    with Session(engine) as session:
+        project_id = _seed(session, count=20)
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ai"))
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_au"))
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ad"))
+        session.execute(text("DROP TABLE IF EXISTS lemma_fts"))
+        session.execute(text("""
+            CREATE VIRTUAL TABLE lemma_fts USING fts5(
+                lemma_text,
+                tokenize='unicode61 remove_diacritics 1'
+            )
+        """))
+        session.execute(
+            text("INSERT INTO lemma_fts(rowid, lemma_text) VALUES(:rowid, :lemma_text)"),
+            {"rowid": 999999, "lemma_text": "unique_term_0000"},
+        )
+        session.commit()
+
+        results = svc.search_lemmas(
+            session,
+            project_id,
+            filters={"search": "unique_term", "hide_noise": False},
+            limit=50,
+            offset=0,
+        )
+        count = svc.count_lemmas(
+            session,
+            project_id,
+            filters={"search": "unique_term", "hide_noise": False},
+        )
+
+    assert len(results) > 0
+    assert all("unique_term" in r[0].lemma_text for r in results)
+    assert count == len(results)
+    assert DictionaryService._lemma_fts_health_cache
+    engine.dispose()
+    DictionaryService.invalidate_count_cache()
+
+
+def test_lemma_fts_health_probe_is_cached(fts_engine, monkeypatch):
+    svc = DictionaryService()
+    DictionaryService.invalidate_count_cache()
+    calls = {"count": 0}
+
+    def _fake_inspect(*_args, **_kwargs):
+        calls["count"] += 1
+        return {
+            "healthy": True,
+            "issues": [],
+            "table_exists": True,
+            "trigger_names": ["trg_lemma_fts_ad", "trg_lemma_fts_ai", "trg_lemma_fts_au"],
+            "missing_triggers": [],
+            "lemma_count": 20,
+            "lemma_fts_count": 20,
+            "missing_in_fts_count": 0,
+            "extra_in_fts_count": 0,
+            "sample_missing_ids": [],
+            "sample_extra_rowids": [],
+        }
+
+    monkeypatch.setattr(
+        "app.services.dictionary_service.inspect_lemma_fts_parity",
+        _fake_inspect,
+    )
+
+    with Session(fts_engine) as session:
+        project_id = _seed(session, count=20)
+        svc.search_lemmas(
+            session,
+            project_id,
+            filters={"search": "unique_term", "hide_noise": False},
+            limit=50,
+            offset=0,
+        )
+        svc.count_lemmas(
+            session,
+            project_id,
+            filters={"search": "unique_term", "hide_noise": False},
+        )
+
+    assert calls["count"] == 1
+    DictionaryService.invalidate_count_cache()
+
+
 # ---------------------------------------------------------------------------
 # TTL count cache
 # ---------------------------------------------------------------------------
@@ -271,9 +366,19 @@ def test_count_cache_expires(fts_engine, monkeypatch):
 def test_invalidate_count_cache_clears_all(fts_engine):
     svc = DictionaryService()
     DictionaryService._count_cache.clear()
+    DictionaryService._lemma_fts_health_cache.clear()
     with Session(fts_engine) as session:
         project_id = _seed(session, count=5)
         svc.count_lemmas(session, project_id, {"hide_noise": False})
+        svc.search_lemmas(
+            session,
+            project_id,
+            {"search": "word_", "hide_noise": False},
+            limit=5,
+            offset=0,
+        )
         assert len(DictionaryService._count_cache) > 0
+        assert len(DictionaryService._lemma_fts_health_cache) > 0
     DictionaryService.invalidate_count_cache()
     assert len(DictionaryService._count_cache) == 0
+    assert len(DictionaryService._lemma_fts_health_cache) == 0

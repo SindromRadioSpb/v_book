@@ -105,7 +105,8 @@ def test_repair_lemma_fts_repairs_rowid_parity_drift(tmp_path: Path) -> None:
             text("SELECT COUNT(*) FROM lemma_fts WHERE lemma_fts MATCH :term"),
             {"term": '"unique_term"*'},
         ).scalar_one()
-    assert before_results == []
+    assert len(before_results) == 1
+    assert before_results[0][0].lemma_text == "unique_term"
     assert like_count == 1
     assert fts_raw_count == 1
 
