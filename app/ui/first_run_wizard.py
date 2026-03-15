@@ -224,6 +224,24 @@ class FirstRunWizardDialog(QDialog):
         self.refresh_health_btn = QPushButton("Run Health Check")
         self.refresh_health_btn.clicked.connect(self._refresh_health_summary)
         l6.addWidget(self.refresh_health_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.health_summary_counts_label = QLabel("Waiting for health results...")
+        self.health_summary_counts_label.setWordWrap(True)
+        l6.addWidget(self.health_summary_counts_label)
+        self.health_recommendation_label = QLabel("Recommended next step will appear after the health check.")
+        self.health_recommendation_label.setWordWrap(True)
+        l6.addWidget(self.health_recommendation_label)
+        health_actions = QHBoxLayout()
+        self.health_fix_resources_btn = QPushButton("Fix Local Resources")
+        self.health_fix_resources_btn.clicked.connect(self._open_resources_manager)
+        health_actions.addWidget(self.health_fix_resources_btn)
+        self.health_fix_mt_btn = QPushButton("Fix MT Providers")
+        self.health_fix_mt_btn.clicked.connect(self._open_mt_settings)
+        health_actions.addWidget(self.health_fix_mt_btn)
+        self.health_fix_audio_btn = QPushButton("Fix Audio Providers")
+        self.health_fix_audio_btn.clicked.connect(self._open_audio_settings)
+        health_actions.addWidget(self.health_fix_audio_btn)
+        health_actions.addStretch()
+        l6.addLayout(health_actions)
         self.health_text = QTextEdit()
         self.health_text.setReadOnly(True)
         self.health_text.setPlainText("Checking health summary in background...")
@@ -424,9 +442,55 @@ class FirstRunWizardDialog(QDialog):
     def _set_health_summary_loading(self, status_text: str, *, preserve_text: bool = False) -> None:
         self.health_status_label.setText(status_text)
         self.refresh_health_btn.setEnabled(False)
+        self.health_summary_counts_label.setText("Waiting for health results...")
+        self.health_recommendation_label.setText("Recommended next step will appear after the health check.")
+        self.health_fix_resources_btn.setEnabled(False)
+        self.health_fix_mt_btn.setEnabled(False)
+        self.health_fix_audio_btn.setEnabled(False)
         if preserve_text and self.health_text.toPlainText().strip():
             return
         self.health_text.setPlainText("Checking health summary in background...")
+
+    @staticmethod
+    def _summarize_health_report(report: dict) -> tuple[str, str, dict[str, bool]]:
+        items = report.get("items", []) or []
+        counts = {"error": 0, "warn": 0, "optional": 0, "ok": 0}
+        actions = {"resources": False, "mt": False, "audio": False}
+
+        for row in items:
+            status = str(row.get("status", "unknown"))
+            if status in counts:
+                counts[status] += 1
+            check_id = str(row.get("check_id", ""))
+            title = str(row.get("title", ""))
+            if status not in {"warn", "error"}:
+                continue
+            if (
+                check_id.startswith("resource:")
+                or check_id.startswith("baseline:")
+                or check_id.startswith("bootstrap:")
+                or "resource" in title.lower()
+                or "baseline" in title.lower()
+            ):
+                actions["resources"] = True
+            elif check_id.startswith("cloud_mt:") or "translation" in title.lower():
+                actions["mt"] = True
+            elif check_id.startswith("cloud_audio:") or "audio" in title.lower():
+                actions["audio"] = True
+
+        counts_text = (
+            f"Errors: {counts['error']} | Warnings: {counts['warn']} | "
+            f"Optional: {counts['optional']} | OK: {counts['ok']}"
+        )
+        if actions["resources"]:
+            recommendation = "Recommended next step: Open Resources Manager and complete local setup."
+        elif actions["mt"]:
+            recommendation = "Recommended next step: Open MT Provider Settings and finish provider configuration."
+        elif actions["audio"]:
+            recommendation = "Recommended next step: Open Audio Provider Settings and finish provider configuration."
+        else:
+            recommendation = "Recommended next step: No immediate fix required."
+        return counts_text, recommendation, actions
 
     def _render_health_summary(self, report: dict) -> None:
         lines = [f"Overall: {report.get('overall', 'unknown')}"]
@@ -438,7 +502,13 @@ class FirstRunWizardDialog(QDialog):
             remediation = row.get("remediation", "")
             if remediation:
                 lines.append(f"  remediation: {remediation}")
+        counts_text, recommendation, actions = self._summarize_health_report(report)
         self.health_text.setPlainText("\n".join(lines))
+        self.health_summary_counts_label.setText(counts_text)
+        self.health_recommendation_label.setText(recommendation)
+        self.health_fix_resources_btn.setEnabled(actions["resources"])
+        self.health_fix_mt_btn.setEnabled(actions["mt"])
+        self.health_fix_audio_btn.setEnabled(actions["audio"])
         self.health_status_label.setText(f"Health summary ready ({report.get('overall', 'unknown')}).")
         self.refresh_health_btn.setEnabled(True)
 
@@ -451,6 +521,11 @@ class FirstRunWizardDialog(QDialog):
         if int(request_id) != self._active_health_request_id:
             return
         self.health_status_label.setText(f"Health check failed: {message}")
+        self.health_summary_counts_label.setText("Health summary unavailable.")
+        self.health_recommendation_label.setText("Recommended next step: Fix the health-check error and retry.")
+        self.health_fix_resources_btn.setEnabled(False)
+        self.health_fix_mt_btn.setEnabled(False)
+        self.health_fix_audio_btn.setEnabled(False)
         self.health_text.setPlainText(f"Health check failed.\n\n{message}")
         self.refresh_health_btn.setEnabled(True)
 

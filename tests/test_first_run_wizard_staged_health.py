@@ -98,3 +98,51 @@ def test_first_run_wizard_queues_health_refresh_until_current_run_finishes(monke
     assert dialog.refresh_health_btn.isEnabled() is True
     assert "health summary ready (ok)" in dialog.health_status_label.text().lower()
     assert "pronunciation bootstrap" in dialog.health_text.toPlainText().lower()
+
+
+def test_first_run_wizard_health_summary_enables_context_actions(monkeypatch, qtbot):
+    _FakeHealthWorker.created = []
+    monkeypatch.setattr("app.ui.first_run_wizard.UnifiedHealthCheckWorker", _FakeHealthWorker)
+
+    dialog = FirstRunWizardDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.wait(20)
+
+    worker = _FakeHealthWorker.created[0]
+    worker._running = False
+    worker.finished.emit(
+        {
+            "overall": "warn",
+            "items": [
+                {
+                    "check_id": "resource:nikud_pronunciation_model",
+                    "title": "Resource: Pronunciation Model",
+                    "status": "error",
+                    "message": "Missing.",
+                    "remediation": "Open Resources Manager and install the missing resource.",
+                },
+                {
+                    "check_id": "cloud_mt:google_cloud_translate",
+                    "title": "Cloud Translation: Google Cloud Translate",
+                    "status": "warn",
+                    "message": "Credentials are missing.",
+                    "remediation": "Open MT Provider Settings and configure provider credentials.",
+                },
+                {
+                    "check_id": "cloud_audio:google_cloud_tts",
+                    "title": "Cloud Audio: Google TTS",
+                    "status": "optional",
+                    "message": "Provider is disabled.",
+                    "remediation": "Enable provider in Audio Provider Settings if needed.",
+                },
+            ],
+        }
+    )
+
+    assert "errors: 1" in dialog.health_summary_counts_label.text().lower()
+    assert "warnings: 1" in dialog.health_summary_counts_label.text().lower()
+    assert dialog.health_fix_resources_btn.isEnabled() is True
+    assert dialog.health_fix_mt_btn.isEnabled() is True
+    assert dialog.health_fix_audio_btn.isEnabled() is False
+    assert "resources manager" in dialog.health_recommendation_label.text().lower()
