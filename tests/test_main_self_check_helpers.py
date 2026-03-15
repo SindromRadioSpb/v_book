@@ -285,6 +285,45 @@ def test_import_self_check_reports_helper_failure(monkeypatch):
     assert "DLL initialization routine failed" in check["error"]
 
 
+def test_db_open_self_check_reports_schema_and_profile(monkeypatch, tmp_path: Path):
+    db_path = (tmp_path / "db_open.db").resolve()
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE schema_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO schema_meta(key, value) VALUES ('schema_version', '42')")
+        conn.execute("CREATE TABLE dict_project(project_id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO dict_project(project_id) VALUES (1)")
+        conn.execute("CREATE TABLE source_document(doc_id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO source_document(doc_id) VALUES (1)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        main,
+        "resolve_db_path",
+        lambda _arg, settings=None: SimpleNamespace(path=str(db_path), source="CLI"),
+    )
+    monkeypatch.setattr(
+        "app.infra.db_path_resolver.classify_db_profile",
+        lambda path, settings=None: "Custom",
+    )
+
+    exit_code, payload = main._run_db_open_self_check(_DummySettings(), str(db_path))
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["db_profile"] == "Custom"
+    assert payload["db_source"] == "CLI"
+    assert payload["schema_version"] == 42
+    assert payload["supported_schema_version"] >= 42
+    assert payload["db_size_bytes"] > 0
+    assert payload["sample_project_id"] == 1
+    assert payload["sample_doc_id"] == 1
+
+
 def test_acquire_app_instance_lock_uses_expected_lockfile(monkeypatch, tmp_path: Path):
     captured = {}
 

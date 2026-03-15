@@ -484,14 +484,24 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
 
 
 def _run_db_open_self_check(settings: SettingsService, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
+    from app.infra.db_path_resolver import classify_db_profile, inspect_db_path
+
     resolved_db = resolve_db_path(db_path_arg, settings=settings)
     db_path = Path(resolved_db.path).resolve()
+    db_info = inspect_db_path(db_path)
     payload: dict[str, Any] = {
         "mode": "db_open",
         "timestamp_utc": _utc_now_iso(),
         "db_path": str(db_path),
         "db_source": resolved_db.source,
+        "db_profile": classify_db_profile(db_path, settings=settings),
+        "db_exists": bool(db_info.exists),
+        "db_size_bytes": int(db_info.size_bytes),
+        "schema_version": db_info.schema_version,
+        "supported_schema_version": int(db_info.supported_schema_version),
     }
+    if db_info.error:
+        payload["inspect_error"] = db_info.error
 
     started = time.perf_counter()
     try:
