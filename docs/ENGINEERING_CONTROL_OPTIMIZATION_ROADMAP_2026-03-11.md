@@ -2261,6 +2261,31 @@ Engineering meaning:
 - any future Dictionary work should now be treated as search-semantics or
   product UX work, not as a leftover cold-open branch.
 
+## Coverage / QA reporting phase 1
+
+The next bounded product-facing wave after Dictionary rollout is now recorded
+in:
+
+- `docs/COVERAGE_REPORTING_PHASE1_2026-03-15.md`
+
+Current status after the wave:
+
+- the existing `QA / Coverage` panel keeps its staged first-usable-state
+  contract intact;
+- operators can now copy the current panel state into the clipboard;
+- operators can now export a lightweight text/markdown coverage report from the
+  current panel state;
+- report generation reuses already-loaded panel data and does not introduce a
+  new worker/query pipeline.
+
+Engineering meaning:
+
+- this turns Coverage from a pure inspection panel into a bounded handoff
+  surface;
+- it avoids reopening coverage computation or export-center redesign;
+- any future coverage work should now focus on stronger report formats or
+  broader product workflow integration, not on another rescue branch.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now
