@@ -2401,6 +2401,38 @@ Engineering meaning:
 - any future reconnect work should focus on broader flow integration rather
   than another round of basic restart messaging.
 
+## Hewiki release and dev DB recovery
+
+The next bounded operational follow-up before the release decision is recorded
+in:
+
+- `docs/HEWIKI_RELEASE_AND_DEV_DB_RECOVERY_2026-03-15.md`
+
+Current status after the wave:
+
+- both canonical large hewiki DB paths were restored back to a usable
+  lower-layer state
+- release reconnect target:
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
+  - `db_open = ok`
+  - `schema_version = 42`
+  - `repair_fts_schema.py --dry-run = OK`
+- ongoing development target:
+  - `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+  - `db_open = ok`
+  - `schema_version = 42`
+  - `repair_fts_schema.py --dry-run = OK`
+
+Engineering meaning:
+
+- the release reconnect DB and the post-release development DB are now
+  intentionally separated again;
+- this closes the immediate lower-layer blocker for those two canonical paths;
+- it does not by itself complete release sign-off, which still requires:
+  - fresh `dist` and installer rebuild
+  - frozen/installed self-check reruns
+  - final release evidence on rebuilt artifacts
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now

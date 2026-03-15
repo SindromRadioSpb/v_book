@@ -176,8 +176,16 @@ Known-good reconnect target for release smoke:
 
 - [ ] `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db`
 - [ ] Verify before reconnect:
-  - `schema_version = 35`
-  - `PRAGMA quick_check = ok`
+  - `schema_version = 42`
+  - `python scripts/repair_fts_schema.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --dry-run` returns `status = OK`
+
+Dev/test DB kept for ongoing post-release development:
+
+- [ ] `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+- [ ] Verify before ongoing development:
+  - `schema_version = 42`
+  - `python scripts/repair_fts_schema.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --dry-run` returns `status = OK`
+- [ ] Do not treat the `test.db` target as release sign-off evidence; it is the ongoing operator/dev regression DB after the release cut
 
 ### 3. Basic Functionality Test
 

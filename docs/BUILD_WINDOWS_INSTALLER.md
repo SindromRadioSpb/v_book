@@ -452,8 +452,20 @@ python -c "import sqlite3; p=r'J:\Project_Vibe\V_book\ref_corpora\HDLE_Processin
 
 Pass criteria:
 
-- `schema_version = 35`
-- `quick_check = ok`
+- `schema_version = 42`
+- `python scripts/repair_fts_schema.py --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --dry-run` returns `status = OK`
+
+Separate ongoing development target after the release cut:
+
+- `J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db`
+
+This second DB is retained for:
+
+- ongoing operator-style testing during the next development stage
+- post-release regression work
+- reproducing heavy-project issues without using the release reconnect target
+
+It is not the primary release sign-off DB.
 
 ### Test on Clean Windows VM (Critical)
 
