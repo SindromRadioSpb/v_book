@@ -2248,7 +2248,8 @@ Current status after the rollout:
   - default exact count (cold) ~= `0.129s`
 - runtime Dictionary search no longer blindly trusts `lemma_fts` existence:
   - healthy `lemma_fts` keeps the FTS path;
-  - unhealthy `lemma_fts` parity now falls back to `LIKE`;
+  - unhealthy `lemma_fts` parity or sampled semantic health now falls back to
+    `LIKE`;
   - the fallback warns once and points to
     `python scripts/repair_lemma_fts.py --db-path "<db-path>"`
 - parity inspection is now cached per DB path for bounded runtime cost

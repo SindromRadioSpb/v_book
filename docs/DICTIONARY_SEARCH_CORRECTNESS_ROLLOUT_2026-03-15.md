@@ -60,18 +60,20 @@ Docs:
 `DictionaryService` previously switched to the FTS path whenever the
 `lemma_fts` table existed.
 
-That was insufficient because the user-visible search contract depends on
-rowid parity:
+That was insufficient because the user-visible search contract depends on both
+rowid parity and bounded semantic health:
 
 - `lemma.rowid == lemma.lemma_id`
 - `lemma_fts.rowid == lemma.lemma_id`
+- sampled non-noise `lemma_text` values must still be searchable through
+  `lemma_fts MATCH ...` for their own `rowid`
 
 The new runtime behavior is:
 
 - if `lemma_fts` is missing: use existing `LIKE` fallback;
 - if `lemma_fts` exists and parity is healthy: keep using FTS;
-- if `lemma_fts` exists but parity is unhealthy: log one bounded warning and
-  fall back to `LIKE`.
+- if `lemma_fts` exists but parity or sampled semantic health is unhealthy:
+  log one bounded warning and fall back to `LIKE`.
 
 ### 2. Runtime parity checks are cached
 
@@ -105,6 +107,11 @@ New bounded automated evidence now covers:
 - broken `lemma_fts` parity with existing table present:
   - Dictionary search returns matching rows via `LIKE` fallback;
   - Dictionary count stays correct for the same search term;
+- semantic drift where `lemma_fts` still contains the rowid but `MATCH` no
+  longer finds the current `lemma_text`:
+  - bounded health probe marks the DB unhealthy;
+  - runtime search/count fall back to `LIKE`;
+  - offline repair restores searchable FTS state;
 - repeated search/count on the same DB:
   - parity inspection is cached and not re-run on every call.
 
@@ -116,7 +123,7 @@ Current classification:
 
 - Dictionary cold-open path: closed
 - Dictionary offline `lemma_fts` repair path: implemented
-- Dictionary runtime trust issue from parity drift: mitigated
+- Dictionary runtime trust issue from parity or semantic drift: mitigated
 
 What still remains outside this patch:
 
