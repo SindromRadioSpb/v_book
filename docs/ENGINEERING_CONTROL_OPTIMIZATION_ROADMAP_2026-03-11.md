@@ -2234,6 +2234,33 @@ Current status after the branch:
 - applying that repair to a concrete unhealthy DB is an explicit operator step,
   not a new wide cold-audit program.
 
+## Dictionary search correctness rollout
+
+The first product-facing rollout follow-up for the Dictionary parity branch is
+now recorded in:
+
+- `docs/DICTIONARY_SEARCH_CORRECTNESS_ROLLOUT_2026-03-15.md`
+
+Current status after the rollout:
+
+- Dictionary open remains objectively not a cold blocker:
+  - default first page ~= `0.003s`
+  - default exact count (cold) ~= `0.129s`
+- runtime Dictionary search no longer blindly trusts `lemma_fts` existence:
+  - healthy `lemma_fts` keeps the FTS path;
+  - unhealthy `lemma_fts` parity now falls back to `LIKE`;
+  - the fallback warns once and points to
+    `python scripts/repair_lemma_fts.py --db-path "<db-path>"`
+- parity inspection is now cached per DB path for bounded runtime cost
+
+Engineering meaning:
+
+- this closes the most immediate user-facing search trust risk without
+  reopening generic cold work;
+- the canonical offline `lemma_fts` repair path remains the real restore path;
+- any future Dictionary work should now be treated as search-semantics or
+  product UX work, not as a leftover cold-open branch.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now
