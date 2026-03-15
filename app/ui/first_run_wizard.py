@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.infra.db_path_resolver import (
+    STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
     SETTINGS_KEY_ACTIVE_DB_PATH,
     clear_deferred_db_startup_guard,
     discover_baseline_db_path,
@@ -344,9 +345,15 @@ class FirstRunWizardDialog(QDialog):
         info = inspect_db_path(selected)
         if selected == get_default_db_path(settings=self.settings):
             if info.exists:
-                self.db_status_label.setText("Default DB exists and will be reused.")
+                self.db_status_label.setText(
+                    "Default DB exists and will be reused. This is the fastest startup path. "
+                    "Use it when you want to start locally now and reconnect a heavier DB later."
+                )
             else:
-                self.db_status_label.setText("Default DB will be created on next startup.")
+                self.db_status_label.setText(
+                    "Default DB will be created on next startup. This is the recommended local-first path. "
+                    "You can reconnect a migrated or heavy DB later from Tools -> Switch Database."
+                )
             return
 
         if not info.exists:
@@ -357,7 +364,20 @@ class FirstRunWizardDialog(QDialog):
             return
 
         schema = info.schema_version if info.schema_version is not None else "unknown"
-        self.db_status_label.setText(f"Selected DB ready (schema: {schema}).")
+        status = f"Selected DB ready (schema: {schema}). Restart is required to switch."
+        if (
+            info.schema_version is not None
+            and info.supported_schema_version > 0
+            and info.schema_version < info.supported_schema_version
+        ):
+            status += " It is older than the app schema; expect one longer restart because backup and migration may run."
+        elif info.schema_version is not None and info.schema_version == info.supported_schema_version:
+            status += " If this is the DB you plan to use next, finish the wizard and restart once."
+        if info.size_bytes >= STARTUP_DEFER_SIZE_THRESHOLD_BYTES:
+            status += " This is a heavy DB, so reconnect can take longer than the default local DB. Prefer one deliberate restart into it rather than repeated DB switching."
+        if self.db_baseline_radio.isChecked():
+            status += " Baseline quick-pick is intended for explicit reconnect when you want the large reference workspace next."
+        self.db_status_label.setText(status)
 
     def _apply_database_selection(self) -> bool:
         selected = self._selected_db_path()

@@ -9,7 +9,10 @@ from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStackedWidg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 
-from app.infra.db_path_resolver import classify_db_profile
+from app.infra.db_path_resolver import (
+    STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
+    classify_db_profile,
+)
 from app.infra.settings import SettingsService
 from app.services.audio_player_service import AudioPlayerService
 from app.services.db_service import DBService
@@ -646,6 +649,7 @@ class AppWindow(QMainWindow):
         deferred_path = str(self.settings.get_string("app/deferred_startup_db_path", "") or "").strip()
         if not deferred_path:
             return
+        deferred_reason = str(self.settings.get_string("app/deferred_startup_db_reason", "") or "").strip()
 
         from app.infra.db_path_resolver import discover_baseline_db_path, inspect_db_path
         from PyQt6.QtWidgets import QMessageBox
@@ -653,6 +657,36 @@ class AppWindow(QMainWindow):
         deferred = Path(deferred_path).expanduser().resolve()
         info = inspect_db_path(deferred)
         baseline = discover_baseline_db_path()
+        message = self._build_deferred_database_reconnect_message(
+            deferred=deferred,
+            info=info,
+            deferred_reason=deferred_reason,
+            baseline=baseline,
+            inspect_db_info=inspect_db_path,
+        )
+        answer = QMessageBox.question(
+            self,
+            "Database Startup Guard",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.open_database_switch_dialog()
+        else:
+            self._show_nav_status(
+                "Running on default local DB. Use Tools -> Switch Database to connect a migrated database."
+            )
+
+    def _build_deferred_database_reconnect_message(
+        self,
+        *,
+        deferred: Path,
+        info,
+        deferred_reason: str,
+        baseline: Optional[Path],
+        inspect_db_info,
+    ) -> str:
         lines = [
             "HDLE opened with the default local DB to avoid blocking startup on a large legacy database.",
             "",
@@ -664,8 +698,10 @@ class AppWindow(QMainWindow):
             )
         if info.exists:
             lines.append(f"Deferred DB size: {info.size_bytes / (1024 * 1024 * 1024):.2f} GB")
+        if deferred_reason:
+            lines.extend(["", f"Deferred reason: {deferred_reason}"])
         if baseline is not None:
-            baseline_info = inspect_db_path(baseline)
+            baseline_info = inspect_db_info(baseline)
             baseline_schema = (
                 str(baseline_info.schema_version)
                 if baseline_info.schema_version is not None
@@ -681,22 +717,19 @@ class AppWindow(QMainWindow):
         lines.extend(
             [
                 "",
-                "Open Switch Database now to connect a migrated DB explicitly.",
+                "Next step: use Tools -> Switch Database to reconnect explicitly only when you know which DB you want next.",
+                "Recommended path: choose one migrated DB, switch once, and let the restart complete before making another DB change.",
             ]
         )
-        answer = QMessageBox.question(
-            self,
-            "Database Startup Guard",
-            "\n".join(lines),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            self.open_database_switch_dialog()
-        else:
-            self._show_nav_status(
-                "Running on default local DB. Use Tools -> Switch Database to connect a migrated database."
+        if info.exists and info.schema_version is not None and info.schema_version < info.supported_schema_version:
+            lines.append(
+                "Because the deferred DB is still older than the app schema, expect one longer restart while backup and migration finish."
             )
+        if info.exists and info.size_bytes >= STARTUP_DEFER_SIZE_THRESHOLD_BYTES:
+            lines.append(
+                "Because this is a heavy DB, staying on the default local DB is still the safer option until you intentionally reconnect."
+            )
+        return "\n".join(lines)
 
     def _collect_shortcut_conflicts(self) -> Dict[str, List[str]]:
         by_shortcut: Dict[str, List[str]] = {}

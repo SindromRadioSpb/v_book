@@ -30,6 +30,9 @@ from PyQt6.QtWidgets import (
 
 from app.infra.db_path_resolver import (
     SETTINGS_KEY_ACTIVE_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_PATH,
+    SETTINGS_KEY_DEFERRED_DB_REASON,
+    STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
     clear_deferred_db_startup_guard,
     classify_db_profile,
     discover_baseline_db_path,
@@ -185,6 +188,11 @@ class DatabaseSwitchDialog(QDialog):
         self.selection_info_label.setWordWrap(True)
         root.addWidget(self.selection_info_label)
 
+        self.reconnect_guidance_label = QLabel("")
+        self.reconnect_guidance_label.setWordWrap(True)
+        self.reconnect_guidance_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        root.addWidget(self.reconnect_guidance_label)
+
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
@@ -274,8 +282,55 @@ class DatabaseSwitchDialog(QDialog):
             else:
                 lines.append("File does not exist.")
         self.selection_info_label.setText("\n".join(lines))
+        self.reconnect_guidance_label.setText(
+            self._build_reconnect_guidance(selected=selected, info=info, profile=profile)
+        )
 
         self.backup_btn.setEnabled(info.exists and not info.error)
+
+    def _build_reconnect_guidance(self, *, selected: Path, info, profile: str) -> str:
+        guidance: list[str] = []
+        deferred_path = str(self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_PATH, "") or "").strip()
+        deferred_reason = str(self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_REASON, "") or "").strip()
+        selected_resolved = selected.resolve()
+        if deferred_path:
+            try:
+                deferred_resolved = Path(deferred_path).expanduser().resolve()
+            except Exception:
+                deferred_resolved = None
+            if deferred_resolved is not None and deferred_resolved == selected_resolved:
+                guidance.append("This DB was previously deferred at startup. Switching now is the explicit reconnect path.")
+                if deferred_reason:
+                    guidance.append(f"Deferred reason: {deferred_reason}")
+
+        if selected_resolved == self.default_db_path.resolve():
+            guidance.append("Recommended for the fastest local startup and the safest default operator workflow.")
+            guidance.append(
+                "Use this when you want to keep working immediately and reconnect a heavier DB later from Tools -> Switch Database."
+            )
+        else:
+            guidance.append("Switching databases always requires a restart.")
+            guidance.append(
+                "Recommended reconnect order: confirm the target DB, switch once, then let the restart complete before making another DB change."
+            )
+            if info.exists and info.schema_version is not None and info.supported_schema_version > 0:
+                if info.schema_version < info.supported_schema_version:
+                    guidance.append(
+                        "This DB is older than the current app schema. Expect one longer restart while backup and migration complete."
+                    )
+                elif info.schema_version == info.supported_schema_version:
+                    guidance.append(
+                        "Schema is current. If this is the DB you expect to use next, this is the lowest-risk reconnect case."
+                    )
+            if info.exists and info.size_bytes >= STARTUP_DEFER_SIZE_THRESHOLD_BYTES:
+                guidance.append(
+                    "This is a heavy DB. Prefer creating a backup before switching if you have not already validated it, and avoid repeated switch/restart loops."
+                )
+            if profile == "Baseline (dev)":
+                guidance.append(
+                    "Baseline quick-pick is intended for explicit reconnect after the UI is visible. Use it when you want the large reference workspace next, not as the default local-first profile."
+                )
+        return "\n".join(guidance)
 
     def _copy_selected_path(self) -> None:
         app = QApplication.instance()
@@ -353,7 +408,8 @@ class DatabaseSwitchDialog(QDialog):
             if info.schema_version < info.supported_schema_version:
                 warning = (
                     f"Selected database schema is older ({info.schema_version}) than app schema "
-                    f"({info.supported_schema_version}). Migrations may run on next startup."
+                    f"({info.supported_schema_version}). Migrations may run on next startup.\n\n"
+                    "For large databases this can take longer because backup and migration happen before the next full UI session opens."
                 )
                 return True, "", warning
         return True, "", None

@@ -1,5 +1,8 @@
 ﻿"""Integration-level contract tests for AppWindow workspace navigation."""
 
+import sqlite3
+from pathlib import Path
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QWidget
@@ -41,6 +44,21 @@ def _fresh_window(monkeypatch, qtbot):
     qtbot.addWidget(window)
     window.show()
     return window
+
+
+def _create_db(path: Path, schema_version: int) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
+            (str(schema_version),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
 
 
 def test_no_duplicate_shortcut_bindings(monkeypatch, qtbot):
@@ -162,3 +180,50 @@ def test_maybe_open_imported_project_routes_to_new_project(monkeypatch, qtbot):
 
     window._maybe_open_imported_project(_Dialog())
     assert opened == [77]
+
+
+def test_deferred_reconnect_prompt_mentions_single_restart_path(monkeypatch, qtbot, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.set_value("workspace/active_workspace", "workspace.projects")
+    settings.sync()
+
+    monkeypatch.setattr("app.ui.project_dashboard.ProjectDashboard.load_projects", lambda self: None)
+    monkeypatch.setattr("app.ui.project_dashboard.ProjectService", lambda: object())
+    monkeypatch.setattr("app.ui.app_window.ProjectService", lambda: object())
+
+    window = AppWindow()
+    qtbot.addWidget(window)
+    window.show()
+
+    legacy_db = _create_db(tmp_path / "legacy.db", 41)
+    settings.set_value("app/deferred_startup_db_path", str(legacy_db))
+    settings.set_value("app/deferred_startup_db_reason", "legacy startup guard")
+    settings.sync()
+
+    monkeypatch.setattr("app.ui.app_window.STARTUP_DEFER_SIZE_THRESHOLD_BYTES", 1)
+
+    info = type(
+        "Info",
+        (),
+        {
+            "exists": True,
+            "schema_version": 41,
+            "supported_schema_version": 42,
+            "size_bytes": 2,
+        },
+    )()
+
+    text = window._build_deferred_database_reconnect_message(
+        deferred=legacy_db,
+        info=info,
+        deferred_reason="legacy startup guard",
+        baseline=None,
+        inspect_db_info=lambda path: info,
+    )
+
+    assert "choose one migrated DB, switch once" in text
+    assert "longer restart while backup and migration finish" in text
+    assert "safer option until you intentionally reconnect" in text
+    assert "Deferred reason: legacy startup guard" in text
