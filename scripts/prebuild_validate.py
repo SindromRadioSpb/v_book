@@ -15,6 +15,7 @@ Exit codes:
 """
 
 import argparse
+import json
 from datetime import datetime, timezone
 from dataclasses import dataclass
 import importlib
@@ -49,6 +50,17 @@ class CheckResult:
     name: str
     status: str
     details: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "details": self.details,
+        }
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _unique_export_project_name() -> str:
@@ -417,6 +429,39 @@ def _compute_final_status(results: list[CheckResult]) -> str:
     return FINAL_PASS
 
 
+def build_validation_report(
+    *,
+    db_path: Path,
+    profile: str,
+    skip_export_import: bool,
+    skip_quick_check: bool,
+    final_status: str,
+    results: list[CheckResult],
+) -> dict[str, object]:
+    from app.build_meta import get_build_meta
+
+    return {
+        "generated_at_utc": _utc_now_iso(),
+        "db_path": str(db_path),
+        "db_size_bytes": int(db_path.stat().st_size) if db_path.exists() else 0,
+        "profile": profile,
+        "skip_export_import": bool(skip_export_import),
+        "skip_quick_check": bool(skip_quick_check),
+        "final_status": final_status,
+        "checks": [item.to_dict() for item in results],
+        "build": get_build_meta(),
+    }
+
+
+def write_validation_report(report: dict[str, object], out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return out_path
+
+
 def run_prebuild_validation(
     db_path: Path,
     *,
@@ -570,6 +615,12 @@ def main():
         action="store_true",
         help="Skip PRAGMA quick_check (useful for very large DB pipelines)",
     )
+    parser.add_argument(
+        "--report-json-out",
+        type=Path,
+        default=None,
+        help="Optional path to write a machine-readable prebuild validation JSON report",
+    )
     args = parser.parse_args()
 
     db_path = args.db_path
@@ -591,6 +642,17 @@ def main():
         skip_export_import=bool(args.skip_export_import),
         skip_quick_check=bool(args.skip_quick_check),
     )
+    report = build_validation_report(
+        db_path=db_path,
+        profile=args.profile,
+        skip_export_import=bool(args.skip_export_import),
+        skip_quick_check=bool(args.skip_quick_check),
+        final_status=final_status,
+        results=results,
+    )
+    if args.report_json_out is not None:
+        report_path = write_validation_report(report, args.report_json_out)
+        logger.info("JSON report written: %s", report_path)
 
     # Summary
     logger.info("\n" + "=" * 70)
