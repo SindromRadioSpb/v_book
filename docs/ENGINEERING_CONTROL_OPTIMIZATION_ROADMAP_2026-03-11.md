@@ -2286,6 +2286,28 @@ Engineering meaning:
 - any future coverage work should now focus on stronger report formats or
   broader product workflow integration, not on another rescue branch.
 
+## Guided onboarding / reconnect UX phase 1
+
+The next bounded product-facing wave after Coverage reporting is now recorded
+in:
+
+- `docs/GUIDED_ONBOARDING_RECONNECT_PHASE1_2026-03-15.md`
+
+Current status after the wave:
+
+- the first-run wizard keeps its staged/background health-summary contract;
+- the health page now surfaces severity counts for the current report;
+- the health page now shows a recommended next step;
+- the health page now enables context fix buttons only for actionable
+  `warn` / `error` categories in the current report.
+
+Engineering meaning:
+
+- this improves operator guidance without changing health-check semantics;
+- it does not reopen cold, reconnect, or provider/resource redesign work;
+- any future onboarding work should now focus on broader flow coherence rather
+  than raw health-summary visibility.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now
