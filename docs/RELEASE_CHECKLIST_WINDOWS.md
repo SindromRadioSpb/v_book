@@ -61,6 +61,12 @@ cd J:\Project_Vibe\V_book
   - `frozen_onnx_probe.status = ok`
   - `bootstrap:pronunciation.status = ok`
   - `bootstrap:sentence_niqqud.status = ok`
+- [ ] Manual helper confirmation passes:
+  - `.\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --out "build\verify_dist\probe_dist_manual.json"`
+  - `probe_dist_manual.json` shows:
+    - `ok = true`
+    - `details = real_inference`
+    - `model_path` under `_internal\resources\models\phonikud\`
 - [ ] `build\verify_dist\db_open_dist.json` reports:
   - `ok = true`
   - `schema_version` present
@@ -106,6 +112,8 @@ ISCC.exe installer\installer.iss
 - [ ] Installed to `C:\Program Files\HDLE\`
 - [ ] Start menu shortcut: Start → HDLE Premium
 - [ ] Desktop shortcut (if selected during install)
+- [ ] Installed payload contains:
+  - `C:\Program Files\HDLE\_internal\resources\models\phonikud\phonikud-1.0.int8.onnx`
 
 ### 2. First Run
 

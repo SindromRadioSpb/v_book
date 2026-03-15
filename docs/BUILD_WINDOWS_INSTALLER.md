@@ -221,6 +221,25 @@ Reason:
   - `huggingface_hub` is missing from packaging,
   - ONNX helper/runtime contract drifts from self-check expectations.
 
+Current verified frozen-layout expectation for fresh `dist` builds:
+
+- staged phonikud model is bundled under:
+  - `dist\HDLE_Premium\_internal\resources\models\phonikud\phonikud-1.0.int8.onnx`
+- `HDLE_ONNX_Probe.exe` must discover that bundled model without requiring a
+  user-configured `pronunciation/phonikud/model_path`
+
+Manual confirmation command:
+
+```powershell
+.\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --out "J:\Project_Vibe\V_book\build\verify_dist\probe_dist_manual.json"
+```
+
+Pass criteria:
+
+- `ok = true`
+- `details = real_inference`
+- `model_path` points to `_internal\resources\models\phonikud\...`
+
 **Windows console encoding gate (required before release):**
 
 `--self-check` output must remain ASCII-safe on Windows consoles with `cp1251`.

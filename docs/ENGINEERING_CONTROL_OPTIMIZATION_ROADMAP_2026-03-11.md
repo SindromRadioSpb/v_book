@@ -2433,6 +2433,32 @@ Engineering meaning:
   - frozen/installed self-check reruns
   - final release evidence on rebuilt artifacts
 
+## Release / ship gate phase 4
+
+The next bounded release-facing follow-up after restoring the canonical hewiki
+DB targets is recorded in:
+
+- `docs/RELEASE_SHIP_GATE_PHASE4_2026-03-15.md`
+
+Current status after the wave:
+
+- fresh `dist`/installer rebuilds now explicitly bundle the staged phonikud
+  ONNX model
+- frozen bundled-resource lookup now resolves the actual packaged layout:
+  - `_internal\resources`
+- `HDLE_ONNX_Probe.exe` now finds the bundled model and passes real inference
+- `scripts/verify_frozen_health.ps1` passes on the fresh `dist` payload against
+  the recovered release reconnect DB
+
+Engineering meaning:
+
+- the packaged ONNX probe/model discovery blocker is closed
+- release sign-off no longer depends on ad-hoc local model-path configuration
+- remaining release work narrows to:
+  - installed-app smoke on the fresh installer
+  - clean VM smoke
+  - final release evidence capture
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now
