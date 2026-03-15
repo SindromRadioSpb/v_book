@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic repair tool for Dictionary lemma_fts rowid parity drift."""
+"""Deterministic repair tool for Dictionary lemma_fts health drift."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def repair_lemma_fts(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Repair lemma_fts parity drift")
+    parser = argparse.ArgumentParser(description="Repair lemma_fts health drift")
     parser.add_argument("--db-path", required=True, help="Path to SQLite DB")
     parser.add_argument("--dry-run", action="store_true", help="Inspect only")
     parser.add_argument(

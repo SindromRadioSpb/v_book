@@ -279,6 +279,51 @@ def test_like_fallback_used_when_lemma_fts_parity_unhealthy(tmp_path):
     DictionaryService.invalidate_count_cache()
 
 
+def test_like_fallback_used_when_lemma_fts_semantic_drift_unhealthy(fts_engine):
+    svc = DictionaryService()
+    DictionaryService.invalidate_count_cache()
+    with Session(fts_engine) as session:
+        project_id = _seed(session, count=20)
+        lemma_id = session.execute(
+            text(
+                "SELECT MIN(lemma_id) FROM lemma WHERE project_id = :project_id"
+            ),
+            {"project_id": project_id},
+        ).scalar_one()
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ai"))
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_au"))
+        session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ad"))
+        session.execute(
+            text("UPDATE lemma SET lemma_text = :lemma_text WHERE lemma_id = :lemma_id"),
+            {"lemma_text": "semantic_shift", "lemma_id": lemma_id},
+        )
+        session.commit()
+
+        raw_fts_count = session.execute(
+            text("SELECT COUNT(*) FROM lemma_fts WHERE lemma_fts MATCH :term"),
+            {"term": '"semantic_shift"*'},
+        ).scalar_one()
+        results = svc.search_lemmas(
+            session,
+            project_id,
+            filters={"search": "semantic_shift", "hide_noise": False},
+            limit=50,
+            offset=0,
+        )
+        count = svc.count_lemmas(
+            session,
+            project_id,
+            filters={"search": "semantic_shift", "hide_noise": False},
+        )
+
+    assert raw_fts_count == 0
+    assert len(results) == 1
+    assert results[0][0].lemma_text == "semantic_shift"
+    assert count == 1
+    assert DictionaryService._lemma_fts_health_cache
+    DictionaryService.invalidate_count_cache()
+
+
 def test_lemma_fts_health_probe_is_cached(fts_engine, monkeypatch):
     svc = DictionaryService()
     DictionaryService.invalidate_count_cache()
@@ -298,6 +343,8 @@ def test_lemma_fts_health_probe_is_cached(fts_engine, monkeypatch):
             "extra_in_fts_count": 0,
             "sample_missing_ids": [],
             "sample_extra_rowids": [],
+            "semantic_sample_ids": [1, 2, 3],
+            "unsearchable_sample_ids": [],
         }
 
     monkeypatch.setattr(

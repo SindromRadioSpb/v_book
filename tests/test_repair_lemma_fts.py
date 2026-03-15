@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.infra.fts_manager import inspect_lemma_fts_parity
+from app.infra.fts_manager import ensure_lemma_fts_health, inspect_lemma_fts_parity
 from app.infra.sa_models import DictProject, Lemma, LemmaProjectStat, Library
 from app.services.dictionary_service import DictionaryService
 from scripts import repair_lemma_fts as repair_mod
@@ -140,5 +140,75 @@ def test_repair_lemma_fts_dry_run_reports_required_action(tmp_path: Path) -> Non
     assert summary["status"] == "FAILED"
     assert "dry-run" in str(summary["error"]).lower()
     assert summary["issues_detected"]
+
+    engine.dispose()
+
+
+def test_repair_lemma_fts_repairs_semantic_drift(tmp_path: Path) -> None:
+    db_path = tmp_path / "lemma_fts_semantic_drift.db"
+    engine = _make_engine(str(db_path))
+    project_id, lemma_id, _lemma_text = _seed(engine)
+    raw = engine.raw_connection()
+    try:
+        ensure_lemma_fts_health(raw, schema="main", rebuild=True)
+    finally:
+        raw.close()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DROP TRIGGER IF EXISTS trg_lemma_fts_ai")
+        conn.execute("DROP TRIGGER IF EXISTS trg_lemma_fts_au")
+        conn.execute("DROP TRIGGER IF EXISTS trg_lemma_fts_ad")
+        conn.execute(
+            "UPDATE lemma SET lemma_text = ? WHERE lemma_id = ?",
+            ("semantic_shift", lemma_id),
+        )
+        conn.commit()
+        before = inspect_lemma_fts_parity(conn)
+
+    assert before["healthy"] is False
+    assert lemma_id in before["unsearchable_sample_ids"]
+
+    svc = DictionaryService()
+    with Session(engine) as session:
+        before_results = svc.search_lemmas(
+            session,
+            project_id,
+            filters={"search": "semantic_shift", "hide_noise": False},
+            limit=50,
+            offset=0,
+        )
+        like_count = session.execute(
+            text("SELECT COUNT(*) FROM lemma WHERE lemma_text LIKE :term"),
+            {"term": "%semantic_shift%"},
+        ).scalar_one()
+        fts_raw_count = session.execute(
+            text("SELECT COUNT(*) FROM lemma_fts WHERE lemma_fts MATCH :term"),
+            {"term": '"semantic_shift"*'},
+        ).scalar_one()
+    assert len(before_results) == 1
+    assert before_results[0][0].lemma_text == "semantic_shift"
+    assert like_count == 1
+    assert fts_raw_count == 0
+
+    summary = repair_mod.repair_lemma_fts(db_path, dry_run=False, backup=False)
+    assert summary["status"] == "REPAIRED"
+    assert summary["after"]["healthy"] is True
+    assert summary["after"]["unsearchable_sample_ids"] == []
+
+    with Session(engine) as session:
+        after_results = svc.search_lemmas(
+            session,
+            project_id,
+            filters={"search": "semantic_shift", "hide_noise": False},
+            limit=50,
+            offset=0,
+        )
+        fts_raw_count_after = session.execute(
+            text("SELECT COUNT(*) FROM lemma_fts WHERE lemma_fts MATCH :term"),
+            {"term": '"semantic_shift"*'},
+        ).scalar_one()
+    assert len(after_results) == 1
+    assert after_results[0][0].lemma_text == "semantic_shift"
+    assert fts_raw_count_after == 1
 
     engine.dispose()

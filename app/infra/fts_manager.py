@@ -261,12 +261,18 @@ LEMMA_FTS_TRIGGER_NAMES = (
 )
 
 
+def _quote_fts5_prefix_term(term: str) -> str:
+    """Return a quoted FTS5 prefix query for a raw term."""
+    escaped = str(term or "").replace('"', '""')
+    return f'"{escaped}"*'
+
+
 def inspect_lemma_fts_parity(
     conn: sqlite3.Connection,
     schema: str = "main",
     sample_limit: int = 5,
 ) -> dict[str, Any]:
-    """Inspect lemma_fts rowid parity against lemma.lemma_id.
+    """Inspect lemma_fts rowid/search parity against lemma.lemma_id.
 
     This is intentionally a bounded, explicit health probe for the Dictionary
     search contract. It is not used on the hot search path.
@@ -296,6 +302,8 @@ def inspect_lemma_fts_parity(
     extra_in_fts_count: int | None
     sample_missing_ids: list[int] = []
     sample_extra_rowids: list[int] = []
+    semantic_sample_ids: list[int] = []
+    unsearchable_sample_ids: list[int] = []
 
     if table_exists:
         lemma_fts_count = int(conn.execute(
@@ -355,6 +363,31 @@ def inspect_lemma_fts_parity(
                 (sample_limit,),
             ).fetchall()
         ]
+        semantic_rows = conn.execute(
+            f"""
+            SELECT l.lemma_id, l.lemma_text
+            FROM {prefix}lemma AS l
+            WHERE COALESCE(l.is_noise, 0) = 0
+              AND LENGTH(TRIM(COALESCE(l.lemma_text, ''))) >= 2
+            ORDER BY l.lemma_id ASC
+            LIMIT ?
+            """,
+            (sample_limit,),
+        ).fetchall()
+        semantic_sample_ids = [int(row[0]) for row in semantic_rows]
+        for lemma_id, lemma_text in semantic_rows:
+            match_row = conn.execute(
+                f"""
+                SELECT 1
+                FROM {prefix}lemma_fts
+                WHERE rowid = ?
+                  AND {prefix}lemma_fts MATCH ?
+                LIMIT 1
+                """,
+                (int(lemma_id), _quote_fts5_prefix_term(str(lemma_text))),
+            ).fetchone()
+            if match_row is None:
+                unsearchable_sample_ids.append(int(lemma_id))
     else:
         lemma_fts_count = None
         missing_in_fts_count = None
@@ -372,6 +405,8 @@ def inspect_lemma_fts_parity(
         issues.append(f"missing_rowids_in_fts:{missing_in_fts_count}")
     if extra_in_fts_count:
         issues.append(f"extra_rowids_in_fts:{extra_in_fts_count}")
+    if unsearchable_sample_ids:
+        issues.append(f"unsearchable_sample_rowids:{unsearchable_sample_ids}")
 
     healthy = (
         table_exists
@@ -379,6 +414,7 @@ def inspect_lemma_fts_parity(
         and missing_in_fts_count == 0
         and extra_in_fts_count == 0
         and lemma_fts_count == lemma_count
+        and not unsearchable_sample_ids
     )
 
     return {
@@ -392,6 +428,8 @@ def inspect_lemma_fts_parity(
         "extra_in_fts_count": extra_in_fts_count,
         "sample_missing_ids": sample_missing_ids,
         "sample_extra_rowids": sample_extra_rowids,
+        "semantic_sample_ids": semantic_sample_ids,
+        "unsearchable_sample_ids": unsearchable_sample_ids,
         "issues": issues,
     }
 
