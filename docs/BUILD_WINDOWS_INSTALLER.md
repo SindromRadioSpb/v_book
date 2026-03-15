@@ -178,7 +178,8 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_frozen_health.ps1
 ```
 
 Expected:
-- `build\verify\import_dist.json` and `build\verify\health_dist.json` contain `build.version`, `build.commit`, `build.dirty`, `build.built_at_utc`
+- `build\verify\import_dist.json`, `build\verify\health_dist.json`, and `build\verify\db_open_dist.json` contain `build.version`, `build.commit`, `build.dirty`, `build.built_at_utc`
+- `build\verify\frozen_health_summary.json` exists as the canonical frozen self-check summary artifact
 - `build\verify\build_meta_dist.txt` exists and matches the expected commit for the release candidate
 
 **Frozen runtime gates (required before release):**
@@ -188,6 +189,7 @@ Run these exact checks on the built `dist` payload:
 ```powershell
 .\dist\HDLE_Premium\HDLE_Premium.exe --self-check import --self-check-out "J:\Project_Vibe\V_book\build\verify_dist\import_dist.json"
 .\dist\HDLE_Premium\HDLE_Premium.exe --self-check health --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_dist\health_dist.json"
+.\dist\HDLE_Premium\HDLE_Premium.exe --self-check db_open --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_dist\db_open_dist.json"
 .\dist\HDLE_Premium\HDLE_ONNX_Probe.exe --mode import --out "J:\Project_Vibe\V_book\build\verify_dist\probe_import_dist.json"
 ```
 
@@ -198,6 +200,12 @@ Required pass criteria:
 - `frozen_onnx_probe.status = ok`
 - `bootstrap:pronunciation.status = ok`
 - `bootstrap:sentence_niqqud.status = ok`
+- `db_open_dist.json` reports:
+  - `ok = true`
+  - `schema_version` present
+  - `supported_schema_version` present
+  - `db_profile` present
+- `frozen_health_summary.json` exists and summarizes probe/import/health/db_open
 
 This is mandatory after any change touching:
 
@@ -350,6 +358,7 @@ installer\output\HDLE_Premium_Setup.exe
    ```powershell
    M:\Soft\HDLE\HDLE_Premium.exe --self-check import --self-check-out "J:\Project_Vibe\V_book\build\verify_installed\import_installed.json"
    M:\Soft\HDLE\HDLE_Premium.exe --self-check health --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_installed\health_installed.json"
+   M:\Soft\HDLE\HDLE_Premium.exe --self-check db_open --db-path "J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db" --self-check-out "J:\Project_Vibe\V_book\build\verify_installed\db_open_installed.json"
    M:\Soft\HDLE\HDLE_ONNX_Probe.exe --mode import --out "J:\Project_Vibe\V_book\build\verify_installed\probe_import_installed.json"
    ```
 
@@ -360,6 +369,11 @@ installer\output\HDLE_Premium_Setup.exe
      - `frozen_onnx_probe.status = ok`
      - `bootstrap:pronunciation.status = ok`
      - `bootstrap:sentence_niqqud.status = ok`
+   - `db_open_installed.json` exists and reports:
+     - `ok = true`
+     - current `schema_version`
+     - current `supported_schema_version`
+     - `db_profile`
 
 8. **Verify installer really deployed the latest binaries:**
 

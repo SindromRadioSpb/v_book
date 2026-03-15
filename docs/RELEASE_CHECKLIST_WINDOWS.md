@@ -61,6 +61,12 @@ cd J:\Project_Vibe\V_book
   - `frozen_onnx_probe.status = ok`
   - `bootstrap:pronunciation.status = ok`
   - `bootstrap:sentence_niqqud.status = ok`
+- [ ] `build\verify_dist\db_open_dist.json` reports:
+  - `ok = true`
+  - `schema_version` present
+  - `supported_schema_version` present
+  - `db_profile` present
+- [ ] `build\verify_dist\frozen_health_summary.json` exists and preserves one canonical summary for probe/import/health/db_open
 - [ ] `--self-check import` and `--self-check health` do not crash with `UnicodeEncodeError`
 
 ### 2. Build Installer
@@ -111,11 +117,17 @@ ISCC.exe installer\installer.iss
 **Installed self-check gates:**
 - [ ] `HDLE_Premium.exe --self-check import --self-check-out ...` succeeds
 - [ ] `HDLE_Premium.exe --self-check health --db-path "<known-good migrated db>" --self-check-out ...` succeeds
+- [ ] `HDLE_Premium.exe --self-check db_open --db-path "<known-good migrated db>" --self-check-out ...` succeeds
 - [ ] No `UnicodeEncodeError` window/dialog appears during self-check
 - [ ] Installed health JSON reports:
   - `frozen_onnx_probe.status = ok`
   - `bootstrap:pronunciation.status = ok`
   - `bootstrap:sentence_niqqud.status = ok`
+- [ ] Installed `db_open` JSON reports:
+  - `ok = true`
+  - current `schema_version`
+  - current `supported_schema_version`
+  - `db_profile`
   - `report.overall = ok`
 
 **Stanza models download (if internet available):**

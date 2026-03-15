@@ -2337,6 +2337,41 @@ Engineering meaning:
 - the next release-facing decision can now focus on artifact quality and real
   candidate DB readiness, not on reconstructing evidence from console logs.
 
+## Release / ship gate phase 3
+
+The next bounded release-facing follow-up after machine-readable prebuild
+evidence is installed/dist self-check contract hardening.
+
+This wave is recorded in:
+
+- `docs/RELEASE_SHIP_GATE_PHASE3_2026-03-15.md`
+
+Current status after the wave:
+
+- `db_open` is now part of the explicit frozen self-check contract alongside
+  import and health
+- `db_open` payload now exposes:
+  - `db_profile`
+  - `schema_version`
+  - `supported_schema_version`
+  - `db_size_bytes`
+- `scripts/verify_frozen_health.ps1` now verifies:
+  - probe
+  - import
+  - health
+  - db_open
+- the frozen self-check pass now writes one canonical summary artifact:
+  - `frozen_health_summary.json`
+
+Engineering meaning:
+
+- installed/dist verification no longer depends on manually stitching together
+  multiple JSON files;
+- the release gate now proves not just helper/runtime health, but also the
+  runtime DB-open contract on the selected target DB;
+- the next product-facing move can shift to reconnect guidance without losing
+  self-check rigor.
+
 ## Residual decision note: Concordance sentence_fts dependency-health
 
 The narrow residual decision for the Concordance dependency gate is now
