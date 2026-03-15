@@ -12,6 +12,13 @@ Before building the HDLE Premium installer, run comprehensive validation to ensu
 python scripts/prebuild_validate.py
 ```
 
+Current ship-gate note:
+
+- prebuild validation now runs a bounded DB corruption probe before the
+  write-heavy checks
+- if the selected DB is unhealthy, validation stops early and points to:
+  - `python scripts/repair_db_corruption.py --db-path "<db-path>"`
+
 This runs:
 1. ✅ FTS table presence and consistency
 2. ✅ Project lifecycle (create/delete)
@@ -129,6 +136,15 @@ This creates missing FTS tables and rebuilds data from base tables.
 The fix is already applied:
 - Export creates FTS in payload before copying data
 - Import ensures FTS exists in host before inserting
+
+### Issue: Prebuild validation fails on corruption probe
+
+**Root Cause:** The selected DB is already unhealthy enough that release
+validation should stop before project lifecycle or export/import writes.
+
+**Fix:**
+1. Run `python scripts/repair_db_corruption.py --db-path "<db-path>"`
+2. Rerun `python scripts/prebuild_validate.py --db-path "<db-path>"`
 
 ### Issue: "no such table: main.document_sentence" during export
 

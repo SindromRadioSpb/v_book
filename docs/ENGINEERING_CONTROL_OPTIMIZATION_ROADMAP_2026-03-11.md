@@ -2521,3 +2521,23 @@ Manual validation note from the same wave:
 - export now fails fast on corrupt source DBs with an explicit
   `repair_db_corruption.py` remediation hint instead of failing late after
   payload assembly.
+
+## Release-facing ship gate phase 1
+
+The next bounded product-facing wave after Import / Project Exchange UX Phase 1
+is now recorded in:
+
+- `docs/RELEASE_SHIP_GATE_PHASE1_2026-03-15.md`
+
+Current implementation scope:
+
+- strengthen `scripts/prebuild_validate.py` as an actual ship gate
+- detect corrupt candidate DBs before write-heavy validation phases
+- stop early with explicit `repair_db_corruption.py` remediation
+- sync prebuild/release docs to the new fail-fast contract
+
+Immediate outcome from the first live ship-gate run:
+
+- both large hewiki DB artifacts currently fail the new corruption probe
+- this means release readiness is now honestly blocked at the DB artifact level,
+  not by unresolved cold branches
