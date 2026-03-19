@@ -11,14 +11,14 @@ Safety:
 - Timeouts: Client-side timeout prevents hangs
 - Error handling: Worker never raises uncaught exceptions
 """
+
 import logging
 import multiprocessing
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
 from multiprocessing.connection import Connection
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class WorkerResult:
     target_lang: str
     inference_time_ms: float
     request_id: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ============================================================================
@@ -232,10 +232,9 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         dict: {"translator": ctranslate2.Translator, "tokenizer": AutoTokenizer}
     """
     # CRITICAL FIX: Use direct stdout instead of logging to avoid deadlock in spawn context
-    import sys
     import time
 
-    sys.stdout.write(f"[Worker] _load_ctranslate2_model START\n")
+    sys.stdout.write("[Worker] _load_ctranslate2_model START\n")
     sys.stdout.write(f"[Worker] model_path: {model_path}\n")
     sys.stdout.flush()
 
@@ -243,6 +242,7 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         sys.stdout.write("[Worker] Importing ctranslate2...\n")
         sys.stdout.flush()
         import ctranslate2
+
         sys.stdout.write("[Worker] ctranslate2 imported\n")
         sys.stdout.flush()
     except ImportError:
@@ -252,6 +252,7 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         sys.stdout.write("[Worker] Importing NllbTokenizer...\n")
         sys.stdout.flush()
         from transformers import NllbTokenizer
+
         sys.stdout.write("[Worker] NllbTokenizer imported\n")
         sys.stdout.flush()
     except ImportError:
@@ -307,6 +308,7 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         raise
     except Exception as e:
         import traceback
+
         sys.stdout.write(f"[Worker] ERROR in _load_ctranslate2_model: {e}\n")
         sys.stdout.flush()
         traceback.print_exc()
@@ -390,7 +392,7 @@ def _translate_ctranslate2(
 
 
 def _translate_transformers(
-    model_dict: Dict,
+    model_dict: dict,
     text: str,
     source_lang: str,
     target_lang: str,
@@ -407,10 +409,19 @@ def _translate_transformers(
     # Tokenize
     inputs = tokenizer(text, return_tensors="pt")
 
+    # Resolve forced_bos_token_id for target language.
+    # transformers 4.x: tokenizer.lang_code_to_id[target_lang]
+    # transformers 5.x: lang_code_to_id was removed; use convert_tokens_to_ids()
+    lang_to_id = getattr(tokenizer, "lang_code_to_id", None)
+    if lang_to_id is not None:
+        forced_bos_token_id = lang_to_id[target_lang]
+    else:
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(target_lang)
+
     # Generate
     outputs = model.generate(
         **inputs,
-        forced_bos_token_id=tokenizer.lang_code_to_id[target_lang],
+        forced_bos_token_id=forced_bos_token_id,
         max_length=512,
     )
 
@@ -449,14 +460,15 @@ class LocalMTWorker:
         self.model_id = model_id
         self.timeout = timeout
 
-        self.process: Optional[multiprocessing.Process] = None
-        self.conn: Optional[Connection] = None
+        self.process: multiprocessing.Process | None = None
+        self.conn: Connection | None = None
 
         self._start_worker()
 
     def _start_worker(self):
         """Start worker process."""
         import time
+
         start_time = time.perf_counter()
         logger.info(f"[WORKER] Starting worker for {self.model_id} ({self.backend})")
 
@@ -478,13 +490,13 @@ class LocalMTWorker:
         # Wait for worker to be ready (ping)
         # Model loading can take 60-240 seconds on slower systems (1.3GB model)
         try:
-            logger.info(f"Waiting for worker to load model (timeout=240s)...")
+            logger.info("Waiting for worker to load model (timeout=240s)...")
             if not self.ping(timeout=240):  # 240 seconds for model loading (increased from 120s)
                 # Check if process is still alive
                 if self.process and self.process.is_alive():
-                    logger.error(f"Worker process alive but not responding to ping (timeout)")
+                    logger.error("Worker process alive but not responding to ping (timeout)")
                 else:
-                    logger.error(f"Worker process died during startup")
+                    logger.error("Worker process died during startup")
                 raise WorkerError("Worker failed to start")
             elapsed = time.perf_counter() - start_time
             logger.info(f"[WORKER] Worker ready: {self.model_id} ({elapsed:.1f}s)")
@@ -497,7 +509,7 @@ class LocalMTWorker:
         elapsed = time.perf_counter() - start_time
         logger.info(f"[WORKER] Worker started successfully: {self.model_id} ({elapsed:.1f}s)")
 
-    def ping(self, timeout: Optional[float] = None) -> bool:
+    def ping(self, timeout: float | None = None) -> bool:
         """
         Ping worker to check if alive.
 
@@ -550,15 +562,17 @@ class LocalMTWorker:
 
         try:
             # Send request
-            self.conn.send({
-                "type": "translate",
-                "data": {
-                    "text": request.text,
-                    "source_lang": request.source_lang,
-                    "target_lang": request.target_lang,
-                    "request_id": request.request_id,
+            self.conn.send(
+                {
+                    "type": "translate",
+                    "data": {
+                        "text": request.text,
+                        "source_lang": request.source_lang,
+                        "target_lang": request.target_lang,
+                        "request_id": request.request_id,
+                    },
                 }
-            })
+            )
 
             # Wait for response
             if self.conn.poll(timeout=self.timeout):
@@ -607,7 +621,7 @@ class LocalMTWorker:
     def __del__(self):
         """Cleanup on deletion."""
         try:
-            if hasattr(self, 'process') and hasattr(self, 'conn'):
+            if hasattr(self, "process") and hasattr(self, "conn"):
                 self.shutdown()
         except:
             pass

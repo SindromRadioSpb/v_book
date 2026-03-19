@@ -46,10 +46,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +80,7 @@ MODEL_REGISTRY = {
 # Model Installer
 # ============================================================================
 
+
 class ModelInstaller:
     """Install and verify local MT models."""
 
@@ -91,6 +89,7 @@ class ModelInstaller:
         # Import here to avoid hard dependency
         try:
             from app.services.local_models.model_resource_manager import ModelResourceManager
+
             self.manager = ModelResourceManager()
         except ImportError as e:
             logger.error(f"Failed to import ModelResourceManager: {e}")
@@ -170,11 +169,7 @@ class ModelInstaller:
         package_sha256 = self._calculate_directory_hash(model_path)
 
         # Calculate total size
-        size_bytes = sum(
-            f.stat().st_size
-            for f in model_path.rglob("*")
-            if f.is_file()
-        )
+        size_bytes = sum(f.stat().st_size for f in model_path.rglob("*") if f.is_file())
 
         # Write manifest
         manifest_path = model_path / "manifest.json"
@@ -207,6 +202,7 @@ class ModelInstaller:
         """Check if CTranslate2 is installed."""
         try:
             import ctranslate2
+
             logger.debug(f"CTranslate2 version: {ctranslate2.__version__}")
             return True
         except ImportError:
@@ -215,14 +211,23 @@ class ModelInstaller:
             return False
 
     def _check_transformers(self) -> bool:
-        """Check if Transformers is installed."""
+        """Check if Transformers is installed and importable.
+
+        On Windows, torch CUDA DLL loading can fail (WinError 1114) when Qt has
+        already initialized its runtime in the same process (e.g. pytest-qt).
+        Catch OSError in addition to ImportError so the installer remains robust.
+        """
         try:
             import transformers
+
             logger.debug(f"Transformers version: {transformers.__version__}")
             return True
         except ImportError:
             logger.error("Transformers not installed")
             logger.info("Install with: pip install transformers")
+            return False
+        except OSError as e:
+            logger.warning(f"Transformers import failed (DLL load error): {e}")
             return False
 
     def _download_ctranslate2(self, hf_model_id: str, model_path: Path) -> bool:
@@ -314,6 +319,7 @@ class ModelInstaller:
 
             # Clean up temp directory
             import shutil
+
             shutil.rmtree(temp_path)
 
             return True
@@ -432,6 +438,7 @@ class ModelInstaller:
 # ============================================================================
 # CLI
 # ============================================================================
+
 
 def main():
     """Main CLI entry point."""

@@ -22,6 +22,8 @@ def test_phonikud_adapter_reports_real_inference(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", lambda _name: _FakeModule)
     adapter = PhonikudAdapter(model_path="J:/fake/model", enabled=True)
+    # Prevent auto-discovery of installed model so health_check uses infer() path.
+    monkeypatch.setattr(adapter, "_resolve_model_path", lambda: None)
     report = adapter.health_check(["שלום"])
 
     assert report.mode == "real_inference"
@@ -41,6 +43,8 @@ def test_phonikud_adapter_reports_fallback(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", lambda _name: _FakeModule)
     adapter = PhonikudAdapter(model_path="", enabled=True)
+    # Prevent auto-discovery of installed model so health_check uses infer() path.
+    monkeypatch.setattr(adapter, "_resolve_model_path", lambda: None)
     report = adapter.health_check(["תחנה"])
 
     assert report.mode == "fallback"
@@ -54,6 +58,8 @@ def test_phonikud_adapter_reports_error_when_import_fails(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", _raise)
     adapter = PhonikudAdapter(model_path="", enabled=True)
+    # Prevent auto-discovery of installed model so health_check uses infer() path.
+    monkeypatch.setattr(adapter, "_resolve_model_path", lambda: None)
     report = adapter.health_check(["אבג"])
 
     assert report.mode == "error"
@@ -110,11 +116,14 @@ def test_phonikud_adapter_clears_runtime_cache_when_model_path_changes(monkeypat
     monkeypatch.setattr(importlib, "import_module", lambda _name: fake_module)
 
     bad = PhonikudAdapter(model_path="J:/Models/phonikud/bad-model-path", enabled=True)
+    # Force model_path_effective to return the intended path (not auto-discovered real model).
+    monkeypatch.setattr(bad, "_resolve_model_path", lambda: "J:/Models/phonikud/bad-model-path")
     bad_report = bad.health_check(["שלום"])
     assert bad_report.mode == "error"
     assert bad_report.status == "error"
 
     good = PhonikudAdapter(model_path="J:/Models/phonikud/phonikud-1.0.int8", enabled=True)
+    monkeypatch.setattr(good, "_resolve_model_path", lambda: "J:/Models/phonikud/phonikud-1.0.int8")
     good_report = good.health_check(["שלום"])
     assert good_report.mode == "real_inference"
     assert good_report.status == "ok"
@@ -191,6 +200,8 @@ def test_phonikud_adapter_fallback_details_include_resolved_models_root(monkeypa
     adapter = PhonikudAdapter(model_path="", enabled=True)
     models_root = tmp_path / "custom_root" / "models"
     monkeypatch.setattr(adapter, "_resolve_models_root", lambda: models_root)
+    # Prevent auto-discovery of installed model so health_check uses infer() path.
+    monkeypatch.setattr(adapter, "_resolve_model_path", lambda: None)
 
     report = adapter.health_check(["sample"])
 
@@ -300,7 +311,10 @@ def test_phonikud_adapter_uses_frozen_helper_for_onnx_health_check(monkeypatch, 
 
         def communicate(self, timeout=1):
             _ = timeout
-            return ('{"ok": true, "mode": "probe", "sample_output": "\\u05e9\\u05b8\\u05c1\\u05dc\\u05d5\\u05b9\\u05dd"}', "")
+            return (
+                '{"ok": true, "mode": "probe", "sample_output": "\\u05e9\\u05b8\\u05c1\\u05dc\\u05d5\\u05b9\\u05dd"}',
+                "",
+            )
 
         def kill(self):
             return None
