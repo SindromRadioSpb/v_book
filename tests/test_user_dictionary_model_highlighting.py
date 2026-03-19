@@ -28,7 +28,10 @@ def _item(study_state: str):
 
 def test_user_dictionary_model_has_study_status_column_label():
     model = UserDictionaryItemsTableModel(items=[_item("new")])
-    assert model.headerData(5, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Study Status"
+    assert (
+        model.headerData(5, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+        == "Study Status"
+    )
 
 
 def test_last_review_cell_has_background_only_for_review_column():

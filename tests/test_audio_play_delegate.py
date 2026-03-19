@@ -16,7 +16,9 @@ def test_delegate_emits_play_callback_for_ready_cell(qtbot):
     clicked = []
     view = QTableView()
     qtbot.addWidget(view)
-    delegate = AudioPlayDelegate(on_play_clicked=lambda idx: clicked.append((idx.row(), idx.column())))
+    delegate = AudioPlayDelegate(
+        on_play_clicked=lambda idx: clicked.append((idx.row(), idx.column()))
+    )
     view.setModel(model)
     view.setItemDelegateForColumn(0, delegate)
     view.resize(140, 40)
@@ -35,7 +37,9 @@ def test_delegate_ignores_click_for_missing_audio(qtbot):
     clicked = []
     view = QTableView()
     qtbot.addWidget(view)
-    delegate = AudioPlayDelegate(on_play_clicked=lambda idx: clicked.append((idx.row(), idx.column())))
+    delegate = AudioPlayDelegate(
+        on_play_clicked=lambda idx: clicked.append((idx.row(), idx.column()))
+    )
     view.setModel(model)
     view.setItemDelegateForColumn(0, delegate)
     view.resize(140, 40)
@@ -45,4 +49,3 @@ def test_delegate_ignores_click_for_missing_audio(qtbot):
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
 
     assert clicked == []
-

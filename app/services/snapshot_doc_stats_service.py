@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
 
 SNAPSHOT_STATS_STATE_UNKNOWN = "unknown"
 SNAPSHOT_STATS_STATE_VALID = "valid"
@@ -40,7 +40,7 @@ class SnapshotDocStatsService:
 
     @staticmethod
     def _utc_now() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     @staticmethod
     def _chunk_ids(doc_ids: Iterable[int], chunk_size: int = 500) -> list[list[int]]:
@@ -90,7 +90,7 @@ class SnapshotDocStatsService:
         *,
         document,
         snapshot_sentence_count: int,
-        updated_at: Optional[str] = None,
+        updated_at: str | None = None,
     ) -> None:
         document.snapshot_sentence_count = max(int(snapshot_sentence_count or 0), 0)
         document.snapshot_stats_state = SNAPSHOT_STATS_STATE_VALID
@@ -110,21 +110,25 @@ class SnapshotDocStatsService:
             param_names = [f"doc_id_{idx}" for idx in range(len(chunk))]
             params = {name: int(doc_id) for name, doc_id in zip(param_names, chunk)}
             in_clause = ", ".join(f":{name}" for name in param_names)
-            rows = session.execute(
-                text(
-                    "SELECT "
-                    "  sd.doc_id AS doc_id, "
-                    "  COALESCE(sd.sentence_count, 0) AS stored_sentence_count, "
-                    "  COUNT(ds.sentence_id) AS actual_sentence_count, "
-                    "  COUNT(sns.sentence_id) AS actual_snapshot_sentence_count "
-                    "FROM source_document sd "
-                    "LEFT JOIN document_sentence ds ON ds.doc_id = sd.doc_id "
-                    "LEFT JOIN sentence_nlp_snapshot sns ON sns.sentence_id = ds.sentence_id "
-                    f"WHERE sd.doc_id IN ({in_clause}) "
-                    "GROUP BY sd.doc_id, sd.sentence_count"
-                ),
-                params,
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT "
+                        "  sd.doc_id AS doc_id, "
+                        "  COALESCE(sd.sentence_count, 0) AS stored_sentence_count, "
+                        "  COUNT(ds.sentence_id) AS actual_sentence_count, "
+                        "  COUNT(sns.sentence_id) AS actual_snapshot_sentence_count "
+                        "FROM source_document sd "
+                        "LEFT JOIN document_sentence ds ON ds.doc_id = sd.doc_id "
+                        "LEFT JOIN sentence_nlp_snapshot sns ON sns.sentence_id = ds.sentence_id "
+                        f"WHERE sd.doc_id IN ({in_clause}) "
+                        "GROUP BY sd.doc_id, sd.sentence_count"
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            )
             for row in rows:
                 rows_by_doc[int(row["doc_id"])] = dict(row)
 
@@ -210,37 +214,45 @@ class SnapshotDocStatsService:
             param_names = [f"doc_id_{idx}" for idx in range(len(chunk))]
             params = {name: int(doc_id) for name, doc_id in zip(param_names, chunk)}
             in_clause = ", ".join(f":{name}" for name in param_names)
-            rows = session.execute(
-                text(
-                    "SELECT "
-                    "  sd.doc_id AS doc_id, "
-                    "  COALESCE(sd.sentence_count, 0) AS stored_sentence_count, "
-                    "  COALESCE(sd.snapshot_sentence_count, 0) AS stored_snapshot_sentence_count, "
-                    "  COALESCE(sd.snapshot_stats_state, 'unknown') AS stored_snapshot_stats_state, "
-                    "  COUNT(ds.sentence_id) AS actual_sentence_count, "
-                    "  COUNT(sns.sentence_id) AS actual_snapshot_sentence_count "
-                    "FROM source_document sd "
-                    "LEFT JOIN document_sentence ds ON ds.doc_id = sd.doc_id "
-                    "LEFT JOIN sentence_nlp_snapshot sns ON sns.sentence_id = ds.sentence_id "
-                    f"WHERE sd.doc_id IN ({in_clause}) "
-                    "GROUP BY "
-                    "  sd.doc_id, sd.sentence_count, sd.snapshot_sentence_count, sd.snapshot_stats_state"
-                ),
-                params,
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT "
+                        "  sd.doc_id AS doc_id, "
+                        "  COALESCE(sd.sentence_count, 0) AS stored_sentence_count, "
+                        "  COALESCE(sd.snapshot_sentence_count, 0) AS stored_snapshot_sentence_count, "
+                        "  COALESCE(sd.snapshot_stats_state, 'unknown') AS stored_snapshot_stats_state, "
+                        "  COUNT(ds.sentence_id) AS actual_sentence_count, "
+                        "  COUNT(sns.sentence_id) AS actual_snapshot_sentence_count "
+                        "FROM source_document sd "
+                        "LEFT JOIN document_sentence ds ON ds.doc_id = sd.doc_id "
+                        "LEFT JOIN sentence_nlp_snapshot sns ON sns.sentence_id = ds.sentence_id "
+                        f"WHERE sd.doc_id IN ({in_clause}) "
+                        "GROUP BY "
+                        "  sd.doc_id, sd.sentence_count, sd.snapshot_sentence_count, sd.snapshot_stats_state"
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            )
 
             for row in rows:
                 doc_id = int(row["doc_id"])
                 stored_sentence_count = int(row["stored_sentence_count"] or 0)
                 stored_snapshot_sentence_count = int(row["stored_snapshot_sentence_count"] or 0)
-                stored_state = str(row["stored_snapshot_stats_state"] or SNAPSHOT_STATS_STATE_UNKNOWN)
+                stored_state = str(
+                    row["stored_snapshot_stats_state"] or SNAPSHOT_STATS_STATE_UNKNOWN
+                )
                 actual_sentence_count = int(row["actual_sentence_count"] or 0)
                 actual_snapshot_sentence_count = int(row["actual_snapshot_sentence_count"] or 0)
 
                 sentence_mismatch = stored_sentence_count != actual_sentence_count
                 snapshot_mismatch = stored_snapshot_sentence_count != actual_snapshot_sentence_count
                 expected_state = (
-                    SNAPSHOT_STATS_STATE_VALID if not sentence_mismatch else SNAPSHOT_STATS_STATE_INVALID
+                    SNAPSHOT_STATS_STATE_VALID
+                    if not sentence_mismatch
+                    else SNAPSHOT_STATS_STATE_INVALID
                 )
                 state_mismatch = stored_state != expected_state
 

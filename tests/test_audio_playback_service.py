@@ -58,7 +58,9 @@ def test_resolve_ready_path_returns_existing_relative_asset(monkeypatch):
         monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_dir)
 
         with Session(engine) as session:
-            _insert_asset(session, lang="he", norm_text="shalom", rel_path=str(rel).replace("\\", "/"))
+            _insert_asset(
+                session, lang="he", norm_text="shalom", rel_path=str(rel).replace("\\", "/")
+            )
             session.commit()
             resolved = AudioPlaybackService.resolve_ready_path(
                 session,
@@ -83,7 +85,9 @@ def test_audio_asset_rel_path_constraint_rejects_unsafe_paths():
 
             session.rollback()
             with pytest.raises(IntegrityError):
-                _insert_asset(session, lang="he", norm_text="bad_parent", rel_path="audio/../evil.wav")
+                _insert_asset(
+                    session, lang="he", norm_text="bad_parent", rel_path="audio/../evil.wav"
+                )
                 session.commit()
     finally:
         engine.dispose()
@@ -98,10 +102,20 @@ def test_resolve_ready_path_returns_none_when_file_missing(monkeypatch):
         monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_dir)
 
         with Session(engine) as session:
-            _insert_asset(session, lang="he", norm_text="missing_file", rel_path="audio/mock_local_audio/he/nope.wav")
+            _insert_asset(
+                session,
+                lang="he",
+                norm_text="missing_file",
+                rel_path="audio/mock_local_audio/he/nope.wav",
+            )
             session.commit()
 
-            assert AudioPlaybackService.resolve_ready_path(session, lang="he", norm_text="missing_file") is None
+            assert (
+                AudioPlaybackService.resolve_ready_path(
+                    session, lang="he", norm_text="missing_file"
+                )
+                is None
+            )
     finally:
         engine.dispose()
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -170,7 +184,9 @@ def test_launch_audio_files_passes_contexts_to_internal_player(monkeypatch, tmp_
     class _FakePlayer:
         is_available = True
 
-        def play_paths(self, paths, *, labels=None, play_mode=None, contexts=None, start_immediately=False):
+        def play_paths(
+            self, paths, *, labels=None, play_mode=None, contexts=None, start_immediately=False
+        ):
             captured["paths"] = list(paths)
             captured["labels"] = list(labels or [])
             captured["play_mode"] = play_mode

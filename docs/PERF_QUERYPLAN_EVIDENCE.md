@@ -61,4 +61,3 @@ Header:
    - full scan markers
    - elapsed sample timings
 4. Attach both JSON/MD artifacts in patch DoD evidence.
-

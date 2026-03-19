@@ -8,6 +8,7 @@ Fix:
   - audio_player_panel.py model: path != "." guard before os.path.exists check
   - audio_player_service.py backend: str(path) == "." early-return False
 """
+
 from __future__ import annotations
 
 import os
@@ -171,16 +172,17 @@ def test_dedup_upgrades_unresolved_track_to_resolved(tmp_path, qapp):
 
     with patch.object(AudioPlayerService, "_build_default_backend", return_value=None):
         from app.ui.widgets.audio_player_panel import AudioPlayerPanel
+
         panel = AudioPlayerPanel.__new__(AudioPlayerPanel)
         from app.services.audio_player_service import AudioPlayerService as _APS
+
         panel.player = _APS(settings=settings_mock)
 
     # Inject an old unresolved track for sentence source_id=42
     old_track = AudioTrack(
-        path=Path(""),          # unresolved — str(Path("")) == "."
+        path=Path(""),  # unresolved — str(Path("")) == "."
         label="שלום",
-        context={"kind": "sentence", "source_id": 42, "play_count": 0,
-                 "audio_status": "unknown"},
+        context={"kind": "sentence", "source_id": 42, "play_count": 0, "audio_status": "unknown"},
     )
     panel.player._tracks = [old_track]
 
@@ -239,6 +241,7 @@ def test_dedup_upgrades_unresolved_track_to_resolved(tmp_path, qapp):
 
     # And the model should show "ready" for this track
     import os
+
     path_str = str(panel.player._tracks[0].path)
     status = _make_queue_model_status(path_str)
     assert status == "ready"

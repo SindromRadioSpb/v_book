@@ -55,7 +55,9 @@ def _create_payload_db(path: Path) -> Path:
 
 @pytest.fixture
 def temp_host_db(tmp_path):
-    db_path = _create_host_db(tmp_path / "host.db", schema_version=65, project_name="Existing Project")
+    db_path = _create_host_db(
+        tmp_path / "host.db", schema_version=65, project_name="Existing Project"
+    )
     DBService.initialize(str(db_path))
     yield db_path
     DBService.shutdown()
@@ -79,7 +81,9 @@ def test_preflight_import_reports_name_conflict_and_final_name(temp_host_db, tmp
     )
     create_bundle(payload_path, manifest, bundle_path)
 
-    report = ProjectImportEngine().preflight_import(bundle_path, ImportOptions(rename_if_conflict=True))
+    report = ProjectImportEngine().preflight_import(
+        bundle_path, ImportOptions(rename_if_conflict=True)
+    )
 
     assert report.host_schema_version == 65
     assert report.name_conflict is True

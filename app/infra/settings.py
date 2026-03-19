@@ -18,20 +18,17 @@ logger = logging.getLogger(__name__)
 class SettingsService:
     """Singleton QSettings wrapper (INI format, cross-platform)."""
 
-    _instance: Optional['SettingsService'] = None
+    _instance: Optional["SettingsService"] = None
 
     def __init__(self):
         """Initialize QSettings with INI format for portability."""
         self._settings = QSettings(
-            QSettings.Format.IniFormat,
-            QSettings.Scope.UserScope,
-            "HDLE_Premium",
-            "HDLE_Premium"
+            QSettings.Format.IniFormat, QSettings.Scope.UserScope, "HDLE_Premium", "HDLE_Premium"
         )
         logger.info(f"Settings initialized at: {self._settings.fileName()}")
 
     @classmethod
-    def get_instance(cls) -> 'SettingsService':
+    def get_instance(cls) -> "SettingsService":
         """Get or create singleton instance."""
         if cls._instance is not None:
             try:
@@ -107,7 +104,7 @@ class SettingsService:
         """Save window geometry and state."""
         try:
             self.set_value("window/geometry", window.saveGeometry())
-            if hasattr(window, 'saveState'):
+            if hasattr(window, "saveState"):
                 self.set_value("window/state", window.saveState())
             logger.debug("Window geometry saved")
         except Exception as e:
@@ -128,7 +125,7 @@ class SettingsService:
                     logger.warning("Failed to restore window geometry")
                     return False
 
-                if hasattr(window, 'restoreState'):
+                if hasattr(window, "restoreState"):
                     state = self.get_bytes("window/state")
                     if state:
                         window.restoreState(QByteArray(state))

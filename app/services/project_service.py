@@ -1,24 +1,24 @@
 """Project management service."""
-import logging
-from typing import List, Optional
 
-from sqlalchemy import select, func, delete as sql_delete, text
+import logging
+
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
-from app.infra.sa_models import (
-    DictProject,
-    Library,
-    SourceCorpus,
-    SourceDocument,
-    DocumentSentence,
-    Lemma,
-    Ngram,
-    TermCard,
-)
 from app.domain.dto import DeleteReport
 from app.domain.exceptions import ReferenceCorpusReadonlyError
-from app.services.db_service import DBService
 from app.infra.fts_manager import ensure_fts_tables
+from app.infra.sa_models import (
+    DictProject,
+    Lemma,
+    Library,
+    Ngram,
+    SourceCorpus,
+    SourceDocument,
+    TermCard,
+)
+from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +68,18 @@ class ProjectService:
 
         return library
 
-    def list_projects(self, session: Session) -> List[DictProject]:
+    def list_projects(self, session: Session) -> list[DictProject]:
         """List all projects."""
         stmt = select(DictProject).options(joinedload(DictProject.library))
         projects = session.execute(stmt).scalars().all()
         return list(projects)
 
-    def get_project(self, session: Session, project_id: int) -> Optional[DictProject]:
+    def get_project(self, session: Session, project_id: int) -> DictProject | None:
         """Get a project by ID."""
         stmt = select(DictProject).where(DictProject.project_id == project_id)
         return session.execute(stmt).scalar_one_or_none()
 
-    def get_default_reference_project(self, session: Session) -> Optional[int]:
+    def get_default_reference_project(self, session: Session) -> int | None:
         """
         Get the default reference corpus project ID.
 
@@ -132,10 +132,7 @@ class ProjectService:
 
         for table_name in table_names:
             table_exists = conn.execute(
-                text(
-                    "SELECT 1 FROM sqlite_master "
-                    "WHERE type='table' AND name=:table_name"
-                ),
+                text("SELECT 1 FROM sqlite_master " "WHERE type='table' AND name=:table_name"),
                 {"table_name": table_name},
             ).scalar()
             if not table_exists:
@@ -158,7 +155,7 @@ class ProjectService:
         session: Session,
         name: str,
         description: str = "",
-        library: Optional[Library] = None,
+        library: Library | None = None,
         auto_assign_reference: bool = True,
     ) -> DictProject:
         """
@@ -252,12 +249,10 @@ class ProjectService:
             raise ValueError("Project name cannot exceed 255 characters")
 
         # Check for forbidden characters (same as CreateProjectDialog)
-        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        forbidden_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
         bad_chars = [char for char in new_name if char in forbidden_chars]
         if bad_chars:
-            raise ValueError(
-                f"Project name cannot contain forbidden characters: / \\ : * ? \" < > |"
-            )
+            raise ValueError('Project name cannot contain forbidden characters: / \\ : * ? " < > |')
 
         # Get project
         project = self.get_project(session, project_id)
@@ -272,8 +267,7 @@ class ProjectService:
 
         # Check uniqueness within library
         existing = session.execute(
-            select(DictProject)
-            .where(
+            select(DictProject).where(
                 DictProject.library_id == project.library_id,
                 DictProject.name == new_name,
                 DictProject.project_id != project_id,
@@ -281,9 +275,7 @@ class ProjectService:
         ).scalar_one_or_none()
 
         if existing:
-            raise ValueError(
-                f"A project named '{new_name}' already exists in this library"
-            )
+            raise ValueError(f"A project named '{new_name}' already exists in this library")
 
         # Update project
         project.name = new_name
@@ -292,9 +284,7 @@ class ProjectService:
         session.commit()
         session.refresh(project)
 
-        logger.info(
-            f"Renamed project {project_id}: '{old_name}' → '{new_name}'"
-        )
+        logger.info(f"Renamed project {project_id}: '{old_name}' → '{new_name}'")
 
         # Audit log
         try:
@@ -380,9 +370,9 @@ class ProjectService:
 
             # Count what will be deleted (for reporting)
             corpora_count = session.execute(
-                select(func.count()).select_from(SourceCorpus).where(
-                    SourceCorpus.project_id == project_id
-                )
+                select(func.count())
+                .select_from(SourceCorpus)
+                .where(SourceCorpus.project_id == project_id)
             ).scalar()
 
             # Count documents across all corpora
@@ -394,28 +384,25 @@ class ProjectService:
             ).scalar()
 
             # Count sentences — use SUM(sentence_count) fast path (no 13M-row JOIN)
-            sentences_count = session.execute(
-                select(func.coalesce(func.sum(SourceDocument.sentence_count), 0))
-                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                .where(SourceCorpus.project_id == project_id)
-            ).scalar() or 0
+            sentences_count = (
+                session.execute(
+                    select(func.coalesce(func.sum(SourceDocument.sentence_count), 0))
+                    .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+                    .where(SourceCorpus.project_id == project_id)
+                ).scalar()
+                or 0
+            )
 
             lemmas_count = session.execute(
-                select(func.count()).select_from(Lemma).where(
-                    Lemma.project_id == project_id
-                )
+                select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
             ).scalar()
 
             ngrams_count = session.execute(
-                select(func.count()).select_from(Ngram).where(
-                    Ngram.project_id == project_id
-                )
+                select(func.count()).select_from(Ngram).where(Ngram.project_id == project_id)
             ).scalar()
 
             term_cards_count = session.execute(
-                select(func.count()).select_from(TermCard).where(
-                    TermCard.project_id == project_id
-                )
+                select(func.count()).select_from(TermCard).where(TermCard.project_id == project_id)
             ).scalar()
 
             # --- Fast explicit delete (bypass FK CASCADE) ---
@@ -464,41 +451,49 @@ class ProjectService:
                 # 2. Nullify SET-NULL FK references in user_dictionary_item.
                 _safe(
                     "UPDATE user_dictionary_item "
-                    "SET origin_project_id = NULL WHERE origin_project_id = :pid", p
+                    "SET origin_project_id = NULL WHERE origin_project_id = :pid",
+                    p,
                 )
                 _safe(
                     "UPDATE user_dictionary_item SET origin_tm_entry_id = NULL "
                     "WHERE origin_tm_entry_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "UPDATE user_dictionary_item SET origin_doc_id = NULL "
                     "WHERE origin_doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)", p
+                    "  WHERE sc.project_id = :pid)",
+                    p,
                 )
 
                 # 3. Grandchildren (leaf tables first).
                 _safe(
                     "DELETE FROM run_error WHERE run_id IN "
-                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)", p
+                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM sentence_nlp_snapshot_stage WHERE run_id IN "
-                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)", p
+                    "(SELECT run_id FROM processor_run WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM stopword_item WHERE stopset_id IN "
-                    "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)", p
+                    "(SELECT stopset_id FROM stopword_set WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM ngram_component WHERE ngram_id IN "
-                    "(SELECT ngram_id FROM ngram WHERE project_id = :pid)", p
+                    "(SELECT ngram_id FROM ngram WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM term_cluster_member WHERE cluster_id IN "
-                    "(SELECT cluster_id FROM term_cluster WHERE project_id = :pid)", p
+                    "(SELECT cluster_id FROM term_cluster WHERE project_id = :pid)",
+                    p,
                 )
                 # Stat tables: PK starts with project_id → O(log N) via PK index.
                 _safe("DELETE FROM lemma_doc_stat WHERE project_id = :pid", p)
@@ -507,29 +502,34 @@ class ProjectService:
                 _safe("DELETE FROM ngram_project_stat WHERE project_id = :pid", p)
                 _safe(
                     "DELETE FROM tm_entry_history WHERE tm_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM tm_alias WHERE tm_id IN "
-                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)", p
+                    "(SELECT tm_id FROM tm_entry WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM dict_entry WHERE dict_source_id IN "
-                    "(SELECT dict_source_id FROM dict_source WHERE project_id = :pid)", p
+                    "(SELECT dict_source_id FROM dict_source WHERE project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM sentence_pronunciation WHERE sentence_id IN ("
                     "  SELECT ds.sentence_id FROM document_sentence ds"
                     "  JOIN source_document sd ON ds.doc_id = sd.doc_id"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)", p
+                    "  WHERE sc.project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM sentence_nlp_snapshot WHERE sentence_id IN ("
                     "  SELECT ds.sentence_id FROM document_sentence ds"
                     "  JOIN source_document sd ON ds.doc_id = sd.doc_id"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)", p
+                    "  WHERE sc.project_id = :pid)",
+                    p,
                 )
 
                 # 4. Children: direct project_id FK tables.
@@ -553,31 +553,33 @@ class ProjectService:
                     "DELETE FROM document_text WHERE doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)", p
+                    "  WHERE sc.project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM document_sentence WHERE doc_id IN ("
                     "  SELECT sd.doc_id FROM source_document sd"
                     "  JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id"
-                    "  WHERE sc.project_id = :pid)", p
+                    "  WHERE sc.project_id = :pid)",
+                    p,
                 )
                 _safe(
                     "DELETE FROM source_document WHERE corpus_id IN "
-                    "(SELECT corpus_id FROM source_corpus WHERE project_id = :pid)", p
+                    "(SELECT corpus_id FROM source_corpus WHERE project_id = :pid)",
+                    p,
                 )
                 _safe("DELETE FROM source_corpus WHERE project_id = :pid", p)
 
                 # 6. Delete the project row itself (critical — project becomes invisible).
-                session.execute(
-                    sql_delete(DictProject).where(DictProject.project_id == project_id)
-                )
+                session.execute(sql_delete(DictProject).where(DictProject.project_id == project_id))
                 session.expunge_all()
 
                 if corruption_warnings:
                     logger.warning(
                         "Project %d deleted with %d orphaned rows due to "
                         "B-tree corruption. Run VACUUM to rebuild the database.",
-                        project_id, len(corruption_warnings)
+                        project_id,
+                        len(corruption_warnings),
                     )
 
                 with_retry_on_locked(
@@ -628,13 +630,13 @@ class ProjectService:
                 error_message=str(e),
             )
 
-    def get_project_corpora(self, session: Session, project_id: int) -> List[SourceCorpus]:
+    def get_project_corpora(self, session: Session, project_id: int) -> list[SourceCorpus]:
         """Get all corpora for a project."""
         stmt = select(SourceCorpus).where(SourceCorpus.project_id == project_id)
         corpora = session.execute(stmt).scalars().all()
         return list(corpora)
 
-    def get_default_corpus(self, session: Session, project_id: int) -> Optional[SourceCorpus]:
+    def get_default_corpus(self, session: Session, project_id: int) -> SourceCorpus | None:
         """Get the default corpus for a project."""
         corpora = self.get_project_corpora(session, project_id)
         return corpora[0] if corpora else None
@@ -650,32 +652,44 @@ class ProjectService:
         - total_ngrams: Total unique n-grams
         """
         # Count documents
-        total_docs = session.execute(
-            select(func.count())
-            .select_from(SourceDocument)
-            .join(SourceCorpus)
-            .where(SourceCorpus.project_id == project_id)
-        ).scalar() or 0
+        total_docs = (
+            session.execute(
+                select(func.count())
+                .select_from(SourceDocument)
+                .join(SourceCorpus)
+                .where(SourceCorpus.project_id == project_id)
+            ).scalar()
+            or 0
+        )
 
-        processed_docs = session.execute(
-            select(func.count())
-            .select_from(SourceDocument)
-            .join(SourceCorpus)
-            .where(
-                SourceCorpus.project_id == project_id,
-                SourceDocument.status == "processed",
-            )
-        ).scalar() or 0
+        processed_docs = (
+            session.execute(
+                select(func.count())
+                .select_from(SourceDocument)
+                .join(SourceCorpus)
+                .where(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.status == "processed",
+                )
+            ).scalar()
+            or 0
+        )
 
         # Count lemmas
-        total_lemmas = session.execute(
-            select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
-        ).scalar() or 0
+        total_lemmas = (
+            session.execute(
+                select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
+            ).scalar()
+            or 0
+        )
 
         # Count ngrams
-        total_ngrams = session.execute(
-            select(func.count()).select_from(Ngram).where(Ngram.project_id == project_id)
-        ).scalar() or 0
+        total_ngrams = (
+            session.execute(
+                select(func.count()).select_from(Ngram).where(Ngram.project_id == project_id)
+            ).scalar()
+            or 0
+        )
 
         return {
             "total_docs": total_docs,

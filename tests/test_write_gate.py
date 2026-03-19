@@ -67,4 +67,3 @@ def test_serialized_db_write_allows_reentrant_nesting_same_thread() -> None:
 def test_run_serialized_db_write_returns_callback_result() -> None:
     value = run_serialized_db_write("test.return", lambda: 42)
     assert value == 42
-

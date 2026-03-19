@@ -16,15 +16,23 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app.infra.sa_models import (
-    DictProject, Library, SourceCorpus, SourceDocument, DocumentSentence, Lemma,
-    SentenceNLPSnapshot, SentenceNLPSnapshotStage, ProcessorRun,
+    DictProject,
+    Library,
+    SourceCorpus,
+    SourceDocument,
+    DocumentSentence,
+    Lemma,
+    SentenceNLPSnapshot,
+    SentenceNLPSnapshotStage,
+    ProcessorRun,
 )
 from app.services.project_service import ProjectService
 
 
 def _make_engine(db_path: Path):
-    engine = create_engine(f"sqlite:///{db_path}", echo=False,
-                           connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{db_path}", echo=False, connect_args={"check_same_thread": False}
+    )
 
     @event.listens_for(engine, "connect")
     def set_pragma(conn, _rec):
@@ -71,8 +79,9 @@ def _make_test_db():
     session.add(lib)
     session.flush()
 
-    proj = DictProject(library_id=lib.library_id, name="DeleteMe",
-                       description="test", src_lang="he", tgt_lang="ru")
+    proj = DictProject(
+        library_id=lib.library_id, name="DeleteMe", description="test", src_lang="he", tgt_lang="ru"
+    )
     session.add(proj)
     session.flush()
 
@@ -82,8 +91,11 @@ def _make_test_db():
 
     doc = SourceDocument(
         corpus_id=corpus.corpus_id,
-        file_path="/tmp/x.txt", file_name="x.txt", file_ext=".txt",
-        sha256="abc123", sentence_count=3,
+        file_path="/tmp/x.txt",
+        file_name="x.txt",
+        file_ext=".txt",
+        sha256="abc123",
+        sentence_count=3,
     )
     session.add(doc)
     session.flush()
@@ -112,18 +124,25 @@ def test_delete_project_removes_all_data():
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute(
-                "SELECT COUNT(*) FROM dict_project WHERE project_id=?", (project_id,)
-            ).fetchone()[0] == 0
-            assert raw.execute(
-                "SELECT COUNT(*) FROM lemma WHERE project_id=?", (project_id,)
-            ).fetchone()[0] == 0
-            assert raw.execute(
-                "SELECT COUNT(*) FROM source_corpus WHERE project_id=?", (project_id,)
-            ).fetchone()[0] == 0
-            assert raw.execute(
-                "SELECT COUNT(*) FROM document_sentence"
-            ).fetchone()[0] == 0
+            assert (
+                raw.execute(
+                    "SELECT COUNT(*) FROM dict_project WHERE project_id=?", (project_id,)
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                raw.execute(
+                    "SELECT COUNT(*) FROM lemma WHERE project_id=?", (project_id,)
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                raw.execute(
+                    "SELECT COUNT(*) FROM source_corpus WHERE project_id=?", (project_id,)
+                ).fetchone()[0]
+                == 0
+            )
+            assert raw.execute("SELECT COUNT(*) FROM document_sentence").fetchone()[0] == 0
         finally:
             raw.close()
     finally:
@@ -166,7 +185,7 @@ def test_delete_project_removes_sentence_nlp_snapshots():
                     engine="test",
                     engine_version="1",
                     sentence_text_hash=f"hash-{idx}",
-                    payload_json='[]',
+                    payload_json="[]",
                     token_count=0,
                 )
             )
@@ -180,9 +199,7 @@ def test_delete_project_removes_sentence_nlp_snapshots():
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute(
-                "SELECT COUNT(*) FROM sentence_nlp_snapshot"
-            ).fetchone()[0] == 0
+            assert raw.execute("SELECT COUNT(*) FROM sentence_nlp_snapshot").fetchone()[0] == 0
         finally:
             raw.close()
     finally:
@@ -232,9 +249,9 @@ def test_delete_project_removes_sentence_nlp_snapshot_stage_rows():
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute(
-                "SELECT COUNT(*) FROM sentence_nlp_snapshot_stage"
-            ).fetchone()[0] == 0
+            assert (
+                raw.execute("SELECT COUNT(*) FROM sentence_nlp_snapshot_stage").fetchone()[0] == 0
+            )
         finally:
             raw.close()
     finally:

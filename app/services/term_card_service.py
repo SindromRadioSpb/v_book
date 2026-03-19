@@ -8,20 +8,20 @@ Provides term curation workflow:
 - Review queue (filtered term lists for curation)
 """
 
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_, select
+from typing import Any
 
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.domain.dto import TermCardDTO
 from app.infra.sa_models import (
-    TermCluster,
-    TermAlias,
-    StopwordSet,
-    StopwordItem,
     DocumentSentence,
+    StopwordItem,
+    StopwordSet,
+    TermAlias,
+    TermCluster,
     utc_now,
 )
-from app.domain.dto import TermCardDTO
 
 
 class TermCardService:
@@ -35,9 +35,9 @@ class TermCardService:
         self,
         session: Session,
         project_id: int,
-        cluster_id: Optional[int] = None,
-        canonical_key: Optional[str] = None,
-    ) -> Optional[TermCardDTO]:
+        cluster_id: int | None = None,
+        canonical_key: str | None = None,
+    ) -> TermCardDTO | None:
         """Get term card by cluster_id or canonical_key.
 
         Args:
@@ -91,9 +91,11 @@ class TermCardService:
         # Get pinned example sentence text (if set)
         pinned_example_text = None
         if cluster.pinned_example_sent_id:
-            sent = session.query(DocumentSentence).filter(
-                DocumentSentence.sentence_id == cluster.pinned_example_sent_id
-            ).first()
+            sent = (
+                session.query(DocumentSentence)
+                .filter(DocumentSentence.sentence_id == cluster.pinned_example_sent_id)
+                .first()
+            )
             if sent:
                 pinned_example_text = sent.text
 
@@ -137,7 +139,7 @@ class TermCardService:
         cluster_id: int,
         status: str,
         curated_by: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> bool:
         """Set curation status for a term.
 
@@ -154,7 +156,7 @@ class TermCardService:
         Raises:
             ValueError: If status is invalid
         """
-        valid_statuses = ('auto', 'needs_review', 'approved', 'rejected')
+        valid_statuses = ("auto", "needs_review", "approved", "rejected")
         if status not in valid_statuses:
             raise ValueError(f"Invalid status: {status}. Must be one of {valid_statuses}")
 
@@ -174,7 +176,7 @@ class TermCardService:
     def bulk_set_status(
         self,
         session: Session,
-        cluster_ids: List[int],
+        cluster_ids: list[int],
         status: str,
         curated_by: str,
     ) -> int:
@@ -189,7 +191,7 @@ class TermCardService:
         Returns:
             Number of clusters updated
         """
-        valid_statuses = ('auto', 'needs_review', 'approved', 'rejected')
+        valid_statuses = ("auto", "needs_review", "approved", "rejected")
         if status not in valid_statuses:
             raise ValueError(f"Invalid status: {status}")
 
@@ -223,7 +225,7 @@ class TermCardService:
         project_id: int,
         canonical_key: str,
         variant: str,
-        note: Optional[str] = None,
+        note: str | None = None,
     ) -> bool:
         """Add variant alias for a term.
 
@@ -297,7 +299,7 @@ class TermCardService:
         session: Session,
         project_id: int,
         canonical_key: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List all aliases for a term.
 
         Args:
@@ -335,7 +337,7 @@ class TermCardService:
         session: Session,
         project_id: int,
         canonical_key: str,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> bool:
         """Mark term as stopword.
 
@@ -568,12 +570,12 @@ class TermCardService:
         self,
         session: Session,
         project_id: int,
-        status_filter: Optional[str] = None,
+        status_filter: str | None = None,
         min_freq: int = 0,
         order_by: str = "freq",
         limit: int = 100,
         offset: int = 0,
-    ) -> List[TermCardDTO]:
+    ) -> list[TermCardDTO]:
         """List terms for review queue.
 
         Args:
@@ -601,9 +603,7 @@ class TermCardService:
         # Ordering
         if order_by == "freq":
             query = query.order_by(TermCluster.freq_abs.desc())
-        elif order_by == "termhood":
-            query = query.order_by(TermCluster.weirdness.desc())
-        elif order_by == "weirdness":
+        elif order_by == "termhood" or order_by == "weirdness":
             query = query.order_by(TermCluster.weirdness.desc())
         elif order_by == "pmi":
             query = query.order_by(TermCluster.best_pmi.desc())
@@ -623,7 +623,7 @@ class TermCardService:
         self,
         session: Session,
         project_id: int,
-        status_filter: Optional[str] = None,
+        status_filter: str | None = None,
         min_freq: int = 0,
     ) -> int:
         """Count terms in review queue.

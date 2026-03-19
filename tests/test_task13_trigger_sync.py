@@ -23,7 +23,8 @@ def test_db():
     cursor = conn.cursor()
 
     # Minimal schema for testing triggers
-    cursor.executescript("""
+    cursor.executescript(
+        """
         -- Schema metadata
         CREATE TABLE schema_meta (
             key TEXT PRIMARY KEY,
@@ -92,7 +93,8 @@ def test_db():
               noise_reason = NEW.noise_reason
           WHERE tm_entry.cluster_id = NEW.cluster_id;
         END;
-    """)
+    """
+    )
 
     conn.commit()
 
@@ -108,16 +110,20 @@ def test_trigger_lemma_to_tm_valid_to_noise(test_db):
     cursor = test_db.cursor()
 
     # Create lemma (Valid)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO lemma (lemma_id, project_id, lemma_text, norm_text, is_noise)
         VALUES (1, 1, 'תתקש', 'תתקש', 0)
-    """)
+    """
+    )
 
     # Create linked tm_entry (Valid)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, lemma_id, is_noise)
         VALUES (1, 1, 'lemma', 'תתקש', 'תתקש', 'test translation', 1, 0)
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify initial state
@@ -128,23 +134,25 @@ def test_trigger_lemma_to_tm_valid_to_noise(test_db):
     assert cursor.fetchone()[0] == 0, "TMEntry should be Valid (0)"
 
     # UPDATE lemma to Noise
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE lemma
         SET is_noise = 1, noise_reason = 'NOISE_TEST'
         WHERE lemma_id = 1
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify trigger synced to tm_entry
     cursor.execute("SELECT is_noise, noise_reason FROM lemma WHERE lemma_id = 1")
     lemma_row = cursor.fetchone()
     assert lemma_row[0] == 1, "Lemma should be Noise (1)"
-    assert lemma_row[1] == 'NOISE_TEST', "Lemma noise_reason should be set"
+    assert lemma_row[1] == "NOISE_TEST", "Lemma noise_reason should be set"
 
     cursor.execute("SELECT is_noise, noise_reason FROM tm_entry WHERE tm_id = 1")
     tm_row = cursor.fetchone()
     assert tm_row[0] == 1, "TMEntry should be Noise (1) - SYNCED BY TRIGGER"
-    assert tm_row[1] == 'NOISE_TEST', "TMEntry noise_reason should be synced"
+    assert tm_row[1] == "NOISE_TEST", "TMEntry noise_reason should be synced"
 
 
 def test_trigger_lemma_to_tm_noise_to_valid(test_db):
@@ -152,16 +160,20 @@ def test_trigger_lemma_to_tm_noise_to_valid(test_db):
     cursor = test_db.cursor()
 
     # Create lemma (Noise)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO lemma (lemma_id, project_id, lemma_text, norm_text, is_noise, noise_reason)
         VALUES (2, 1, 'מבחן', 'מבחן', 1, 'NOISE_PUNCT_ONLY')
-    """)
+    """
+    )
 
     # Create linked tm_entry (Noise)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, lemma_id, is_noise, noise_reason)
         VALUES (2, 1, 'lemma', 'מבחן', 'מבחן', 'test', 2, 1, 'NOISE_PUNCT_ONLY')
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify initial state
@@ -172,11 +184,13 @@ def test_trigger_lemma_to_tm_noise_to_valid(test_db):
     assert cursor.fetchone()[0] == 1, "TMEntry should be Noise (1)"
 
     # UPDATE lemma to Valid
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE lemma
         SET is_noise = 0, noise_reason = NULL
         WHERE lemma_id = 2
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify trigger synced to tm_entry
@@ -196,36 +210,42 @@ def test_trigger_cluster_to_tm_valid_to_noise(test_db):
     cursor = test_db.cursor()
 
     # Create term_cluster (Valid)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO term_cluster (cluster_id, project_id, representative_he, norm_text, is_noise)
         VALUES (1, 1, 'תשובה ג', 'תשובה_ג', 0)
-    """)
+    """
+    )
 
     # Create linked tm_entry (Valid)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, cluster_id, is_noise)
         VALUES (3, 1, 'term_cluster', 'תשובה ג', 'תשובה_ג', 'answer c', 1, 0)
-    """)
+    """
+    )
     test_db.commit()
 
     # UPDATE term_cluster to Noise
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE term_cluster
         SET is_noise = 1, noise_reason = 'NOISE_TEST'
         WHERE cluster_id = 1
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify trigger synced to tm_entry
     cursor.execute("SELECT is_noise, noise_reason FROM term_cluster WHERE cluster_id = 1")
     cluster_row = cursor.fetchone()
     assert cluster_row[0] == 1, "Cluster should be Noise (1)"
-    assert cluster_row[1] == 'NOISE_TEST', "Cluster noise_reason should be set"
+    assert cluster_row[1] == "NOISE_TEST", "Cluster noise_reason should be set"
 
     cursor.execute("SELECT is_noise, noise_reason FROM tm_entry WHERE tm_id = 3")
     tm_row = cursor.fetchone()
     assert tm_row[0] == 1, "TMEntry should be Noise (1) - SYNCED BY TRIGGER"
-    assert tm_row[1] == 'NOISE_TEST', "TMEntry noise_reason should be synced"
+    assert tm_row[1] == "NOISE_TEST", "TMEntry noise_reason should be synced"
 
 
 def test_trigger_cluster_to_tm_noise_to_valid(test_db):
@@ -233,24 +253,30 @@ def test_trigger_cluster_to_tm_noise_to_valid(test_db):
     cursor = test_db.cursor()
 
     # Create term_cluster (Noise)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO term_cluster (cluster_id, project_id, representative_he, norm_text, is_noise, noise_reason)
         VALUES (2, 1, 'מבחן טכני', 'מבחן_טכני', 1, 'NOISE_NUMBER_ONLY')
-    """)
+    """
+    )
 
     # Create linked tm_entry (Noise)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, cluster_id, is_noise, noise_reason)
         VALUES (4, 1, 'term_cluster', 'מבחן טכני', 'מבחן_טכני', 'technical test', 2, 1, 'NOISE_NUMBER_ONLY')
-    """)
+    """
+    )
     test_db.commit()
 
     # UPDATE term_cluster to Valid
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE term_cluster
         SET is_noise = 0, noise_reason = NULL
         WHERE cluster_id = 2
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify trigger synced to tm_entry
@@ -270,29 +296,37 @@ def test_trigger_no_unlinked_side_effects(test_db):
     cursor = test_db.cursor()
 
     # Create lemma
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO lemma (lemma_id, project_id, lemma_text, norm_text, is_noise)
         VALUES (3, 1, 'בדיקה', 'בדיקה', 0)
-    """)
+    """
+    )
 
     # Create UNLINKED tm_entry (lemma_id=NULL)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, lemma_id, is_noise)
         VALUES (5, 1, 'lemma', 'אחר', 'אחר', 'other', NULL, 0)
-    """)
+    """
+    )
     test_db.commit()
 
     # UPDATE lemma to Noise
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE lemma
         SET is_noise = 1, noise_reason = 'NOISE_TEST'
         WHERE lemma_id = 3
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify unlinked tm_entry was NOT affected
     cursor.execute("SELECT is_noise FROM tm_entry WHERE tm_id = 5")
-    assert cursor.fetchone()[0] == 0, "Unlinked TMEntry should remain Valid (0) - NOT affected by trigger"
+    assert (
+        cursor.fetchone()[0] == 0
+    ), "Unlinked TMEntry should remain Valid (0) - NOT affected by trigger"
 
 
 def test_trigger_multiple_tm_entries_per_source(test_db):
@@ -300,32 +334,40 @@ def test_trigger_multiple_tm_entries_per_source(test_db):
     cursor = test_db.cursor()
 
     # Create lemma (Valid)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO lemma (lemma_id, project_id, lemma_text, norm_text, is_noise)
         VALUES (4, 1, 'מרובה', 'מרובה', 0)
-    """)
+    """
+    )
 
     # Create 3 linked tm_entry records (all Valid)
     for i in range(6, 9):
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             INSERT INTO tm_entry (tm_id, project_id, kind, src_text, src_norm, translation, lemma_id, is_noise)
             VALUES ({i}, 1, 'lemma', 'מרובה', 'מרובה', 'translation {i}', 4, 0)
-        """)
+        """
+        )
     test_db.commit()
 
     # UPDATE lemma to Noise
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE lemma
         SET is_noise = 1, noise_reason = 'NOISE_TEST'
         WHERE lemma_id = 4
-    """)
+    """
+    )
     test_db.commit()
 
     # Verify ALL 3 tm_entry records were synced
     cursor.execute("SELECT COUNT(*) FROM tm_entry WHERE lemma_id = 4 AND is_noise = 1")
     assert cursor.fetchone()[0] == 3, "All 3 linked TMEntry records should be synced to Noise (1)"
 
-    cursor.execute("SELECT COUNT(*) FROM tm_entry WHERE lemma_id = 4 AND noise_reason = 'NOISE_TEST'")
+    cursor.execute(
+        "SELECT COUNT(*) FROM tm_entry WHERE lemma_id = 4 AND noise_reason = 'NOISE_TEST'"
+    )
     assert cursor.fetchone()[0] == 3, "All 3 linked TMEntry records should have synced noise_reason"
 
 
@@ -336,7 +378,7 @@ def test_schema_version_14(test_db):
     cursor.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'")
     version = cursor.fetchone()[0]
 
-    assert version == '14', "Schema version should be 14 after migration 014"
+    assert version == "14", "Schema version should be 14 after migration 014"
 
 
 if __name__ == "__main__":

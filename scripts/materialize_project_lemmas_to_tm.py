@@ -21,7 +21,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--db-path", required=True, help="SQLite DB path")
     parser.add_argument("--project-id", type=int, required=True, help="dict_project.project_id")
-    parser.add_argument("--chunk-size", type=int, default=10000, help="Rows per commit chunk (default: 10000)")
+    parser.add_argument(
+        "--chunk-size", type=int, default=10000, help="Rows per commit chunk (default: 10000)"
+    )
     parser.add_argument(
         "--source-ref",
         default="lemma_materialize_full",

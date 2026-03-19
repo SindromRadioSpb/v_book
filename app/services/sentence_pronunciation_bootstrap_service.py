@@ -8,12 +8,13 @@ Modes:
 Scopes are pre-resolved to sentence_ids by the caller (UI or worker).
 See docs/SENTENCES_NIQQUD.md for full contract.
 """
+
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
@@ -22,8 +23,6 @@ from app.services.sentence_pronunciation_service import (
     GuardParams,
     SentencePronunciationService,
     SentenceSegmenter,
-    compute_niqqud_coverage,
-    SANITIZER_VERSION,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,7 +63,7 @@ class SentenceBootstrapResult:
             + self.skipped_invalid_after_qc
         )
 
-    def summary_lines(self) -> List[str]:
+    def summary_lines(self) -> list[str]:
         lines = [
             f"Total candidates : {self.total_candidates}",
             f"Processed        : {self.processed}",
@@ -127,17 +126,17 @@ class SentencePronunciationBootstrapService:
     def run(
         self,
         session: Session,
-        sentence_ids: List[int],
+        sentence_ids: list[int],
         *,
         lang: str,
-        mode: str = "fill_only",   # "dry_run" | "fill_only" | "rebuild"
-        phonikud_generator,         # PronunciationGenerator-like with .generate() and .mode
-        guard_params: Optional[GuardParams] = None,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        row_callback: Optional[Callable] = None,  # (sid: int, niqqud: str|None, action: str)
-        cancel_check: Optional[Callable[[], bool]] = None,
-        pause_check: Optional[Callable[[], bool]] = None,
-        phonikud_version: Optional[str] = None,
+        mode: str = "fill_only",  # "dry_run" | "fill_only" | "rebuild"
+        phonikud_generator,  # PronunciationGenerator-like with .generate() and .mode
+        guard_params: GuardParams | None = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        row_callback: Callable | None = None,  # (sid: int, niqqud: str|None, action: str)
+        cancel_check: Callable[[], bool] | None = None,
+        pause_check: Callable[[], bool] | None = None,
+        phonikud_version: str | None = None,
     ) -> SentenceBootstrapResult:
         """Run the full bootstrap pipeline.
 
@@ -173,6 +172,7 @@ class SentencePronunciationBootstrapService:
 
         # Batch-fetch sentence texts for all IDs
         from app.services.sentences_workspace_service import SentencesWorkspaceService
+
         svc_ws = SentencesWorkspaceService()
 
         if progress_callback:
@@ -192,11 +192,11 @@ class SentencePronunciationBootstrapService:
             if result.cancelled:
                 break
 
-            chunk_ids = sentence_ids[chunk_start: chunk_start + self._chunk_size]
-            text_map: Dict[int, str] = svc_ws.get_sentence_texts_by_ids(session, chunk_ids)
+            chunk_ids = sentence_ids[chunk_start : chunk_start + self._chunk_size]
+            text_map: dict[int, str] = svc_ws.get_sentence_texts_by_ids(session, chunk_ids)
 
             # ── Sub-chunk: apply guards + collect texts to generate ────────────
-            to_generate: List[tuple[int, str, str]] = []  # (sentence_id, preprocessed, hash)
+            to_generate: list[tuple[int, str, str]] = []  # (sentence_id, preprocessed, hash)
 
             for sid in chunk_ids:
                 raw_text = text_map.get(sid)
@@ -218,6 +218,7 @@ class SentencePronunciationBootstrapService:
                 # Pre-check: existing row guard (skip_has_override, skip_same_hash)
                 if mode != "dry_run":
                     from app.infra.sa_models import SentencePronunciation
+
                     existing = session.get(SentencePronunciation, sid)
                     if existing is not None:
                         if existing.is_override:
@@ -226,13 +227,21 @@ class SentencePronunciationBootstrapService:
                             if row_callback:
                                 row_callback(sid, None, "skipped_has_override")
                             continue
-                        if mode == "fill_only" and existing.src_hash == src_hash and existing.niqqud_text:
+                        if (
+                            mode == "fill_only"
+                            and existing.src_hash == src_hash
+                            and existing.niqqud_text
+                        ):
                             result.processed += 1
                             result.skipped_same_hash += 1
                             if row_callback:
                                 row_callback(sid, None, "skipped_same_hash")
                             continue
-                        if mode == "rebuild" and existing.src_hash == src_hash and existing.niqqud_text:
+                        if (
+                            mode == "rebuild"
+                            and existing.src_hash == src_hash
+                            and existing.niqqud_text
+                        ):
                             result.processed += 1
                             result.skipped_same_hash += 1
                             if row_callback:
@@ -263,19 +272,24 @@ class SentencePronunciationBootstrapService:
                 if result.cancelled:
                     break
 
-                sub_chunk = to_generate[sub_start: sub_start + self._sub_chunk_size]
+                sub_chunk = to_generate[sub_start : sub_start + self._sub_chunk_size]
                 # Flatten texts (segmented if needed)
-                generation_inputs: Dict[int, List[str]] = {}
+                generation_inputs: dict[int, list[str]] = {}
                 for sid, preprocessed, src_hash in sub_chunk:
                     segments = self._segmenter.split(preprocessed)
                     generation_inputs[sid] = segments
 
                 # Unique texts → batch generate
                 all_texts = list({seg for segs in generation_inputs.values() for seg in segs})
-                generated_map: Dict[str, Dict] = {}
+                generated_map: dict[str, dict] = {}
                 try:
                     generated_map = phonikud_generator.generate(lang, all_texts)
-                    _pv = str(phonikud_version or getattr(phonikud_generator, "mode", None) or _pv or "unknown")
+                    _pv = str(
+                        phonikud_version
+                        or getattr(phonikud_generator, "mode", None)
+                        or _pv
+                        or "unknown"
+                    )
                     result.generator_mode = _pv
                 except Exception as exc:
                     logger.error("Phonikud generation batch failed: %s", exc, exc_info=True)
@@ -323,7 +337,10 @@ class SentencePronunciationBootstrapService:
                     raw_niqqud = " ".join(niqqud_parts) if niqqud_parts else ""
 
                     # Sanitize output
-                    from app.services.pronunciation_quality_service import PronunciationQualityService
+                    from app.services.pronunciation_quality_service import (
+                        PronunciationQualityService,
+                    )
+
                     sanitized_niqqud = PronunciationQualityService.sanitize_tts_text(raw_niqqud)
 
                     # QC
@@ -350,7 +367,9 @@ class SentencePronunciationBootstrapService:
                         continue
 
                     # Store niqqud_text only for ok/partial/auto_fixed; None for rejected
-                    store_niqqud = sanitized_niqqud if qc_status not in ("rejected", "failed") else None
+                    store_niqqud = (
+                        sanitized_niqqud if qc_status not in ("rejected", "failed") else None
+                    )
 
                     try:
                         action = self._svc.upsert_auto(

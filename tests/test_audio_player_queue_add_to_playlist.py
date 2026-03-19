@@ -147,7 +147,10 @@ def test_queue_add_to_playlist_dedup(setup_panel, monkeypatch):
             return None
 
     monkeypatch.setattr("app.ui.widgets.audio_player_panel.AddQueueToPlaylistDialog", _Dialog)
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QMessageBox.information",
+        lambda *_a, **_k: QMessageBox.StandardButton.Ok,
+    )
 
     panel._on_add_queue_selected_to_playlist_clicked()
     panel._on_add_queue_selected_to_playlist_clicked()

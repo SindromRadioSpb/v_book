@@ -41,7 +41,7 @@ class TestActionsRegistry:
             keywords=["test", "action"],
             shortcut="Ctrl+T",
             callback=callback,
-            category="Test"
+            category="Test",
         )
 
         registry.register(spec)
@@ -59,7 +59,7 @@ class TestActionsRegistry:
             keywords=["test"],
             shortcut="",
             callback=callback,
-            category="Test"
+            category="Test",
         )
 
         registry.register(spec)
@@ -73,25 +73,29 @@ class TestActionsRegistry:
         enabled_callback = MagicMock()
         disabled_callback = MagicMock()
 
-        registry.register(ActionSpec(
-            action_id="enabled",
-            title="Enabled Action",
-            keywords=["enabled"],
-            shortcut="",
-            callback=enabled_callback,
-            enabled_check=lambda: True,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="enabled",
+                title="Enabled Action",
+                keywords=["enabled"],
+                shortcut="",
+                callback=enabled_callback,
+                enabled_check=lambda: True,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="disabled",
-            title="Disabled Action",
-            keywords=["disabled"],
-            shortcut="",
-            callback=disabled_callback,
-            enabled_check=lambda: False,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="disabled",
+                title="Disabled Action",
+                keywords=["disabled"],
+                shortcut="",
+                callback=disabled_callback,
+                enabled_check=lambda: False,
+                category="Test",
+            )
+        )
 
         enabled = registry.get_enabled()
         assert len(enabled) == 1
@@ -100,14 +104,16 @@ class TestActionsRegistry:
     def test_execute_success(self, registry):
         """Test executing action."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="test.action",
-            title="Test Action",
-            keywords=["test"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="test.action",
+                title="Test Action",
+                keywords=["test"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         success = registry.execute("test.action")
         assert success is True
@@ -121,15 +127,17 @@ class TestActionsRegistry:
     def test_execute_disabled(self, registry):
         """Test executing disabled action fails."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="disabled",
-            title="Disabled Action",
-            keywords=["disabled"],
-            shortcut="",
-            callback=callback,
-            enabled_check=lambda: False,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="disabled",
+                title="Disabled Action",
+                keywords=["disabled"],
+                shortcut="",
+                callback=callback,
+                enabled_check=lambda: False,
+                category="Test",
+            )
+        )
 
         success = registry.execute("disabled")
         assert success is False
@@ -142,23 +150,27 @@ class TestSearchScoring:
     def test_empty_query_returns_all_enabled(self, registry):
         """Test empty query returns all enabled actions."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="action1",
-            title="Action 1",
-            keywords=["one"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action1",
+                title="Action 1",
+                keywords=["one"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="action2",
-            title="Action 2",
-            keywords=["two"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action2",
+                title="Action 2",
+                keywords=["two"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("")
         assert len(results) == 2
@@ -166,23 +178,27 @@ class TestSearchScoring:
     def test_exact_title_match(self, registry):
         """Test exact title match scores highest."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="exact",
-            title="import",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="exact",
+                title="import",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="contains",
-            title="Import Dictionary",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="contains",
+                title="Import Dictionary",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("import")
         assert len(results) == 2
@@ -191,23 +207,27 @@ class TestSearchScoring:
     def test_title_prefix_beats_contains(self, registry):
         """Test title prefix scores higher than contains."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="prefix",
-            title="Import Dictionary",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="prefix",
+                title="Import Dictionary",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="contains",
-            title="Dictionary Import Tool",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="contains",
+                title="Dictionary Import Tool",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("import")
         assert len(results) == 2
@@ -216,14 +236,16 @@ class TestSearchScoring:
     def test_keyword_matching(self, registry):
         """Test keyword matching."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="with_keyword",
-            title="Translation Management",
-            keywords=["tm", "translate", "memory"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="with_keyword",
+                title="Translation Management",
+                keywords=["tm", "translate", "memory"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("tm")
         assert len(results) == 1
@@ -233,14 +255,16 @@ class TestSearchScoring:
     def test_no_match(self, registry):
         """Test no match returns empty."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="action",
-            title="Test Action",
-            keywords=["test"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action",
+                title="Test Action",
+                keywords=["test"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("nonexistent")
         assert len(results) == 0
@@ -248,14 +272,16 @@ class TestSearchScoring:
     def test_multi_word_query(self, registry):
         """Test multi-word query matching."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="import_dict",
-            title="Import Dictionary",
-            keywords=["csv", "load"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="import_dict",
+                title="Import Dictionary",
+                keywords=["csv", "load"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("import csv")
         assert len(results) == 1
@@ -264,14 +290,16 @@ class TestSearchScoring:
     def test_case_insensitive(self, registry):
         """Test search is case insensitive."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="action",
-            title="Import Dictionary",
-            keywords=["CSV"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action",
+                title="Import Dictionary",
+                keywords=["CSV"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         results = registry.search("IMPORT")
         assert len(results) == 1
@@ -289,14 +317,16 @@ class TestPerformance:
 
         # Register 1000 actions
         for i in range(1000):
-            registry.register(ActionSpec(
-                action_id=f"action_{i}",
-                title=f"Action {i}",
-                keywords=[f"keyword{i}", f"tag{i % 10}"],
-                shortcut=f"Ctrl+{i % 10}",
-                callback=callback,
-                category=f"Category{i % 5}"
-            ))
+            registry.register(
+                ActionSpec(
+                    action_id=f"action_{i}",
+                    title=f"Action {i}",
+                    keywords=[f"keyword{i}", f"tag{i % 10}"],
+                    shortcut=f"Ctrl+{i % 10}",
+                    callback=callback,
+                    category=f"Category{i % 5}",
+                )
+            )
 
         # Measure search times
         times = []
@@ -328,23 +358,27 @@ class TestCommandPaletteDialog:
     def test_dialog_shows_all_actions(self, registry, qtbot):
         """Test dialog shows all enabled actions."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="action1",
-            title="Action 1",
-            keywords=["one"],
-            shortcut="Ctrl+1",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action1",
+                title="Action 1",
+                keywords=["one"],
+                shortcut="Ctrl+1",
+                callback=callback,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="action2",
-            title="Action 2",
-            keywords=["two"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action2",
+                title="Action 2",
+                keywords=["two"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         dialog = CommandPaletteDialog()
         qtbot.addWidget(dialog)
@@ -355,23 +389,27 @@ class TestCommandPaletteDialog:
     def test_dialog_filters_on_search(self, registry, qtbot):
         """Test dialog filters results on search."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="import",
-            title="Import Dictionary",
-            keywords=["csv"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="import",
+                title="Import Dictionary",
+                keywords=["csv"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="export",
-            title="Export Data",
-            keywords=["save"],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="export",
+                title="Export Data",
+                keywords=["save"],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         dialog = CommandPaletteDialog()
         qtbot.addWidget(dialog)
@@ -387,14 +425,16 @@ class TestCommandPaletteDialog:
     def test_dialog_auto_selects_first_result(self, registry, qtbot):
         """Test dialog auto-selects first result."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="action",
-            title="Action",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="action",
+                title="Action",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         dialog = CommandPaletteDialog()
         qtbot.addWidget(dialog)
@@ -404,14 +444,16 @@ class TestCommandPaletteDialog:
     def test_dialog_emits_action_selected(self, registry, qtbot):
         """Test dialog emits action_selected on Enter."""
         callback = MagicMock()
-        registry.register(ActionSpec(
-            action_id="test.action",
-            title="Test Action",
-            keywords=[],
-            shortcut="",
-            callback=callback,
-            category="Test"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="test.action",
+                title="Test Action",
+                keywords=[],
+                shortcut="",
+                callback=callback,
+                category="Test",
+            )
+        )
 
         dialog = CommandPaletteDialog()
         qtbot.addWidget(dialog)

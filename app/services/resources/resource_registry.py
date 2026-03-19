@@ -9,7 +9,6 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 from app.infra.resource_paths import ResourcePaths
 from app.infra.settings import SettingsService
@@ -29,7 +28,7 @@ class ResourceEntry:
     size_bytes: int
     checksum: str
     local_install_subdir: str
-    filenames: List[str]
+    filenames: list[str]
     description: str = ""
 
 
@@ -38,7 +37,7 @@ class ResourceStatus:
     resource_id: str
     state: str  # installed|missing|corrupted|not_configured
     message: str
-    install_paths: List[Path]
+    install_paths: list[Path]
 
 
 class ResourceRegistry:
@@ -47,7 +46,7 @@ class ResourceRegistry:
     SETTINGS_KEY_MANIFEST_OVERRIDE = "resources/manifest_path"
     SETTINGS_KEY_DATA_ROOT = ResourcePaths.SETTINGS_KEY_DATA_ROOT
 
-    def __init__(self, *, settings: Optional[SettingsService] = None):
+    def __init__(self, *, settings: SettingsService | None = None):
         self.settings = settings or SettingsService.get_instance()
 
     def resource_paths(self):
@@ -67,15 +66,15 @@ class ResourceRegistry:
         except Exception:
             return Path("app/resources/resource_manifest.json").resolve()
 
-    def load_manifest(self) -> Dict[str, object]:
+    def load_manifest(self) -> dict[str, object]:
         path = self.manifest_path()
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
 
-    def list_entries(self) -> List[ResourceEntry]:
+    def list_entries(self) -> list[ResourceEntry]:
         raw = self.load_manifest()
         rows = raw.get("resources", [])
-        entries: List[ResourceEntry] = []
+        entries: list[ResourceEntry] = []
         for item in rows if isinstance(rows, list) else []:
             try:
                 entries.append(
@@ -90,7 +89,9 @@ class ResourceRegistry:
                         size_bytes=int(item.get("size_bytes") or 0),
                         checksum=str(item.get("checksum") or "").strip().lower(),
                         local_install_subdir=str(item.get("local_install_subdir") or "").strip(),
-                        filenames=[str(v).strip() for v in (item.get("filenames") or []) if str(v).strip()],
+                        filenames=[
+                            str(v).strip() for v in (item.get("filenames") or []) if str(v).strip()
+                        ],
                         description=str(item.get("description") or "").strip(),
                     )
                 )
@@ -98,7 +99,7 @@ class ResourceRegistry:
                 logger.warning("Skipping invalid resource manifest row: %s", exc)
         return [entry for entry in entries if entry.id]
 
-    def get_entry(self, resource_id: str) -> Optional[ResourceEntry]:
+    def get_entry(self, resource_id: str) -> ResourceEntry | None:
         target = str(resource_id or "").strip()
         if not target:
             return None
@@ -107,20 +108,20 @@ class ResourceRegistry:
                 return entry
         return None
 
-    def resolve_install_paths(self, entry: ResourceEntry) -> List[Path]:
+    def resolve_install_paths(self, entry: ResourceEntry) -> list[Path]:
         base = self.resource_paths().data_root
         subdir = Path(entry.local_install_subdir or ".")
         target_dir = base / subdir
         return [target_dir / name for name in entry.filenames]
 
-    def resolve_bundled_install_paths(self, entry: ResourceEntry) -> List[Path]:
+    def resolve_bundled_install_paths(self, entry: ResourceEntry) -> list[Path]:
         bundled_root = ResourcePaths.resolve_bundled_resources_root()
         subdir = Path(entry.local_install_subdir or ".")
         target_dir = bundled_root / subdir
         return [target_dir / name for name in entry.filenames]
 
-    def resolve_candidate_install_path_sets(self, entry: ResourceEntry) -> List[List[Path]]:
-        candidates: List[List[Path]] = []
+    def resolve_candidate_install_path_sets(self, entry: ResourceEntry) -> list[list[Path]]:
+        candidates: list[list[Path]] = []
 
         primary = self.resolve_install_paths(entry)
         if primary:
@@ -136,7 +137,7 @@ class ResourceRegistry:
 
         return candidates
 
-    def _resolve_explicit_phonikud_install_paths(self, entry: ResourceEntry) -> List[Path]:
+    def _resolve_explicit_phonikud_install_paths(self, entry: ResourceEntry) -> list[Path]:
         """Treat explicit phonikud model paths as valid installed resources.
 
         The niqqud bootstrap can be configured with a direct ONNX file path via
@@ -179,7 +180,7 @@ class ResourceRegistry:
             return ResourceStatus(entry.id, "not_configured", "No target filenames configured.", [])
 
         install_paths = candidate_sets[0]
-        resolved_paths: List[Path] | None = None
+        resolved_paths: list[Path] | None = None
         for path_set in candidate_sets:
             if all(path.exists() for path in path_set):
                 resolved_paths = path_set
@@ -204,10 +205,12 @@ class ResourceRegistry:
 
         return ResourceStatus(entry.id, "installed", "Resource is installed.", resolved_paths)
 
-    def get_all_statuses(self) -> List[ResourceStatus]:
+    def get_all_statuses(self) -> list[ResourceStatus]:
         return [self.get_status(entry.id) for entry in self.list_entries()]
 
-    def install_from_file(self, resource_id: str, source_path: Path, *, overwrite: bool = True) -> ResourceStatus:
+    def install_from_file(
+        self, resource_id: str, source_path: Path, *, overwrite: bool = True
+    ) -> ResourceStatus:
         entry = self.get_entry(resource_id)
         if entry is None:
             raise ValueError(f"Unknown resource_id: {resource_id}")

@@ -1,6 +1,7 @@
 r"""Initialize production database at M:\V_book\HDLE\hdle.db"""
-import sys
+
 import logging
+import sys
 from pathlib import Path
 
 # Add parent directory to path
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
+
 
 def main():
     """Create production database."""
@@ -42,6 +44,7 @@ def main():
     # Cleanup
     DBService.shutdown()
     print(f"\n[OK] Production database ready at: {db_path}")
+
 
 if __name__ == "__main__":
     main()

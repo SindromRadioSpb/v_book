@@ -1,4 +1,5 @@
 """Test MWE scoring (M5)."""
+
 import pytest
 from app.domain.scoring import calculate_pmi, calculate_tscore
 

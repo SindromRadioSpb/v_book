@@ -8,32 +8,34 @@ This script is an executable mathematical specification that:
 
 This is NOT just a demo - it's a mathematical contract.
 """
-import sys
+
 import io
 import logging
 import math
+import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Any
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.WARNING)
 
-print("="*70)
+print("=" * 70)
 print("D1: EXECUTABLE SPECIFICATION - Terms Table Mathematics")
-print("="*70)
+print("=" * 70)
 
 # ================================================================
 # Setup
 # ================================================================
+from sqlalchemy import text
+
 from app.services.db_service import DBService
-from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
 from app.services.process_service import ProcessService
+from app.services.project_service import ProjectService
 from app.services.term_extraction_service import TermExtractionService
-from sqlalchemy import text
 
 test_db = Path("verify_terms_math.db")
 if test_db.exists():
@@ -59,20 +61,19 @@ DOCUMENTS = {
 בבית הספר יש ספר חדש.
 הספר החדש טוב.
 הספר החדש טוב.""",
-
     "B": """בית ספר גדול ליד בית הספר.
 בית הספר גדול.
 הספר בבית הספר חדש וטוב.
 בבית הספר יש ספר חדש.""",
-
     "C": """ה ספר הזה טוב.
-בית הספר החדש טוב."""
+בית הספר החדש טוב.""",
 }
+
 
 # ================================================================
 # Schema Introspection
 # ================================================================
-def get_schema_info(session) -> Dict[str, Dict[str, str]]:
+def get_schema_info(session) -> dict[str, dict[str, str]]:
     """Introspect DB schema and validate required tables/columns exist.
 
     Returns:
@@ -84,21 +85,32 @@ def get_schema_info(session) -> Dict[str, Dict[str, str]]:
     print("\n[SCHEMA INTROSPECTION]")
 
     required_tables = {
-        'lemma': ['lemma_id', 'project_id', ('text', ['lemma_text', 'text', 'lemma'])],
-        'lemma_project_stat': ['project_id', 'lemma_id', 'freq_abs'],
-        'ngram': ['ngram_id', 'project_id', 'surface_text', 'lemma_phrase'],
-        'ngram_project_stat': ['project_id', 'ngram_id', 'freq_abs', 'doc_freq',
-                               ('pmi', ['pmi_cache', 'pmi']),
-                               ('llr', ['llr_cache', 'llr']),
-                               ('dice', ['dice_cache', 'dice'])],
-        'term_cluster': ['cluster_id', 'project_id', 'representative_he',
-                        'freq_abs', 'doc_freq', 'members_count',
-                        ('pmi', ['best_pmi', 'pmi']),
-                        ('llr', ['best_llr', 'llr']),
-                        ('dice', ['best_dice', 'dice'])],
-        'term_cluster_member': ['cluster_id', 'ngram_id'],
-        'source_document': ['doc_id', 'corpus_id'],
-        'source_corpus': ['corpus_id', 'project_id'],
+        "lemma": ["lemma_id", "project_id", ("text", ["lemma_text", "text", "lemma"])],
+        "lemma_project_stat": ["project_id", "lemma_id", "freq_abs"],
+        "ngram": ["ngram_id", "project_id", "surface_text", "lemma_phrase"],
+        "ngram_project_stat": [
+            "project_id",
+            "ngram_id",
+            "freq_abs",
+            "doc_freq",
+            ("pmi", ["pmi_cache", "pmi"]),
+            ("llr", ["llr_cache", "llr"]),
+            ("dice", ["dice_cache", "dice"]),
+        ],
+        "term_cluster": [
+            "cluster_id",
+            "project_id",
+            "representative_he",
+            "freq_abs",
+            "doc_freq",
+            "members_count",
+            ("pmi", ["best_pmi", "pmi"]),
+            ("llr", ["best_llr", "llr"]),
+            ("dice", ["best_dice", "dice"]),
+        ],
+        "term_cluster_member": ["cluster_id", "ngram_id"],
+        "source_document": ["doc_id", "corpus_id"],
+        "source_corpus": ["corpus_id", "project_id"],
     }
 
     schema = {}
@@ -148,6 +160,7 @@ def get_schema_info(session) -> Dict[str, Dict[str, str]]:
 
     return schema
 
+
 # ================================================================
 # Independent Metric Computation (Pure Math)
 # ================================================================
@@ -162,6 +175,7 @@ def compute_pmi_independent(c_xy: int, c_x: int, c_y: int, n: int) -> float:
         return None
     return math.log2((c_xy * n) / (c_x * c_y))
 
+
 def compute_dice_independent(c_xy: int, c_x: int, c_y: int) -> float:
     """Compute Dice independently.
 
@@ -170,6 +184,7 @@ def compute_dice_independent(c_xy: int, c_x: int, c_y: int) -> float:
     if c_x <= 0 or c_y <= 0:
         return None
     return (2 * c_xy) / (c_x + c_y)
+
 
 def compute_llr_independent(c_xy: int, c_x: int, c_y: int, n: int) -> float:
     """Compute LLR independently using 2x2 contingency table.
@@ -199,18 +214,19 @@ def compute_llr_independent(c_xy: int, c_x: int, c_y: int, n: int) -> float:
         return o * math.log(o / e)  # Natural log (ln)
 
     llr = 2 * (
-        safe_log_ratio(o11, e11) +
-        safe_log_ratio(o12, e12) +
-        safe_log_ratio(o21, e21) +
-        safe_log_ratio(o22, e22)
+        safe_log_ratio(o11, e11)
+        + safe_log_ratio(o12, e12)
+        + safe_log_ratio(o21, e21)
+        + safe_log_ratio(o22, e22)
     )
 
     return llr
 
+
 # ================================================================
 # Invariant Checks
 # ================================================================
-def check_invariants(cluster: Any, num_docs: int, schema: Dict) -> List[str]:
+def check_invariants(cluster: Any, num_docs: int, schema: dict) -> list[str]:
     """Check all mathematical invariants for a cluster.
 
     Returns:
@@ -232,13 +248,13 @@ def check_invariants(cluster: Any, num_docs: int, schema: Dict) -> List[str]:
         failures.append(f"Cluster {cid} ({term}): members_count={cluster.members_count} < 1")
 
     # Dice bounds
-    dice = getattr(cluster, schema['term_cluster']['dice'], None)
+    dice = getattr(cluster, schema["term_cluster"]["dice"], None)
     if dice is not None:
         if dice < 0 or dice > 1:
             failures.append(f"Cluster {cid} ({term}): dice={dice} not in [0,1]")
 
     # LLR bounds
-    llr = getattr(cluster, schema['term_cluster']['llr'], None)
+    llr = getattr(cluster, schema["term_cluster"]["llr"], None)
     if llr is not None:
         if llr < 0:
             failures.append(f"Cluster {cid} ({term}): llr={llr} < 0")
@@ -257,6 +273,7 @@ def check_invariants(cluster: Any, num_docs: int, schema: Dict) -> List[str]:
 
     return failures
 
+
 # ================================================================
 # Main Verification Logic
 # ================================================================
@@ -273,13 +290,11 @@ try:
         print("\n[1/5] Creating controlled dataset...")
         print(f"  Documents: {len(DOCUMENTS)}")
         for doc_name, content in DOCUMENTS.items():
-            lines = [l.strip() for l in content.strip().split('\n') if l.strip()]
+            lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
             print(f"  Document {doc_name}: {len(lines)} sentences")
 
         project = project_service.create_project(
-            session,
-            "Terms Math Verification",
-            "Controlled dataset for mathematical verification"
+            session, "Terms Math Verification", "Controlled dataset for mathematical verification"
         )
         corpus = project_service.get_default_corpus(session, project.project_id)
         print(f"  ✅ Project ID: {project.project_id}, Corpus ID: {corpus.corpus_id}")
@@ -292,7 +307,7 @@ try:
         doc_ids = {}
         for doc_name, content in DOCUMENTS.items():
             doc_file = test_dir / f"doc_{doc_name}.txt"
-            doc_file.write_text(content, encoding='utf-8')
+            doc_file.write_text(content, encoding="utf-8")
 
             doc = ingest_service.import_document(session, corpus.corpus_id, doc_file)
             process_service.process_document(session, doc.doc_id, use_mock=True)
@@ -314,7 +329,7 @@ try:
             include_np=False,
             min_freq=1,
             ngram_ns=(2,),
-            overwrite=True
+            overwrite=True,
         )
 
         print(f"  ✅ N-grams extracted: {report.ngrams_extracted}")
@@ -330,10 +345,7 @@ try:
         print("\n[4/5] Checking invariants for all clusters...")
 
         clusters = term_service.list_term_clusters(
-            session,
-            project.project_id,
-            top_n=100,
-            preset='freq'
+            session, project.project_id, top_n=100, preset="freq"
         )
 
         print(f"  Retrieved {len(clusters)} clusters")
@@ -370,7 +382,8 @@ try:
 
             # Get ngram members
             result = session.execute(
-                text("""
+                text(
+                    """
                     SELECT ng.ngram_id, ng.surface_text, ng.lemma_phrase,
                            st.freq_abs, st.doc_freq,
                            st.{pmi_col}, st.{llr_col}, st.{dice_col}
@@ -380,11 +393,12 @@ try:
                     WHERE tcm.cluster_id = :cluster_id
                     ORDER BY st.freq_abs DESC
                 """.format(
-                    pmi_col=schema['ngram_project_stat']['pmi'],
-                    llr_col=schema['ngram_project_stat']['llr'],
-                    dice_col=schema['ngram_project_stat']['dice']
-                )),
-                {"cluster_id": target_cluster.cluster_id}
+                        pmi_col=schema["ngram_project_stat"]["pmi"],
+                        llr_col=schema["ngram_project_stat"]["llr"],
+                        dice_col=schema["ngram_project_stat"]["dice"],
+                    )
+                ),
+                {"cluster_id": target_cluster.cluster_id},
             )
 
             ngrams = result.fetchall()
@@ -412,7 +426,16 @@ try:
 
             # For bigram metrics, verify the first (highest freq) member
             if len(ngrams) > 0:
-                ngram_id, surface, lemma_phrase, c_bigram, df, stored_pmi, stored_llr, stored_dice = ngrams[0]
+                (
+                    ngram_id,
+                    surface,
+                    lemma_phrase,
+                    c_bigram,
+                    df,
+                    stored_pmi,
+                    stored_llr,
+                    stored_dice,
+                ) = ngrams[0]
 
                 # Parse lemma phrase for unigram lookup
                 lemmas = lemma_phrase.split()
@@ -422,26 +445,30 @@ try:
                     # Get total tokens (sum of all unigram lemma counts)
                     # This matches production implementation: _get_total_tokens()
                     result = session.execute(
-                        text("""
+                        text(
+                            """
                             SELECT SUM(freq_abs)
                             FROM lemma_project_stat
                             WHERE project_id = :project_id
-                        """),
-                        {"project_id": project.project_id}
+                        """
+                        ),
+                        {"project_id": project.project_id},
                     )
                     total_tokens = result.scalar() or 1  # Avoid division by zero
 
                     # Get unigram counts
-                    lemma_text_col = schema['lemma']['text']
+                    lemma_text_col = schema["lemma"]["text"]
                     result = session.execute(
-                        text(f"""
+                        text(
+                            f"""
                             SELECT l.{lemma_text_col}, lps.freq_abs
                             FROM lemma l
                             JOIN lemma_project_stat lps ON lps.lemma_id = l.lemma_id
                             WHERE lps.project_id = :project_id
                               AND l.{lemma_text_col} IN (:l1, :l2)
-                        """),
-                        {"project_id": project.project_id, "l1": l1, "l2": l2}
+                        """
+                        ),
+                        {"project_id": project.project_id, "l1": l1, "l2": l2},
                     )
 
                     unigram_counts = {row[0]: row[1] for row in result.fetchall()}
@@ -459,7 +486,7 @@ try:
                         pmi_calc = compute_pmi_independent(c_bigram, c_x, c_y, total_tokens)
                         if pmi_calc is not None and stored_pmi is not None:
                             diff = abs(pmi_calc - stored_pmi)
-                            print(f"\n     PMI:")
+                            print("\n     PMI:")
                             print(f"       Calculated: {pmi_calc:.6f}")
                             print(f"       Stored:     {stored_pmi:.6f}")
                             print(f"       Diff:       {diff:.6e}")
@@ -468,15 +495,15 @@ try:
                                 failures.append(
                                     f"{target_term} ({surface}): PMI diff={diff:.6e} > tolerance"
                                 )
-                                print(f"       ❌ FAIL")
+                                print("       ❌ FAIL")
                             else:
-                                print(f"       ✅ PASS")
+                                print("       ✅ PASS")
 
                         # Independent Dice
                         dice_calc = compute_dice_independent(c_bigram, c_x, c_y)
                         if dice_calc is not None and stored_dice is not None:
                             diff = abs(dice_calc - stored_dice)
-                            print(f"\n     Dice:")
+                            print("\n     Dice:")
                             print(f"       Calculated: {dice_calc:.6f}")
                             print(f"       Stored:     {stored_dice:.6f}")
                             print(f"       Diff:       {diff:.6e}")
@@ -485,9 +512,9 @@ try:
                                 failures.append(
                                     f"{target_term} ({surface}): Dice diff={diff:.6e} > tolerance"
                                 )
-                                print(f"       ❌ FAIL")
+                                print("       ❌ FAIL")
                             else:
-                                print(f"       ✅ PASS")
+                                print("       ✅ PASS")
 
                         # Independent LLR
                         llr_calc = compute_llr_independent(c_bigram, c_x, c_y, total_tokens)
@@ -500,7 +527,7 @@ try:
                             o21 = c_x - c_bigram
                             o22 = total_tokens - c_x - c_y + c_bigram
 
-                            print(f"\n     LLR (2×2 contingency table):")
+                            print("\n     LLR (2×2 contingency table):")
                             print(f"       O11 (x,y):    {o11:6d}")
                             print(f"       O12 (x,¬y):   {o12:6d}")
                             print(f"       O21 (¬x,y):   {o21:6d}")
@@ -513,12 +540,13 @@ try:
                                 failures.append(
                                     f"{target_term} ({surface}): LLR diff={diff:.6e} > tolerance"
                                 )
-                                print(f"       ❌ FAIL")
+                                print("       ❌ FAIL")
                             else:
-                                print(f"       ✅ PASS")
+                                print("       ✅ PASS")
 
 except Exception as e:
     import traceback
+
     print(f"\n❌ VERIFICATION EXCEPTION: {e}")
     traceback.print_exc()
     failures.append(f"EXCEPTION: {e}")
@@ -526,6 +554,7 @@ except Exception as e:
 finally:
     # Cleanup
     import shutil
+
     if test_dir.exists():
         shutil.rmtree(test_dir)
 
@@ -534,15 +563,15 @@ finally:
     # ================================================================
     # FINAL VERDICT
     # ================================================================
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("VERIFICATION SUMMARY")
-    print("="*70)
+    print("=" * 70)
 
     if not failures:
         print("✅ PASS: All invariants and metric checks passed")
         print(f"   - Dataset: {len(DOCUMENTS)} documents")
         print(f"   - Clusters verified: {len(clusters) if 'clusters' in locals() else 0}")
-        print(f"   - Metrics independently recomputed and matched")
+        print("   - Metrics independently recomputed and matched")
         print(f"\n📁 Database saved: {test_db}")
         sys.exit(0)
     else:

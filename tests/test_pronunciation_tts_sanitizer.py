@@ -27,4 +27,3 @@ def test_sanitize_tts_text_removes_bidi_and_joiners_and_normalizes_separators():
     assert "|" not in sanitized
     assert "\u2013" not in sanitized
     assert sanitized == "\u05DE\u05D5\u05EA\u05E8\u05EA \u05D1"
-

@@ -135,9 +135,11 @@ def test_cli_dry_run_prints_summary_without_mutation(monkeypatch, capsys) -> Non
         _reset_db_service()
         DBService.initialize(db_path)
         with DBService.get_instance().get_read_session() as session:
-            remaining = session.execute(
-                select(ProcessorRun).where(ProcessorRun.project_id == project_id)
-            ).scalars().all()
+            remaining = (
+                session.execute(select(ProcessorRun).where(ProcessorRun.project_id == project_id))
+                .scalars()
+                .all()
+            )
         assert len(remaining) == 8
     finally:
         _reset_db_service()
@@ -207,9 +209,11 @@ def test_cli_preflight_only_prints_summary_without_mutation(monkeypatch, capsys)
         _reset_db_service()
         DBService.initialize(db_path)
         with DBService.get_instance().get_read_session() as session:
-            remaining = session.execute(
-                select(ProcessorRun).where(ProcessorRun.project_id == project_id)
-            ).scalars().all()
+            remaining = (
+                session.execute(select(ProcessorRun).where(ProcessorRun.project_id == project_id))
+                .scalars()
+                .all()
+            )
         assert len(remaining) == 8
     finally:
         _reset_db_service()
@@ -316,14 +320,32 @@ def test_cli_apply_prunes_old_blank_success_rows(monkeypatch, capsys) -> None:
         _reset_db_service()
         DBService.initialize(db_path)
         with DBService.get_instance().get_read_session() as session:
-            remaining_runs = session.execute(
-                select(ProcessorRun).where(ProcessorRun.project_id == project_id).order_by(ProcessorRun.run_id)
-            ).scalars().all()
+            remaining_runs = (
+                session.execute(
+                    select(ProcessorRun)
+                    .where(ProcessorRun.project_id == project_id)
+                    .order_by(ProcessorRun.run_id)
+                )
+                .scalars()
+                .all()
+            )
 
         assert len(remaining_runs) == 3
         assert len([run for run in remaining_runs if run.status == "failed"]) == 1
-        assert len([run for run in remaining_runs if run.status == "ok" and (run.note or "").strip()]) == 1
-        assert len([run for run in remaining_runs if run.status == "ok" and not (run.note or "").strip()]) == 1
+        assert (
+            len([run for run in remaining_runs if run.status == "ok" and (run.note or "").strip()])
+            == 1
+        )
+        assert (
+            len(
+                [
+                    run
+                    for run in remaining_runs
+                    if run.status == "ok" and not (run.note or "").strip()
+                ]
+            )
+            == 1
+        )
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
@@ -375,9 +397,11 @@ def test_cli_apply_rejects_protected_db_without_override(monkeypatch) -> None:
         _reset_db_service()
         DBService.initialize(db_path)
         with DBService.get_instance().get_read_session() as session:
-            remaining = session.execute(
-                select(ProcessorRun).where(ProcessorRun.project_id == project_id)
-            ).scalars().all()
+            remaining = (
+                session.execute(select(ProcessorRun).where(ProcessorRun.project_id == project_id))
+                .scalars()
+                .all()
+            )
         assert len(remaining) == 8
     finally:
         _reset_db_service()
@@ -395,7 +419,9 @@ def test_cli_apply_passes_protected_override_to_preflight(monkeypatch, capsys) -
         real_preflight = module._run_telemetry_retention_apply_preflight
 
         def _capture_preflight(**kwargs):
-            captured["allow_protected_db_telemetry_apply"] = kwargs["allow_protected_db_telemetry_apply"]
+            captured["allow_protected_db_telemetry_apply"] = kwargs[
+                "allow_protected_db_telemetry_apply"
+            ]
             return real_preflight(**kwargs)
 
         monkeypatch.setattr(module, "_run_telemetry_retention_apply_preflight", _capture_preflight)

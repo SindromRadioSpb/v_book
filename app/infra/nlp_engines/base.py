@@ -1,8 +1,8 @@
 """Base NLP engine interface (M3)."""
+
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class Sentence:
     """Sentence with tokens."""
 
     text: str
-    tokens: List[Token]
+    tokens: list[Token]
 
 
 class NLPEngine(ABC):
@@ -39,6 +39,6 @@ class NLPEngine(ABC):
         pass
 
     @abstractmethod
-    def process(self, text: str) -> List[Sentence]:
+    def process(self, text: str) -> list[Sentence]:
         """Process text and return sentences with tokens."""
         pass

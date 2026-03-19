@@ -9,14 +9,10 @@ Creates a minimal SQLite DB with:
 Returns path to fixture DB and project_id for testing.
 """
 
-import os
-import shutil
-import sqlite3
-import tempfile
 import logging
-from pathlib import Path
+import sqlite3
 from datetime import datetime
-from typing import Tuple
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +33,7 @@ class FixtureBuilder:
         self.fixture_dir = None
         self.db_path = None
 
-    def build(self) -> Tuple[str, int]:
+    def build(self) -> tuple[str, int]:
         """
         Build fixture DB with term clusters.
 
@@ -82,8 +78,10 @@ class FixtureBuilder:
         db_service = DBService.get_instance()
 
         # Apply M7 migrations manually (004_m7 + 005_m7_revert)
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
 
         con = sqlite3.connect(str(self.db_path))
         con.executescript(migration_m7)
@@ -97,8 +95,8 @@ class FixtureBuilder:
 
     def _create_project(self) -> int:
         """Create test project."""
+        from app.infra.sa_models import DictProject, Library
         from app.services.db_service import DBService
-        from app.infra.sa_models import Library, DictProject
 
         DBService.initialize(self.db_path)
         db_service = DBService.get_instance()
@@ -137,9 +135,9 @@ class FixtureBuilder:
         For E2E testing, we create term data directly
         to avoid dependency on full NLP/document pipeline.
         """
-        from app.services.db_service import DBService
-        from app.infra.sa_models import Lemma, LemmaProjectStat, TermCluster
         from app.domain.normalization import normalize_for_tm
+        from app.infra.sa_models import Lemma, LemmaProjectStat, TermCluster
+        from app.services.db_service import DBService
 
         DBService.initialize(self.db_path)
         db_service = DBService.get_instance()
@@ -194,9 +192,11 @@ class FixtureBuilder:
 
                 session.commit()
 
-                logger.info(f"Created {len(lemmas_data)} lemmas and {len(clusters_data)} term clusters")
+                logger.info(
+                    f"Created {len(lemmas_data)} lemmas and {len(clusters_data)} term clusters"
+                )
 
-        except Exception as e:
+        except Exception:
             logger.exception("Extraction pipeline failed")
             raise
 
@@ -207,16 +207,19 @@ class FixtureBuilder:
 
     def _verify_clusters(self, project_id: int) -> int:
         """Verify term clusters were created."""
-        from app.services.db_service import DBService
+        from sqlalchemy import func, select
+
         from app.infra.sa_models import TermCluster
-        from sqlalchemy import select, func
+        from app.services.db_service import DBService
 
         DBService.initialize(self.db_path)
         db_service = DBService.get_instance()
 
         with db_service.get_session() as session:
-            stmt = select(func.count()).select_from(TermCluster).where(
-                TermCluster.project_id == project_id
+            stmt = (
+                select(func.count())
+                .select_from(TermCluster)
+                .where(TermCluster.project_id == project_id)
             )
             count = session.execute(stmt).scalar()
 
@@ -225,7 +228,7 @@ class FixtureBuilder:
         return count
 
 
-def build_fixture() -> Tuple[str, int]:
+def build_fixture() -> tuple[str, int]:
     """
     Build fixture DB with term clusters.
 

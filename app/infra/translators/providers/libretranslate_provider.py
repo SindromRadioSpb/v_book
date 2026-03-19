@@ -11,19 +11,19 @@ Configuration (QSettings keys):
 
 Glossary Support: No (LibreTranslate does not support glossaries natively)
 """
+
 import json
 import logging
 import time
-import urllib.request
 import urllib.error
 import urllib.parse
-from typing import Optional
+import urllib.request
 
 from app.infra.translators.base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class LibreTranslateProvider(BaseProvider):
     def __init__(
         self,
         api_url: str = "https://libretranslate.com/translate",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout_seconds: float = 10.0,
     ):
         """Initialize LibreTranslate provider.

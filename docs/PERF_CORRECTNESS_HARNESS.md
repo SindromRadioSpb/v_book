@@ -71,4 +71,3 @@ cd /d J:\Project_Vibe\V_book
 - The harness consumes existing artifacts.
 - No cloud calls, no write-heavy pipeline execution inside this checker.
 - Intended for rapid local/CI validation before and after perf patches.
-

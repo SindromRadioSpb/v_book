@@ -36,7 +36,9 @@ def _restore_env(previous: dict[str, str | None]) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def isolate_smoke_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Path]]:
+def isolate_smoke_environment(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[dict[str, Path]]:
     """Redirect smoke tests to temp paths and a temp DB copy."""
     source_raw = (os.environ.get("SMOKE_DB_PATH") or "").strip()
     if not source_raw:

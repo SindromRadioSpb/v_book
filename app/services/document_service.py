@@ -6,17 +6,18 @@ Covers:
 - link_url validation (http/https only, length limit).
 All DB operations are short-transaction, WAL-safe.
 """
+
 import logging
 import re
 from collections import Counter
-from typing import List, Optional, Dict, Any
+from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select, func, or_, exists, union, false, text
+from sqlalchemy import exists, false, func, or_, select, text, union
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import SourceCorpus, SourceDocument
 from app.domain.dto import DocumentDTO
+from app.infra.sa_models import SourceCorpus, SourceDocument
 from app.infra.security import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 VALID_LEVELS = frozenset({"aleph", "bet", "gimel", "he"})
 
 # Safe sort column allowlist (DB column name → ORM attribute)
-_SORT_ALLOWLIST: Dict[str, Any] = {
+_SORT_ALLOWLIST: dict[str, Any] = {
     "doc_id": SourceDocument.doc_id,
     "file_name": SourceDocument.file_name,
     "file_size_bytes": SourceDocument.file_size_bytes,
@@ -54,7 +55,7 @@ _TAG_SPLIT_RE = re.compile(r"[,;\n\r]+")
 # ---------------------------------------------------------------------------
 
 
-def validate_link_url(url: Optional[str]) -> Optional[str]:
+def validate_link_url(url: str | None) -> str | None:
     """Validate and normalise link_url.
 
     Allowed schemes: http, https only.
@@ -81,7 +82,7 @@ def validate_link_url(url: Optional[str]) -> Optional[str]:
     return url
 
 
-def validate_tag(tag: Optional[str]) -> Optional[str]:
+def validate_tag(tag: str | None) -> str | None:
     """Trim, canonicalize, and validate tag length."""
     if tag is None:
         return None
@@ -93,7 +94,7 @@ def validate_tag(tag: Optional[str]) -> Optional[str]:
     return tag
 
 
-def validate_level(level: Optional[str]) -> Optional[str]:
+def validate_level(level: str | None) -> str | None:
     """Validate level against allowed enum."""
     if level is None:
         return None
@@ -105,7 +106,7 @@ def validate_level(level: Optional[str]) -> Optional[str]:
     return level
 
 
-def validate_topic(topic: Optional[str]) -> Optional[str]:
+def validate_topic(topic: str | None) -> str | None:
     """Trim and validate topic length."""
     if topic is None:
         return None
@@ -117,7 +118,7 @@ def validate_topic(topic: Optional[str]) -> Optional[str]:
     return topic
 
 
-def split_tag_tokens(raw_tag: Optional[str]) -> List[str]:
+def split_tag_tokens(raw_tag: str | None) -> list[str]:
     """Return normalized tag tokens from a raw metadata string.
 
     Supported separators are explicit: comma, semicolon, newline. Whitespace-only
@@ -127,7 +128,7 @@ def split_tag_tokens(raw_tag: Optional[str]) -> List[str]:
     if not text:
         return []
     parts = _TAG_SPLIT_RE.split(text)
-    tokens: List[str] = []
+    tokens: list[str] = []
     seen: set[str] = set()
     for part in parts:
         token = re.sub(r"\s+", " ", part.strip())
@@ -144,7 +145,7 @@ def split_tag_tokens(raw_tag: Optional[str]) -> List[str]:
     return [collapsed] if collapsed else []
 
 
-def canonicalize_tag_text(raw_tag: Optional[str]) -> Optional[str]:
+def canonicalize_tag_text(raw_tag: str | None) -> str | None:
     """Persist tags in a stable comma-separated format."""
     tokens = split_tag_tokens(raw_tag)
     if not tokens:
@@ -152,7 +153,7 @@ def canonicalize_tag_text(raw_tag: Optional[str]) -> Optional[str]:
     return ", ".join(tokens)
 
 
-def parse_tag_filter_input(raw_value: Optional[str]) -> List[str]:
+def parse_tag_filter_input(raw_value: str | None) -> list[str]:
     """Parse tag filter input using the same explicit separators as storage."""
     return split_tag_tokens(raw_value)
 
@@ -201,10 +202,7 @@ class DocumentService:
         across migrations applied at runtime.
         """
         result = session.execute(
-            text(
-                "SELECT 1 FROM sqlite_master"
-                " WHERE type='table' AND name='document_name_fts'"
-            )
+            text("SELECT 1 FROM sqlite_master" " WHERE type='table' AND name='document_name_fts'")
         ).fetchone()
         return result is not None
 
@@ -213,7 +211,7 @@ class DocumentService:
         project_id: int,
         *,
         search_query: str,
-        session: Optional[Session] = None,
+        session: Session | None = None,
     ):
         """Build deduplicated doc-id subquery for picker search.
 
@@ -234,12 +232,10 @@ class DocumentService:
 
         # --- tag: prefix mode — explicit tag contains search (LIKE, always) ----------
         if query.lower().startswith(_TAG_SEARCH_PREFIX):
-            tag_term = query[len(_TAG_SEARCH_PREFIX):].strip()
+            tag_term = query[len(_TAG_SEARCH_PREFIX) :].strip()
             if not tag_term:
                 return (
-                    select(SourceDocument.doc_id)
-                    .where(false())
-                    .subquery("project_doc_match_ids")
+                    select(SourceDocument.doc_id).where(false()).subquery("project_doc_match_ids")
                 )
             tag_like = f"%{tag_term}%"
             return (
@@ -323,19 +319,18 @@ class DocumentService:
         stmt,
         *,
         project_id: int,
-        document_filter: Optional[str] = None,
-        document_id: Optional[int] = None,
-        tag_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        document_filter: str | None = None,
+        document_id: int | None = None,
+        tag_filter: str | None = None,
+        topic_filter: str | None = None,
+        level_filter: str | None = None,
+        status_filter: str | None = None,
         tag_match_mode: str = "any",
-        session: Optional[Session] = None,
+        session: Session | None = None,
     ):
         """Apply explicit picker filters with deterministic AND semantics."""
-        stmt = (
-            stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == int(project_id))
+        stmt = stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id).where(
+            SourceCorpus.project_id == int(project_id)
         )
 
         document_filter_clean = (document_filter or "").strip()
@@ -381,17 +376,17 @@ class DocumentService:
         self,
         project_id: int,
         *,
-        search_query: Optional[str] = None,
-        document_filter: Optional[str] = None,
-        document_id: Optional[int] = None,
-        tag_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        search_query: str | None = None,
+        document_filter: str | None = None,
+        document_id: int | None = None,
+        tag_filter: str | None = None,
+        topic_filter: str | None = None,
+        level_filter: str | None = None,
+        status_filter: str | None = None,
         tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
-        session: Optional[Session] = None,
+        session: Session | None = None,
     ):
         """Build project-scoped query for document picker (search + sort, no pagination).
 
@@ -435,10 +430,9 @@ class DocumentService:
                 session=session,
             )
         elif not query:
-            stmt = (
-                stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                .where(SourceCorpus.project_id == int(project_id))
-            )
+            stmt = stmt.join(
+                SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id
+            ).where(SourceCorpus.project_id == int(project_id))
 
         status_filter_clean = (status_filter or "").strip()
         if status_filter_clean and not explicit_filters_active:
@@ -452,13 +446,13 @@ class DocumentService:
         session: Session,
         project_id: int,
         *,
-        search_query: Optional[str] = None,
-        document_filter: Optional[str] = None,
-        document_id: Optional[int] = None,
-        tag_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        search_query: str | None = None,
+        document_filter: str | None = None,
+        document_id: int | None = None,
+        tag_filter: str | None = None,
+        topic_filter: str | None = None,
+        level_filter: str | None = None,
+        status_filter: str | None = None,
         tag_match_mode: str = "any",
     ) -> int:
         """Return project-scoped count for document picker search."""
@@ -504,10 +498,9 @@ class DocumentService:
                     session=session,
                 )
             else:
-                stmt = (
-                    stmt.join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                    .where(SourceCorpus.project_id == int(project_id))
-                )
+                stmt = stmt.join(
+                    SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id
+                ).where(SourceCorpus.project_id == int(project_id))
                 status_filter_clean = (status_filter or "").strip()
                 if status_filter_clean:
                     stmt = stmt.where(SourceDocument.status == status_filter_clean)
@@ -519,19 +512,19 @@ class DocumentService:
         session: Session,
         project_id: int,
         *,
-        search_query: Optional[str] = None,
-        document_filter: Optional[str] = None,
-        document_id: Optional[int] = None,
-        tag_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        search_query: str | None = None,
+        document_filter: str | None = None,
+        document_id: int | None = None,
+        tag_filter: str | None = None,
+        topic_filter: str | None = None,
+        level_filter: str | None = None,
+        status_filter: str | None = None,
         tag_match_mode: str = "any",
         sort_by: str = "doc_id",
         sort_dir: str = "desc",
         limit: int = 25,
         offset: int = 0,
-    ) -> List[DocumentDTO]:
+    ) -> list[DocumentDTO]:
         """Return one project-scoped page for document picker."""
         stmt = self.build_project_documents_query(
             project_id,
@@ -557,24 +550,21 @@ class DocumentService:
         project_id: int,
         *,
         limit: int = 5,
-    ) -> List[str]:
+    ) -> list[str]:
         """Return most frequent normalized tag tokens for a project."""
-        rows = (
-            session.execute(
-                select(SourceDocument.tag, func.count(SourceDocument.doc_id))
-                .select_from(SourceDocument)
-                .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-                .where(
-                    SourceCorpus.project_id == int(project_id),
-                    SourceDocument.tag.is_not(None),
-                    func.trim(SourceDocument.tag) != "",
-                )
-                .group_by(SourceDocument.tag)
+        rows = session.execute(
+            select(SourceDocument.tag, func.count(SourceDocument.doc_id))
+            .select_from(SourceDocument)
+            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+            .where(
+                SourceCorpus.project_id == int(project_id),
+                SourceDocument.tag.is_not(None),
+                func.trim(SourceDocument.tag) != "",
             )
-            .all()
-        )
+            .group_by(SourceDocument.tag)
+        ).all()
         counter: Counter[str] = Counter()
-        display_map: Dict[str, str] = {}
+        display_map: dict[str, str] = {}
         for raw_tag, row_count in rows:
             for token in split_tag_tokens(raw_tag):
                 norm = token.casefold()
@@ -590,11 +580,11 @@ class DocumentService:
         self,
         corpus_id: int,
         *,
-        title_search: Optional[str] = None,
-        tag_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        title_search: str | None = None,
+        tag_filter: str | None = None,
+        level_filter: str | None = None,
+        topic_filter: str | None = None,
+        status_filter: str | None = None,
         sort_by: str = "imported_at",
         sort_dir: str = "desc",
     ):
@@ -616,14 +606,16 @@ class DocumentService:
         session: Session,
         corpus_id: int,
         *,
-        title_search: Optional[str] = None,
-        tag_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        title_search: str | None = None,
+        tag_filter: str | None = None,
+        level_filter: str | None = None,
+        topic_filter: str | None = None,
+        status_filter: str | None = None,
     ) -> int:
         """Return total rows count with global filters applied."""
-        stmt = select(func.count(SourceDocument.doc_id)).where(SourceDocument.corpus_id == corpus_id)
+        stmt = select(func.count(SourceDocument.doc_id)).where(
+            SourceDocument.corpus_id == corpus_id
+        )
         stmt = self._apply_documents_filters(
             stmt,
             title_search=title_search,
@@ -639,16 +631,16 @@ class DocumentService:
         session: Session,
         corpus_id: int,
         *,
-        title_search: Optional[str] = None,
-        tag_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        title_search: str | None = None,
+        tag_filter: str | None = None,
+        level_filter: str | None = None,
+        topic_filter: str | None = None,
+        status_filter: str | None = None,
         sort_by: str = "imported_at",
         sort_dir: str = "desc",
         limit: int = 25,
         offset: int = 0,
-    ) -> List[DocumentDTO]:
+    ) -> list[DocumentDTO]:
         """Return one paged slice (global filter + global sort + LIMIT/OFFSET)."""
         stmt = self.build_documents_query(
             corpus_id,
@@ -673,16 +665,16 @@ class DocumentService:
         session: Session,
         corpus_id: int,
         *,
-        title_search: Optional[str] = None,
-        tag_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        title_search: str | None = None,
+        tag_filter: str | None = None,
+        level_filter: str | None = None,
+        topic_filter: str | None = None,
+        status_filter: str | None = None,
         sort_by: str = "imported_at",
         sort_dir: str = "desc",
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-    ) -> List[DocumentDTO]:
+    ) -> list[DocumentDTO]:
         """Return documents for corpus with optional search/filter/sort.
 
         Args:
@@ -726,7 +718,7 @@ class DocumentService:
         docs = session.execute(stmt).scalars().all()
         return [self._to_dto(d) for d in docs]
 
-    def get_document(self, session: Session, doc_id: int) -> Optional[DocumentDTO]:
+    def get_document(self, session: Session, doc_id: int) -> DocumentDTO | None:
         """Get a single document by ID."""
         doc = session.get(SourceDocument, doc_id)
         if doc is None:
@@ -742,10 +734,10 @@ class DocumentService:
         session: Session,
         doc_id: int,
         *,
-        tag: Optional[str] = ...,
-        link_url: Optional[str] = ...,
-        level: Optional[str] = ...,
-        topic: Optional[str] = ...,
+        tag: str | None = ...,
+        link_url: str | None = ...,
+        level: str | None = ...,
+        topic: str | None = ...,
     ) -> DocumentDTO:
         """Update document metadata fields.
 
@@ -804,11 +796,11 @@ class DocumentService:
     def _apply_documents_filters(
         stmt,
         *,
-        title_search: Optional[str] = None,
-        tag_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        title_search: str | None = None,
+        tag_filter: str | None = None,
+        level_filter: str | None = None,
+        topic_filter: str | None = None,
+        status_filter: str | None = None,
     ):
         """Apply global documents filters to query."""
         if title_search:

@@ -253,5 +253,3 @@ coll = COLLECT(
     upx_exclude=[],
     name='HDLE_Premium',
 )
-
-

@@ -1,31 +1,43 @@
 """Term card view - curation workflow (M8)."""
+
 import logging
-from typing import Optional
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QLineEdit, QTextEdit, QComboBox, QTableView, QSplitter,
-    QGroupBox, QSpinBox, QInputDialog, QMessageBox, QMenu, QProgressDialog
-)
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+)
 
+from app.domain.dto import TermCardDTO
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
-from app.services.db_service import DBService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
 from app.services.user_dictionary_service import UserDictionaryService
-from app.domain.normalization.normalizer import normalize_for_tm
-from app.domain.dto import TermCardDTO
-from app.ui.models_qt import TermCardTableModel
-from app.ui.table_layout_controller import TableLayoutController
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.dialogs import show_error, show_info
-from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
-from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
-from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
-from app.ui.workers import UserDictionaryBulkAddWorker, BatchGenerateAudioWorker
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.ui.models_qt import TermCardTableModel
+from app.ui.table_layout_controller import TableLayoutController
+from app.ui.workers import BatchGenerateAudioWorker, UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +53,9 @@ class TermCardView(QWidget):
         self.card_service = TermCardService()
         self.user_dict_service = UserDictionaryService()
         self.settings = SettingsService.get_instance()
-        self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
+        self.batch_audio_worker: BatchGenerateAudioWorker | None = None
 
-        self.current_card: Optional[TermCardDTO] = None
+        self.current_card: TermCardDTO | None = None
         self.current_queue_index = -1
         self._review_queue_loaded = False
         self._defer_initial_load = bool(defer_initial_load)
@@ -263,17 +275,17 @@ class TermCardView(QWidget):
             table_id="term_card_view",
             table=self.queue_table,
             default_widths={
-                0: 46,   # UD
+                0: 46,  # UD
                 1: 260,  # Term
                 2: 180,  # Lemma
-                3: 90,   # Freq
+                3: 90,  # Freq
                 4: 100,  # DocFreq
                 5: 120,  # Status
                 6: 200,  # Pin Translation
                 7: 200,  # Aliases
-                8: 90,   # Stopword
+                8: 90,  # Stopword
                 9: 110,  # Last Review
-                10: 180, # Niqqud
+                10: 180,  # Niqqud
                 11: 90,  # Audio
             },
         )
@@ -364,12 +376,16 @@ class TermCardView(QWidget):
             if raw_src_norm:
                 raw_norm_pairs.append(("he", raw_src_norm))
         overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
-        pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
+        pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(
+            session, raw_norm_pairs
+        )
         for card in cards:
             src_norm = normalize_for_tm("he", card.representative_he, "term_cluster").norm
             raw_src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
             raw_src_norm = (raw_src_norm or "").strip() or (card.canonical_key or "").strip()
-            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+            canonical_hash = self.user_dict_service.build_canonical_hash(
+                "he", "ru", "term_cluster", src_norm
+            )
             overlay = overlay_map.get(canonical_hash) or {}
             card.in_user_dictionary_count = int(overlay.get("in_user_dictionary_count") or 0)
             card.study_tooltip = overlay.get("study_tooltip")
@@ -440,9 +456,11 @@ class TermCardView(QWidget):
             if not card:
                 continue
             src_norm = normalize_for_tm("he", card.representative_he, "surface").norm
-            src_norm = (src_norm or "").strip() or (card.canonical_key or "").strip() or normalize_for_tm(
-                "he", card.representative_he, "term_cluster"
-            ).norm
+            src_norm = (
+                (src_norm or "").strip()
+                or (card.canonical_key or "").strip()
+                or normalize_for_tm("he", card.representative_he, "term_cluster").norm
+            )
             if not src_norm:
                 continue
             items.append(
@@ -486,7 +504,9 @@ class TermCardView(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self._on_generate_audio_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -575,7 +595,9 @@ class TermCardView(QWidget):
             start_immediately=True,
         )
 
-    def _play_audio_items(self, items: list[dict], *, play_mode: str, start_immediately: bool = False):
+    def _play_audio_items(
+        self, items: list[dict], *, play_mode: str, start_immediately: bool = False
+    ):
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -603,9 +625,7 @@ class TermCardView(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")
@@ -645,14 +665,18 @@ class TermCardView(QWidget):
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected queue rows."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         selected_items = self._selected_pronunciation_items()
         changed = False
         if not selected_items:
             changed = show_pronunciation_bootstrap_dialog(parent=self)
         else:
-            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            changed = show_pronunciation_bootstrap_dialog(
+                parent=self, selected_items=selected_items
+            )
         if changed:
             self.load_review_queue()
 
@@ -701,6 +725,7 @@ class TermCardView(QWidget):
             return
 
         from sqlalchemy import select
+
         from app.infra.sa_models import TermCluster
 
         payloads = []
@@ -747,7 +772,9 @@ class TermCardView(QWidget):
                 row["origin_source_ref"] = None
             prepared.append(row)
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -821,9 +848,7 @@ class TermCardView(QWidget):
 
         self.notes_label.setText(f"<b>Notes:</b> {card.curation_notes or '(none)'}")
 
-        self.example_label.setText(
-            f"<b>Pinned Example:</b> {card.pinned_example_text or '(none)'}"
-        )
+        self.example_label.setText(f"<b>Pinned Example:</b> {card.pinned_example_text or '(none)'}")
 
         # Update navigation
         total = self.queue_model.rowCount()
@@ -1023,7 +1048,7 @@ class TermCardView(QWidget):
                     self.reload_current_card()
                     show_info(self, "Success", f"Term {action}")
                 else:
-                    show_error(self, "Error", f"Failed to toggle stopword")
+                    show_error(self, "Error", "Failed to toggle stopword")
 
         except Exception as e:
             logger.exception("Failed to toggle stopword")

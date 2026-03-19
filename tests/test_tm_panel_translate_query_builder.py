@@ -36,14 +36,91 @@ def tm_filters_db():
 
             rows = [
                 # Included for P1/global + approved + lemma
-                TMEntry(project_id=p1.project_id, kind="lemma", src_lang="he", tgt_lang="ru", src_text="a", src_norm="a", translation="", status="approved", origin="import", is_noise=0),
-                TMEntry(project_id=p1.project_id, kind="lemma", src_lang="he", tgt_lang="ru", src_text="b", src_norm="b", translation="filled", status="approved", origin="import", is_noise=0),
-                TMEntry(project_id=None, kind="lemma", src_lang="he", tgt_lang="ru", src_text="c", src_norm="c", translation="", status="approved", origin="import", is_noise=0),
+                TMEntry(
+                    project_id=p1.project_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="a",
+                    src_norm="a",
+                    translation="",
+                    status="approved",
+                    origin="import",
+                    is_noise=0,
+                ),
+                TMEntry(
+                    project_id=p1.project_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="b",
+                    src_norm="b",
+                    translation="filled",
+                    status="approved",
+                    origin="import",
+                    is_noise=0,
+                ),
+                TMEntry(
+                    project_id=None,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="c",
+                    src_norm="c",
+                    translation="",
+                    status="approved",
+                    origin="import",
+                    is_noise=0,
+                ),
                 # Excluded by filters
-                TMEntry(project_id=p2.project_id, kind="lemma", src_lang="he", tgt_lang="ru", src_text="d", src_norm="d", translation="", status="approved", origin="import", is_noise=0),
-                TMEntry(project_id=p1.project_id, kind="term_cluster", src_lang="he", tgt_lang="ru", src_text="e", src_norm="e", translation="", status="approved", origin="import", is_noise=0),
-                TMEntry(project_id=p1.project_id, kind="lemma", src_lang="he", tgt_lang="ru", src_text="f", src_norm="f", translation="", status="rejected", origin="import", is_noise=0),
-                TMEntry(project_id=p1.project_id, kind="lemma", src_lang="he", tgt_lang="ru", src_text="g", src_norm="g", translation="", status="approved", origin="import", is_noise=1),
+                TMEntry(
+                    project_id=p2.project_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="d",
+                    src_norm="d",
+                    translation="",
+                    status="approved",
+                    origin="import",
+                    is_noise=0,
+                ),
+                TMEntry(
+                    project_id=p1.project_id,
+                    kind="term_cluster",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="e",
+                    src_norm="e",
+                    translation="",
+                    status="approved",
+                    origin="import",
+                    is_noise=0,
+                ),
+                TMEntry(
+                    project_id=p1.project_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="f",
+                    src_norm="f",
+                    translation="",
+                    status="rejected",
+                    origin="import",
+                    is_noise=0,
+                ),
+                TMEntry(
+                    project_id=p1.project_id,
+                    kind="lemma",
+                    src_lang="he",
+                    tgt_lang="ru",
+                    src_text="g",
+                    src_norm="g",
+                    translation="",
+                    status="approved",
+                    origin="import",
+                    is_noise=1,
+                ),
             ]
             session.add_all(rows)
             session.commit()
@@ -65,8 +142,12 @@ def test_build_filtered_tm_ids_respects_filters(tm_filters_db):
     }
 
     with Session(engine) as session:
-        overwrite_ids = service.fetch_tm_ids_for_translation(session, filters, "OVERWRITE", limit=100, offset=0)
-        fill_empty_ids = service.fetch_tm_ids_for_translation(session, filters, "FILL_EMPTY", limit=100, offset=0)
+        overwrite_ids = service.fetch_tm_ids_for_translation(
+            session, filters, "OVERWRITE", limit=100, offset=0
+        )
+        fill_empty_ids = service.fetch_tm_ids_for_translation(
+            session, filters, "FILL_EMPTY", limit=100, offset=0
+        )
         fill_empty_count = service.count_tm_ids_for_translation(session, filters, "FILL_EMPTY")
 
     assert len(overwrite_ids) == 3

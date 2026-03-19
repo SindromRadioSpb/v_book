@@ -57,7 +57,9 @@ def user_dict_engine():
         Path(db_path).unlink(missing_ok=True)
 
 
-def _create_dictionary(session: Session, service: UserDictionaryService, name: str = "Deck A") -> int:
+def _create_dictionary(
+    session: Session, service: UserDictionaryService, name: str = "Deck A"
+) -> int:
     dto = service.create_dictionary(session, name=name)
     session.commit()
     return dto.dictionary_id
@@ -110,12 +112,22 @@ def test_bulk_add_dedup_by_canonical_hash(user_dict_engine):
 
         assert result["added"] == 1
         assert result["skipped"] == 1
-        count = session.execute(
-            select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
-        ).scalars().all()
+        count = (
+            session.execute(
+                select(UserDictionaryItem).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(count) == 1
         assert count[0].study_progress_id is not None
-        progress_rows = session.execute(select(StudyProgress).where(StudyProgress.canonical_hash == count[0].canonical_hash)).scalars().all()
+        progress_rows = (
+            session.execute(
+                select(StudyProgress).where(StudyProgress.canonical_hash == count[0].canonical_hash)
+            )
+            .scalars()
+            .all()
+        )
         assert len(progress_rows) == 1
 
 
@@ -395,7 +407,9 @@ def test_query_items_fallback_resolves_legacy_src_norm_mismatch(user_dict_engine
             tgt_lang="ru",
             src_text="legacy source",
             src_norm="legacy_bad_norm",
-            canonical_hash=service.build_canonical_hash("he", "ru", "term_cluster", "legacy_bad_norm"),
+            canonical_hash=service.build_canonical_hash(
+                "he", "ru", "term_cluster", "legacy_bad_norm"
+            ),
             tags_json="[]",
             is_noise=0,
             study_state="new",
@@ -442,7 +456,9 @@ def test_query_items_pronunciation_overlay_handles_whitespace_norm_key(user_dict
                 tgt_lang="ru",
                 src_text="term with space",
                 src_norm=legacy_norm,
-                canonical_hash=service.build_canonical_hash("he", "ru", "term_cluster", legacy_norm),
+                canonical_hash=service.build_canonical_hash(
+                    "he", "ru", "term_cluster", legacy_norm
+                ),
                 tags_json="[]",
                 is_noise=0,
                 study_state="new",
@@ -568,7 +584,9 @@ def test_update_item_translation_updates_tm_global_and_tm_entry(user_dict_engine
         session.add(project)
         session.flush()
 
-        lemma = Lemma(project_id=project.project_id, lemma_text="alpha", norm_text="alpha", is_noise=0)
+        lemma = Lemma(
+            project_id=project.project_id, lemma_text="alpha", norm_text="alpha", is_noise=0
+        )
         session.add(lemma)
         session.flush()
 
@@ -625,16 +643,25 @@ def test_update_item_translation_updates_tm_global_and_tm_entry(user_dict_engine
         )
         session.flush()
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
         service.update_item_translation(session, item_id=item_id, translation="NEW VALUE")
         session.commit()
 
         updated_global = session.execute(
-            select(TMGlobal).where(TMGlobal.src_lang == "he", TMGlobal.tgt_lang == "ru", TMGlobal.kind == "lemma", TMGlobal.src_norm == src_norm)
+            select(TMGlobal).where(
+                TMGlobal.src_lang == "he",
+                TMGlobal.tgt_lang == "ru",
+                TMGlobal.kind == "lemma",
+                TMGlobal.src_norm == src_norm,
+            )
         ).scalar_one()
-        updated_entry = session.execute(select(TMEntry).where(TMEntry.tm_id == entry.tm_id)).scalar_one()
+        updated_entry = session.execute(
+            select(TMEntry).where(TMEntry.tm_id == entry.tm_id)
+        ).scalar_one()
 
         assert updated_global.translation == "NEW VALUE"
         assert updated_global.status == "approved"
@@ -654,7 +681,9 @@ def test_set_items_noise_status_bulk_syncs_tm_and_lemma(user_dict_engine):
         session.add(project)
         session.flush()
 
-        lemma = Lemma(project_id=project.project_id, lemma_text="beta", norm_text="beta", is_noise=0)
+        lemma = Lemma(
+            project_id=project.project_id, lemma_text="beta", norm_text="beta", is_noise=0
+        )
         session.add(lemma)
         session.flush()
 
@@ -711,7 +740,9 @@ def test_set_items_noise_status_bulk_syncs_tm_and_lemma(user_dict_engine):
         )
         session.flush()
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
         changed = service.set_items_noise_status_bulk(
@@ -723,10 +754,18 @@ def test_set_items_noise_status_bulk_syncs_tm_and_lemma(user_dict_engine):
         session.commit()
 
         assert changed == 1
-        updated_item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
-        updated_global = session.execute(select(TMGlobal).where(TMGlobal.tm_global_id == global_row.tm_global_id)).scalar_one()
-        updated_entry = session.execute(select(TMEntry).where(TMEntry.tm_id == entry.tm_id)).scalar_one()
-        updated_lemma = session.execute(select(Lemma).where(Lemma.lemma_id == lemma.lemma_id)).scalar_one()
+        updated_item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)
+        ).scalar_one()
+        updated_global = session.execute(
+            select(TMGlobal).where(TMGlobal.tm_global_id == global_row.tm_global_id)
+        ).scalar_one()
+        updated_entry = session.execute(
+            select(TMEntry).where(TMEntry.tm_id == entry.tm_id)
+        ).scalar_one()
+        updated_lemma = session.execute(
+            select(Lemma).where(Lemma.lemma_id == lemma.lemma_id)
+        ).scalar_one()
 
         assert updated_item.is_noise == 1
         assert updated_item.noise_reason == "NOISE_USER_MARKED"
@@ -1030,7 +1069,9 @@ def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
         )
         session.flush()
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
         changed = service.set_items_suspension_bulk(
@@ -1042,7 +1083,9 @@ def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
         session.commit()
         assert changed == 1
 
-        item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)
+        ).scalar_one()
         assert item.is_suspended == 1
         assert item.suspended_reason == "USER_SUSPENDED"
         assert item.study_state == "suspended"
@@ -1055,7 +1098,9 @@ def test_set_items_suspension_bulk_updates_flags(user_dict_engine):
         session.commit()
         assert changed == 1
 
-        item = session.execute(select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)).scalar_one()
+        item = session.execute(
+            select(UserDictionaryItem).where(UserDictionaryItem.item_id == item_id)
+        ).scalar_one()
         assert item.is_suspended == 0
         assert item.suspended_reason is None
 
@@ -1121,11 +1166,15 @@ def test_get_study_summary_counts_by_computed_states(user_dict_engine):
         )
         session.flush()
 
-        items = session.execute(
-            select(UserDictionaryItem)
-            .where(UserDictionaryItem.dictionary_id == dictionary_id)
-            .order_by(UserDictionaryItem.item_id)
-        ).scalars().all()
+        items = (
+            session.execute(
+                select(UserDictionaryItem)
+                .where(UserDictionaryItem.dictionary_id == dictionary_id)
+                .order_by(UserDictionaryItem.item_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(items) == 5
 
         now_dt = datetime.now(timezone.utc)

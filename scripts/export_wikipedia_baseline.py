@@ -15,11 +15,12 @@ from pathlib import Path
 from datetime import datetime
 import sys
 
+
 def export_wikipedia_baseline(force=False):
     """Export Wikipedia baseline database."""
 
     # Source database (with processed lemmas)
-    source_db = Path("J:/Project_Vibe/V_book/hdle_premium.db")
+    source_db = Path("E:/projects/Project_Vibe/V_book/hdle_premium.db")
 
     # Output directory
     output_dir = Path("M:/V_book/HDLE/releases")
@@ -63,7 +64,7 @@ def export_wikipedia_baseline(force=False):
         print(f"[WARNING] Not all documents processed ({processed_count}/{doc_count})")
         if not force:
             print("Continue anyway? (y/n): ", end="")
-            if input().lower() != 'y':
+            if input().lower() != "y":
                 print("Export cancelled")
                 sys.exit(0)
         else:
@@ -75,7 +76,7 @@ def export_wikipedia_baseline(force=False):
     schema_version = cur.fetchone()[0]
     print(f"Schema version: {schema_version}")
 
-    if schema_version != '9':
+    if schema_version != "9":
         print(f"[WARNING] Expected schema v9, got v{schema_version}")
 
     conn.close()
@@ -129,8 +130,9 @@ def export_wikipedia_baseline(force=False):
 
     # Create README
     readme_path = output_dir / f"README_{timestamp}.txt"
-    with open(readme_path, 'w', encoding='utf-8') as f:
-        f.write(f"""Hebrew Wikipedia Baseline Database
+    with open(readme_path, "w", encoding="utf-8") as f:
+        f.write(
+            f"""Hebrew Wikipedia Baseline Database
 ===================================
 
 Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -169,7 +171,8 @@ Notes:
 File: {output_db.name}
 Size: {final_size_mb:.1f} MB
 Compressed: ~{final_size_mb * 0.35:.1f} MB (estimated with 7-Zip)
-""")
+"""
+        )
 
     print()
     print("=" * 60)
@@ -185,6 +188,7 @@ Compressed: ~{final_size_mb * 0.35:.1f} MB (estimated with 7-Zip)
     print("3. Upload to release page")
     print(f"   Estimated compressed size: ~{final_size_mb * 0.35:.1f} MB")
     print()
+
 
 if __name__ == "__main__":
     force = "--force" in sys.argv

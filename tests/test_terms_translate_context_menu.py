@@ -106,13 +106,25 @@ def _build_terms_view(selected_count: int):
         "edit_pron_called": 0,
         "bootstrap_called": 0,
     }
-    view.on_batch_translate = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
-    view.on_generate_audio_selected = lambda: state.__setitem__("generate_called", state["generate_called"] + 1)
+    view.on_batch_translate = lambda: state.__setitem__(
+        "translate_called", state["translate_called"] + 1
+    )
+    view.on_generate_audio_selected = lambda: state.__setitem__(
+        "generate_called", state["generate_called"] + 1
+    )
     view.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
-    view.on_add_selected_to_playlist = lambda: state.__setitem__("playlist_called", state["playlist_called"] + 1)
-    view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add_called", state["add_called"] + 1)
-    view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
-    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
+    view.on_add_selected_to_playlist = lambda: state.__setitem__(
+        "playlist_called", state["playlist_called"] + 1
+    )
+    view.on_add_selected_to_user_dictionary = lambda: state.__setitem__(
+        "add_called", state["add_called"] + 1
+    )
+    view.on_edit_pronunciation_selected = lambda: state.__setitem__(
+        "edit_pron_called", state["edit_pron_called"] + 1
+    )
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__(
+        "bootstrap_called", state["bootstrap_called"] + 1
+    )
     return view, state
 
 

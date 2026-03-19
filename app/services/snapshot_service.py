@@ -5,10 +5,9 @@ typically used for testing, verification, and golden test scenarios.
 """
 
 import logging
-from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass
-from typing import List, Optional
+from datetime import datetime
+from pathlib import Path
 
 from app.infra.resource_paths import ResourcePaths
 from app.services.db_snapshot_base import DBSnapshotBase
@@ -25,15 +24,15 @@ class SnapshotInfo:
     source_db_path: Path
     timestamp: str  # YYYYMMDD_HHMMSS
     reason: str
-    tags: List[str]
+    tags: list[str]
     size_bytes: int
-    sha256: Optional[str] = None
+    sha256: str | None = None
 
 
 class SnapshotService(DBSnapshotBase):
     """Service for creating and managing DB snapshots."""
 
-    def __init__(self, storage_dir: Optional[Path] = None):
+    def __init__(self, storage_dir: Path | None = None):
         """
         Initialize snapshot service.
 
@@ -51,7 +50,7 @@ class SnapshotService(DBSnapshotBase):
         self,
         source_db_path: Path,
         reason: str,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         compute_hash: bool = True,
     ) -> SnapshotInfo:
         """
@@ -114,7 +113,7 @@ class SnapshotService(DBSnapshotBase):
             logger.error(f"Snapshot creation failed: {e}")
             raise RuntimeError(f"Snapshot creation failed: {e}") from e
 
-    def list_snapshots(self) -> List[SnapshotInfo]:
+    def list_snapshots(self) -> list[SnapshotInfo]:
         """
         List all snapshots in storage directory.
 
@@ -179,7 +178,7 @@ class SnapshotService(DBSnapshotBase):
         logger.warning(f"Snapshot not found: {snapshot_id}")
         return False
 
-    def get_snapshot(self, snapshot_id: str) -> Optional[SnapshotInfo]:
+    def get_snapshot(self, snapshot_id: str) -> SnapshotInfo | None:
         """
         Get snapshot metadata by ID.
 

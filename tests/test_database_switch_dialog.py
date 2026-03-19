@@ -175,10 +175,14 @@ def test_switch_dialog_heavy_baseline_guidance_mentions_backup_and_reference_wor
     current_db = _create_db(tmp_path / "current.db", get_supported_schema_version())
     baseline_db = _create_db(tmp_path / "baseline.db", get_supported_schema_version())
 
-    monkeypatch.setattr("app.ui.database_switch_dialog.discover_baseline_db_path", lambda: baseline_db)
+    monkeypatch.setattr(
+        "app.ui.database_switch_dialog.discover_baseline_db_path", lambda: baseline_db
+    )
     monkeypatch.setattr(
         "app.ui.database_switch_dialog.classify_db_profile",
-        lambda path, settings=None: "Baseline (dev)" if Path(path).resolve() == baseline_db.resolve() else "Custom",
+        lambda path, settings=None: (
+            "Baseline (dev)" if Path(path).resolve() == baseline_db.resolve() else "Custom"
+        ),
     )
     monkeypatch.setattr("app.ui.database_switch_dialog.STARTUP_DEFER_SIZE_THRESHOLD_BYTES", 1)
 

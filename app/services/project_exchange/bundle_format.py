@@ -5,14 +5,13 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import Tuple
 
-from app.infra.security import validate_path_security, validate_file_size
+from app.infra.security import validate_file_size, validate_path_security
 from app.infra.security.policy import MAX_BUNDLE_SIZE
 from app.services.project_exchange.constants import (
+    CHECKSUMS_FILENAME,
     MANIFEST_FILENAME,
     PAYLOAD_FILENAME,
-    CHECKSUMS_FILENAME,
     PRONUNCIATION_METADATA_FILENAME,
 )
 from app.services.project_exchange.dto import ManifestInfo
@@ -70,13 +69,15 @@ def create_bundle(
                 validate_path_security(local_path, operation="export_bundle")
                 zf.write(local_path, arcname)
 
-        logger.info(f"Bundle created successfully: {out_path} ({out_path.stat().st_size / 1024 / 1024:.1f} MB)")
+        logger.info(
+            f"Bundle created successfully: {out_path} ({out_path.stat().st_size / 1024 / 1024:.1f} MB)"
+        )
     except Exception as e:
         logger.exception("Failed to create bundle")
         raise BundleFormatError(f"Failed to create bundle: {e}") from e
 
 
-def read_bundle(bundle_path: Path, extract_dir: Path) -> Tuple[ManifestInfo, Path]:
+def read_bundle(bundle_path: Path, extract_dir: Path) -> tuple[ManifestInfo, Path]:
     """Read and validate a .hdleproj bundle, extract to temp dir.
 
     Args:
@@ -104,7 +105,7 @@ def read_bundle(bundle_path: Path, extract_dir: Path) -> Tuple[ManifestInfo, Pat
     # Read manifest
     manifest_path = extract_dir / MANIFEST_FILENAME
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
+        with open(manifest_path, encoding="utf-8") as f:
             manifest_data = json.load(f)
         manifest = ManifestInfo.from_dict(manifest_data)
     except Exception as e:
@@ -114,7 +115,7 @@ def read_bundle(bundle_path: Path, extract_dir: Path) -> Tuple[ManifestInfo, Pat
     logger.info("Verifying checksums...")
     checksums_path = extract_dir / CHECKSUMS_FILENAME
     try:
-        with open(checksums_path, "r", encoding="utf-8") as f:
+        with open(checksums_path, encoding="utf-8") as f:
             stored_checksums = json.load(f)
     except Exception as e:
         raise BundleFormatError(f"Invalid checksums.json: {e}") from e

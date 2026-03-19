@@ -8,12 +8,13 @@ Tests coverage calculations and untranslated lists:
 - Query count guards (no N+1)
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
-from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
 from contextlib import contextmanager
+from pathlib import Path
+
 from sqlalchemy import event
 
 
@@ -57,11 +58,14 @@ class TestCoverageService(unittest.TestCase):
 
         # Apply schema
         from app.services.db_service import DBService
+
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -71,7 +75,7 @@ class TestCoverageService(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -90,13 +94,19 @@ class TestCoverageService(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         os.unlink(cls.test_db.name)
 
     def setUp(self):
         """Clean and seed test data."""
         from app.infra.sa_models import (
-            Lemma, LemmaProjectStat, TermCluster, TMEntry, DictSource, DictEntry
+            DictEntry,
+            DictSource,
+            Lemma,
+            LemmaProjectStat,
+            TermCluster,
+            TMEntry,
         )
 
         with self.db_service.get_session() as session:
@@ -112,9 +122,9 @@ class TestCoverageService(unittest.TestCase):
             # Seed lemmas
             lemmas_data = [
                 ("בית", "NOUN", 100),  # Will be translated via TM
-                ("ספר", "NOUN", 80),   # Will be translated via Dict
-                ("שולחן", "NOUN", 60), # Untranslated
-                ("כסא", "NOUN", 40),   # Untranslated
+                ("ספר", "NOUN", 80),  # Will be translated via Dict
+                ("שולחן", "NOUN", 60),  # Untranslated
+                ("כסא", "NOUN", 40),  # Untranslated
             ]
 
             for lemma_text, pos, freq in lemmas_data:
@@ -138,7 +148,7 @@ class TestCoverageService(unittest.TestCase):
             clusters_data = [
                 ("בית הספר", 50, 0.8),  # Translated via TM, high weirdness
                 ("שולחן עגול", 30, 0.6),  # Untranslated, medium weirdness
-                ("כסא נוח", 20, 0.4),     # Untranslated, low weirdness
+                ("כסא נוח", 20, 0.4),  # Untranslated, low weirdness
             ]
 
             for representative, freq, weirdness in clusters_data:
@@ -315,7 +325,7 @@ class TestCoverageService(unittest.TestCase):
             self.assertLessEqual(
                 counter["count"],
                 3,
-                f"compute_lemma_coverage exceeded query ceiling: {counter['count']} > 3"
+                f"compute_lemma_coverage exceeded query ceiling: {counter['count']} > 3",
             )
 
         # Test compute_termcluster_coverage
@@ -326,7 +336,7 @@ class TestCoverageService(unittest.TestCase):
             self.assertLessEqual(
                 counter["count"],
                 3,
-                f"compute_termcluster_coverage exceeded query ceiling: {counter['count']} > 3"
+                f"compute_termcluster_coverage exceeded query ceiling: {counter['count']} > 3",
             )
 
         # Test list_untranslated_lemmas
@@ -339,7 +349,7 @@ class TestCoverageService(unittest.TestCase):
             self.assertLessEqual(
                 counter["count"],
                 5,
-                f"list_untranslated_lemmas exceeded query ceiling: {counter['count']} > 5"
+                f"list_untranslated_lemmas exceeded query ceiling: {counter['count']} > 5",
             )
 
         # Test list_untranslated_termclusters
@@ -350,7 +360,7 @@ class TestCoverageService(unittest.TestCase):
             self.assertLessEqual(
                 counter["count"],
                 5,
-                f"list_untranslated_termclusters exceeded query ceiling: {counter['count']} > 5"
+                f"list_untranslated_termclusters exceeded query ceiling: {counter['count']} > 5",
             )
 
 

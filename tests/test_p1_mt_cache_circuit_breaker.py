@@ -7,6 +7,7 @@ These tests verify:
 
 Note: Full cache integration tests require real database and are in separate suite.
 """
+
 import logging
 import time
 import pytest
@@ -63,6 +64,7 @@ def mock_settings(monkeypatch):
 
     # Monkeypatch SettingsService.get_instance to return mock
     from app.infra import settings
+
     monkeypatch.setattr(settings.SettingsService, "get_instance", lambda: mock_instance)
 
     return settings_data
@@ -81,14 +83,10 @@ def db_session():
         result_mock = MagicMock()
 
         # Detect SELECT queries (cache lookup)
-        if hasattr(stmt, '_where_criteria') or 'select' in str(type(stmt)).lower():
+        if hasattr(stmt, "_where_criteria") or "select" in str(type(stmt)).lower():
             # Return cached entries that match
-            result_mock.scalar_one_or_none = lambda: (
-                cache_storage[0] if cache_storage else None
-            )
-            result_mock.scalar = lambda: (
-                cache_storage[0] if cache_storage else None
-            )
+            result_mock.scalar_one_or_none = lambda: (cache_storage[0] if cache_storage else None)
+            result_mock.scalar = lambda: (cache_storage[0] if cache_storage else None)
         else:
             result_mock.scalar_one_or_none = lambda: None
             result_mock.scalar = lambda: None

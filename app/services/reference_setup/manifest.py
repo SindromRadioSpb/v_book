@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -46,7 +45,7 @@ class ReferenceManifest:
     # TODO: Replace with actual GitHub Release URL after pre-processing
     DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/SindromRadioSpb/v_book/main/ref_corpora/manifests/hewiki_ref_manifest.json"
 
-    def __init__(self, manifest_path: Optional[Path] = None):
+    def __init__(self, manifest_path: Path | None = None):
         """
         Initialize manifest.
 
@@ -58,7 +57,7 @@ class ReferenceManifest:
 
     def load_from_file(self, path: Path):
         """Load manifest from JSON file."""
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         self.entries = {
@@ -89,20 +88,16 @@ class ReferenceManifest:
         except Exception as e:
             raise RuntimeError(f"Failed to load manifest from {url}: {e}")
 
-    def get_latest(self) -> Optional[ManifestEntry]:
+    def get_latest(self) -> ManifestEntry | None:
         """Get latest manifest entry by version."""
         if not self.entries:
             return None
 
         # Sort by version (assumes YYYYMMDD format)
-        sorted_entries = sorted(
-            self.entries.values(),
-            key=lambda e: e.version,
-            reverse=True
-        )
+        sorted_entries = sorted(self.entries.values(), key=lambda e: e.version, reverse=True)
         return sorted_entries[0]
 
-    def get_by_version(self, version: str) -> Optional[ManifestEntry]:
+    def get_by_version(self, version: str) -> ManifestEntry | None:
         """Get manifest entry by version."""
         for entry in self.entries.values():
             if entry.version == version:
@@ -113,10 +108,7 @@ class ReferenceManifest:
         """Save manifest to JSON file."""
         data = {
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "entries": {
-                name: entry.to_dict()
-                for name, entry in self.entries.items()
-            }
+            "entries": {name: entry.to_dict() for name, entry in self.entries.items()},
         }
 
         path.parent.mkdir(parents=True, exist_ok=True)

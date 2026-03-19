@@ -8,26 +8,28 @@ Provides dictionary import from CSV/XLSX with:
 - Deterministic import reports
 """
 
-import logging
-import hashlib
 import csv
+import hashlib
+import logging
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Iterator, Callable, Optional, Literal, List
+from typing import Literal
+
 from sqlalchemy.orm import Session
 
-from app.domain.dto import ImportRow, ImportReport, ImportInvalidRow, ImportConflict
+from app.domain.dto import ImportConflict, ImportInvalidRow, ImportReport, ImportRow
 from app.domain.normalization import normalize_for_tm
-from app.infra.sa_models import DictSource, DictEntry
+from app.infra.sa_models import DictEntry, DictSource
 from app.infra.security import (
+    MAX_DICTIONARY_SIZE,
+    AuditLogger,
+    PathSecurityError,
+    ValidationError,
+    get_import_limiter,
+    sanitize_for_log,
     validate_file_size,
     validate_path_security,
-    sanitize_for_log,
-    MAX_DICTIONARY_SIZE,
-    ValidationError,
-    PathSecurityError,
-    AuditLogger,
-    get_import_limiter,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ class DictionaryImportService:
         Yields:
             ImportRow instances
         """
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        with open(path, encoding="utf-8-sig", newline="") as f:
             reader = csv.reader(f)
             rows = list(reader)
 
@@ -124,7 +126,9 @@ class DictionaryImportService:
         try:
             import openpyxl
         except ImportError:
-            raise ImportError("openpyxl is required for XLSX import. Install it with: pip install openpyxl")
+            raise ImportError(
+                "openpyxl is required for XLSX import. Install it with: pip install openpyxl"
+            )
 
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         ws = wb.active
@@ -149,8 +153,8 @@ class DictionaryImportService:
 
     def _parse_full_format(
         self,
-        rows: List[List[str]],
-        header: List[str],
+        rows: list[list[str]],
+        header: list[str],
         fmt: str,
     ) -> Iterator[ImportRow]:
         """Parse full format with headers.
@@ -193,10 +197,26 @@ class DictionaryImportService:
             kind = row[col_map.get("kind", -1)].strip() if "kind" in col_map else "lemma"
             src_lang = row[col_map.get("src_lang", -1)].strip() if "src_lang" in col_map else "he"
             tgt_lang = row[col_map.get("tgt_lang", -1)].strip() if "tgt_lang" in col_map else "ru"
-            pos = row[col_map.get("pos", -1)].strip() if "pos" in col_map and col_map["pos"] < len(row) else None
-            domain = row[col_map.get("domain", -1)].strip() if "domain" in col_map and col_map["domain"] < len(row) else None
-            status = row[col_map.get("status", -1)].strip() if "status" in col_map and col_map["status"] < len(row) else "approved"
-            notes = row[col_map.get("notes", -1)].strip() if "notes" in col_map and col_map["notes"] < len(row) else None
+            pos = (
+                row[col_map.get("pos", -1)].strip()
+                if "pos" in col_map and col_map["pos"] < len(row)
+                else None
+            )
+            domain = (
+                row[col_map.get("domain", -1)].strip()
+                if "domain" in col_map and col_map["domain"] < len(row)
+                else None
+            )
+            status = (
+                row[col_map.get("status", -1)].strip()
+                if "status" in col_map and col_map["status"] < len(row)
+                else "approved"
+            )
+            notes = (
+                row[col_map.get("notes", -1)].strip()
+                if "notes" in col_map and col_map["notes"] < len(row)
+                else None
+            )
 
             # Priority
             priority = None
@@ -230,7 +250,7 @@ class DictionaryImportService:
 
     def _parse_2column_format(
         self,
-        rows: List[List[str]],
+        rows: list[list[str]],
         default_kind: str,
     ) -> Iterator[ImportRow]:
         """Parse 2-column format (he, ru).
@@ -272,14 +292,14 @@ class DictionaryImportService:
         session: Session,
         path: str,
         *,
-        project_id: Optional[int],
+        project_id: int | None,
         scope: Literal["global", "project"],
         on_conflict: Literal["skip", "overwrite", "keep_both_as_variants"],
         normalize_mode: Literal["strict", "compat"],
         default_kind: str = "lemma",
         default_status: str = "approved",
-        progress_cb: Optional[Callable[[int, int], None]] = None,
-        cancel_flag: Optional[Callable[[], bool]] = None,
+        progress_cb: Callable[[int, int], None] | None = None,
+        cancel_flag: Callable[[], bool] | None = None,
         force_reimport: bool = False,
     ) -> ImportReport:
         """Import dictionary from file.
@@ -349,8 +369,7 @@ class DictionaryImportService:
             validate_file_size(safe_path, MAX_DICTIONARY_SIZE, file_type="dictionary")
         except ValidationError as e:
             logger.warning(
-                f"File size limit exceeded: {sanitize_for_log(path_obj.name)}, "
-                f"size={e.value}"
+                f"File size limit exceeded: {sanitize_for_log(path_obj.name)}, " f"size={e.value}"
             )
 
             # Audit: Log BLOCK event
@@ -426,8 +445,8 @@ class DictionaryImportService:
             "conflicts": 0,
             "invalid": 0,
         }
-        invalid_rows: List[ImportInvalidRow] = []
-        conflict_details: List[ImportConflict] = []
+        invalid_rows: list[ImportInvalidRow] = []
+        conflict_details: list[ImportConflict] = []
 
         # Track processed entries within this batch (for conflict detection)
         # Key: (kind, src_lang, tgt_lang, src_norm, translation)
@@ -445,13 +464,17 @@ class DictionaryImportService:
 
             # Validate row
             if not row.src_text or not row.translation:
-                invalid_rows.append(ImportInvalidRow(row.row_index, "Missing src_text or translation"))
+                invalid_rows.append(
+                    ImportInvalidRow(row.row_index, "Missing src_text or translation")
+                )
                 counters["invalid"] += 1
                 continue
 
             # Normalize src_text (ALWAYS strict for dict_entry key)
             try:
-                src_norm_result = normalize_for_tm(row.src_lang, row.src_text, row.kind, mode="strict")
+                src_norm_result = normalize_for_tm(
+                    row.src_lang, row.src_text, row.kind, mode="strict"
+                )
                 src_norm = src_norm_result.norm
             except Exception as e:
                 invalid_rows.append(ImportInvalidRow(row.row_index, f"Normalization error: {e}"))
@@ -478,7 +501,9 @@ class DictionaryImportService:
                         continue
 
                     try:
-                        alias_norm_result = normalize_for_tm(row.src_lang, alias, row.kind, mode="strict")
+                        alias_norm_result = normalize_for_tm(
+                            row.src_lang, alias, row.kind, mode="strict"
+                        )
                         alias_norm = alias_norm_result.norm
                     except Exception as e:
                         logger.warning(f"Alias normalization failed: {alias}, error: {e}")
@@ -537,11 +562,11 @@ class DictionaryImportService:
             duration_ms=elapsed_ms,
             details={
                 "total_rows": total_rows,
-                "added": counters['added'],
-                "updated": counters['updated'],
-                "skipped": counters['skipped'],
-                "invalid": counters['invalid'],
-                "conflicts": counters['conflicts'],
+                "added": counters["added"],
+                "updated": counters["updated"],
+                "skipped": counters["skipped"],
+                "invalid": counters["invalid"],
+                "conflicts": counters["conflicts"],
                 "dict_source_id": dict_source.dict_source_id,
             },
             project_id=project_id,
@@ -565,8 +590,8 @@ class DictionaryImportService:
         self,
         session: Session,
         sha256: str,
-        project_id: Optional[int],
-    ) -> Optional[DictSource]:
+        project_id: int | None,
+    ) -> DictSource | None:
         """Check if SHA256 already imported in scope.
 
         Args:
@@ -595,7 +620,7 @@ class DictionaryImportService:
         on_conflict: str,
         default_status: str,
         counters: dict,
-        conflict_details: List[ImportConflict],
+        conflict_details: list[ImportConflict],
         processed_batch: set,
     ) -> None:
         """Process single entry with conflict policy.
@@ -628,8 +653,7 @@ class DictionaryImportService:
         # Check if same src_norm exists in batch (conflict)
         batch_conflict_key = (row.kind, row.src_lang, row.tgt_lang, src_norm)
         has_batch_conflict = any(
-            (k, sl, tl, sn) == batch_conflict_key
-            for (k, sl, tl, sn, trans) in processed_batch
+            (k, sl, tl, sn) == batch_conflict_key for (k, sl, tl, sn, trans) in processed_batch
         )
 
         # Query existing entries with same (dict_source_id, kind, src_lang, tgt_lang, src_norm)

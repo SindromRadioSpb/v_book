@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Callable, Iterator, TypeVar
+from typing import TypeVar
 
 logger = logging.getLogger(__name__)
 

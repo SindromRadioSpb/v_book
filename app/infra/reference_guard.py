@@ -4,6 +4,7 @@ A reference project (is_reference=1) is physically backed by a read-only DB
 file.  Any service-layer write path must call assert_not_reference_project()
 before mutating data that belongs to such a project.
 """
+
 from __future__ import annotations
 
 
@@ -19,7 +20,9 @@ class ReferenceProjectReadOnlyError(RuntimeError):
         )
 
 
-def assert_not_reference_project(project_id: int, is_reference: int, operation: str = "write") -> None:
+def assert_not_reference_project(
+    project_id: int, is_reference: int, operation: str = "write"
+) -> None:
     """Raise ReferenceProjectReadOnlyError if the project is a reference project.
 
     Call this at the top of any service method that writes to project-owned data.

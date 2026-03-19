@@ -13,9 +13,10 @@ All existing public API is preserved (back-compat).
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, QUrl, pyqtSignal
 
@@ -69,10 +70,10 @@ class AudioTrack:
 
     path: Path
     label: str = ""
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
-    def to_payload(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "path": str(self.path),
             "label": self.label,
         }
@@ -111,7 +112,7 @@ class AudioBackendBase(QObject):
 class QtMultimediaBackend(AudioBackendBase):
     """QtMultimedia playback backend."""
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         if not QT_MULTIMEDIA_AVAILABLE:
             raise RuntimeError("QtMultimedia is not available")
@@ -190,7 +191,7 @@ class AudioPlayerService(QObject):
     rate, repeat modes (none/one/all), and auto-pause after each item.
     """
 
-    _instance: Optional["AudioPlayerService"] = None
+    _instance: AudioPlayerService | None = None
 
     queue_changed = pyqtSignal(list)
     now_playing_changed = pyqtSignal(object)
@@ -202,19 +203,19 @@ class AudioPlayerService(QObject):
     def __init__(
         self,
         *,
-        settings: Optional[SettingsService] = None,
-        backend: Optional[AudioBackendBase] = None,
+        settings: SettingsService | None = None,
+        backend: AudioBackendBase | None = None,
     ):
         super().__init__()
         self.settings = settings or SettingsService.get_instance()
 
         # Non-destructive queue: items are never popped on play.
-        self._tracks: List[AudioTrack] = []
+        self._tracks: list[AudioTrack] = []
         # Index of the track that is currently (or was last) started.
         # -1 = nothing has been started yet.
         self._current_index: int = -1
         # Reference to the track physically held by the backend right now.
-        self._current: Optional[AudioTrack] = None
+        self._current: AudioTrack | None = None
 
         self._backend = backend
         if self._backend is None:
@@ -240,10 +241,10 @@ class AudioPlayerService(QObject):
 
         # v2: playback rate + repeat
         self._playback_rate: float = 1.0
-        self._repeat_mode: str = "none"   # "none" | "one" | "all"
-        self._repeat_count: int = 0       # 0 = infinite, N = play N times (mode="one")
-        self._item_play_count: int = 0    # how many times the current item has finished
-        self._auto_pause: bool = False    # pause after each item instead of auto-advancing
+        self._repeat_mode: str = "none"  # "none" | "one" | "all"
+        self._repeat_count: int = 0  # 0 = infinite, N = play N times (mode="one")
+        self._item_play_count: int = 0  # how many times the current item has finished
+        self._auto_pause: bool = False  # pause after each item instead of auto-advancing
 
         self.reload_from_settings()
 
@@ -255,7 +256,7 @@ class AudioPlayerService(QObject):
     # ── Singleton ─────────────────────────────────────────────────────────────
 
     @classmethod
-    def get_instance(cls) -> "AudioPlayerService":
+    def get_instance(cls) -> AudioPlayerService:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -284,7 +285,7 @@ class AudioPlayerService(QObject):
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
-    def _build_default_backend(self) -> Optional[AudioBackendBase]:
+    def _build_default_backend(self) -> AudioBackendBase | None:
         if not QT_MULTIMEDIA_AVAILABLE:
             logger.warning("QtMultimedia is unavailable, internal playback disabled")
             return None
@@ -364,7 +365,7 @@ class AudioPlayerService(QObject):
 
     # ── Queue management ──────────────────────────────────────────────────────
 
-    def queue_snapshot(self) -> List[Dict[str, Any]]:
+    def queue_snapshot(self) -> list[dict[str, Any]]:
         """Return ALL tracks (including already-played; cursor is in the UI)."""
         return [track.to_payload() for track in self._tracks]
 
@@ -403,10 +404,10 @@ class AudioPlayerService(QObject):
 
     def enqueue_from_db(
         self,
-        items: list,       # List[AudioQueueItemDTO] — avoids circular import
+        items: list,  # List[AudioQueueItemDTO] — avoids circular import
         *,
-        mode: str = "append",   # "append" | "prepend" | "after_current"
-        resolved_paths: Optional[Dict[int, Path]] = None,  # item_id → abs Path
+        mode: str = "append",  # "append" | "prepend" | "after_current"
+        resolved_paths: dict[int, Path] | None = None,  # item_id → abs Path
     ) -> int:
         """Add AudioQueueItemDTO objects to the in-memory queue without requiring
         an audio file on disk.  Items with no ready audio appear as 'missing'
@@ -417,14 +418,14 @@ class AudioPlayerService(QObject):
           prepend       — insert before position 0 (shifts current_index)
           after_current — insert after current cursor position
         """
-        tracks: List[AudioTrack] = []
+        tracks: list[AudioTrack] = []
         for item in items:
             label = (
                 item.snapshot_hebrew
                 or item.snapshot_source_label
                 or f"{item.kind}:{item.source_id}"
             )
-            ctx: Dict[str, Any] = {
+            ctx: dict[str, Any] = {
                 "snapshot_hebrew": item.snapshot_hebrew,
                 "snapshot_niqqud": item.snapshot_niqqud,
                 "snapshot_translation": item.snapshot_translation,
@@ -436,9 +437,7 @@ class AudioPlayerService(QObject):
                 "audio_status": item.audio_status,
                 "play_count": item.play_count,
             }
-            resolved_path = (
-                (resolved_paths or {}).get(item.item_id) or Path("")
-            )
+            resolved_path = (resolved_paths or {}).get(item.item_id) or Path("")
             tracks.append(AudioTrack(path=resolved_path, label=label, context=ctx))
 
         if not tracks:
@@ -450,9 +449,7 @@ class AudioPlayerService(QObject):
                 self._current_index += len(tracks)
         elif mode == "after_current":
             insert_at = max(0, self._current_index + 1)
-            self._tracks = (
-                self._tracks[:insert_at] + tracks + self._tracks[insert_at:]
-            )
+            self._tracks = self._tracks[:insert_at] + tracks + self._tracks[insert_at:]
         else:  # append
             self._tracks.extend(tracks)
 
@@ -466,8 +463,8 @@ class AudioPlayerService(QObject):
         path: Path,
         *,
         label: str = "",
-        play_mode: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        play_mode: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> int:
         return self.play_paths(
             [path],
@@ -480,12 +477,12 @@ class AudioPlayerService(QObject):
         self,
         paths: Sequence[Path],
         *,
-        labels: Optional[Sequence[str]] = None,
-        play_mode: Optional[str] = None,
-        contexts: Optional[Sequence[Dict[str, Any]]] = None,
+        labels: Sequence[str] | None = None,
+        play_mode: str | None = None,
+        contexts: Sequence[dict[str, Any]] | None = None,
         start_immediately: bool = False,
     ) -> int:
-        items: List[AudioTrack] = []
+        items: list[AudioTrack] = []
         for idx, path in enumerate(paths):
             if not path:
                 continue
@@ -495,7 +492,7 @@ class AudioPlayerService(QObject):
             label = ""
             if labels is not None and idx < len(labels):
                 label = str(labels[idx] or "")
-            ctx: Dict[str, Any] = {}
+            ctx: dict[str, Any] = {}
             if contexts is not None and idx < len(contexts):
                 ctx = dict(contexts[idx] or {})
             # Keep queue Plays column deterministic for all entrypoints:
@@ -529,15 +526,15 @@ class AudioPlayerService(QObject):
         else:  # enqueue
             # Deduplicate by source key for all explicit source-backed rows.
             # This prevents queue pollution when replaying playlist entries.
-            existing_key_to_index: Dict[tuple[str, int, Optional[int]], int] = {}
+            existing_key_to_index: dict[tuple[str, int, int | None], int] = {}
             for idx, existing in enumerate(self._tracks):
                 key = self._source_key_from_context(existing.context or {})
                 if key is not None and key not in existing_key_to_index:
                     existing_key_to_index[key] = idx
 
-            append_items: List[AudioTrack] = []
+            append_items: list[AudioTrack] = []
             changed_existing = False
-            first_target_index: Optional[int] = None
+            first_target_index: int | None = None
 
             for incoming in items:
                 key = self._source_key_from_context(incoming.context or {})
@@ -579,7 +576,7 @@ class AudioPlayerService(QObject):
         return len(items)
 
     @staticmethod
-    def _source_key_from_context(context: Dict[str, Any]) -> Optional[tuple[str, int, Optional[int]]]:
+    def _source_key_from_context(context: dict[str, Any]) -> tuple[str, int, int | None] | None:
         kind = _normalize_queue_kind(str(context.get("kind") or ""))
         source_id_raw = context.get("source_id")
         if not kind or source_id_raw is None:
@@ -595,7 +592,7 @@ class AudioPlayerService(QObject):
             project_id = None
         return (kind, source_id, project_id)
 
-    def _find_existing_track_index(self, track: AudioTrack) -> Optional[int]:
+    def _find_existing_track_index(self, track: AudioTrack) -> int | None:
         key = self._source_key_from_context(track.context or {})
         if key is None:
             return None
@@ -686,9 +683,7 @@ class AudioPlayerService(QObject):
 
     def _timers_active(self) -> bool:
         return (
-            self._pre_timer.isActive()
-            or self._post_timer.isActive()
-            or self._gap_timer.isActive()
+            self._pre_timer.isActive() or self._post_timer.isActive() or self._gap_timer.isActive()
         )
 
     def _stop_all_timers(self) -> None:
@@ -789,9 +784,8 @@ class AudioPlayerService(QObject):
             self._current.context["play_count"] += 1
 
         # Will we replay the same item?
-        will_repeat_same = (
-            self._repeat_mode == "one"
-            and (self._repeat_count == 0 or self._item_play_count < self._repeat_count)
+        will_repeat_same = self._repeat_mode == "one" and (
+            self._repeat_count == 0 or self._item_play_count < self._repeat_count
         )
 
         self._current = None
@@ -814,9 +808,7 @@ class AudioPlayerService(QObject):
 
         # Determine if there is a next track (accounting for repeat-all)
         next_idx = self._current_index + 1
-        has_next = next_idx < len(self._tracks) or (
-            self._repeat_mode == "all" and self._tracks
-        )
+        has_next = next_idx < len(self._tracks) or (self._repeat_mode == "all" and self._tracks)
 
         if has_next:
             if self.gap_ms > 0:
@@ -857,7 +849,7 @@ class AudioPlayerService(QObject):
     def _emit_queue_changed(self) -> None:
         self.queue_changed.emit(self.queue_snapshot())
 
-    def _emit_now_playing(self, payload: Optional[Dict[str, Any]]) -> None:
+    def _emit_now_playing(self, payload: dict[str, Any] | None) -> None:
         self.now_playing_changed.emit(payload)
 
     def _set_state(self, state: str) -> None:

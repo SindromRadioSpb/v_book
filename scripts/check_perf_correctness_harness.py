@@ -98,8 +98,12 @@ def _snapshot(payload: dict[str, Any], artifact: Path) -> dict[str, Any]:
         "overall_status": str(payload.get("overall_status") or ""),
         "stage_status": str(stage.get("status") or ""),
         "errors_count": max(0, _safe_int(stage.get("errors_count"))),
-        "overwrite_mode": _safe_int(stage.get("overwrite"), _safe_int((payload.get("config") or {}).get("overwrite"), 0)),
-        "rows": stage.get("rows_processed") if isinstance(stage.get("rows_processed"), dict) else {},
+        "overwrite_mode": _safe_int(
+            stage.get("overwrite"), _safe_int((payload.get("config") or {}).get("overwrite"), 0)
+        ),
+        "rows": (
+            stage.get("rows_processed") if isinstance(stage.get("rows_processed"), dict) else {}
+        ),
         "rows_total": _rows_total(stage.get("rows_processed")),
         "details": stage.get("details") if isinstance(stage.get("details"), dict) else {},
         "db_paths": {
@@ -107,17 +111,32 @@ def _snapshot(payload: dict[str, Any], artifact: Path) -> dict[str, Any]:
             "base_sandbox_db": str(db.get("base_sandbox_db") or ""),
             "working_db": str(db.get("working_db") or ""),
         },
-        "error_samples": (stage.get("error_samples") if isinstance(stage.get("error_samples"), list) else [])[:5],
+        "error_samples": (
+            stage.get("error_samples") if isinstance(stage.get("error_samples"), list) else []
+        )[:5],
     }
 
 
 def _check_common(s: dict[str, Any]) -> list[dict[str, str]]:
     checks: list[dict[str, str]] = []
-    checks.append({"name": "overall_status_pass", "status": "PASS" if s["overall_status"] == "pass" else "FAIL"})
-    checks.append({"name": "stage_status_ok", "status": "PASS" if s["stage_status"] == "ok" else "FAIL"})
-    checks.append({"name": "error_count_zero", "status": "PASS" if s["errors_count"] == 0 else "FAIL"})
-    checks.append({"name": "overwrite_enabled", "status": "PASS" if s["overwrite_mode"] == 1 else "FAIL"})
-    checks.append({"name": "rows_total_positive", "status": "PASS" if s["rows_total"] > 0 else "FAIL"})
+    checks.append(
+        {
+            "name": "overall_status_pass",
+            "status": "PASS" if s["overall_status"] == "pass" else "FAIL",
+        }
+    )
+    checks.append(
+        {"name": "stage_status_ok", "status": "PASS" if s["stage_status"] == "ok" else "FAIL"}
+    )
+    checks.append(
+        {"name": "error_count_zero", "status": "PASS" if s["errors_count"] == 0 else "FAIL"}
+    )
+    checks.append(
+        {"name": "overwrite_enabled", "status": "PASS" if s["overwrite_mode"] == 1 else "FAIL"}
+    )
+    checks.append(
+        {"name": "rows_total_positive", "status": "PASS" if s["rows_total"] > 0 else "FAIL"}
+    )
     has_m_path = any(path.upper().startswith("M:\\") for path in s["db_paths"].values() if path)
     checks.append({"name": "db_paths_not_m_drive", "status": "PASS" if not has_m_path else "FAIL"})
     return checks
@@ -126,9 +145,18 @@ def _check_common(s: dict[str, Any]) -> list[dict[str, str]]:
 def _check_extract_terms(s: dict[str, Any]) -> list[dict[str, str]]:
     rows = s["rows"]
     return [
-        {"name": "extract_terms_lemma_positive", "status": "PASS" if _safe_int(rows.get("lemma")) > 0 else "FAIL"},
-        {"name": "extract_terms_term_positive", "status": "PASS" if _safe_int(rows.get("term")) > 0 else "FAIL"},
-        {"name": "extract_terms_sentence_positive", "status": "PASS" if _safe_int(rows.get("sentence")) > 0 else "FAIL"},
+        {
+            "name": "extract_terms_lemma_positive",
+            "status": "PASS" if _safe_int(rows.get("lemma")) > 0 else "FAIL",
+        },
+        {
+            "name": "extract_terms_term_positive",
+            "status": "PASS" if _safe_int(rows.get("term")) > 0 else "FAIL",
+        },
+        {
+            "name": "extract_terms_sentence_positive",
+            "status": "PASS" if _safe_int(rows.get("sentence")) > 0 else "FAIL",
+        },
     ]
 
 
@@ -138,15 +166,31 @@ def _check_niqqud(s: dict[str, Any]) -> list[dict[str, str]]:
     lexical = details.get("lexical") if isinstance(details.get("lexical"), dict) else {}
     sentence = details.get("sentence") if isinstance(details.get("sentence"), dict) else {}
     checks = [
-        {"name": "niqqud_lemma_positive", "status": "PASS" if _safe_int(rows.get("lemma")) > 0 else "FAIL"},
-        {"name": "niqqud_sentence_positive", "status": "PASS" if _safe_int(rows.get("sentence")) > 0 else "FAIL"},
+        {
+            "name": "niqqud_lemma_positive",
+            "status": "PASS" if _safe_int(rows.get("lemma")) > 0 else "FAIL",
+        },
+        {
+            "name": "niqqud_sentence_positive",
+            "status": "PASS" if _safe_int(rows.get("sentence")) > 0 else "FAIL",
+        },
     ]
     if lexical:
-        checks.append({"name": "niqqud_lexical_failed_zero", "status": "PASS" if _safe_int(lexical.get("failed")) == 0 else "FAIL"})
+        checks.append(
+            {
+                "name": "niqqud_lexical_failed_zero",
+                "status": "PASS" if _safe_int(lexical.get("failed")) == 0 else "FAIL",
+            }
+        )
     else:
         checks.append({"name": "niqqud_lexical_details_present", "status": "WARN"})
     if sentence:
-        checks.append({"name": "niqqud_sentence_failed_zero", "status": "PASS" if _safe_int(sentence.get("failed")) == 0 else "FAIL"})
+        checks.append(
+            {
+                "name": "niqqud_sentence_failed_zero",
+                "status": "PASS" if _safe_int(sentence.get("failed")) == 0 else "FAIL",
+            }
+        )
     else:
         checks.append({"name": "niqqud_sentence_details_present", "status": "WARN"})
     return checks
@@ -192,8 +236,12 @@ def _worst(checks: list[dict[str, str]]) -> str:
     return "PASS"
 
 
-def _evaluate(artifacts: list[Path], payloads: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
-    snapshots = [_snapshot(payload, artifact) for payload, artifact in zip(payloads, artifacts, strict=True)]
+def _evaluate(
+    artifacts: list[Path], payloads: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], str]:
+    snapshots = [
+        _snapshot(payload, artifact) for payload, artifact in zip(payloads, artifacts, strict=True)
+    ]
     latest_by_stage: dict[str, dict[str, Any]] = {}
     for snap in snapshots:
         latest_by_stage[snap["stage_name"]] = snap
@@ -256,7 +304,9 @@ def _evaluate(artifacts: list[Path], payloads: list[dict[str, Any]]) -> tuple[li
     return rows, overall
 
 
-def _write_report(path: Path, stage_rows: list[dict[str, Any]], overall: str, used: list[Path]) -> None:
+def _write_report(
+    path: Path, stage_rows: list[dict[str, Any]], overall: str, used: list[Path]
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     now_utc = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     lines: list[str] = []
@@ -295,8 +345,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--artifacts", nargs="+", help="Explicit artifact paths.")
     parser.add_argument("--glob", dest="glob", default=None, help="Glob pattern for artifacts.")
     parser.add_argument("--dir", dest="dir", default=None, help="Directory scan path.")
-    parser.add_argument("--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts.")
-    parser.add_argument("--report-path", default=str(DEFAULT_REPORT_PATH), help="Markdown report path.")
+    parser.add_argument(
+        "--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts."
+    )
+    parser.add_argument(
+        "--report-path", default=str(DEFAULT_REPORT_PATH), help="Markdown report path."
+    )
     return parser.parse_args(argv)
 
 
@@ -337,4 +391,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

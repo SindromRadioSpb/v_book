@@ -11,8 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import and_, asc, case, desc, exists, func, or_, select, text, tuple_, update
 from sqlalchemy.orm import Session
@@ -24,9 +25,9 @@ from app.infra.sa_models import (
     DictProject,
     Lemma,
     StudyProgress,
+    TermCluster,
     TMEntry,
     TMGlobal,
-    TermCluster,
     UserDictionary,
     UserDictionaryItem,
 )
@@ -64,7 +65,7 @@ class UserDictionaryService:
         self,
         session: Session,
         name: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         *,
         is_pinned: int = 0,
         sort_order: int = 0,
@@ -98,7 +99,9 @@ class UserDictionaryService:
         logger.info("Created user dictionary: id=%s, name=%s", row.dictionary_id, clean_name)
         return self._dictionary_to_dto(row, item_count=0)
 
-    def rename_dictionary(self, session: Session, dictionary_id: int, new_name: str) -> UserDictionaryDTO:
+    def rename_dictionary(
+        self, session: Session, dictionary_id: int, new_name: str
+    ) -> UserDictionaryDTO:
         """Rename a user dictionary."""
         clean_name = self._validate_dictionary_name(new_name)
         row = session.get(UserDictionary, dictionary_id)
@@ -106,18 +109,21 @@ class UserDictionaryService:
             raise ValueError(f"Dictionary not found: {dictionary_id}")
 
         if row.name == clean_name:
-            return self._dictionary_to_dto(row, item_count=self._count_items(session, dictionary_id))
+            return self._dictionary_to_dto(
+                row, item_count=self._count_items(session, dictionary_id)
+            )
 
         existing = session.execute(
-            select(UserDictionary)
-            .where(UserDictionary.name == clean_name, UserDictionary.dictionary_id != dictionary_id)
+            select(UserDictionary).where(
+                UserDictionary.name == clean_name, UserDictionary.dictionary_id != dictionary_id
+            )
         ).scalar_one_or_none()
         if existing:
             raise ValueError(f"Dictionary '{clean_name}' already exists")
 
         old_name = row.name
         row.name = clean_name
-        row.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        row.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         session.flush()
 
         self._audit_event(
@@ -130,7 +136,9 @@ class UserDictionaryService:
                 "new_name": sanitize_for_log(clean_name),
             },
         )
-        logger.info("Renamed user dictionary: id=%s, old=%s, new=%s", dictionary_id, old_name, clean_name)
+        logger.info(
+            "Renamed user dictionary: id=%s, old=%s, new=%s", dictionary_id, old_name, clean_name
+        )
         return self._dictionary_to_dto(row, item_count=self._count_items(session, dictionary_id))
 
     def delete_dictionary(self, session: Session, dictionary_id: int) -> bool:
@@ -153,18 +161,26 @@ class UserDictionaryService:
         logger.info("Deleted user dictionary: id=%s, name=%s", dictionary_id, name)
         return True
 
-    def list_dictionaries(self, session: Session) -> List[UserDictionaryDTO]:
+    def list_dictionaries(self, session: Session) -> list[UserDictionaryDTO]:
         """List dictionaries with item counts."""
         stmt = (
             select(UserDictionary, func.count(UserDictionaryItem.item_id))
-            .outerjoin(UserDictionaryItem, UserDictionaryItem.dictionary_id == UserDictionary.dictionary_id)
+            .outerjoin(
+                UserDictionaryItem, UserDictionaryItem.dictionary_id == UserDictionary.dictionary_id
+            )
             .group_by(UserDictionary.dictionary_id)
-            .order_by(desc(UserDictionary.is_pinned), asc(UserDictionary.sort_order), asc(UserDictionary.name))
+            .order_by(
+                desc(UserDictionary.is_pinned),
+                asc(UserDictionary.sort_order),
+                asc(UserDictionary.name),
+            )
         )
         rows = session.execute(stmt).all()
-        return [self._dictionary_to_dto(dictionary, item_count=count or 0) for dictionary, count in rows]
+        return [
+            self._dictionary_to_dto(dictionary, item_count=count or 0) for dictionary, count in rows
+        ]
 
-    def get_dictionary(self, session: Session, dictionary_id: int) -> Optional[UserDictionaryDTO]:
+    def get_dictionary(self, session: Session, dictionary_id: int) -> UserDictionaryDTO | None:
         """Get dictionary by ID."""
         row = session.get(UserDictionary, dictionary_id)
         if not row:
@@ -174,22 +190,22 @@ class UserDictionaryService:
     @staticmethod
     def build_canonical_hash(src_lang: str, dst_lang: str, kind: str, src_norm: str) -> str:
         """Build canonical hash as SHA256(src_lang+dst_lang+kind+src_norm)."""
-        payload = f"{src_lang}{dst_lang}{kind}{src_norm}".encode("utf-8")
+        payload = f"{src_lang}{dst_lang}{kind}{src_norm}".encode()
         return hashlib.sha256(payload).hexdigest()
 
     def bulk_add_items(
         self,
         session: Session,
         dictionary_id: int,
-        items: Iterable[Dict[str, Any]],
+        items: Iterable[dict[str, Any]],
         *,
         include_noise: bool = False,
         skip_duplicates: bool = True,
         materialize_tm: bool = True,
         chunk_size: int = 500,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, int]:
         """Add items to dictionary with dedupe and noise policy."""
         if not session.get(UserDictionary, dictionary_id):
             raise ValueError(f"Dictionary not found: {dictionary_id}")
@@ -203,14 +219,16 @@ class UserDictionaryService:
         cancelled = False
         pending = 0
         existing_hashes = set()
-        added_rows: List[UserDictionaryItem] = []
+        added_rows: list[UserDictionaryItem] = []
         if skip_duplicates:
             existing_hashes = set(
                 session.execute(
                     select(UserDictionaryItem.canonical_hash).where(
                         UserDictionaryItem.dictionary_id == dictionary_id
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
         dictionary_row = session.get(UserDictionary, dictionary_id)
         for raw in item_list:
@@ -284,7 +302,7 @@ class UserDictionaryService:
 
         # Global SRS progress is keyed by canonical_hash and linked per item.
         study_service = StudyService()
-        progress_cache: Dict[str, int] = {}
+        progress_cache: dict[str, int] = {}
         for row in added_rows:
             progress_id = progress_cache.get(row.canonical_hash)
             if progress_id is None:
@@ -309,7 +327,7 @@ class UserDictionaryService:
             tm_linked = projection_stats["linked"]
 
         if dictionary_row:
-            dictionary_row.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            dictionary_row.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         self._audit_event(
             session,
@@ -349,8 +367,8 @@ class UserDictionaryService:
     def _materialize_tm_entries_for_items(
         self,
         session: Session,
-        items: List[UserDictionaryItem],
-    ) -> Dict[str, int]:
+        items: list[UserDictionaryItem],
+    ) -> dict[str, int]:
         """Ensure user dictionary rows are represented in TM entries for TM panel visibility."""
         from app.services.tm_global_service import TMGlobalService
 
@@ -358,15 +376,17 @@ class UserDictionaryService:
             return {"created": 0, "reused": 0, "linked": 0}
 
         tm_global_service = TMGlobalService()
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        cache: Dict[Tuple[Optional[int], str, str, str, str], TMEntry] = {}
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        cache: dict[tuple[int | None, str, str, str, str], TMEntry] = {}
         touched_global_ids = set()
         created = 0
         reused = 0
         linked = 0
 
         for item in items:
-            src_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+            src_norm = self._canonical_src_norm(
+                item.src_lang, item.src_text, item.kind, item.src_norm
+            )
             project_scope = item.origin_project_id if item.origin_project_id is not None else None
             key = (project_scope, item.kind, item.src_lang, item.tgt_lang, src_norm)
             entry = None
@@ -454,7 +474,9 @@ class UserDictionaryService:
             elif entry.tm_global_id:
                 touched_global_ids.add(entry.tm_global_id)
             elif (entry.translation or "").strip():
-                linked_global = tm_global_service.upsert_and_link(session, entry, immediate_propagate=False)
+                linked_global = tm_global_service.upsert_and_link(
+                    session, entry, immediate_propagate=False
+                )
                 touched_global_ids.add(linked_global.tm_global_id)
             linked += 1
 
@@ -462,20 +484,31 @@ class UserDictionaryService:
             tm_global_service.propagate_to_entries(
                 session=session,
                 tm_global_id=tm_global_id,
-                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"],
+                fields=[
+                    "translation",
+                    "status",
+                    "origin",
+                    "confidence",
+                    "is_noise",
+                    "noise_reason",
+                ],
             )
 
         return {"created": created, "reused": reused, "linked": linked}
 
     @staticmethod
     def _tm_entry_matches_item(
-        entry: Optional[TMEntry],
+        entry: TMEntry | None,
         item: UserDictionaryItem,
         src_norm: str,
     ) -> bool:
         if not entry:
             return False
-        if entry.kind != item.kind or entry.src_lang != item.src_lang or entry.tgt_lang != item.tgt_lang:
+        if (
+            entry.kind != item.kind
+            or entry.src_lang != item.src_lang
+            or entry.tgt_lang != item.tgt_lang
+        ):
             return False
         if entry.src_norm != src_norm:
             return False
@@ -492,18 +525,22 @@ class UserDictionaryService:
             entity_id = None
         if item.kind == "lemma" and item.origin_entity_type == "lemma" and entity_id is not None:
             entry.lemma_id = entity_id
-        if item.kind == "term_cluster" and item.origin_entity_type in ("term_cluster", "term_card") and entity_id is not None:
+        if (
+            item.kind == "term_cluster"
+            and item.origin_entity_type in ("term_cluster", "term_card")
+            and entity_id is not None
+        ):
             entry.cluster_id = entity_id
 
     def bulk_remove_items(
         self,
         session: Session,
-        item_ids: List[int],
+        item_ids: list[int],
         *,
         chunk_size: int = 500,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, int]:
         """Remove items by IDs in chunks."""
         if not item_ids:
             return {"removed": 0, "processed": 0, "total": 0, "cancelled": False}
@@ -514,17 +551,20 @@ class UserDictionaryService:
         cancelled = False
         dictionary_ids = set(
             session.execute(
-                select(UserDictionaryItem.dictionary_id).where(UserDictionaryItem.item_id.in_(item_ids))
-            ).scalars().all()
+                select(UserDictionaryItem.dictionary_id).where(
+                    UserDictionaryItem.item_id.in_(item_ids)
+                )
+            )
+            .scalars()
+            .all()
         )
         for i in range(0, len(item_ids), chunk_size):
             if cancel_check and cancel_check():
                 cancelled = True
                 break
             chunk = item_ids[i : i + chunk_size]
-            stmt = (
-                UserDictionaryItem.__table__.delete()
-                .where(UserDictionaryItem.item_id.in_(chunk))
+            stmt = UserDictionaryItem.__table__.delete().where(
+                UserDictionaryItem.item_id.in_(chunk)
             )
             result = session.execute(stmt)
             removed += result.rowcount or 0
@@ -533,7 +573,7 @@ class UserDictionaryService:
                 progress_callback(processed, total)
 
         if dictionary_ids:
-            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             session.execute(
                 UserDictionary.__table__.update()
                 .where(UserDictionary.dictionary_id.in_(dictionary_ids))
@@ -544,9 +584,19 @@ class UserDictionaryService:
             session,
             event_type="user_dictionary_bulk_remove",
             operation="bulk_remove_user_dictionary_items",
-            details={"removed": removed, "processed": processed, "total": total, "cancelled": cancelled},
+            details={
+                "removed": removed,
+                "processed": processed,
+                "total": total,
+                "cancelled": cancelled,
+            },
         )
-        logger.info("User dictionary bulk remove: removed=%s, processed=%s, total=%s", removed, processed, total)
+        logger.info(
+            "User dictionary bulk remove: removed=%s, processed=%s, total=%s",
+            removed,
+            processed,
+            total,
+        )
         return {
             "removed": removed,
             "processed": processed,
@@ -558,7 +608,7 @@ class UserDictionaryService:
         self,
         session: Session,
         item_id: int,
-        translation: Optional[str],
+        translation: str | None,
     ) -> None:
         """Update canonical translation for a dictionary item and propagate to TM entries."""
         from app.services.tm_global_service import TMGlobalService
@@ -569,7 +619,7 @@ class UserDictionaryService:
 
         translation_value = (translation or "").strip()
         src_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         tm_global_service = TMGlobalService()
 
         # Prefer existing TM entry (explicit origin link first, then project+canonical key)
@@ -621,12 +671,20 @@ class UserDictionaryService:
                 is_noise=item.is_noise or 0,
                 noise_reason=item.noise_reason,
             )
-            if item.kind == "lemma" and item.origin_entity_type == "lemma" and item.origin_entity_id:
+            if (
+                item.kind == "lemma"
+                and item.origin_entity_type == "lemma"
+                and item.origin_entity_id
+            ):
                 try:
                     created.lemma_id = int(item.origin_entity_id)
                 except Exception:
                     created.lemma_id = None
-            if item.kind == "term_cluster" and item.origin_entity_type in ("term_cluster", "term_card") and item.origin_entity_id:
+            if (
+                item.kind == "term_cluster"
+                and item.origin_entity_type in ("term_cluster", "term_card")
+                and item.origin_entity_id
+            ):
                 try:
                     created.cluster_id = int(item.origin_entity_id)
                 except Exception:
@@ -668,7 +726,14 @@ class UserDictionaryService:
             tm_global_service.propagate_to_entries(
                 session=session,
                 tm_global_id=global_row.tm_global_id,
-                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"],
+                fields=[
+                    "translation",
+                    "status",
+                    "origin",
+                    "confidence",
+                    "is_noise",
+                    "noise_reason",
+                ],
             )
 
         item.updated_at = now_str
@@ -688,9 +753,9 @@ class UserDictionaryService:
     def set_items_noise_status_bulk(
         self,
         session: Session,
-        item_ids: List[int],
+        item_ids: list[int],
         is_noise: bool,
-        noise_reason: Optional[str] = None,
+        noise_reason: str | None = None,
     ) -> int:
         """Set noise status for selected user dictionary items and sync TM layers."""
         if not item_ids:
@@ -700,26 +765,30 @@ class UserDictionaryService:
 
         noise_value = 1 if is_noise else 0
         reason_value = noise_reason if is_noise else None
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         items = list(
             session.execute(
                 select(UserDictionaryItem)
                 .where(UserDictionaryItem.item_id.in_(item_ids))
                 .order_by(asc(UserDictionaryItem.item_id))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if not items:
             return 0
 
         touched_dictionary_ids = set()
-        key_rows: Dict[Tuple[str, str, str, str], UserDictionaryItem] = {}
+        key_rows: dict[tuple[str, str, str, str], UserDictionaryItem] = {}
         for item in items:
             item.is_noise = noise_value
             item.noise_reason = reason_value
             item.updated_at = now_str
             touched_dictionary_ids.add(item.dictionary_id)
-            canonical_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+            canonical_norm = self._canonical_src_norm(
+                item.src_lang, item.src_text, item.kind, item.src_norm
+            )
             key_rows[(item.src_lang, item.tgt_lang, item.kind, canonical_norm)] = item
 
         tm_global_service = TMGlobalService()
@@ -735,7 +804,9 @@ class UserDictionaryService:
                         TMEntry.kind == kind,
                         TMEntry.src_norm == src_norm,
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
             for entry in entries:
@@ -824,9 +895,9 @@ class UserDictionaryService:
     def set_items_suspension_bulk(
         self,
         session: Session,
-        item_ids: List[int],
+        item_ids: list[int],
         is_suspended: bool,
-        suspended_reason: Optional[str] = None,
+        suspended_reason: str | None = None,
     ) -> int:
         """Set per-item suspension flags for selected dictionary items."""
         if not item_ids:
@@ -836,14 +907,16 @@ class UserDictionaryService:
         reason_value = (suspended_reason or "").strip() if is_suspended else ""
         if not reason_value:
             reason_value = None
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         items = list(
             session.execute(
                 select(UserDictionaryItem)
                 .where(UserDictionaryItem.item_id.in_(item_ids))
                 .order_by(asc(UserDictionaryItem.item_id))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if not items:
             return 0
@@ -881,19 +954,21 @@ class UserDictionaryService:
     def set_items_due_now_bulk(
         self,
         session: Session,
-        item_ids: List[int],
+        item_ids: list[int],
     ) -> int:
         """Force selected items' linked SRS progress due now (repeat immediately)."""
         if not item_ids:
             return 0
 
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         items = list(
             session.execute(
                 select(UserDictionaryItem)
                 .where(UserDictionaryItem.item_id.in_(item_ids))
                 .order_by(asc(UserDictionaryItem.item_id))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if not items:
             return 0
@@ -938,23 +1013,23 @@ class UserDictionaryService:
     def sync_noise_from_lemmas(
         self,
         session: Session,
-        lemma_ids: List[int],
+        lemma_ids: list[int],
     ) -> int:
         """Sync lemma noise status to user_dictionary_item rows (source -> UD)."""
         clean_ids = sorted({int(v) for v in (lemma_ids or []) if v is not None})
         if not clean_ids:
             return 0
 
-        rows = session.execute(
-            select(Lemma).where(Lemma.lemma_id.in_(clean_ids))
-        ).scalars().all()
+        rows = session.execute(select(Lemma).where(Lemma.lemma_id.in_(clean_ids))).scalars().all()
         if not rows:
             return 0
 
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         updated = 0
         for lemma in rows:
-            src_norm = self._canonical_src_norm("he", lemma.lemma_text, "lemma", lemma.norm_text or "")
+            src_norm = self._canonical_src_norm(
+                "he", lemma.lemma_text, "lemma", lemma.norm_text or ""
+            )
             canonical_hash = self.build_canonical_hash("he", "ru", "lemma", src_norm)
             stmt = (
                 update(UserDictionaryItem)
@@ -989,20 +1064,22 @@ class UserDictionaryService:
     def sync_noise_from_term_clusters(
         self,
         session: Session,
-        cluster_ids: List[int],
+        cluster_ids: list[int],
     ) -> int:
         """Sync term_cluster noise status to user_dictionary_item rows (source -> UD)."""
         clean_ids = sorted({int(v) for v in (cluster_ids or []) if v is not None})
         if not clean_ids:
             return 0
 
-        rows = session.execute(
-            select(TermCluster).where(TermCluster.cluster_id.in_(clean_ids))
-        ).scalars().all()
+        rows = (
+            session.execute(select(TermCluster).where(TermCluster.cluster_id.in_(clean_ids)))
+            .scalars()
+            .all()
+        )
         if not rows:
             return 0
 
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         updated = 0
         for cluster in rows:
             src_norm = self._canonical_src_norm(
@@ -1019,7 +1096,9 @@ class UserDictionaryService:
                     or_(
                         UserDictionaryItem.canonical_hash == canonical_hash,
                         and_(
-                            UserDictionaryItem.origin_entity_type.in_(["term_cluster", "term_card"]),
+                            UserDictionaryItem.origin_entity_type.in_(
+                                ["term_cluster", "term_card"]
+                            ),
                             UserDictionaryItem.origin_entity_id == str(cluster.cluster_id),
                         ),
                     )
@@ -1046,16 +1125,16 @@ class UserDictionaryService:
         self,
         session: Session,
         dictionary_id: int,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         *,
         limit: int = 100,
         offset: int = 0,
         sort_column: str = "updated_at",
         sort_direction: str = "desc",
-    ) -> Tuple[List[UserDictionaryItemDTO], int]:
+    ) -> tuple[list[UserDictionaryItemDTO], int]:
         """Query dictionary items with translation resolution from tm_global."""
         filters = filters or {}
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         base_stmt = (
             select(UserDictionaryItem, TMGlobal, StudyProgress, DictProject.name)
             .select_from(UserDictionaryItem)
@@ -1096,7 +1175,11 @@ class UserDictionaryService:
 
         order_col = self.ITEM_SORT_COLUMNS.get(sort_column, UserDictionaryItem.updated_at)
         direction = asc if sort_direction == "asc" else desc
-        stmt = base_stmt.order_by(direction(order_col), asc(UserDictionaryItem.item_id)).limit(limit).offset(offset)
+        stmt = (
+            base_stmt.order_by(direction(order_col), asc(UserDictionaryItem.item_id))
+            .limit(limit)
+            .offset(offset)
+        )
 
         rows = session.execute(stmt).all()
         source_items = [item for item, _tm_global, _progress, _project_name in rows]
@@ -1105,8 +1188,8 @@ class UserDictionaryService:
         study_service = StudyService()
         summaries = study_service.get_progress_summaries(session, hashes)
 
-        audio_status_by_item: Dict[int, str] = {}
-        pronunciation_by_item: Dict[int, Dict[str, Any]] = {}
+        audio_status_by_item: dict[int, str] = {}
+        pronunciation_by_item: dict[int, dict[str, Any]] = {}
         if source_items:
             audio_service = AudioAssetService()
             try:
@@ -1132,8 +1215,8 @@ class UserDictionaryService:
                 )
                 audio_status_by_item[item.item_id] = status_map.get(key, "missing")
 
-            pronunciation_pairs: List[Tuple[str, str]] = []
-            pronunciation_keys_by_item: Dict[int, Tuple[str, str, str]] = {}
+            pronunciation_pairs: list[tuple[str, str]] = []
+            pronunciation_keys_by_item: dict[int, tuple[str, str, str]] = {}
             for item in source_items:
                 lang_key = (item.src_lang or "").strip()
                 canonical_norm = (item.src_norm or "").strip()
@@ -1142,7 +1225,11 @@ class UserDictionaryService:
                     try:
                         raw_norm = normalize_for_tm(lang_key, item.src_text, "surface").norm or ""
                     except Exception as exc:
-                        logger.debug("Failed to derive raw pronunciation norm for item_id=%s: %s", item.item_id, exc)
+                        logger.debug(
+                            "Failed to derive raw pronunciation norm for item_id=%s: %s",
+                            item.item_id,
+                            exc,
+                        )
                 raw_norm = (raw_norm or "").strip() or canonical_norm
                 pronunciation_keys_by_item[item.item_id] = (lang_key, canonical_norm, raw_norm)
                 if lang_key and canonical_norm:
@@ -1167,7 +1254,7 @@ class UserDictionaryService:
                 pronunciation_by_item[item.item_id] = item_pron
 
             # Sentence-origin rows use sentence_pronunciation overlay (keyed by sentence_id).
-            sentence_ids_by_item: Dict[int, int] = {}
+            sentence_ids_by_item: dict[int, int] = {}
             for item in source_items:
                 origin_type = str(item.origin_entity_type or "").strip().lower()
                 if origin_type not in {"sentence", "sentences"}:
@@ -1181,7 +1268,9 @@ class UserDictionaryService:
                 sentence_ids_by_item[item.item_id] = sentence_id
             if sentence_ids_by_item:
                 try:
-                    from app.services.sentence_pronunciation_service import SentencePronunciationService
+                    from app.services.sentence_pronunciation_service import (
+                        SentencePronunciationService,
+                    )
 
                     sentence_overlay = SentencePronunciationService().bulk_get_niqqud(
                         session=session,
@@ -1202,7 +1291,7 @@ class UserDictionaryService:
                     }
 
         items = []
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         for item, tm_global, _progress, origin_project_name in rows:
             resolved_tm_global = self._resolve_tm_global_for_item(session, item, tm_global)
             summary = summaries.get(item.canonical_hash)
@@ -1225,7 +1314,7 @@ class UserDictionaryService:
         self,
         session: Session,
         dictionary_id: int,
-        filters: Optional[Dict[str, Any]],
+        filters: dict[str, Any] | None,
         write_mode: str,
     ) -> int:
         """Count item IDs eligible for translation by write mode."""
@@ -1254,11 +1343,11 @@ class UserDictionaryService:
         session: Session,
         dictionary_id: int,
         *,
-        scope_origin_project_id: Optional[int] = None,
+        scope_origin_project_id: int | None = None,
         hide_noise: bool = True,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Return deterministic study-state counters for one opened dictionary."""
-        now_value = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_value = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         is_new_expr = and_(
             func.coalesce(StudyProgress.review_count, 0) <= 0,
             StudyProgress.last_grade.is_(None),
@@ -1269,8 +1358,10 @@ class UserDictionaryService:
             (StudyProgress.due_at <= now_value, "due"),
             (
                 and_(
-                    func.coalesce(StudyProgress.review_count, 0) >= StudyService.MASTERED_MIN_REVIEWS,
-                    func.coalesce(StudyProgress.interval_days, 0) >= StudyService.MASTERED_INTERVAL_DAYS,
+                    func.coalesce(StudyProgress.review_count, 0)
+                    >= StudyService.MASTERED_MIN_REVIEWS,
+                    func.coalesce(StudyProgress.interval_days, 0)
+                    >= StudyService.MASTERED_INTERVAL_DAYS,
                 ),
                 "mastered",
             ),
@@ -1286,7 +1377,9 @@ class UserDictionaryService:
         if scope_origin_project_id is not None:
             stmt = stmt.where(UserDictionaryItem.origin_project_id == scope_origin_project_id)
         if hide_noise:
-            stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
+            stmt = stmt.where(
+                or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None))
+            )
         stmt = stmt.group_by(state_expr)
 
         counters = {
@@ -1310,9 +1403,9 @@ class UserDictionaryService:
         session: Session,
         dictionary_id: int,
         *,
-        scope_origin_project_id: Optional[int] = None,
+        scope_origin_project_id: int | None = None,
         hide_noise: bool = True,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Return review counters for opened dictionary: Added/Again/Hard/Good/Easy."""
         grade_expr = case(
             (StudyProgress.last_grade.is_(None), "added"),
@@ -1331,7 +1424,9 @@ class UserDictionaryService:
         if scope_origin_project_id is not None:
             stmt = stmt.where(UserDictionaryItem.origin_project_id == scope_origin_project_id)
         if hide_noise:
-            stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
+            stmt = stmt.where(
+                or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None))
+            )
         stmt = stmt.group_by(grade_expr)
 
         counters = {
@@ -1354,12 +1449,12 @@ class UserDictionaryService:
         self,
         session: Session,
         dictionary_id: int,
-        filters: Optional[Dict[str, Any]],
+        filters: dict[str, Any] | None,
         write_mode: str,
         *,
         limit: int,
         offset: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """Fetch item IDs for translation in deterministic order."""
         filters = dict(filters or {})
         stmt = (
@@ -1381,7 +1476,7 @@ class UserDictionaryService:
         stmt = stmt.order_by(asc(UserDictionaryItem.item_id)).limit(limit).offset(offset)
         return list(session.execute(stmt).scalars().all())
 
-    def get_items_by_ids(self, session: Session, item_ids: List[int]) -> List[UserDictionaryItem]:
+    def get_items_by_ids(self, session: Session, item_ids: list[int]) -> list[UserDictionaryItem]:
         """Get user dictionary items by IDs in deterministic order."""
         if not item_ids:
             return []
@@ -1395,8 +1490,8 @@ class UserDictionaryService:
     def resolve_cross_view_status(
         self,
         session: Session,
-        rows: List[Dict[str, Any]],
-    ) -> Dict[str, Dict[str, Any]]:
+        rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         """Resolve membership + study summary + translation/audio status in batch for cross-view tooltips.
 
         Input row format:
@@ -1409,8 +1504,8 @@ class UserDictionaryService:
                 "raw_src_norm": str,  # optional legacy norm hint for pronunciation lookup
             }
         """
-        prepared: List[Dict[str, str]] = []
-        source_text_by_hash: Dict[str, str] = {}
+        prepared: list[dict[str, str]] = []
+        source_text_by_hash: dict[str, str] = {}
         for raw in rows or []:
             src_lang = (raw.get("src_lang") or "").strip()
             tgt_lang = (raw.get("tgt_lang") or "").strip()
@@ -1478,13 +1573,19 @@ class UserDictionaryService:
         )
         tm_rows = []
         if tuple_keys:
-            tm_rows = session.execute(
-                select(TMGlobal).where(
-                    tuple_(TMGlobal.src_lang, TMGlobal.tgt_lang, TMGlobal.kind, TMGlobal.src_norm).in_(tuple_keys)
+            tm_rows = (
+                session.execute(
+                    select(TMGlobal).where(
+                        tuple_(
+                            TMGlobal.src_lang, TMGlobal.tgt_lang, TMGlobal.kind, TMGlobal.src_norm
+                        ).in_(tuple_keys)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
-        tm_by_hash: Dict[str, TMGlobal] = {}
+        tm_by_hash: dict[str, TMGlobal] = {}
         for tm_row in tm_rows:
             canonical_hash = self.build_canonical_hash(
                 tm_row.src_lang,
@@ -1509,7 +1610,7 @@ class UserDictionaryService:
             )
         except Exception:
             audio_status = {}
-        pronunciation_pairs: List[Tuple[str, str]] = []
+        pronunciation_pairs: list[tuple[str, str]] = []
         for row in by_hash.values():
             lang_clean = (row.get("src_lang") or "").strip()
             canonical_norm = (row.get("src_norm") or "").strip()
@@ -1520,7 +1621,7 @@ class UserDictionaryService:
                 pronunciation_pairs.append((lang_clean, raw_norm))
         pronunciation_map = self._resolve_pronunciation_overlay(session, pronunciation_pairs)
 
-        result: Dict[str, Dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {}
         for canonical_hash, row in by_hash.items():
             summary = summaries.get(canonical_hash)
             tm_row = tm_by_hash.get(canonical_hash)
@@ -1587,8 +1688,8 @@ class UserDictionaryService:
     def _apply_item_filters(
         self,
         stmt,
-        filters: Dict[str, Any],
-        now_str: Optional[str] = None,
+        filters: dict[str, Any],
+        now_str: str | None = None,
         *,
         include_audio: bool = False,
     ):
@@ -1597,7 +1698,7 @@ class UserDictionaryService:
             stmt = stmt.where(UserDictionaryItem.kind == filters["kind"])
 
         study_filter = (filters.get("study_state") or "").strip().lower()
-        now_value = now_str or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_value = now_str or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         is_new_clause = and_(
             func.coalesce(StudyProgress.review_count, 0) <= 0,
             StudyProgress.last_grade.is_(None),
@@ -1646,11 +1747,15 @@ class UserDictionaryService:
                 )
             )
         elif origin_filter == "imported":
-            stmt = stmt.where(func.lower(func.coalesce(UserDictionaryItem.origin_source_ref, "")).like("%import%"))
+            stmt = stmt.where(
+                func.lower(func.coalesce(UserDictionaryItem.origin_source_ref, "")).like("%import%")
+            )
 
         hide_noise = filters.get("hide_noise", True)
         if hide_noise:
-            stmt = stmt.where(or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None)))
+            stmt = stmt.where(
+                or_(UserDictionaryItem.is_noise == 0, UserDictionaryItem.is_noise.is_(None))
+            )
 
         search_text = (filters.get("search_text") or "").strip()
         if search_text:
@@ -1665,28 +1770,44 @@ class UserDictionaryService:
 
         translation_filter = (filters.get("translation_filter") or "all").lower()
         if translation_filter == "empty":
-            stmt = stmt.where(or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == ""))
+            stmt = stmt.where(
+                or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == "")
+            )
         elif translation_filter == "non_empty":
-            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+            stmt = stmt.where(
+                and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != "")
+            )
 
         translation_tier = (filters.get("translation_tier") or "").strip().lower()
         if translation_tier == "missing":
-            stmt = stmt.where(or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == ""))
+            stmt = stmt.where(
+                or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == "")
+            )
         elif translation_tier == "deprecated":
             stmt = stmt.where(TMGlobal.status == "deprecated")
-            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+            stmt = stmt.where(
+                and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != "")
+            )
         elif translation_tier == "approved":
             stmt = stmt.where(TMGlobal.status == "approved")
-            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+            stmt = stmt.where(
+                and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != "")
+            )
         elif translation_tier == "user":
             stmt = stmt.where(
                 TMGlobal.origin.in_(["user_edit", "import", "mt_accept", "merge", "revert"])
             )
-            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
-            stmt = stmt.where(or_(TMGlobal.status.is_(None), ~TMGlobal.status.in_(["approved", "deprecated"])))
+            stmt = stmt.where(
+                and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != "")
+            )
+            stmt = stmt.where(
+                or_(TMGlobal.status.is_(None), ~TMGlobal.status.in_(["approved", "deprecated"]))
+            )
         elif translation_tier == "mt":
             stmt = stmt.where(TMGlobal.origin == "mt_auto")
-            stmt = stmt.where(and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != ""))
+            stmt = stmt.where(
+                and_(TMGlobal.translation.is_not(None), func.trim(TMGlobal.translation) != "")
+            )
 
         audio_filter = (filters.get("audio_filter") or "").strip().lower()
         if include_audio and audio_filter and audio_filter != "all":
@@ -1725,10 +1846,12 @@ class UserDictionaryService:
     def _apply_write_mode_filter(stmt, write_mode: str):
         """Apply translation write mode filter using tm_global state."""
         if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
-            return stmt.where(or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == ""))
+            return stmt.where(
+                or_(TMGlobal.translation.is_(None), func.trim(TMGlobal.translation) == "")
+            )
         return stmt
 
-    def _normalize_item_payload(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_item_payload(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Normalize incoming item payload and compute src_norm when needed."""
         kind = str(raw.get("kind") or "").strip()
         src_lang = str(raw.get("src_lang") or "").strip()
@@ -1768,7 +1891,11 @@ class UserDictionaryService:
             "seen_count": int(raw.get("seen_count") or 0),
             "origin_project_id": raw.get("origin_project_id"),
             "origin_entity_type": raw.get("origin_entity_type"),
-            "origin_entity_id": str(raw.get("origin_entity_id")) if raw.get("origin_entity_id") is not None else None,
+            "origin_entity_id": (
+                str(raw.get("origin_entity_id"))
+                if raw.get("origin_entity_id") is not None
+                else None
+            ),
             "origin_tm_entry_id": raw.get("origin_tm_entry_id"),
             "origin_doc_id": raw.get("origin_doc_id"),
             "origin_source_ref": raw.get("origin_source_ref"),
@@ -1792,7 +1919,7 @@ class UserDictionaryService:
         return (fallback_norm or "").strip()
 
     @staticmethod
-    def _extract_qc_flag(notes_value: Optional[str]) -> Optional[str]:
+    def _extract_qc_flag(notes_value: str | None) -> str | None:
         notes = (notes_value or "").strip()
         marker = "qc:"
         if marker not in notes:
@@ -1807,14 +1934,14 @@ class UserDictionaryService:
     def _resolve_pronunciation_overlay(
         self,
         session: Session,
-        pairs: List[Tuple[str, str]],
-    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        pairs: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], dict[str, Any]]:
         """Resolve effective pronunciation metadata in batch."""
         if not pairs:
             return {}
         if not self._table_exists(session, "pronunciation_entry"):
             return {}
-        by_lang: Dict[str, List[str]] = {}
+        by_lang: dict[str, list[str]] = {}
         for src_lang, src_norm in pairs:
             lang_clean = (src_lang or "").strip()
             norm_clean = (src_norm or "").strip()
@@ -1823,7 +1950,7 @@ class UserDictionaryService:
             by_lang.setdefault(lang_clean, []).append(norm_clean)
 
         service = PronunciationService()
-        resolved: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        resolved: dict[tuple[str, str], dict[str, Any]] = {}
         for lang, norms in by_lang.items():
             try:
                 entries = service.bulk_lookup(session, lang=lang, src_norms=norms)
@@ -1849,13 +1976,15 @@ class UserDictionaryService:
         self,
         session: Session,
         item: UserDictionaryItem,
-        joined_tm_global: Optional[TMGlobal],
-    ) -> Optional[TMGlobal]:
+        joined_tm_global: TMGlobal | None,
+    ) -> TMGlobal | None:
         """Resolve TMGlobal row, including fallback for legacy non-canonical src_norm."""
         if joined_tm_global is not None:
             return joined_tm_global
 
-        canonical_norm = self._canonical_src_norm(item.src_lang, item.src_text, item.kind, item.src_norm)
+        canonical_norm = self._canonical_src_norm(
+            item.src_lang, item.src_text, item.kind, item.src_norm
+        )
         if not canonical_norm or canonical_norm == item.src_norm:
             return None
 
@@ -1871,12 +2000,12 @@ class UserDictionaryService:
     def _item_to_dto(
         self,
         item: UserDictionaryItem,
-        tm_global: Optional[TMGlobal],
-        summary: Optional[StudyProgressSummaryDTO],
+        tm_global: TMGlobal | None,
+        summary: StudyProgressSummaryDTO | None,
         audio_status: str,
-        pronunciation_payload: Optional[Dict[str, Any]],
+        pronunciation_payload: dict[str, Any] | None,
         *,
-        origin_project_name: Optional[str] = None,
+        origin_project_name: str | None = None,
     ) -> UserDictionaryItemDTO:
         """Convert ORM row to item DTO with resolved translation fields."""
         study_service = StudyService()
@@ -1978,11 +2107,11 @@ class UserDictionaryService:
         *,
         item: UserDictionaryItem,
         summary: StudyProgressSummaryDTO,
-        tm_global: Optional[TMGlobal],
+        tm_global: TMGlobal | None,
         audio_status: str,
         translation_tier: str,
         origin_kind: str,
-        pronunciation_payload: Optional[Dict[str, Any]],
+        pronunciation_payload: dict[str, Any] | None,
     ) -> str:
         pronunciation_payload = pronunciation_payload or {}
         translation_bits = [
@@ -2026,10 +2155,10 @@ class UserDictionaryService:
         *,
         in_user_dictionary_count: int,
         summary: StudyProgressSummaryDTO,
-        tm_global: Optional[TMGlobal],
+        tm_global: TMGlobal | None,
         translation_tier: str,
         audio_status: str,
-        pronunciation_payload: Optional[Dict[str, Any]],
+        pronunciation_payload: dict[str, Any] | None,
     ) -> str:
         pronunciation_payload = pronunciation_payload or {}
         translation_bits = [
@@ -2096,24 +2225,24 @@ class UserDictionaryService:
             raise ValueError("Dictionary name cannot be empty")
         if len(clean_name) > 255:
             raise ValueError("Dictionary name cannot exceed 255 characters")
-        forbidden_chars = ["/", "\\", ":", "*", "?", "\"", "<", ">", "|"]
+        forbidden_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
         if any(ch in clean_name for ch in forbidden_chars):
-            raise ValueError("Dictionary name contains forbidden characters: / \\ : * ? \" < > |")
+            raise ValueError('Dictionary name contains forbidden characters: / \\ : * ? " < > |')
         return clean_name
 
     @staticmethod
     def _count_items(session: Session, dictionary_id: int) -> int:
-        stmt = select(func.count()).select_from(UserDictionaryItem).where(
-            UserDictionaryItem.dictionary_id == dictionary_id
+        stmt = (
+            select(func.count())
+            .select_from(UserDictionaryItem)
+            .where(UserDictionaryItem.dictionary_id == dictionary_id)
         )
         return session.execute(stmt).scalar() or 0
 
     @staticmethod
     def _table_exists(session: Session, table_name: str) -> bool:
         try:
-            stmt = text(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name LIMIT 1"
-            )
+            stmt = text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name LIMIT 1")
             return session.execute(stmt, {"name": table_name}).scalar() is not None
         except Exception:
             return False
@@ -2124,8 +2253,8 @@ class UserDictionaryService:
         *,
         event_type: str,
         operation: str,
-        resource_id: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        resource_id: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Write audit entry without forcing commit of caller transaction."""
         try:

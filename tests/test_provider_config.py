@@ -194,9 +194,7 @@ class TestProviderConfigManager:
         # Simulate old settings (only rate_limit key, no max_requests_per_minute)
         from app.infra.translators.provider_config import get_rate_limit_key
 
-        config_manager.settings.set_value(
-            get_rate_limit_key("legacy_provider"), 120
-        )
+        config_manager.settings.set_value(get_rate_limit_key("legacy_provider"), 120)
 
         # Load config
         config = config_manager.load_config("legacy_provider")

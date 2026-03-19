@@ -91,7 +91,9 @@ def test_bulk_set_status_defers_tm_global_propagation(monkeypatch) -> None:
         assert propagate_calls[0] == entry_a.tm_global_id
 
         rows = session.execute(
-            select(TMEntry.tm_id, TMEntry.status).where(TMEntry.tm_id.in_([1, 2])).order_by(TMEntry.tm_id)
+            select(TMEntry.tm_id, TMEntry.status)
+            .where(TMEntry.tm_id.in_([1, 2]))
+            .order_by(TMEntry.tm_id)
         ).all()
         assert rows == [(1, "approved"), (2, "approved")]
     finally:
@@ -141,7 +143,9 @@ def test_set_noise_status_bulk_defers_tm_global_propagation(monkeypatch) -> None
         original_propagate = TMGlobalService.propagate_to_entries
         propagate_calls: list[int] = []
 
-        def tracked_upsert(self, session, entry, immediate_propagate=True, force_global_update=False):
+        def tracked_upsert(
+            self, session, entry, immediate_propagate=True, force_global_update=False
+        ):
             upsert_immediate_flags.append(immediate_propagate)
             return original_upsert(
                 self,

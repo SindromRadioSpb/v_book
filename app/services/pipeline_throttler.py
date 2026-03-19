@@ -8,7 +8,7 @@ this class only provides pre-start warnings and tooltips.
 from __future__ import annotations
 
 import logging
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,10 @@ from app.services.operations_center import HEAVY_CATEGORIES, OperationsCenter
 class PipelineThrottler:
     """Advisory throttler for heavy pipeline operations."""
 
-    _instance: ClassVar[Optional["PipelineThrottler"]] = None
+    _instance: ClassVar[PipelineThrottler | None] = None
 
     @classmethod
-    def instance(cls) -> "PipelineThrottler":
+    def instance(cls) -> PipelineThrottler:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -44,7 +44,7 @@ class PipelineThrottler:
     def check_and_warn(
         self,
         category: str,
-        parent: Optional[object] = None,
+        parent: object | None = None,
         operation_label: str = "",
     ) -> bool:
         """Check whether the slot is free; show a warning dialog if not."""

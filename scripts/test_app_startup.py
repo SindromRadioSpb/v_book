@@ -5,6 +5,7 @@ Checks:
 2. Providers register correctly
 3. No startup errors
 """
+
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ try:
         register_google_cloud_translate,
     )
     from app.infra.translators.providers_registry import ProvidersRegistry
+
     print("   [OK] All imports successful")
 except Exception as e:
     print(f"   [ERROR] Import failed: {e}")

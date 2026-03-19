@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
@@ -32,14 +33,14 @@ class PronunciationBootstrapResult:
 class PronunciationGenerator:
     """Generator interface for offline pronunciation enrichment."""
 
-    def generate(self, lang: str, source_texts: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    def generate(self, lang: str, source_texts: list[str]) -> dict[str, dict[str, str | None]]:
         raise NotImplementedError
 
 
 class NoopPronunciationGenerator(PronunciationGenerator):
     """Fallback generator that produces no entries."""
 
-    def generate(self, lang: str, source_texts: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    def generate(self, lang: str, source_texts: list[str]) -> dict[str, dict[str, str | None]]:
         _ = lang
         _ = source_texts
         return {}
@@ -48,7 +49,9 @@ class NoopPronunciationGenerator(PronunciationGenerator):
 class PhonikudPronunciationGenerator(PronunciationGenerator):
     """Best-effort adapter for local Phonikud-like libraries."""
 
-    def __init__(self, *, strict: bool = False, model_path: Optional[str] = None, enabled: bool = True):
+    def __init__(
+        self, *, strict: bool = False, model_path: str | None = None, enabled: bool = True
+    ):
         self.strict = strict
         self._adapter = PhonikudAdapter(model_path=model_path, enabled=enabled)
 
@@ -58,13 +61,13 @@ class PhonikudPronunciationGenerator(PronunciationGenerator):
 
     def health_check(
         self,
-        sample_texts: Optional[List[str]] = None,
+        sample_texts: list[str] | None = None,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> PhonikudHealthReport:
         return self._adapter.health_check(sample_texts, cancel_check=cancel_check)
 
-    def generate(self, lang: str, source_texts: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    def generate(self, lang: str, source_texts: list[str]) -> dict[str, dict[str, str | None]]:
         if lang.strip().lower() not in {"he", "he-il"}:
             return {}
         if not self._adapter.is_available():
@@ -75,7 +78,7 @@ class PhonikudPronunciationGenerator(PronunciationGenerator):
         mode = self._adapter.last_mode
         confidence = 0.8 if mode == PhonikudMode.REAL_INFERENCE.value else 0.2
 
-        result: Dict[str, Dict[str, Optional[str]]] = {}
+        result: dict[str, dict[str, str | None]] = {}
         for source_text in source_texts:
             try:
                 niqqud = generated.get(source_text)
@@ -92,29 +95,32 @@ class PhonikudPronunciationGenerator(PronunciationGenerator):
                 logger.debug("Phonikud generation failed for '%s': %s", source_text, exc)
         return result
 
+
 class PronunciationBootstrapService:
     """Build pronunciation entries from existing lexical corpus."""
 
     def __init__(
         self,
         *,
-        pronunciation_service: Optional[PronunciationService] = None,
-        generator: Optional[PronunciationGenerator] = None,
+        pronunciation_service: PronunciationService | None = None,
+        generator: PronunciationGenerator | None = None,
     ):
         self.pronunciation_service = pronunciation_service or PronunciationService()
         self.generator = generator or NoopPronunciationGenerator()
 
     @staticmethod
-    def _candidate_rank(text_value: str, source_priority: int, row_id: int) -> Tuple[int, int, int, int, str]:
+    def _candidate_rank(
+        text_value: str, source_priority: int, row_id: int
+    ) -> tuple[int, int, int, int, str]:
         text_clean = (text_value or "").strip()
         has_separator = 1 if ("_" in text_clean or "|" in text_clean) else 0
         has_space = 0 if " " in text_clean else 1
         return (
-            has_separator,          # Prefer separator-free source text.
-            has_space,              # Prefer phrase-like values with spaces.
-            -len(text_clean),       # Prefer longer surface forms (keeps prefixes/articles).
-            source_priority,        # Stable source precedence.
-            row_id,                 # Stable deterministic tie-breaker.
+            has_separator,  # Prefer separator-free source text.
+            has_space,  # Prefer phrase-like values with spaces.
+            -len(text_clean),  # Prefer longer surface forms (keeps prefixes/articles).
+            source_priority,  # Stable source precedence.
+            row_id,  # Stable deterministic tie-breaker.
         )
 
     def collect_source_candidates(
@@ -125,13 +131,13 @@ class PronunciationBootstrapService:
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Collect deterministic `(src_norm -> preferred source_text)` map."""
-        selected: Dict[str, Tuple[Tuple[int, int, int, int, str], str]] = {}
+        selected: dict[str, tuple[tuple[int, int, int, int, str], str]] = {}
 
         def pick(
-            norm_value: Optional[str],
-            text_value: Optional[str],
+            norm_value: str | None,
+            text_value: str | None,
             source_priority: int,
             row_id: int,
             *,
@@ -163,7 +169,9 @@ class PronunciationBootstrapService:
         if include_terms:
             try:
                 term_rows = session.execute(
-                    select(TermCluster.cluster_id, TermCluster.norm_text, TermCluster.representative_he)
+                    select(
+                        TermCluster.cluster_id, TermCluster.norm_text, TermCluster.representative_he
+                    )
                     .where(TermCluster.norm_text.is_not(None))
                     .where(TermCluster.representative_he.is_not(None))
                     .order_by(asc(TermCluster.norm_text), asc(TermCluster.cluster_id))
@@ -176,7 +184,11 @@ class PronunciationBootstrapService:
         if include_user_dictionary:
             try:
                 ud_rows = session.execute(
-                    select(UserDictionaryItem.item_id, UserDictionaryItem.src_norm, UserDictionaryItem.src_text)
+                    select(
+                        UserDictionaryItem.item_id,
+                        UserDictionaryItem.src_norm,
+                        UserDictionaryItem.src_text,
+                    )
                     .where(UserDictionaryItem.src_lang == lang)
                     .where(UserDictionaryItem.src_norm.is_not(None))
                     .where(UserDictionaryItem.src_text.is_not(None))
@@ -197,40 +209,52 @@ class PronunciationBootstrapService:
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
-    ) -> List[str]:
+    ) -> list[str]:
         """Collect unique source norms from lexical tables."""
         values = set()
 
         if include_lemmas:
             try:
-                lemma_rows = session.execute(
-                    select(Lemma.norm_text)
-                    .where(Lemma.norm_text.is_not(None))
-                    .order_by(asc(Lemma.norm_text))
-                ).scalars().all()
+                lemma_rows = (
+                    session.execute(
+                        select(Lemma.norm_text)
+                        .where(Lemma.norm_text.is_not(None))
+                        .order_by(asc(Lemma.norm_text))
+                    )
+                    .scalars()
+                    .all()
+                )
                 values.update(v.strip() for v in lemma_rows if (v or "").strip())
             except Exception as exc:
                 logger.debug("collect_unique_src_norms lemmas skipped: %s", exc)
 
         if include_terms:
             try:
-                term_rows = session.execute(
-                    select(TermCluster.norm_text)
-                    .where(TermCluster.norm_text.is_not(None))
-                    .order_by(asc(TermCluster.norm_text))
-                ).scalars().all()
+                term_rows = (
+                    session.execute(
+                        select(TermCluster.norm_text)
+                        .where(TermCluster.norm_text.is_not(None))
+                        .order_by(asc(TermCluster.norm_text))
+                    )
+                    .scalars()
+                    .all()
+                )
                 values.update(v.strip() for v in term_rows if (v or "").strip())
             except Exception as exc:
                 logger.debug("collect_unique_src_norms terms skipped: %s", exc)
 
         if include_user_dictionary:
             try:
-                ud_rows = session.execute(
-                    select(UserDictionaryItem.src_norm)
-                    .where(UserDictionaryItem.src_lang == lang)
-                    .where(UserDictionaryItem.src_norm.is_not(None))
-                    .order_by(asc(UserDictionaryItem.src_norm))
-                ).scalars().all()
+                ud_rows = (
+                    session.execute(
+                        select(UserDictionaryItem.src_norm)
+                        .where(UserDictionaryItem.src_lang == lang)
+                        .where(UserDictionaryItem.src_norm.is_not(None))
+                        .order_by(asc(UserDictionaryItem.src_norm))
+                    )
+                    .scalars()
+                    .all()
+                )
                 values.update(v.strip() for v in ud_rows if (v or "").strip())
             except Exception as exc:
                 logger.debug("collect_unique_src_norms user_dictionary skipped: %s", exc)
@@ -241,14 +265,14 @@ class PronunciationBootstrapService:
         self,
         *,
         lang: str,
-        selected_items: List[Dict[str, Any]],
+        selected_items: list[dict[str, Any]],
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
         include_sentences: bool = False,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Collect deterministic `(src_norm -> source_text)` map from selected rows."""
-        selected: Dict[str, Tuple[Tuple[int, int, int, int, str], str]] = {}
+        selected: dict[str, tuple[tuple[int, int, int, int, str], str]] = {}
         source_priority = {
             "lemmas": 0,
             "terms": 1,
@@ -267,8 +291,8 @@ class PronunciationBootstrapService:
             item_lang: str,
             text_value: str,
             group: str,
-            provided_norm: Optional[str],
-            provided_raw_norm: Optional[str],
+            provided_norm: str | None,
+            provided_raw_norm: str | None,
         ) -> str:
             explicit = (provided_raw_norm or "").strip() or (provided_norm or "").strip()
             if group in {"lemmas", "terms"} and text_value:
@@ -281,9 +305,9 @@ class PronunciationBootstrapService:
         def pick(
             *,
             item_lang: str,
-            norm_value: Optional[str],
-            raw_norm_value: Optional[str],
-            text_value: Optional[str],
+            norm_value: str | None,
+            raw_norm_value: str | None,
+            text_value: str | None,
             group: str,
             row_id: int,
         ) -> None:
@@ -334,17 +358,17 @@ class PronunciationBootstrapService:
         lang: str,
         chunk_size: int = 500,
         rebuild_auto: bool = False,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
         include_sentences: bool = False,
-        selected_items: Optional[List[Dict[str, Any]]] = None,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        selected_items: list[dict[str, Any]] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> PronunciationBootstrapResult:
         """Bootstrap pronunciation entries from available lexical norms."""
-        source_candidates: Dict[str, str]
+        source_candidates: dict[str, str]
         if selected_items:
             source_candidates = self.collect_selected_source_candidates(
                 lang=lang,
@@ -428,18 +452,28 @@ class PronunciationBootstrapService:
                     continue
                 notes_value = (item.get("notes") or "").strip()
                 niqqud_value = niqqud_result.value
-                if PronunciationQualityService.has_source_structure_mismatch(source_text, niqqud_value):
+                if PronunciationQualityService.has_source_structure_mismatch(
+                    source_text, niqqud_value
+                ):
                     source_sig = PronunciationQualityService.spoken_letters_signature(source_text)
-                    candidate_sig = PronunciationQualityService.spoken_letters_signature(niqqud_value)
+                    candidate_sig = PronunciationQualityService.spoken_letters_signature(
+                        niqqud_value
+                    )
                     source_sig_compact = source_sig.replace(" ", "")
                     candidate_sig_compact = candidate_sig.replace(" ", "")
                     # When only spacing differs (common Phonikud separator artifacts like "ה|חומר"),
                     # keep generated nikud instead of falling back to plain source.
-                    if source_sig_compact and candidate_sig_compact and source_sig_compact == candidate_sig_compact:
+                    if (
+                        source_sig_compact
+                        and candidate_sig_compact
+                        and source_sig_compact == candidate_sig_compact
+                    ):
                         mismatch_note = "qc:source_spacing_variation"
                         notes_value = f"{notes_value}; {mismatch_note}".strip("; ").strip()
                     else:
-                        fallback_source = PronunciationQualityService.sanitize_spoken_text(source_text)
+                        fallback_source = PronunciationQualityService.sanitize_spoken_text(
+                            source_text
+                        )
                         if fallback_source:
                             niqqud_value = fallback_source
                             mismatch_note = "qc:source_structure_fallback"

@@ -173,7 +173,11 @@ def test_bootstrap_worker_reports_busy_when_heavy_slot_taken(monkeypatch):
         def register(self, *_args, **_kwargs):
             raise OperationsCenterBusyError(
                 "pronunciation_bootstrap",
-                [OperationEntry(op_id="op-1", name="NLP Process (42 docs)", category="nlp_process")],
+                [
+                    OperationEntry(
+                        op_id="op-1", name="NLP Process (42 docs)", category="nlp_process"
+                    )
+                ],
             )
 
         def unregister(self, _op_id):

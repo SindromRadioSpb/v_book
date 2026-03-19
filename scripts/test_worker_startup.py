@@ -2,18 +2,19 @@
 
 This script tests the LocalMTWorker initialization to diagnose startup issues.
 """
+
 import logging
 import sys
 from pathlib import Path
 
 # Setup logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 from app.services.local_models import ModelResourceManager
 from app.infra.local_mt.worker_process import LocalMTWorker
+
 
 def test_worker_startup():
     """Test worker startup."""
@@ -81,6 +82,7 @@ def test_worker_startup():
     except Exception as e:
         print(f"\n  [ERROR] Worker startup failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

@@ -8,23 +8,26 @@ Provides safe export of TM entries and dictionaries to multiple formats:
 - Atomic file writing (temp + replace)
 """
 
-import logging
 import csv
 import json
+import logging
 import os
 import tempfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
-from typing import Optional, List, BinaryIO, Dict, Any
-from sqlalchemy.orm import Session
+from typing import Any, BinaryIO
+
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
-    TMEntry, DictEntry, DictSource, TermCluster,
-    Lemma, DictProject, SourceDocument
+    DictEntry,
+    DictSource,
+    Lemma,
+    TermCluster,
+    TMEntry,
 )
+from app.infra.security import get_export_limiter, sanitize_csv_cell, sanitize_xml_text
 from app.services.stats_service import StatsService
-from app.infra.security import sanitize_csv_cell, sanitize_xml_text, get_export_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ class ExportService:
         session: Session,
         path: str,
         *,
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
         include_draft: bool = False,
     ) -> int:
         """Export TM entries to CSV.
@@ -72,53 +75,57 @@ class ExportService:
             writer = csv.writer(f)
 
             # Write header
-            writer.writerow([
-                "tm_id",
-                "project_id",
-                "kind",
-                "src_lang",
-                "tgt_lang",
-                "src_text",
-                "src_norm",
-                "translation",
-                "translation_norm",
-                "pos",
-                "domain",
-                "notes",
-                "status",
-                "confidence",
-                "origin",
-                "source_ref",
-                "created_at",
-                "updated_at",
-                "approved_at",
-                "approved_by",
-            ])
+            writer.writerow(
+                [
+                    "tm_id",
+                    "project_id",
+                    "kind",
+                    "src_lang",
+                    "tgt_lang",
+                    "src_text",
+                    "src_norm",
+                    "translation",
+                    "translation_norm",
+                    "pos",
+                    "domain",
+                    "notes",
+                    "status",
+                    "confidence",
+                    "origin",
+                    "source_ref",
+                    "created_at",
+                    "updated_at",
+                    "approved_at",
+                    "approved_by",
+                ]
+            )
 
             # Write rows with sanitization
             for entry in entries:
-                writer.writerow([
-                    entry.tm_id,
-                    entry.project_id if entry.project_id is not None else "",
-                    sanitize_csv_cell(entry.kind),
-                    sanitize_csv_cell(entry.src_lang),
-                    sanitize_csv_cell(entry.tgt_lang),
-                    sanitize_csv_cell(entry.src_text),
-                    sanitize_csv_cell(entry.src_norm),
-                    sanitize_csv_cell(entry.translation),
-                    sanitize_csv_cell(entry.translation_norm),
-                    sanitize_csv_cell(entry.pos),
-                    sanitize_csv_cell(entry.domain),
-                    sanitize_csv_cell(entry.notes),
-                    sanitize_csv_cell(entry.status),
-                    entry.confidence if entry.confidence is not None else "",
-                    sanitize_csv_cell(entry.origin),
-                    sanitize_csv_cell(entry.source_ref),
-                    str(entry.created_at),
-                    str(entry.updated_at),
-                    str(entry.approved_at) if entry.approved_at else "",
-                    sanitize_csv_cell(entry.approved_by),
-                ])
+                writer.writerow(
+                    [
+                        entry.tm_id,
+                        entry.project_id if entry.project_id is not None else "",
+                        sanitize_csv_cell(entry.kind),
+                        sanitize_csv_cell(entry.src_lang),
+                        sanitize_csv_cell(entry.tgt_lang),
+                        sanitize_csv_cell(entry.src_text),
+                        sanitize_csv_cell(entry.src_norm),
+                        sanitize_csv_cell(entry.translation),
+                        sanitize_csv_cell(entry.translation_norm),
+                        sanitize_csv_cell(entry.pos),
+                        sanitize_csv_cell(entry.domain),
+                        sanitize_csv_cell(entry.notes),
+                        sanitize_csv_cell(entry.status),
+                        entry.confidence if entry.confidence is not None else "",
+                        sanitize_csv_cell(entry.origin),
+                        sanitize_csv_cell(entry.source_ref),
+                        str(entry.created_at),
+                        str(entry.updated_at),
+                        str(entry.approved_at) if entry.approved_at else "",
+                        sanitize_csv_cell(entry.approved_by),
+                    ]
+                )
 
         logger.info(f"Exported {len(entries)} TM entries to {path}")
         return len(entries)
@@ -128,7 +135,7 @@ class ExportService:
         session: Session,
         path: str,
         *,
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
         include_draft: bool = False,
     ) -> int:
         """Export TM entries to JSON.
@@ -158,28 +165,30 @@ class ExportService:
         # Export to JSON (no sanitization needed)
         data = []
         for entry in entries:
-            data.append({
-                "tm_id": entry.tm_id,
-                "project_id": entry.project_id,
-                "kind": entry.kind,
-                "src_lang": entry.src_lang,
-                "tgt_lang": entry.tgt_lang,
-                "src_text": entry.src_text,
-                "src_norm": entry.src_norm,
-                "translation": entry.translation,
-                "translation_norm": entry.translation_norm,
-                "pos": entry.pos,
-                "domain": entry.domain,
-                "notes": entry.notes,
-                "status": entry.status,
-                "confidence": entry.confidence,
-                "origin": entry.origin,
-                "source_ref": entry.source_ref,
-                "created_at": str(entry.created_at),
-                "updated_at": str(entry.updated_at),
-                "approved_at": str(entry.approved_at) if entry.approved_at else None,
-                "approved_by": entry.approved_by,
-            })
+            data.append(
+                {
+                    "tm_id": entry.tm_id,
+                    "project_id": entry.project_id,
+                    "kind": entry.kind,
+                    "src_lang": entry.src_lang,
+                    "tgt_lang": entry.tgt_lang,
+                    "src_text": entry.src_text,
+                    "src_norm": entry.src_norm,
+                    "translation": entry.translation,
+                    "translation_norm": entry.translation_norm,
+                    "pos": entry.pos,
+                    "domain": entry.domain,
+                    "notes": entry.notes,
+                    "status": entry.status,
+                    "confidence": entry.confidence,
+                    "origin": entry.origin,
+                    "source_ref": entry.source_ref,
+                    "created_at": str(entry.created_at),
+                    "updated_at": str(entry.updated_at),
+                    "approved_at": str(entry.approved_at) if entry.approved_at else None,
+                    "approved_by": entry.approved_by,
+                }
+            )
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -192,8 +201,8 @@ class ExportService:
         session: Session,
         path: str,
         *,
-        dict_source_id: Optional[int] = None,
-        project_id: Optional[int] = None,
+        dict_source_id: int | None = None,
+        project_id: int | None = None,
     ) -> int:
         """Export dictionary entries to CSV.
 
@@ -227,41 +236,45 @@ class ExportService:
             writer = csv.writer(f)
 
             # Write header
-            writer.writerow([
-                "dict_entry_id",
-                "dict_source_id",
-                "kind",
-                "src_lang",
-                "tgt_lang",
-                "src_text",
-                "src_norm",
-                "translation",
-                "translation_norm",
-                "pos",
-                "domain",
-                "status",
-                "priority",
-                "notes",
-            ])
+            writer.writerow(
+                [
+                    "dict_entry_id",
+                    "dict_source_id",
+                    "kind",
+                    "src_lang",
+                    "tgt_lang",
+                    "src_text",
+                    "src_norm",
+                    "translation",
+                    "translation_norm",
+                    "pos",
+                    "domain",
+                    "status",
+                    "priority",
+                    "notes",
+                ]
+            )
 
             # Write rows with sanitization
             for entry in entries:
-                writer.writerow([
-                    entry.dict_entry_id,
-                    entry.dict_source_id,
-                    sanitize_csv_cell(entry.kind),
-                    sanitize_csv_cell(entry.src_lang),
-                    sanitize_csv_cell(entry.tgt_lang),
-                    sanitize_csv_cell(entry.src_text),
-                    sanitize_csv_cell(entry.src_norm),
-                    sanitize_csv_cell(entry.translation),
-                    sanitize_csv_cell(entry.translation_norm),
-                    sanitize_csv_cell(entry.pos),
-                    sanitize_csv_cell(entry.domain),
-                    sanitize_csv_cell(entry.status),
-                    entry.priority if entry.priority is not None else "",
-                    sanitize_csv_cell(entry.notes),
-                ])
+                writer.writerow(
+                    [
+                        entry.dict_entry_id,
+                        entry.dict_source_id,
+                        sanitize_csv_cell(entry.kind),
+                        sanitize_csv_cell(entry.src_lang),
+                        sanitize_csv_cell(entry.tgt_lang),
+                        sanitize_csv_cell(entry.src_text),
+                        sanitize_csv_cell(entry.src_norm),
+                        sanitize_csv_cell(entry.translation),
+                        sanitize_csv_cell(entry.translation_norm),
+                        sanitize_csv_cell(entry.pos),
+                        sanitize_csv_cell(entry.domain),
+                        sanitize_csv_cell(entry.status),
+                        entry.priority if entry.priority is not None else "",
+                        sanitize_csv_cell(entry.notes),
+                    ]
+                )
 
         logger.info(f"Exported {len(entries)} dict entries to {path}")
         return len(entries)
@@ -298,7 +311,7 @@ class ExportService:
         """
         try:
             import openpyxl
-            from openpyxl.styles import Font, Alignment
+            from openpyxl.styles import Alignment, Font
         except ImportError:
             raise ImportError("openpyxl is required for XLSX export. Install: pip install openpyxl")
 
@@ -316,8 +329,13 @@ class ExportService:
 
             # Headers
             headers = [
-                "Source (Hebrew)", "Translation (Russian)", "Status",
-                "Origin", "Kind", "Frequency", "Notes"
+                "Source (Hebrew)",
+                "Translation (Russian)",
+                "Status",
+                "Origin",
+                "Kind",
+                "Frequency",
+                "Notes",
             ]
 
             # Task 11: Add classification columns if requested
@@ -335,14 +353,15 @@ class ExportService:
             # Also need JOIN if exclude_noise=True to filter by lemma.is_noise
             if include_classification or exclude_noise:
                 # Join with lemma table to get classification for lemma entries
-                from sqlalchemy import outerjoin, or_
+                from sqlalchemy import or_
+
                 tm_query = (
                     session.query(TMEntry, Lemma)
                     .outerjoin(
                         Lemma,
-                        (TMEntry.kind == "lemma") &
-                        (TMEntry.src_text == Lemma.lemma_text) &
-                        (TMEntry.project_id == Lemma.project_id)
+                        (TMEntry.kind == "lemma")
+                        & (TMEntry.src_text == Lemma.lemma_text)
+                        & (TMEntry.project_id == Lemma.project_id),
                     )
                     .filter(TMEntry.project_id == project_id)
                 )
@@ -354,8 +373,8 @@ class ExportService:
                     tm_query = tm_query.filter(
                         or_(
                             Lemma.lemma_id.is_(None),  # No lemma joined (keep non-lemma entries)
-                            Lemma.is_noise == 0,        # Lemma is not noise
-                            Lemma.is_noise.is_(None)    # Lemma noise status is NULL
+                            Lemma.is_noise == 0,  # Lemma is not noise
+                            Lemma.is_noise.is_(None),  # Lemma noise status is NULL
                         )
                     )
 
@@ -384,11 +403,17 @@ class ExportService:
                 # Task 11: Add classification data from joined lemma
                 if include_classification:
                     if lemma:
-                        row_data.extend([
-                            lemma.entity_class or "",
-                            "Noise" if lemma.is_noise == 1 else "Valid" if lemma.is_noise == 0 else "",
-                            lemma.noise_reason or "",
-                        ])
+                        row_data.extend(
+                            [
+                                lemma.entity_class or "",
+                                (
+                                    "Noise"
+                                    if lemma.is_noise == 1
+                                    else "Valid" if lemma.is_noise == 0 else ""
+                                ),
+                                lemma.noise_reason or "",
+                            ]
+                        )
                     else:
                         # No lemma found (e.g., for term_cluster or other kinds)
                         row_data.extend(["", "", ""])
@@ -402,13 +427,11 @@ class ExportService:
             # Apply noise filter (Task 11)
             if exclude_noise:
                 from sqlalchemy import or_
+
                 query = query.filter(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
 
             lemmas = (
-                query
-                .order_by(Lemma.lemma_text)
-                .limit(100)  # Limit to avoid huge exports
-                .all()
+                query.order_by(Lemma.lemma_text).limit(100).all()  # Limit to avoid huge exports
             )
 
             # For lemmas, try to get translation from TM and frequency from stats
@@ -426,6 +449,7 @@ class ExportService:
 
                 # Look up frequency from LemmaProjectStat
                 from app.infra.sa_models import LemmaProjectStat
+
                 lemma_stat = (
                     session.query(LemmaProjectStat)
                     .filter(
@@ -451,11 +475,17 @@ class ExportService:
 
                 # Task 11: Add classification data for lemmas
                 if include_classification:
-                    row_data.extend([
-                        lemma.entity_class or "",
-                        "Noise" if lemma.is_noise == 1 else "Valid" if lemma.is_noise == 0 else "",
-                        lemma.noise_reason or "",
-                    ])
+                    row_data.extend(
+                        [
+                            lemma.entity_class or "",
+                            (
+                                "Noise"
+                                if lemma.is_noise == 1
+                                else "Valid" if lemma.is_noise == 0 else ""
+                            ),
+                            lemma.noise_reason or "",
+                        ]
+                    )
 
                 ws_dict.append(row_data)
                 row_count += 1
@@ -489,7 +519,8 @@ class ExportService:
             stats = stats_service.compute_project_stats(session, project_id)
 
             # Get metrics registry for deterministic ordering
-            from app.services.metrics_registry import get_registry, MetricType
+            from app.services.metrics_registry import MetricType, get_registry
+
             registry = get_registry()
 
             # Convert stats dataclass to dict for lookups
@@ -532,8 +563,8 @@ class ExportService:
                     ws_stats.append([spec.label, formatted_value])
 
             # Auto-size columns
-            ws_stats.column_dimensions['A'].width = 30
-            ws_stats.column_dimensions['B'].width = 20
+            ws_stats.column_dimensions["A"].width = 30
+            ws_stats.column_dimensions["B"].width = 20
 
             # Write to file handle
             wb.save(f)
@@ -557,7 +588,7 @@ class ExportService:
         fd, temp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
 
         try:
-            with os.fdopen(fd, 'wb') as f:
+            with os.fdopen(fd, "wb") as f:
                 write_func(f)
 
             # Atomic replace (works on Windows and POSIX)
@@ -585,7 +616,7 @@ class ExportService:
         fd, temp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
 
         try:
-            with os.fdopen(fd, 'wb') as f:
+            with os.fdopen(fd, "wb") as f:
                 result = write_func(f)
 
             # Atomic replace (works on Windows and POSIX)
@@ -640,6 +671,7 @@ class ExportService:
         # Apply noise filter (Task 11)
         if exclude_noise:
             from sqlalchemy import or_
+
             query = query.filter(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         # Stable order for determinism
@@ -649,11 +681,7 @@ class ExportService:
         # Build TBX XML
         def write_tbx(f: BinaryIO):
             # Root element
-            tbx = ET.Element("tbx", {
-                "type": "TBX-Basic",
-                "style": "dca",
-                "xml:lang": "he"
-            })
+            tbx = ET.Element("tbx", {"type": "TBX-Basic", "style": "dca", "xml:lang": "he"})
 
             # Text element
             text = ET.SubElement(tbx, "text")
@@ -741,14 +769,15 @@ class ExportService:
         # Also need JOIN if exclude_noise=True to filter by lemma.is_noise
         if include_classification or exclude_noise:
             # Join with lemma table to get classification for lemma entries
-            from sqlalchemy import outerjoin, or_
+            from sqlalchemy import or_
+
             query = (
                 session.query(TMEntry, Lemma)
                 .outerjoin(
                     Lemma,
-                    (TMEntry.kind == "lemma") &
-                    (TMEntry.src_text == Lemma.lemma_text) &
-                    (TMEntry.project_id == Lemma.project_id)
+                    (TMEntry.kind == "lemma")
+                    & (TMEntry.src_text == Lemma.lemma_text)
+                    & (TMEntry.project_id == Lemma.project_id),
                 )
                 .filter(TMEntry.project_id == project_id)
             )
@@ -763,8 +792,8 @@ class ExportService:
                 query = query.filter(
                     or_(
                         Lemma.lemma_id.is_(None),  # No lemma joined (keep non-lemma entries)
-                        Lemma.is_noise == 0,        # Lemma is not noise
-                        Lemma.is_noise.is_(None)    # Lemma noise status is NULL
+                        Lemma.is_noise == 0,  # Lemma is not noise
+                        Lemma.is_noise.is_(None),  # Lemma noise status is NULL
                     )
                 )
 
@@ -786,24 +815,23 @@ class ExportService:
         pinned_entries = []
         if include_pinned:
             query_pinned = session.query(TermCluster).filter(
-                TermCluster.project_id == project_id,
-                TermCluster.pinned_translation.isnot(None)
+                TermCluster.project_id == project_id, TermCluster.pinned_translation.isnot(None)
             )
 
             # Apply noise filter to pinned clusters (Task 11)
             if exclude_noise:
                 from sqlalchemy import or_
+
                 query_pinned = query_pinned.filter(
                     or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None))
                 )
 
-            clusters_with_pinned = (
-                query_pinned
-                .order_by(TermCluster.representative_he)
-                .all()
-            )
+            clusters_with_pinned = query_pinned.order_by(TermCluster.representative_he).all()
             # Task 11: Keep cluster object for classification data
-            pinned_entries = [(c.representative_he, c.pinned_translation, c if include_classification else None) for c in clusters_with_pinned]
+            pinned_entries = [
+                (c.representative_he, c.pinned_translation, c if include_classification else None)
+                for c in clusters_with_pinned
+            ]
 
         # Build TMX XML
         def write_tmx(f: BinaryIO):
@@ -811,15 +839,19 @@ class ExportService:
             tmx = ET.Element("tmx", {"version": "1.4"})
 
             # Header
-            header = ET.SubElement(tmx, "header", {
-                "creationtool": "V_book",
-                "creationtoolversion": "1.0",
-                "datatype": "plaintext",
-                "segtype": "sentence",
-                "adminlang": "en",
-                "srclang": "he",
-                "o-tmf": "unknown"
-            })
+            header = ET.SubElement(
+                tmx,
+                "header",
+                {
+                    "creationtool": "V_book",
+                    "creationtoolversion": "1.0",
+                    "datatype": "plaintext",
+                    "segtype": "sentence",
+                    "adminlang": "en",
+                    "srclang": "he",
+                    "o-tmf": "unknown",
+                },
+            )
 
             # Body
             body = ET.SubElement(tmx, "body")
@@ -908,7 +940,7 @@ class ExportService:
         self,
         session: Session,
         path: str,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         sort_column: str = "updated_at",
         sort_direction: str = "desc",
     ) -> int:
@@ -942,11 +974,12 @@ class ExportService:
         """
         try:
             import openpyxl
-            from openpyxl.styles import Font, Alignment
+            from openpyxl.styles import Alignment, Font
         except ImportError:
             raise ImportError("openpyxl is required for XLSX export. Install: pip install openpyxl")
 
-        from sqlalchemy import select, or_, func
+        from sqlalchemy import or_, select
+
         from app.services.translation_admin_service import TranslationAdminService
 
         filters = filters or {}
@@ -1025,8 +1058,16 @@ class ExportService:
 
             # Headers
             headers = [
-                "ID", "Kind", "Source", "Translation", "Status",
-                "Project", "Origin", "Source Ref", "Updated", "Noise"
+                "ID",
+                "Kind",
+                "Source",
+                "Translation",
+                "Status",
+                "Project",
+                "Origin",
+                "Source Ref",
+                "Updated",
+                "Noise",
             ]
             ws.append(headers)
 
@@ -1057,18 +1098,20 @@ class ExportService:
                     elif entry.is_noise == 0:
                         noise_display = "Valid"
 
-                    ws.append([
-                        entry.tm_id,
-                        entry.kind or "",
-                        entry.src_text or "",
-                        entry.translation or "",
-                        entry.status or "",
-                        str(entry.project_id) if entry.project_id else "Global",
-                        entry.origin or "",
-                        entry.source_ref or "",
-                        str(entry.updated_at) if entry.updated_at else "",
-                        noise_display,
-                    ])
+                    ws.append(
+                        [
+                            entry.tm_id,
+                            entry.kind or "",
+                            entry.src_text or "",
+                            entry.translation or "",
+                            entry.status or "",
+                            str(entry.project_id) if entry.project_id else "Global",
+                            entry.origin or "",
+                            entry.source_ref or "",
+                            str(entry.updated_at) if entry.updated_at else "",
+                            noise_display,
+                        ]
+                    )
                     row_count += 1
 
             # Auto-size columns (same pattern as export_xlsx)
@@ -1094,4 +1137,3 @@ class ExportService:
 
         logger.info(f"Exported {result} TM entries to {path}")
         return result
-

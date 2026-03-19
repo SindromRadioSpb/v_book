@@ -8,26 +8,26 @@ Never touches production DB directly.
 """
 
 import argparse
-import sys
-import os
 import json
-from pathlib import Path
+import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.services.p3_verification_service import P3VerificationService
 from app.services.db_service import DBService
+from app.services.p3_verification_service import P3VerificationService
 
 
 def get_default_db_path() -> str:
-    """Get default HDLE database path.
+    r"""Get default HDLE database path.
 
     Returns:
         Default DB path: %USERPROFILE%\AppData\Local\HDLE\hdle.db
     """
-    user_profile = os.environ.get('USERPROFILE')
+    user_profile = os.environ.get("USERPROFILE")
     if not user_profile:
         return ""
 
@@ -45,21 +45,18 @@ def main():
         "--db",
         type=str,
         default=get_default_db_path(),
-        help="Source database path (default: %%USERPROFILE%%\\AppData\\Local\\HDLE\\hdle.db)"
+        help="Source database path (default: %%USERPROFILE%%\\AppData\\Local\\HDLE\\hdle.db)",
     )
 
     parser.add_argument(
-        "--project-id",
-        type=int,
-        default=1,
-        help="Project ID for testing (default: 1)"
+        "--project-id", type=int, default=1, help="Project ID for testing (default: 1)"
     )
 
     parser.add_argument(
         "--out-dir",
         type=str,
         default=None,
-        help="Output directory for snapshot and reports (default: runtime/verifications/p3/<timestamp>)"
+        help="Output directory for snapshot and reports (default: runtime/verifications/p3/<timestamp>)",
     )
 
     args = parser.parse_args()
@@ -69,7 +66,7 @@ def main():
         print(f"[ERROR] Database not found: {args.db}")
         print("")
         print("Hint: Specify database path with --db option")
-        print(f"   Example: python -m app.tools.p3_verify --db path/to/your.db")
+        print("   Example: python -m app.tools.p3_verify --db path/to/your.db")
         print("")
         print("Exit code: 2 (SKIPPED)")
         return 2
@@ -124,7 +121,11 @@ def main():
 
         # Print step results
         for step in report.steps:
-            status_icon = "[PASS]" if step.status == "PASS" else "[FAIL]" if step.status == "FAIL" else "[SKIP]"
+            status_icon = (
+                "[PASS]"
+                if step.status == "PASS"
+                else "[FAIL]" if step.status == "FAIL" else "[SKIP]"
+            )
             print(f"{status_icon} {step.name}: {step.status} ({step.elapsed_ms:.2f}ms)")
             if step.error:
                 print(f"   Error: {step.error}")
@@ -140,13 +141,13 @@ def main():
         json_path = out_dir / "P3_VERIFICATION_REPORT.json"
         md_path = out_dir / "P3_VERIFICATION_REPORT.md"
 
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
 
-        with open(md_path, 'w', encoding='utf-8') as f:
+        with open(md_path, "w", encoding="utf-8") as f:
             f.write(report.to_markdown())
 
-        print(f"[*] Reports written:")
+        print("[*] Reports written:")
         print(f"   JSON: {json_path}")
         print(f"   MD:   {md_path}")
         print("")

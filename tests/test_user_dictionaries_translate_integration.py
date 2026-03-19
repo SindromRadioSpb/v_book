@@ -53,7 +53,9 @@ def translate_engine():
         Path(db_path).unlink(missing_ok=True)
 
 
-def test_translate_selected_updates_tm_global_and_refreshes_resolution(monkeypatch, translate_engine):
+def test_translate_selected_updates_tm_global_and_refreshes_resolution(
+    monkeypatch, translate_engine
+):
     service = UserDictionaryService()
 
     with Session(translate_engine) as session:
@@ -113,7 +115,9 @@ def test_translate_selected_updates_tm_global_and_refreshes_resolution(monkeypat
         session.commit()
 
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
     class DummyDB:
@@ -123,7 +127,9 @@ def test_translate_selected_updates_tm_global_and_refreshes_resolution(monkeypat
         def get_session(self):
             return Session(self.engine)
 
-    monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine))
+    monkeypatch.setattr(
+        "app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine)
+    )
 
     def fake_resolve(
         self,
@@ -138,7 +144,9 @@ def test_translate_selected_updates_tm_global_and_refreshes_resolution(monkeypat
     ):
         return TranslationResult(translation=f"MT::{src_text}", source="local_nllb", confidence=1.0)
 
-    monkeypatch.setattr("app.services.translation_service.TranslationService.resolve_translation", fake_resolve)
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService.resolve_translation", fake_resolve
+    )
 
     worker = UserDictTranslateWorker(
         dictionary_id=dictionary_id,
@@ -247,7 +255,9 @@ def test_translate_selected_fill_empty_skips_non_empty_global(monkeypatch, trans
         session.commit()
 
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
     class DummyDB:
@@ -257,7 +267,9 @@ def test_translate_selected_fill_empty_skips_non_empty_global(monkeypatch, trans
         def get_session(self):
             return Session(self.engine)
 
-    monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine))
+    monkeypatch.setattr(
+        "app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine)
+    )
 
     def fake_resolve(
         self,
@@ -272,7 +284,9 @@ def test_translate_selected_fill_empty_skips_non_empty_global(monkeypatch, trans
     ):
         return TranslationResult(translation=f"MT::{src_text}", source="local_nllb", confidence=1.0)
 
-    monkeypatch.setattr("app.services.translation_service.TranslationService.resolve_translation", fake_resolve)
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService.resolve_translation", fake_resolve
+    )
 
     worker = UserDictTranslateWorker(
         dictionary_id=dictionary_id,
@@ -356,7 +370,9 @@ def test_translate_selected_overwrite_replaces_higher_ranked_global(monkeypatch,
         session.commit()
 
         item_id = session.execute(
-            select(UserDictionaryItem.item_id).where(UserDictionaryItem.dictionary_id == dictionary_id)
+            select(UserDictionaryItem.item_id).where(
+                UserDictionaryItem.dictionary_id == dictionary_id
+            )
         ).scalar_one()
 
     class DummyDB:
@@ -366,7 +382,9 @@ def test_translate_selected_overwrite_replaces_higher_ranked_global(monkeypatch,
         def get_session(self):
             return Session(self.engine)
 
-    monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine))
+    monkeypatch.setattr(
+        "app.services.db_service.DBService.get_instance", lambda: DummyDB(translate_engine)
+    )
 
     def fake_resolve(
         self,
@@ -381,7 +399,9 @@ def test_translate_selected_overwrite_replaces_higher_ranked_global(monkeypatch,
     ):
         return TranslationResult(translation=f"MT::{src_text}", source="local_nllb", confidence=1.0)
 
-    monkeypatch.setattr("app.services.translation_service.TranslationService.resolve_translation", fake_resolve)
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService.resolve_translation", fake_resolve
+    )
 
     worker = UserDictTranslateWorker(
         dictionary_id=dictionary_id,

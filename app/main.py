@@ -1,16 +1,17 @@
 """HDLE Premium - Main entry point."""
+
 from __future__ import annotations
 
-import sys
-import json
-import time
-import sqlite3
-import logging
 import argparse
 import importlib
+import json
+import logging
 import os
+import sqlite3
 import subprocess
-from datetime import datetime, timezone
+import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,7 @@ def get_app_dir() -> Path:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _attach_build_meta(payload: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +161,9 @@ def _prepare_onnxruntime_dll_paths_for_bridge() -> None:
         if resolved.lower() not in normalized_path and resolved not in prefix_parts:
             prefix_parts.append(resolved)
     if prefix_parts:
-        os.environ["PATH"] = ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+        os.environ["PATH"] = (
+            ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+        )
 
 
 def _resolve_frozen_onnx_probe_executable() -> Path | None:
@@ -287,7 +290,9 @@ def _run_frozen_onnx_probe_helper(
     payload["exit_code"] = int(proc.returncode)
     payload["timeout_ms"] = int(timeout_ms)
     if proc.returncode != 0 and not str(payload.get("error") or "").strip():
-        payload["error"] = (proc.stderr or proc.stdout or "").strip() or f"Helper exited with code {proc.returncode}"
+        payload["error"] = (
+            proc.stderr or proc.stdout or ""
+        ).strip() or f"Helper exited with code {proc.returncode}"
 
     return proc.returncode, payload
 
@@ -428,7 +433,9 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
                 "module": getattr(ort_module, "__name__", "onnxruntime"),
                 "origin": ort_origin,
                 "capi_dir_exists": bool(capi_dir and capi_dir.exists()),
-                "pybind_exists": bool(capi_dir and (capi_dir / "onnxruntime_pybind11_state.pyd").exists()),
+                "pybind_exists": bool(
+                    capi_dir and (capi_dir / "onnxruntime_pybind11_state.pyd").exists()
+                ),
                 "runtime_dll_exists": bool(capi_dir and (capi_dir / "onnxruntime.dll").exists()),
             }
         except Exception as exc:
@@ -479,11 +486,15 @@ def _run_import_self_check(settings: SettingsService) -> tuple[int, dict[str, An
         )
     payload["checks"]["required_resources"] = required_resources
 
-    ok = bool(payload["checks"]["phonikud_import"]["ok"] and payload["checks"]["onnxruntime_import"]["ok"])
+    ok = bool(
+        payload["checks"]["phonikud_import"]["ok"] and payload["checks"]["onnxruntime_import"]["ok"]
+    )
     return (0 if ok else 1), payload
 
 
-def _run_db_open_self_check(settings: SettingsService, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
+def _run_db_open_self_check(
+    settings: SettingsService, db_path_arg: str | None
+) -> tuple[int, dict[str, Any]]:
     from app.infra.db_path_resolver import classify_db_profile, inspect_db_path
 
     resolved_db = resolve_db_path(db_path_arg, settings=settings)
@@ -507,8 +518,12 @@ def _run_db_open_self_check(settings: SettingsService, db_path_arg: str | None) 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
-            row = conn.execute("SELECT project_id FROM dict_project ORDER BY project_id ASC LIMIT 1").fetchone()
-            doc_row = conn.execute("SELECT doc_id FROM source_document ORDER BY doc_id ASC LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT project_id FROM dict_project ORDER BY project_id ASC LIMIT 1"
+            ).fetchone()
+            doc_row = conn.execute(
+                "SELECT doc_id FROM source_document ORDER BY doc_id ASC LIMIT 1"
+            ).fetchone()
         finally:
             conn.close()
     except Exception as exc:
@@ -524,7 +539,9 @@ def _run_db_open_self_check(settings: SettingsService, db_path_arg: str | None) 
     return 0, payload
 
 
-def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
+def _run_health_self_check(
+    settings: SettingsService, db_path_arg: str | None
+) -> tuple[int, dict[str, Any]]:
     from app.services.health_check_service import HealthCheckService
 
     resolved_db = resolve_db_path(db_path_arg, settings=settings)
@@ -581,10 +598,16 @@ def _run_health_self_check(settings: SettingsService, db_path_arg: str | None) -
                     "id": "frozen_onnx_probe",
                     "name": "Frozen ONNX Probe",
                     "status": "ok" if probe_ok else "error",
-                    "message": "ONNX helper probe passed" if probe_ok else (probe_error or "ONNX helper probe failed"),
-                    "remediation": "Reinstall runtime dependencies and verify HDLE_ONNX_Probe.exe packaging."
-                    if not probe_ok
-                    else "",
+                    "message": (
+                        "ONNX helper probe passed"
+                        if probe_ok
+                        else (probe_error or "ONNX helper probe failed")
+                    ),
+                    "remediation": (
+                        "Reinstall runtime dependencies and verify HDLE_ONNX_Probe.exe packaging."
+                        if not probe_ok
+                        else ""
+                    ),
                 }
             )
 
@@ -753,9 +776,7 @@ def _run_cloud_tests_self_check(
     translate_sa, translate_source = _load_service_account_from_env_key(
         "HDLE_GCP_TRANSLATE_SA_JSON_PATH"
     )
-    tts_sa, tts_source = _load_service_account_from_env_key(
-        "HDLE_GCP_TTS_SA_JSON_PATH"
-    )
+    tts_sa, tts_source = _load_service_account_from_env_key("HDLE_GCP_TTS_SA_JSON_PATH")
     shared_sa, shared_source = _load_service_account_info_from_env_or_paths(settings)
 
     if translate_sa is None:
@@ -783,7 +804,9 @@ def _run_cloud_tests_self_check(
                 db_initialized = True
                 attempt["db_init"] = "ok"
 
-                store_sa, credential_source = _load_service_account_info_from_credential_store(settings)
+                store_sa, credential_source = _load_service_account_info_from_credential_store(
+                    settings
+                )
                 attempt["credential_source"] = credential_source
                 if store_sa:
                     if translate_sa is None:
@@ -825,6 +848,11 @@ def _run_cloud_tests_self_check(
         "tts_client_email": _redact_value(str(tts_sa.get("client_email", ""))),
     }
 
+    from app.infra.audio.audio_provider_config import (
+        AudioProviderAuthMode,
+        AudioProviderConfig,
+    )
+    from app.infra.audio.providers.google_cloud_tts_provider import GoogleCloudTTSProvider
     from app.infra.translators.base_provider import TranslationRequest
     from app.infra.translators.provider_config import (
         ProviderAuthConfig,
@@ -834,11 +862,6 @@ def _run_cloud_tests_self_check(
     from app.infra.translators.providers.google_cloud_translate_provider import (
         GoogleCloudTranslateProvider,
     )
-    from app.infra.audio.audio_provider_config import (
-        AudioProviderAuthMode,
-        AudioProviderConfig,
-    )
-    from app.infra.audio.providers.google_cloud_tts_provider import GoogleCloudTTSProvider
 
     class _InlineTranslateConfig:
         def __init__(self, inline_sa: dict[str, Any]):
@@ -924,6 +947,7 @@ def _run_cloud_tests_self_check(
     payload["ok"] = bool(translate_ok and tts_ok)
     return (0 if payload["ok"] else 1), payload
 
+
 def run_self_check(mode: str, *, db_path_arg: str | None) -> tuple[int, dict[str, Any]]:
     from app.infra.settings import SettingsService
 
@@ -990,14 +1014,15 @@ def main():
     # Import heavy Qt/UI modules only for normal app startup.
     # Keep self-check and subprocess bridge paths independent from GUI imports.
     from PyQt6.QtWidgets import QApplication
+
     from app.infra.resource_paths import ResourcePaths
     from app.infra.settings import SettingsService
+    from app.infra.translators.local_providers_setup import (
+        register_google_cloud_translate,
+        register_google_translate,
+    )
     from app.infra.util.logging import setup_logging
     from app.services.db_service import DBService
-    from app.infra.translators.local_providers_setup import (
-        register_google_translate,
-        register_google_cloud_translate,
-    )
     from app.ui.app_window import AppWindow
 
     settings = SettingsService.get_instance()
@@ -1055,6 +1080,7 @@ def main():
         # as a ReadOnlyDatabaseManager so get_ref_session() works throughout the session.
         try:
             from sqlalchemy import text as _sa_text
+
             with db_service.get_session() as _s:
                 _ref_rows = _s.execute(
                     _sa_text(
@@ -1065,14 +1091,13 @@ def main():
             for _pid, _rpath in _ref_rows:
                 try:
                     DBService.attach_reference(_pid, _rpath)
-                    logger.info(
-                        "Reference DB attached: project %d → %s", _pid, _rpath
-                    )
+                    logger.info("Reference DB attached: project %d → %s", _pid, _rpath)
                 except FileNotFoundError:
                     logger.warning(
                         "Reference DB file not found for project %d (path: %s); "
                         "project will remain read-only in UI but physical RO mount skipped.",
-                        _pid, _rpath,
+                        _pid,
+                        _rpath,
                     )
         except Exception as _ref_err:
             logger.warning("Reference DB attach scan failed (non-fatal): %s", _ref_err)

@@ -1,4 +1,5 @@
 """Smoke tests for project and document rename functionality."""
+
 import pytest
 import sqlite3
 from pathlib import Path
@@ -121,6 +122,7 @@ def test_document(db_service, test_project):
 # Project Rename Tests
 # ============================================================================
 
+
 def test_project_rename_success(db_service, project_service, test_project):
     """Test successful project rename."""
     with db_service.get_session() as session:
@@ -159,7 +161,7 @@ def test_project_rename_too_long(db_service, project_service, test_project):
 
 def test_project_rename_forbidden_chars(db_service, project_service, test_project):
     """Test that forbidden characters are rejected."""
-    forbidden = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+    forbidden = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
 
     with db_service.get_session() as session:
         for char in forbidden:
@@ -209,6 +211,7 @@ def test_project_rename_unchanged_name(db_service, project_service, test_project
 # Document Rename Tests
 # ============================================================================
 
+
 def test_document_rename_success(db_service, ingest_service, test_document):
     """Test successful document rename."""
     with db_service.get_session() as session:
@@ -247,7 +250,7 @@ def test_document_rename_too_long(db_service, ingest_service, test_document):
 
 def test_document_rename_forbidden_chars(db_service, ingest_service, test_document):
     """Test that forbidden characters are rejected."""
-    forbidden = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+    forbidden = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
 
     with db_service.get_session() as session:
         for char in forbidden:

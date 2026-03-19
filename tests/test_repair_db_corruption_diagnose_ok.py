@@ -93,7 +93,9 @@ def test_diagnose_db_corruption_returns_ok_for_healthy_db(tmp_path: Path) -> Non
     assert diagnosis["rootpage_matches"] == []
 
 
-def test_diagnose_db_corruption_maps_sentence_snapshot_rootpage(monkeypatch, tmp_path: Path) -> None:
+def test_diagnose_db_corruption_maps_sentence_snapshot_rootpage(
+    monkeypatch, tmp_path: Path
+) -> None:
     db_path = tmp_path / "rootpage.db"
     _create_healthy_db(db_path)
 
@@ -113,7 +115,9 @@ def test_diagnose_db_corruption_maps_sentence_snapshot_rootpage(monkeypatch, tmp
         if pragma_sql == "PRAGMA quick_check(10)":
             return {
                 "ok": False,
-                "rows": [f"*** in database main *** Tree {rootpage} page 1 cell 0: invalid page number"],
+                "rows": [
+                    f"*** in database main *** Tree {rootpage} page 1 cell 0: invalid page number"
+                ],
                 "error": None,
                 "sql": pragma_sql,
             }

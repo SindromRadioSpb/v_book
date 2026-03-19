@@ -10,10 +10,11 @@ import sqlite3
 from pathlib import Path
 import sys
 
+
 def check_processing_status():
     """Check Wikipedia processing status."""
 
-    db_path = Path("J:/Project_Vibe/V_book/hdle_premium.db")
+    db_path = Path("E:/projects/Project_Vibe/V_book/hdle_premium.db")
 
     if not db_path.exists():
         print(f"[ERROR] Database not found: {db_path}")
@@ -28,11 +29,13 @@ def check_processing_status():
     print()
 
     # Get Wikipedia project
-    cur.execute("""
+    cur.execute(
+        """
         SELECT project_id, name, created_at, updated_at
         FROM dict_project
         WHERE name LIKE '%Wikipedia%'
-    """)
+    """
+    )
     projects = cur.fetchall()
 
     if not projects:
@@ -48,14 +51,16 @@ def check_processing_status():
     print()
 
     # Document status breakdown
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT status, COUNT(*) as count
         FROM source_document sd
         JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
         WHERE sc.project_id = {project_id}
         GROUP BY status
         ORDER BY status
-    """)
+    """
+    )
 
     print("Document Status:")
     print("-" * 70)
@@ -71,11 +76,11 @@ def check_processing_status():
     print()
 
     # Processing progress
-    processed = status_counts.get('processed', 0)
-    processing = status_counts.get('processing', 0)
-    queued = status_counts.get('queued', 0)
-    failed = status_counts.get('failed', 0)
-    imported = status_counts.get('imported', 0)
+    processed = status_counts.get("processed", 0)
+    processing = status_counts.get("processing", 0)
+    queued = status_counts.get("queued", 0)
+    failed = status_counts.get("failed", 0)
+    imported = status_counts.get("imported", 0)
 
     if total > 0:
         progress_pct = (processed / total) * 100
@@ -92,7 +97,8 @@ def check_processing_status():
     # Token statistics (check if table exists first)
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_token'")
     if cur.fetchone():
-        cur.execute(f"""
+        cur.execute(
+            f"""
             SELECT
                 COUNT(DISTINCT dt.doc_id) as docs_with_tokens,
                 COUNT(*) as total_tokens,
@@ -102,7 +108,8 @@ def check_processing_status():
             JOIN source_document sd ON dt.doc_id = sd.doc_id
             JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
             WHERE sc.project_id = {project_id}
-        """)
+        """
+        )
         result = cur.fetchone()
     else:
         result = None
@@ -122,7 +129,8 @@ def check_processing_status():
     # Term extraction progress (check if table exists first)
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_term'")
     if cur.fetchone():
-        cur.execute(f"""
+        cur.execute(
+            f"""
             SELECT
                 COUNT(DISTINCT doc_id) as docs_with_terms
             FROM document_term dt
@@ -131,7 +139,8 @@ def check_processing_status():
                 JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
                 WHERE sd.doc_id = dt.doc_id AND sc.project_id = {project_id}
             )
-        """)
+        """
+        )
         docs_with_terms = cur.fetchone()[0]
     else:
         docs_with_terms = 0
@@ -143,7 +152,8 @@ def check_processing_status():
         print()
 
     # Errors (if any)
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT error_message, COUNT(*) as count
         FROM source_document sd
         JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
@@ -153,7 +163,8 @@ def check_processing_status():
         GROUP BY error_message
         ORDER BY count DESC
         LIMIT 5
-    """)
+    """
+    )
 
     errors = cur.fetchall()
     if errors:
@@ -193,6 +204,7 @@ def check_processing_status():
     print("=" * 70)
 
     conn.close()
+
 
 if __name__ == "__main__":
     check_processing_status()

@@ -17,6 +17,7 @@ from datetime import datetime
 
 # Import functions from import script
 import sys
+
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root / "scripts" / "ref_corpora"))
 
@@ -195,11 +196,13 @@ class TestJSONLRecordParsing:
 
     def test_parse_minimal_record(self):
         """Test parsing minimal valid record."""
-        record_str = json.dumps({
-            "doc_id": "test_123",
-            "title": "Test",
-            "text": "Content",
-        })
+        record_str = json.dumps(
+            {
+                "doc_id": "test_123",
+                "title": "Test",
+                "text": "Content",
+            }
+        )
 
         record = json.loads(record_str)
 
@@ -209,16 +212,19 @@ class TestJSONLRecordParsing:
 
     def test_parse_full_record(self):
         """Test parsing full Wikipedia record."""
-        record_str = json.dumps({
-            "doc_id": "מתמטיקה",
-            "title": "מתמטיקה",
-            "url": "https://he.wikipedia.org/wiki?curid=7",
-            "language": "he",
-            "text": "מָתֵמָטִיקָה היא תחום דעת",
-            "source": "hewiki",
-            "dump": "hewiki-20260201.xml.bz2",
-            "extracted_at": "2026-02-07T05:00:00Z",
-        }, ensure_ascii=False)
+        record_str = json.dumps(
+            {
+                "doc_id": "מתמטיקה",
+                "title": "מתמטיקה",
+                "url": "https://he.wikipedia.org/wiki?curid=7",
+                "language": "he",
+                "text": "מָתֵמָטִיקָה היא תחום דעת",
+                "source": "hewiki",
+                "dump": "hewiki-20260201.xml.bz2",
+                "extracted_at": "2026-02-07T05:00:00Z",
+            },
+            ensure_ascii=False,
+        )
 
         record = json.loads(record_str)
 
@@ -230,11 +236,13 @@ class TestJSONLRecordParsing:
 
     def test_parse_empty_text(self):
         """Test handling of record with empty text."""
-        record_str = json.dumps({
-            "doc_id": "test_123",
-            "title": "Test",
-            "text": "",
-        })
+        record_str = json.dumps(
+            {
+                "doc_id": "test_123",
+                "title": "Test",
+                "text": "",
+            }
+        )
 
         record = json.loads(record_str)
 
@@ -243,10 +251,12 @@ class TestJSONLRecordParsing:
 
     def test_parse_missing_optional_fields(self):
         """Test parsing record with missing optional fields."""
-        record_str = json.dumps({
-            "doc_id": "test_123",
-            "text": "Content",
-        })
+        record_str = json.dumps(
+            {
+                "doc_id": "test_123",
+                "text": "Content",
+            }
+        )
 
         record = json.loads(record_str)
 
@@ -297,11 +307,13 @@ class TestErrorReporting:
             source_key="hewiki",
         )
 
-        report.error_details.append({
-            "file": "test.jsonl",
-            "line": 42,
-            "error": "JSON parse error",
-        })
+        report.error_details.append(
+            {
+                "file": "test.jsonl",
+                "line": 42,
+                "error": "JSON parse error",
+            }
+        )
 
         result = report.to_dict()
 
@@ -321,10 +333,12 @@ class TestErrorReporting:
 
         # Add 150 errors
         for i in range(150):
-            report.error_details.append({
-                "file": f"test_{i}.jsonl",
-                "error": f"Error {i}",
-            })
+            report.error_details.append(
+                {
+                    "file": f"test_{i}.jsonl",
+                    "error": f"Error {i}",
+                }
+            )
 
         result = report.to_dict()
 

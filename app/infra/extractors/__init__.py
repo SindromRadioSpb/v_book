@@ -1,10 +1,10 @@
 # Text extractors
-from . import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor, pptx_extractor
+from . import docx_extractor, pdf_extractor, pdf_ocr_extractor, pptx_extractor, txt_extractor
 
 __all__ = [
-    'txt_extractor',
-    'docx_extractor',
-    'pdf_extractor',
-    'pdf_ocr_extractor',
-    'pptx_extractor',
+    "txt_extractor",
+    "docx_extractor",
+    "pdf_extractor",
+    "pdf_ocr_extractor",
+    "pptx_extractor",
 ]

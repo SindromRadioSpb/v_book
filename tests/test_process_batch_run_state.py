@@ -127,9 +127,9 @@ def test_batch_run_resumes_latest_cancelled_run(monkeypatch) -> None:
                 source_label="test_batch",
             )
 
-            runs_after_first = session.execute(
-                select(ProcessorRun).order_by(ProcessorRun.run_id)
-            ).scalars().all()
+            runs_after_first = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_1, err_1) == (1, 0)
         assert len(runs_after_first) == 1
@@ -149,9 +149,9 @@ def test_batch_run_resumes_latest_cancelled_run(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            final_runs = session.execute(
-                select(ProcessorRun).order_by(ProcessorRun.run_id)
-            ).scalars().all()
+            final_runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (2, 0)
         assert len(final_runs) == 1
@@ -207,7 +207,9 @@ def test_batch_run_does_not_resume_when_doc_contract_changes(monkeypatch) -> Non
                 resume_latest=True,
                 source_label="test_batch",
             )
-            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (2, 0)
         assert len(runs) == 2
@@ -258,7 +260,9 @@ def test_batch_resume_keeps_original_chunk_contract(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (1, 0)
         assert len(runs) == 1
@@ -309,7 +313,9 @@ def test_batch_run_does_not_resume_when_doc_ids_hash_changes(monkeypatch) -> Non
                 resume_latest=True,
                 source_label="test_batch",
             )
-            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (3, 0)
         assert len(runs) == 2
@@ -347,7 +353,9 @@ def test_batch_reprocess_uses_batch_run_without_extra_per_doc_runs(monkeypatch) 
                 resume_latest=True,
                 source_label="test_batch",
             )
-            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (2, 0)
         assert len(runs) == 1
@@ -380,9 +388,15 @@ def test_batch_process_populates_snapshot_doc_stats(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            docs = session.execute(
-                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument)
+                    .where(SourceDocument.doc_id.in_(doc_ids))
+                    .order_by(SourceDocument.doc_id.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         assert (ok_count, err_count) == (2, 0)
         assert [str(doc.snapshot_stats_state or "") for doc in docs] == ["valid", "valid"]
@@ -421,7 +435,9 @@ def test_verify_batch_run_contract_reports_selected_run(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
 
         with db.get_session() as session:
             report = service.verify_batch_run_contract(
@@ -472,7 +488,9 @@ def test_batch_run_resumes_explicit_run_id(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
 
         with db.get_session() as session:
             ok_2, err_2 = service.process_documents_batch(
@@ -483,7 +501,9 @@ def test_batch_run_resumes_explicit_run_id(monkeypatch) -> None:
                 resume_run_id=int(run.run_id),
                 source_label="test_batch",
             )
-            runs = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
 
         assert (ok_2, err_2) == (2, 0)
         assert len(runs) == 1
@@ -525,7 +545,9 @@ def test_batch_run_does_not_resume_running_candidate(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="test_batch",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
             run.status = "running"
             run.stage = "processing"
             session.commit()
@@ -585,7 +607,9 @@ def test_batch_run_rejects_explicit_resume_run_id_contract_mismatch(monkeypatch)
                 resume_latest=True,
                 source_label="test_batch",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
             run_id = int(run.run_id)
 
         with db.get_session() as session:

@@ -1,52 +1,52 @@
 ﻿"""Dictionary view - lemmas and MWE list."""
-import logging
-from typing import List, Optional
 
+import logging
+
+from PyQt6.QtCore import QModelIndex, Qt, QTimer
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QTableView,
-    QSpinBox,
-    QLineEdit,
-    QComboBox,
     QCheckBox,
-    QMenu,
-    QMessageBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QModelIndex, QTimer
-from PyQt6.QtGui import QAction
 
-from app.infra.settings import SettingsService
-from app.services.db_service import DBService
-from app.services.audio_playback_service import AudioPlaybackService
-from app.services.translation_service import TranslationService
-from app.services.tm_global_service import TMGlobalService
-from app.services.user_dictionary_service import UserDictionaryService
-from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import LemmaStats
+from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.settings import SettingsService
+from app.services.audio_playback_service import AudioPlaybackService
+from app.services.db_service import DBService
+from app.services.tm_global_service import TMGlobalService
+from app.services.translation_service import TranslationService
+from app.services.user_dictionary_service import UserDictionaryService
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
+from app.ui.dialogs import WhyTranslationDialog, show_error
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
+from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.models_qt import LemmaTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
-from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
-from app.ui.dialogs import show_error, WhyTranslationDialog
-from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
-from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
-from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
-from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
-from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.workers import (
-    TranslationResolveWorker,
-    DictionarySearchWorker,
-    UserDictionaryBulkAddWorker,
     BatchGenerateAudioWorker,
     CrossViewOverlayWorker,
+    DictionarySearchWorker,
+    TranslationResolveWorker,
+    UserDictionaryBulkAddWorker,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class PosFilterDialog(QDialog):
     ]
     ALL_POS = [pos for pos, _label in POS_OPTIONS]
 
-    def __init__(self, selected_pos: Optional[List[str]], parent=None):
+    def __init__(self, selected_pos: list[str] | None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select POS")
         self.setMinimumSize(280, 260)
@@ -118,9 +118,9 @@ class PosFilterDialog(QDialog):
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
 
-    def get_selected_pos(self) -> Optional[List[str]]:
+    def get_selected_pos(self) -> list[str] | None:
         """Return selected POS tags or None if all/none selected."""
-        selected: List[str] = []
+        selected: list[str] = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.checkState() == Qt.CheckState.Checked:
@@ -140,9 +140,9 @@ class DictionaryView(QWidget):
         self.translation_service = TranslationService()
         self.audio_playback_service = AudioPlaybackService()
         self.user_dict_service = UserDictionaryService()
-        self.translation_worker: Optional[TranslationResolveWorker] = None
-        self.overlay_worker: Optional[CrossViewOverlayWorker] = None
-        self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
+        self.translation_worker: TranslationResolveWorker | None = None
+        self.overlay_worker: CrossViewOverlayWorker | None = None
+        self.batch_audio_worker: BatchGenerateAudioWorker | None = None
         self.settings = SettingsService.get_instance()
 
         # Pagination state
@@ -155,15 +155,19 @@ class DictionaryView(QWidget):
         self._search_retry_pending = False
         self._translation_request_seq = 0
         self._active_translation_seq = 0
-        self._pending_translation_lemmas: Optional[List[LemmaStats]] = None
+        self._pending_translation_lemmas: list[LemmaStats] | None = None
         self._overlay_request_seq = 0
         self._active_overlay_seq = 0
-        self._pending_overlay_lemmas: Optional[List[LemmaStats]] = None
-        self.sort_column = str(self.settings.get_string("dictionary_view/sort_column", "freq_abs") or "freq_abs")
-        self.sort_direction = str(self.settings.get_string("dictionary_view/sort_direction", "desc") or "desc")
+        self._pending_overlay_lemmas: list[LemmaStats] | None = None
+        self.sort_column = str(
+            self.settings.get_string("dictionary_view/sort_column", "freq_abs") or "freq_abs"
+        )
+        self.sort_direction = str(
+            self.settings.get_string("dictionary_view/sort_direction", "desc") or "desc"
+        )
         saved_pos = self.settings.get_json("dictionary_view/pos_filter", None)
         if isinstance(saved_pos, list) and len(saved_pos) > 0:
-            self.selected_pos: Optional[List[str]] = [str(pos) for pos in saved_pos if pos]
+            self.selected_pos: list[str] | None = [str(pos) for pos in saved_pos if pos]
         else:
             self.selected_pos = None
 
@@ -317,7 +321,9 @@ class DictionaryView(QWidget):
         self.lemma_table = QTableView()
         self.lemma_table.setModel(self.proxy_model)  # Use proxy model
         self.lemma_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.lemma_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)  # Bulk selection
+        self.lemma_table.setSelectionMode(
+            QTableView.SelectionMode.ExtendedSelection
+        )  # Bulk selection
         # M7 P1: Enable editing for Translation column
         self.lemma_table.setEditTriggers(
             QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
@@ -340,17 +346,17 @@ class DictionaryView(QWidget):
             table_id="dictionary_view",
             table=self.lemma_table,
             default_widths={
-                0: 46,   # UD
+                0: 46,  # UD
                 1: 220,  # Lemma
-                2: 90,   # POS
-                3: 95,   # Frequency
-                4: 95,   # Doc Freq
+                2: 90,  # POS
+                3: 95,  # Frequency
+                4: 95,  # Doc Freq
                 5: 260,  # Translation
                 6: 120,  # Source
                 7: 110,  # Status
-                8: 90,   # Noise
+                8: 90,  # Noise
                 9: 110,  # Last Review
-                10: 180, # Niqqud
+                10: 180,  # Niqqud
                 11: 90,  # Audio
             },
         )
@@ -444,7 +450,9 @@ class DictionaryView(QWidget):
         self.current_page = 1
         self.perform_search()
 
-    def perform_search(self, *, include_total_count: bool = True, preserve_existing_state: bool = False):
+    def perform_search(
+        self, *, include_total_count: bool = True, preserve_existing_state: bool = False
+    ):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
@@ -491,7 +499,9 @@ class DictionaryView(QWidget):
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
         )
         self.search_worker.finished.connect(
-            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(worker, seq)
+            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(
+                worker, seq
+            )
         )
         self.search_worker.start()
 
@@ -512,9 +522,9 @@ class DictionaryView(QWidget):
     def on_search_results(
         self,
         rows: list,
-        request_seq: Optional[int] = None,
+        request_seq: int | None = None,
         *,
-        preserved_state: Optional[dict] = None,
+        preserved_state: dict | None = None,
         include_total_count: bool = True,
     ):
         """Handle page rows from worker (count arrives asynchronously)."""
@@ -536,8 +546,8 @@ class DictionaryView(QWidget):
                 freq_abs=stat.freq_abs,
                 doc_freq=stat.doc_freq,
                 translation=None,  # Will be filled by TranslationResolveWorker
-                status='auto',
-                entity_class=lemma.entity_class if hasattr(lemma, 'entity_class') else None,
+                status="auto",
+                entity_class=lemma.entity_class if hasattr(lemma, "entity_class") else None,
                 is_noise=lemma.is_noise,
                 noise_reason=lemma.noise_reason,
                 norm_text=lemma.norm_text,
@@ -565,7 +575,7 @@ class DictionaryView(QWidget):
         self.start_overlay_worker(lemmas, request_seq)
         self.start_translation_worker(lemmas)
 
-    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+    def on_search_count_ready(self, total_count: int, request_seq: int | None = None):
         """Handle deferred total-count result from worker."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -609,7 +619,9 @@ class DictionaryView(QWidget):
             }
         return snapshot
 
-    def _rehydrate_lemma_state(self, lemmas: List[LemmaStats], preserved_state: dict[int, dict]) -> dict[int, object]:
+    def _rehydrate_lemma_state(
+        self, lemmas: list[LemmaStats], preserved_state: dict[int, dict]
+    ) -> dict[int, object]:
         translation_results: dict[int, object] = {}
         if not preserved_state:
             return translation_results
@@ -638,7 +650,7 @@ class DictionaryView(QWidget):
                 translation_results[row] = payload["translation_result"]
         return translation_results
 
-    def start_overlay_worker(self, lemmas: List[LemmaStats], request_seq: Optional[int] = None):
+    def start_overlay_worker(self, lemmas: list[LemmaStats], request_seq: int | None = None):
         """Resolve heavy study overlays off the UI thread."""
         if not lemmas:
             return
@@ -673,7 +685,9 @@ class DictionaryView(QWidget):
             lambda error_msg, overlay_seq=seq: self.on_overlay_error(error_msg, overlay_seq)
         )
         self.overlay_worker.finished.connect(
-            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(worker, overlay_seq)
+            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(
+                worker, overlay_seq
+            )
         )
         self.overlay_worker.start()
 
@@ -686,14 +700,16 @@ class DictionaryView(QWidget):
             self._pending_overlay_lemmas = None
             QTimer.singleShot(0, lambda: self.start_overlay_worker(pending))
 
-    def on_overlay_results(self, overlay_map: dict, overlay_seq: int, *, request_seq: Optional[int] = None) -> None:
+    def on_overlay_results(
+        self, overlay_map: dict, overlay_seq: int, *, request_seq: int | None = None
+    ) -> None:
         if overlay_seq != self._active_overlay_seq:
             return
         if request_seq is not None and request_seq != self._active_search_seq:
             return
         if not overlay_map:
             return
-        changed_rows: List[int] = []
+        changed_rows: list[int] = []
         for row, lemma in enumerate(self.lemma_model.lemmas):
             payload = overlay_map.get(int(getattr(lemma, "lemma_id", 0) or 0))
             if not payload:
@@ -724,7 +740,7 @@ class DictionaryView(QWidget):
             return
         logger.warning("Dictionary overlay worker error: %s", error_msg)
 
-    def _apply_study_overlays(self, lemmas: List[LemmaStats]) -> None:
+    def _apply_study_overlays(self, lemmas: list[LemmaStats]) -> None:
         """Attach saved-to-UD + study tooltip metadata in one batch lookup."""
         if not lemmas:
             return
@@ -755,7 +771,9 @@ class DictionaryView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
-                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
+                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(
+                    session, raw_norm_pairs
+                )
         except Exception as e:
             logger.warning("Failed to resolve dictionary study overlays: %s", e)
             return
@@ -764,7 +782,9 @@ class DictionaryView(QWidget):
             src_norm = _lemma_norm(lemma)
             raw_src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
             raw_src_norm = (raw_src_norm or "").strip() or (lemma.norm_text or "").strip()
-            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "lemma", src_norm)
+            canonical_hash = self.user_dict_service.build_canonical_hash(
+                "he", "ru", "lemma", src_norm
+            )
             overlay = overlay_map.get(canonical_hash)
             if not overlay:
                 lemma.in_user_dictionary_count = 0
@@ -801,10 +821,12 @@ class DictionaryView(QWidget):
                 lemma.pronunciation_confidence = row_pron.get("pronunciation_confidence")
                 lemma.pronunciation_qc = row_pron.get("pronunciation_qc")
 
-    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_search_error(self, error_msg: str, request_seq: int | None = None):
         """Handle search error."""
         if request_seq is not None and request_seq != self._active_search_seq:
-            logger.debug(f"Ignoring stale dictionary search error: seq={request_seq}, active={self._active_search_seq}")
+            logger.debug(
+                f"Ignoring stale dictionary search error: seq={request_seq}, active={self._active_search_seq}"
+            )
             return
 
         logger.error(f"Search error: {error_msg}")
@@ -931,7 +953,7 @@ class DictionaryView(QWidget):
             return True
         return False
 
-    def start_translation_worker(self, lemmas: List[LemmaStats]):
+    def start_translation_worker(self, lemmas: list[LemmaStats]):
         """M7 P1: Start worker to resolve translations."""
         if not lemmas:
             return
@@ -967,7 +989,9 @@ class DictionaryView(QWidget):
             lambda error_msg, seq=request_seq: self.on_translation_error(error_msg, seq)
         )
         self.translation_worker.finished.connect(
-            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(worker, seq)
+            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(
+                worker, seq
+            )
         )
         self.translation_worker.start()
 
@@ -985,7 +1009,7 @@ class DictionaryView(QWidget):
             self._pending_translation_lemmas = None
             QTimer.singleShot(0, lambda: self.start_translation_worker(pending_lemmas))
 
-    def on_translation_results(self, results: dict, request_seq: Optional[int] = None):
+    def on_translation_results(self, results: dict, request_seq: int | None = None):
         """M7 P1: Handle translation results from worker."""
         if request_seq is not None and request_seq != self._active_translation_seq:
             logger.debug(
@@ -998,7 +1022,7 @@ class DictionaryView(QWidget):
         # Update model with results
         self.lemma_model.update_translations(results)
 
-    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_translation_error(self, error_msg: str, request_seq: int | None = None):
         """M7 P1: Handle translation worker error."""
         if request_seq is not None and request_seq != self._active_translation_seq:
             logger.debug(
@@ -1025,15 +1049,17 @@ class DictionaryView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 # Save to TM
-                from app.infra.sa_models import TMEntry
-                from app.domain.normalization import normalize_for_tm
                 from datetime import datetime
+
+                from app.domain.normalization import normalize_for_tm
+                from app.infra.sa_models import TMEntry
 
                 # Normalize
                 normalized = normalize_for_tm("he", lemma.lemma_text, "lemma")
 
                 # Check if TM entry exists
                 from sqlalchemy import select
+
                 stmt = select(TMEntry).where(
                     TMEntry.project_id == self.project_id,
                     TMEntry.kind == "lemma",
@@ -1085,7 +1111,9 @@ class DictionaryView(QWidget):
                     session.commit()
 
                 def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
-                    self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
+                    self.status_label.setText(
+                        f"Database is busy, retrying ({attempt}/{total_attempts})..."
+                    )
 
                 with serialized_db_write("dictionary.inline_tm_save"):
                     with_retry_on_locked(
@@ -1098,7 +1126,9 @@ class DictionaryView(QWidget):
                 # Update status in model to "approved"
                 lemma.status = "approved"
                 status_idx = self.lemma_model.index(row, 7)  # Status column
-                self.lemma_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
+                self.lemma_model.dataChanged.emit(
+                    status_idx, status_idx, [Qt.ItemDataRole.DisplayRole]
+                )
 
                 logger.info(f"Saved TM entry for lemma: {lemma.lemma_text} -> {translation_value}")
 
@@ -1106,14 +1136,16 @@ class DictionaryView(QWidget):
             logger.exception("Failed to save TM entry")
             show_error(self, "Save Error", f"Failed to save translation: {e}")
 
-    def _selected_audio_items(self) -> List[dict]:
+    def _selected_audio_items(self) -> list[dict]:
         """Build source-audio payloads from selected lemma rows."""
         selected_rows = self.lemma_table.selectionModel().selectedRows()
-        items: List[dict] = []
+        items: list[dict] = []
         for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             lemma = self.lemma_model.lemmas[source_row]
-            src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (lemma.norm_text or "")
+            src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (
+                lemma.norm_text or ""
+            )
             if not src_norm:
                 continue
             items.append(
@@ -1132,17 +1164,19 @@ class DictionaryView(QWidget):
             )
         return items
 
-    def _selected_pronunciation_items(self) -> List[dict]:
+    def _selected_pronunciation_items(self) -> list[dict]:
         """Build pronunciation payloads from selected lemma rows."""
         selected_rows = self.lemma_table.selectionModel().selectedRows()
-        items: List[dict] = []
+        items: list[dict] = []
         for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             lemma = self.lemma_model.lemmas[source_row]
             src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm
-            src_norm = (src_norm or "").strip() or (lemma.norm_text or "").strip() or normalize_for_tm(
-                "he", lemma.lemma_text, "lemma"
-            ).norm
+            src_norm = (
+                (src_norm or "").strip()
+                or (lemma.norm_text or "").strip()
+                or normalize_for_tm("he", lemma.lemma_text, "lemma").norm
+            )
             if not src_norm:
                 continue
             items.append(
@@ -1186,7 +1220,9 @@ class DictionaryView(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self._on_generate_audio_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -1263,7 +1299,9 @@ class DictionaryView(QWidget):
             start_immediately=True,
         )
 
-    def _play_audio_items(self, items: List[dict], *, play_mode: str, start_immediately: bool = False) -> None:
+    def _play_audio_items(
+        self, items: list[dict], *, play_mode: str, start_immediately: bool = False
+    ) -> None:
         """Resolve ready assets and route playback through internal player."""
         try:
             with self.db_service.get_session() as session:
@@ -1292,9 +1330,7 @@ class DictionaryView(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")
@@ -1334,14 +1370,18 @@ class DictionaryView(QWidget):
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected rows scope."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         selected_items = self._selected_pronunciation_items()
         changed = False
         if not selected_items:
             changed = show_pronunciation_bootstrap_dialog(parent=self)
         else:
-            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            changed = show_pronunciation_bootstrap_dialog(
+                parent=self, selected_items=selected_items
+            )
         if changed:
             self.refresh_current_page_after_operation()
 
@@ -1365,7 +1405,9 @@ class DictionaryView(QWidget):
             translate_action.triggered.connect(self.on_batch_translate)
             menu.addAction(translate_action)
 
-            generate_audio_action = QAction(f"Generate Audio Selected ({len(selected_rows)} rows)...", self)
+            generate_audio_action = QAction(
+                f"Generate Audio Selected ({len(selected_rows)} rows)...", self
+            )
             generate_audio_action.triggered.connect(self.on_generate_audio_selected)
             menu.addAction(generate_audio_action)
 
@@ -1373,17 +1415,23 @@ class DictionaryView(QWidget):
             play_audio_action.triggered.connect(self.on_play_audio_selected)
             menu.addAction(play_audio_action)
 
-            add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
+            add_action = QAction(
+                f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self
+            )
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
             menu.addAction(add_action)
-            add_playlist_action = QAction(f"Add Selected to Playlist ({len(selected_rows)} rows)...", self)
+            add_playlist_action = QAction(
+                f"Add Selected to Playlist ({len(selected_rows)} rows)...", self
+            )
             add_playlist_action.triggered.connect(self.on_add_selected_to_playlist)
             menu.addAction(add_playlist_action)
 
             edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
             menu.addAction(edit_pron_action)
-            bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self)
+            bootstrap_pron_action = QAction(
+                f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self
+            )
             bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
             menu.addAction(bootstrap_pron_action)
             menu.addSeparator()
@@ -1399,12 +1447,20 @@ class DictionaryView(QWidget):
         # Check if multiple rows selected
         if len(selected_rows) > 1:
             # Bulk operations
-            mark_valid_bulk_action = QAction(f"[OK] Mark Selected as Valid ({len(selected_rows)} rows)", self)
-            mark_valid_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(False))
+            mark_valid_bulk_action = QAction(
+                f"[OK] Mark Selected as Valid ({len(selected_rows)} rows)", self
+            )
+            mark_valid_bulk_action.triggered.connect(
+                lambda: self.set_lemmas_noise_status_bulk(False)
+            )
             menu.addAction(mark_valid_bulk_action)
 
-            mark_noise_bulk_action = QAction(f"[X] Mark Selected as Noise ({len(selected_rows)} rows)", self)
-            mark_noise_bulk_action.triggered.connect(lambda: self.set_lemmas_noise_status_bulk(True))
+            mark_noise_bulk_action = QAction(
+                f"[X] Mark Selected as Noise ({len(selected_rows)} rows)", self
+            )
+            mark_noise_bulk_action.triggered.connect(
+                lambda: self.set_lemmas_noise_status_bulk(True)
+            )
             menu.addAction(mark_noise_bulk_action)
         else:
             # Single row operation
@@ -1412,11 +1468,15 @@ class DictionaryView(QWidget):
 
             if current_is_noise:
                 mark_valid_action = QAction("[OK] Mark as Valid (remove from noise)", self)
-                mark_valid_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, False))
+                mark_valid_action.triggered.connect(
+                    lambda: self.set_lemma_noise_status(source_row, False)
+                )
                 menu.addAction(mark_valid_action)
             else:
                 mark_noise_action = QAction("[X] Mark as Noise", self)
-                mark_noise_action.triggered.connect(lambda: self.set_lemma_noise_status(source_row, True))
+                mark_noise_action.triggered.connect(
+                    lambda: self.set_lemma_noise_status(source_row, True)
+                )
                 menu.addAction(mark_noise_action)
 
         # Show menu
@@ -1474,7 +1534,9 @@ class DictionaryView(QWidget):
 
         from PyQt6.QtWidgets import QProgressDialog
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -1534,6 +1596,7 @@ class DictionaryView(QWidget):
         if not translation_result:
             # If no result yet, create a minimal one
             from app.services.translation_service import TranslationResult
+
             translation_result = TranslationResult(
                 translation=lemma.translation or "(no translation)",
                 source="unknown",
@@ -1551,13 +1614,14 @@ class DictionaryView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 from sqlalchemy import update
+
                 from app.infra.sa_models import Lemma
 
                 # Update is_noise field
-                stmt = update(Lemma).where(
-                    Lemma.lemma_id == lemma.lemma_id
-                ).values(
-                    is_noise=1 if is_noise else 0
+                stmt = (
+                    update(Lemma)
+                    .where(Lemma.lemma_id == lemma.lemma_id)
+                    .values(is_noise=1 if is_noise else 0)
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_lemmas(session, [lemma.lemma_id])
@@ -1576,6 +1640,7 @@ class DictionaryView(QWidget):
         except Exception as e:
             logger.exception(f"Failed to update noise status for lemma {lemma.lemma_id}")
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to update noise status: {e}")
 
     def set_lemmas_noise_status_bulk(self, is_noise: bool):
@@ -1605,14 +1670,15 @@ class DictionaryView(QWidget):
         # P0: Confirmation dialog for > 100 rows
         if count > 100:
             from PyQt6.QtWidgets import QMessageBox
+
             reply = QMessageBox.question(
                 self,
-                'Confirm Bulk Action',
-                f'You are about to mark {count:,} lemmas as {status_text}.\n\n'
-                f'This operation cannot be undone easily.\n\n'
-                f'Continue?',
+                "Confirm Bulk Action",
+                f"You are about to mark {count:,} lemmas as {status_text}.\n\n"
+                f"This operation cannot be undone easily.\n\n"
+                f"Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No  # Default to No for safety
+                QMessageBox.StandardButton.No,  # Default to No for safety
             )
             if reply == QMessageBox.StandardButton.No:
                 logger.info(f"User cancelled bulk noise update for {count} lemmas")
@@ -1630,13 +1696,14 @@ class DictionaryView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 from sqlalchemy import update
+
                 from app.infra.sa_models import Lemma
 
                 # Bulk update using WHERE IN
-                stmt = update(Lemma).where(
-                    Lemma.lemma_id.in_(lemma_ids)
-                ).values(
-                    is_noise=1 if is_noise else 0
+                stmt = (
+                    update(Lemma)
+                    .where(Lemma.lemma_id.in_(lemma_ids))
+                    .values(is_noise=1 if is_noise else 0)
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_lemmas(session, lemma_ids)
@@ -1651,6 +1718,7 @@ class DictionaryView(QWidget):
 
                 # Show success message
                 from app.ui.dialogs import show_info
+
                 show_info(self, "Success", f"Marked {len(lemma_ids)} lemmas as {status}")
 
                 # Reload to apply filter if needed
@@ -1660,11 +1728,13 @@ class DictionaryView(QWidget):
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(lemma_ids)} lemmas")
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to bulk update noise status: {e}")
 
     def _run_bulk_update_worker(self, lemma_ids: list, source_rows: list, is_noise: bool):
         """Background worker for large datasets (> 1000 rows) with progress dialog."""
         from PyQt6.QtWidgets import QProgressDialog
+
         from app.ui.workers import BulkNoiseUpdateWorker
 
         # Create progress dialog
@@ -1674,7 +1744,7 @@ class DictionaryView(QWidget):
             "Cancel",
             0,
             len(lemma_ids),
-            self
+            self,
         )
         self.bulk_progress_dialog.setWindowTitle("Bulk Update")
         self.bulk_progress_dialog.setModal(True)
@@ -1688,9 +1758,7 @@ class DictionaryView(QWidget):
 
         # Create and start worker
         self.bulk_worker = BulkNoiseUpdateWorker(
-            model_class="Lemma",
-            item_ids=lemma_ids,
-            is_noise=is_noise
+            model_class="Lemma", item_ids=lemma_ids, is_noise=is_noise
         )
 
         # Connect signals
@@ -1704,16 +1772,14 @@ class DictionaryView(QWidget):
 
     def _on_bulk_progress(self, current: int, total: int):
         """Update bulk progress dialog."""
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.setValue(current)
-            self.bulk_progress_dialog.setLabelText(
-                f"Updated {current:,} of {total:,} lemmas..."
-            )
+            self.bulk_progress_dialog.setLabelText(f"Updated {current:,} of {total:,} lemmas...")
 
     def _on_bulk_complete(self, count: int):
         """Handle bulk update completion."""
         # Close progress dialog
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.close()
             self.bulk_progress_dialog = None
 
@@ -1730,13 +1796,16 @@ class DictionaryView(QWidget):
                 )
                 session.commit()
         except Exception as e:
-            logger.warning("Failed to sync lemma noise to User Dictionaries after bulk update: %s", e)
+            logger.warning(
+                "Failed to sync lemma noise to User Dictionaries after bulk update: %s", e
+            )
 
         status = "noise" if self._pending_is_noise else "valid"
         logger.info(f"Bulk update completed: {count} lemmas marked as {status}")
 
         # Show success message
         from app.ui.dialogs import show_info
+
         show_info(self, "Success", f"Marked {count:,} lemmas as {status}")
 
         # Reload to apply filter if needed
@@ -1746,18 +1815,19 @@ class DictionaryView(QWidget):
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""
         # Close progress dialog
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.close()
             self.bulk_progress_dialog = None
 
         logger.error(f"Bulk noise update failed: {error_msg}")
 
         from app.ui.dialogs import show_error
+
         show_error(self, "Error", f"Bulk update failed:\n{error_msg}")
 
     def _on_bulk_cancel(self):
         """Handle bulk update cancellation."""
-        if hasattr(self, 'bulk_worker') and self.bulk_worker and self.bulk_worker.isRunning():
+        if hasattr(self, "bulk_worker") and self.bulk_worker and self.bulk_worker.isRunning():
             self.bulk_worker.cancel()
             logger.info("User cancelled bulk noise update")
 
@@ -1773,15 +1843,16 @@ class DictionaryView(QWidget):
     def on_batch_translate(self):
         """Task 15: Handle batch translate action with scope support."""
         from PyQt6.QtWidgets import QMessageBox
-        from app.ui.dialogs import show_batch_translate_dialog
-        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
-        from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
+
         from app.services.batch_mt_translate_service import (
             BatchTranslateItem,
             BatchTranslateOptions,
         )
         from app.services.db_service import DBService
         from app.services.dictionary_service import DictionaryService
+        from app.ui.dialogs import show_batch_translate_dialog
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
 
         # Get selected rows
         selected_indexes = self.lemma_table.selectionModel().selectedRows()
@@ -1822,7 +1893,7 @@ class DictionaryView(QWidget):
                     f"This action cannot be undone.\n\n"
                     f"Do you want to continue?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    QMessageBox.StandardButton.No,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
@@ -1848,8 +1919,8 @@ class DictionaryView(QWidget):
                 filters=self.build_filters(),
                 provider_mode=provider_mode,
                 write_mode=write_mode,
-                id_fetch_chunk=200,      # Fetch 200 IDs from DB per iteration
-                translation_chunk=1,      # Translate 1 item per commit (per-row semantics)
+                id_fetch_chunk=200,  # Fetch 200 IDs from DB per iteration
+                translation_chunk=1,  # Translate 1 item per commit (per-row semantics)
                 src_lang="he",
                 tgt_lang="ru",
             )
@@ -1859,8 +1930,12 @@ class DictionaryView(QWidget):
             worker.stats_updated.connect(progress_dialog.update_counts)  # Direct connection
             worker.row_translated.connect(progress_dialog.add_recent_item)  # Direct connection
             worker.stage_updated.connect(progress_dialog.set_stage)  # PATCH-16-02: Stage updates
-            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
-            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            worker.finished.connect(
+                lambda result: self.on_batch_translate_finished(result, progress_dialog)
+            )
+            worker.error.connect(
+                lambda error: self.on_batch_translate_error(error, progress_dialog)
+            )
             progress_dialog.cancel_requested.connect(worker.cancel)
             progress_dialog.pause_requested.connect(worker.pause)
             progress_dialog.resume_requested.connect(worker.resume)
@@ -1877,8 +1952,7 @@ class DictionaryView(QWidget):
         else:  # scope == "current_page"
             # Map proxy indices to source rows
             source_rows = [
-                self.proxy_model.map_to_source_row(index.row())
-                for index in selected_indexes
+                self.proxy_model.map_to_source_row(index.row()) for index in selected_indexes
             ]
 
             # Build items list
@@ -1920,8 +1994,12 @@ class DictionaryView(QWidget):
             worker.stats_updated.connect(progress_dialog.update_counts)
             worker.row_translated.connect(progress_dialog.add_recent_item)
             worker.stage_updated.connect(progress_dialog.set_stage)
-            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
-            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            worker.finished.connect(
+                lambda result: self.on_batch_translate_finished(result, progress_dialog)
+            )
+            worker.error.connect(
+                lambda error: self.on_batch_translate_error(error, progress_dialog)
+            )
             progress_dialog.cancel_requested.connect(worker.cancel)
             progress_dialog.pause_requested.connect(worker.pause)
             progress_dialog.resume_requested.connect(worker.resume)
@@ -1947,7 +2025,7 @@ class DictionaryView(QWidget):
         progress_dialog.accept()
 
         # Show result message
-        msg = f"Translation completed!\n\n"
+        msg = "Translation completed!\n\n"
         msg += f"Total: {result.total}\n"
         msg += f"Succeeded: {result.succeeded}\n"
         msg += f"Skipped: {result.skipped}\n"
@@ -1963,7 +2041,7 @@ class DictionaryView(QWidget):
 
         # Re-evaluate button state and clean up worker
         self.on_selection_changed()
-        if hasattr(self, '_batch_worker'):
+        if hasattr(self, "_batch_worker"):
             self._batch_worker.deleteLater()
             del self._batch_worker
 
@@ -1979,7 +2057,7 @@ class DictionaryView(QWidget):
 
         # Re-evaluate button state and clean up worker
         self.on_selection_changed()
-        if hasattr(self, '_batch_worker'):
+        if hasattr(self, "_batch_worker"):
             self._batch_worker.deleteLater()
             del self._batch_worker
 
@@ -1987,6 +2065,7 @@ class DictionaryView(QWidget):
         """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.lemma_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
+
             if isinstance(event, QKeyEvent):
                 key = event.key()
                 modifiers = event.modifiers()
@@ -2011,7 +2090,9 @@ class DictionaryView(QWidget):
                         # Create translation column index in source model
                         translation_source_index = self.lemma_model.index(source_index.row(), 5)
                         # Map back to proxy
-                        translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                        translation_proxy_index = self.proxy_model.mapFromSource(
+                            translation_source_index
+                        )
                         self.lemma_table.setCurrentIndex(translation_proxy_index)
                         self.lemma_table.edit(translation_proxy_index)
                         return True  # Event handled
@@ -2050,4 +2131,3 @@ class DictionaryView(QWidget):
         """Refresh lemma data from database."""
         logger.info("Refreshing dictionary view")
         self.refresh_current_page_after_operation()
-

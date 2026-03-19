@@ -34,7 +34,9 @@ def test_benchmark_main_fails_without_allow_fallback_on_malformed_target(
     sqlite3.connect(str(target_db)).close()
 
     malformed_error = "malformed database schema (sentence_fts) - table sentence_fts already exists"
-    monkeypatch.setattr(bench_mod, "_validate_sqlite_readable", lambda _path: (False, malformed_error))
+    monkeypatch.setattr(
+        bench_mod, "_validate_sqlite_readable", lambda _path: (False, malformed_error)
+    )
     monkeypatch.setattr(bench_mod, "parse_args", lambda: _make_args(target_db))
 
     exit_code = bench_mod.main()

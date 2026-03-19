@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PyQt6.QtCore import QEvent, QModelIndex, QRect, Qt
 from PyQt6.QtGui import QPainter
-from PyQt6.QtWidgets import QApplication, QStyle, QStyleOptionButton, QStyledItemDelegate
+from PyQt6.QtWidgets import QApplication, QStyle, QStyledItemDelegate, QStyleOptionButton
 
 
 class AudioPlayDelegate(QStyledItemDelegate):
@@ -16,7 +16,7 @@ class AudioPlayDelegate(QStyledItemDelegate):
         self,
         parent=None,
         *,
-        on_play_clicked: Optional[Callable[[QModelIndex], None]] = None,
+        on_play_clicked: Callable[[QModelIndex], None] | None = None,
     ):
         super().__init__(parent)
         self._on_play_clicked = on_play_clicked

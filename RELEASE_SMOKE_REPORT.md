@@ -1,6 +1,6 @@
 # RELEASE SMOKE REPORT
 
-Date: 2026-02-25  
+Date: 2026-02-25
 Scope: HDLE Premium Release Candidate build + validation (no source-code edits)
 
 ## 1) Repo state

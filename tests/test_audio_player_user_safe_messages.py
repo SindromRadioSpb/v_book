@@ -90,8 +90,12 @@ def test_clicking_missing_status_cell_shows_user_message(panel_with_one_track, m
 
     messages: list[str] = []
     starts = {"count": 0}
-    monkeypatch.setattr(panel, "_show_status_message", lambda msg, timeout_ms=4500: messages.append(str(msg)))
-    monkeypatch.setattr(player, "_start_next_track", lambda: starts.__setitem__("count", starts["count"] + 1))
+    monkeypatch.setattr(
+        panel, "_show_status_message", lambda msg, timeout_ms=4500: messages.append(str(msg))
+    )
+    monkeypatch.setattr(
+        player, "_start_next_track", lambda: starts.__setitem__("count", starts["count"] + 1)
+    )
 
     idx: QModelIndex = panel._queue_model.index(0, _COL_STATUS)  # noqa: SLF001
     panel._on_queue_table_clicked(idx)
@@ -109,9 +113,15 @@ def test_play_stale_row_shows_user_message_and_does_not_play(panel_with_one_trac
 
     messages: list[str] = []
     starts = {"count": 0}
-    monkeypatch.setattr(panel, "_refresh_audio_paths_for_rows", lambda rows, clear_stale_if_ready=True: None)
-    monkeypatch.setattr(panel, "_show_status_message", lambda msg, timeout_ms=4500: messages.append(str(msg)))
-    monkeypatch.setattr(player, "_start_next_track", lambda: starts.__setitem__("count", starts["count"] + 1))
+    monkeypatch.setattr(
+        panel, "_refresh_audio_paths_for_rows", lambda rows, clear_stale_if_ready=True: None
+    )
+    monkeypatch.setattr(
+        panel, "_show_status_message", lambda msg, timeout_ms=4500: messages.append(str(msg))
+    )
+    monkeypatch.setattr(
+        player, "_start_next_track", lambda: starts.__setitem__("count", starts["count"] + 1)
+    )
 
     idx: QModelIndex = panel._queue_model.index(0, _COL_STATUS)  # noqa: SLF001
     panel._on_queue_play_cell_clicked(idx)

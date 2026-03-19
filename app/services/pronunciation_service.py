@@ -5,15 +5,16 @@ from __future__ import annotations
 import html
 import logging
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
-from app.domain.normalization.normalizer import normalize_for_tm
 from app.domain.dto import PronunciationEntryDTO
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import PronunciationEntry
 from app.services.pronunciation_quality_service import PronunciationQualityService
 
@@ -29,7 +30,7 @@ class PronunciationApplied:
     ssml: str
     mode: str
     is_valid: bool = True
-    qc_flag: Optional[str] = None
+    qc_flag: str | None = None
 
 
 class PronunciationService:
@@ -39,14 +40,16 @@ class PronunciationService:
 
     @staticmethod
     def _now_str() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     @staticmethod
-    def _clean_text(value: Optional[str]) -> Optional[str]:
+    def _clean_text(value: str | None) -> str | None:
         text = (value or "").strip()
         return text or None
 
-    def get_entry(self, session: Session, *, lang: str, src_norm: str) -> Optional[PronunciationEntryDTO]:
+    def get_entry(
+        self, session: Session, *, lang: str, src_norm: str
+    ) -> PronunciationEntryDTO | None:
         """Get one pronunciation entry by `(lang, src_norm)`."""
         lang_clean = (lang or "").strip()
         norm_clean = (src_norm or "").strip()
@@ -66,20 +69,24 @@ class PronunciationService:
         *,
         lang: str,
         src_norms: Iterable[str],
-    ) -> Dict[str, PronunciationEntryDTO]:
+    ) -> dict[str, PronunciationEntryDTO]:
         """Batch lookup for page overlays / generation preprocessing."""
         lang_clean = (lang or "").strip()
         norm_list = sorted({(n or "").strip() for n in src_norms if (n or "").strip()})
         if not lang_clean or not norm_list:
             return {}
-        rows = session.execute(
-            select(PronunciationEntry)
-            .where(
-                PronunciationEntry.lang == lang_clean,
-                PronunciationEntry.src_norm.in_(norm_list),
+        rows = (
+            session.execute(
+                select(PronunciationEntry)
+                .where(
+                    PronunciationEntry.lang == lang_clean,
+                    PronunciationEntry.src_norm.in_(norm_list),
+                )
+                .order_by(asc(PronunciationEntry.src_norm))
             )
-            .order_by(asc(PronunciationEntry.src_norm))
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {row.src_norm: self._to_dto(row) for row in rows}
 
     def upsert_entry(
@@ -88,13 +95,13 @@ class PronunciationService:
         *,
         lang: str,
         src_norm: str,
-        niqqud_text: Optional[str],
-        ipa: Optional[str],
-        reading_text: Optional[str] = None,
+        niqqud_text: str | None,
+        ipa: str | None,
+        reading_text: str | None = None,
         source: str,
-        confidence: Optional[float] = None,
+        confidence: float | None = None,
         is_override: bool = False,
-        notes: Optional[str] = None,
+        notes: str | None = None,
         allow_auto_overwrite: bool = False,
     ) -> PronunciationEntryDTO:
         """Upsert with manual-over-auto merge policy."""
@@ -117,14 +124,16 @@ class PronunciationService:
             strict=incoming_manual,
         )
         if incoming_manual and (not niqqud_result.is_valid or not reading_result.is_valid):
-            invalid_reason = niqqud_result.reason or reading_result.reason or "Invalid pronunciation payload."
+            invalid_reason = (
+                niqqud_result.reason or reading_result.reason or "Invalid pronunciation payload."
+            )
             raise ValueError(invalid_reason)
 
         niqqud_clean = niqqud_result.value
         ipa_clean = self._clean_text(ipa)
         reading_clean = reading_result.value
         notes_clean = self._clean_text(notes)
-        qc_tags: List[str] = []
+        qc_tags: list[str] = []
         if niqqud_result.qc_flag:
             qc_tags.append(f"niqqud_{niqqud_result.qc_flag}")
         if reading_result.qc_flag:
@@ -193,12 +202,9 @@ class PronunciationService:
             row.notes = notes_clean if notes_clean is not None else row.notes
         else:
             existing_niqqud = (row.niqqud_text or "").strip()
-            can_refresh_auto_niqqud = (
-                not existing_niqqud
-                or (
-                    not existing_manual
-                    and not PronunciationQualityService.has_hebrew_nikud(existing_niqqud)
-                )
+            can_refresh_auto_niqqud = not existing_niqqud or (
+                not existing_manual
+                and not PronunciationQualityService.has_hebrew_nikud(existing_niqqud)
             )
             if can_refresh_auto_niqqud and niqqud_clean:
                 row.niqqud_text = niqqud_clean
@@ -239,13 +245,13 @@ class PronunciationService:
         session: Session,
         *,
         lang: str,
-        entries: Iterable[Dict[str, Any]],
+        entries: Iterable[dict[str, Any]],
         chunk_size: int = 500,
         rebuild_auto: bool = False,
         source: str = "auto",
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, int]:
         """Bulk auto upsert (idempotent, manual entries remain authoritative)."""
         payload = list(entries or [])
         total = len(payload)
@@ -279,9 +285,7 @@ class PronunciationService:
                         notes=item.get("notes"),
                         allow_auto_overwrite=rebuild_auto,
                     )
-                    if dto_before is None:
-                        added_or_updated += 1
-                    elif (
+                    if dto_before is None or (
                         (dto_before.niqqud_text or "") != (dto_after.niqqud_text or "")
                         or (dto_before.ipa or "") != (dto_after.ipa or "")
                         or (dto_before.reading_text or "") != (dto_after.reading_text or "")
@@ -336,11 +340,11 @@ class PronunciationService:
         )
 
     @staticmethod
-    def _tokenize_text(text: str) -> List[str]:
+    def _tokenize_text(text: str) -> list[str]:
         return re.findall(r"\w+|[^\w]+", text or "", flags=re.UNICODE)
 
     @staticmethod
-    def _entry_text(entry: Optional[PronunciationEntryDTO]) -> Optional[str]:
+    def _entry_text(entry: PronunciationEntryDTO | None) -> str | None:
         if not entry:
             return None
         raw = (entry.niqqud_text or "").strip() or (entry.reading_text or "").strip()
@@ -362,7 +366,7 @@ class PronunciationService:
         parts = self._tokenize_text(source_text)
         if not parts:
             return source_text
-        token_norms: Dict[str, str] = {}
+        token_norms: dict[str, str] = {}
         for part in parts:
             if not part or not part.strip() or not any(ch.isalnum() for ch in part):
                 continue
@@ -380,7 +384,7 @@ class PronunciationService:
         if not entries:
             return source_text
 
-        result_parts: List[str] = []
+        result_parts: list[str] = []
         changed = False
         for part in parts:
             norm = token_norms.get(part)
@@ -404,7 +408,11 @@ class PronunciationService:
         source_text: str,
     ) -> str:
         parts = self._tokenize_text(source_text)
-        word_part_indexes = [idx for idx, part in enumerate(parts) if part.strip() and any(ch.isalnum() for ch in part)]
+        word_part_indexes = [
+            idx
+            for idx, part in enumerate(parts)
+            if part.strip() and any(ch.isalnum() for ch in part)
+        ]
         if len(word_part_indexes) < 2:
             return source_text
 
@@ -429,7 +437,7 @@ class PronunciationService:
         if not entries:
             return source_text
 
-        matches: Dict[int, tuple[int, str]] = {}
+        matches: dict[int, tuple[int, str]] = {}
         idx = 0
         while idx < word_count:
             found = False
@@ -446,13 +454,13 @@ class PronunciationService:
         if not matches:
             return source_text
 
-        start_by_part_idx: Dict[int, tuple[int, str]] = {}
+        start_by_part_idx: dict[int, tuple[int, str]] = {}
         for start_word, (end_word, replacement) in matches.items():
             start_part = word_part_indexes[start_word]
             end_part = word_part_indexes[end_word]
             start_by_part_idx[start_part] = (end_part, replacement)
 
-        result_parts: List[str] = []
+        result_parts: list[str] = []
         skip_until = -1
         for part_idx, part in enumerate(parts):
             if part_idx <= skip_until:
@@ -473,7 +481,7 @@ class PronunciationService:
         *,
         src_lang: str,
         source_text: str,
-        source_norm: Optional[str] = None,
+        source_norm: str | None = None,
     ) -> PronunciationApplied:
         """Apply phrase-first pronunciation rules (whole phrase -> phrase map -> token fallback)."""
         src_lang_clean = (src_lang or "").strip()
@@ -490,7 +498,9 @@ class PronunciationService:
                 qc_flag=source_qc_flag,
             )
 
-        source_norm_clean = (source_norm or "").strip() or self._normalize_surface(src_lang_clean, source_spoken)
+        source_norm_clean = (source_norm or "").strip() or self._normalize_surface(
+            src_lang_clean, source_spoken
+        )
         exact_entry = self.get_entry(
             session,
             lang=src_lang_clean,

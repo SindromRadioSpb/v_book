@@ -191,8 +191,13 @@ def test_dictionary_current_page_uses_v3_progress(monkeypatch):
     panel.build_filters = lambda: {}
     panel.on_selection_changed = lambda: None
 
-    monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.dialogs.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.workers.BatchTranslateWorker", DummyWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
     monkeypatch.setattr(
@@ -229,8 +234,13 @@ def test_terms_current_page_uses_v3_progress(monkeypatch):
     panel.build_filters = lambda: {}
     panel.on_selection_changed = lambda: None
 
-    monkeypatch.setattr("app.ui.terms_view.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.terms_view.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.terms_view.BatchTranslateWorker", DummyWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
     monkeypatch.setattr(
@@ -244,7 +254,10 @@ def test_terms_current_page_uses_v3_progress(monkeypatch):
     assert DummyWorker.captured is not None
     assert DummyWorker.captured["tab_type"] == "terms"
     assert DummyWorker.captured["options"].chunk_size == 1
-    assert [item.entity_type for item in DummyWorker.captured["items"]] == ["term_cluster", "term_cluster"]
+    assert [item.entity_type for item in DummyWorker.captured["items"]] == [
+        "term_cluster",
+        "term_cluster",
+    ]
 
 
 def test_dictionary_all_filtered_recomputes_total_for_write_mode(monkeypatch):
@@ -260,8 +273,13 @@ def test_dictionary_all_filtered_recomputes_total_for_write_mode(monkeypatch):
     panel.build_filters = lambda: {"q": "x"}
     panel.on_selection_changed = lambda: None
 
-    monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.dialogs.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.workers.TranslateAllFilteredWorker", DummyAllFilteredWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
 
@@ -300,8 +318,13 @@ def test_terms_all_filtered_recomputes_total_for_write_mode(monkeypatch):
     panel.build_filters = lambda: {"q": "x"}
     panel.on_selection_changed = lambda: None
 
-    monkeypatch.setattr("app.ui.terms_view.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.terms_view.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.workers.TranslateAllFilteredWorker", DummyAllFilteredWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
 
@@ -357,8 +380,13 @@ def test_tm_all_filtered_recomputes_total_for_write_mode(monkeypatch):
     panel.perform_search = lambda: None
     panel.on_selection_changed = lambda: None
 
-    monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.dialogs.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "OVERWRITE", "all_filtered"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.workers.TranslateAllFilteredWorker", DummyAllFilteredWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
 

@@ -22,31 +22,12 @@ def setup_logging():
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Export HDLE Premium project as .hdleproj bundle"
-    )
+    parser = argparse.ArgumentParser(description="Export HDLE Premium project as .hdleproj bundle")
+    parser.add_argument("--db-path", type=str, required=True, help="Path to SQLite database file")
+    parser.add_argument("--project-id", type=int, required=True, help="Project ID to export")
+    parser.add_argument("--out", type=str, required=True, help="Output .hdleproj file path")
     parser.add_argument(
-        "--db-path",
-        type=str,
-        required=True,
-        help="Path to SQLite database file"
-    )
-    parser.add_argument(
-        "--project-id",
-        type=int,
-        required=True,
-        help="Project ID to export"
-    )
-    parser.add_argument(
-        "--out",
-        type=str,
-        required=True,
-        help="Output .hdleproj file path"
-    )
-    parser.add_argument(
-        "--no-snapshots",
-        action="store_true",
-        help="Exclude project snapshots from export"
+        "--no-snapshots", action="store_true", help="Exclude project snapshots from export"
     )
 
     args = parser.parse_args()

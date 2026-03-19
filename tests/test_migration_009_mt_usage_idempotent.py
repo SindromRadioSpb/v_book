@@ -59,9 +59,7 @@ def test_migration_009_is_idempotent_when_table_preexists(tmp_path: Path) -> Non
     conn = sqlite3.connect(str(db_path))
     try:
         schema_version = int(
-            conn.execute(
-                "SELECT value FROM schema_meta WHERE key='schema_version'"
-            ).fetchone()[0]
+            conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
         )
         assert schema_version == get_supported_schema_version()
 

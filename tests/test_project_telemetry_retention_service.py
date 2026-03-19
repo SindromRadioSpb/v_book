@@ -162,15 +162,33 @@ def test_apply_retention_deletes_only_old_blank_success_rows() -> None:
         assert result.deleted_run_errors == 0
 
         with db.get_read_session() as session:
-            remaining_runs = session.execute(
-                select(ProcessorRun).where(ProcessorRun.project_id == project_id).order_by(ProcessorRun.run_id)
-            ).scalars().all()
+            remaining_runs = (
+                session.execute(
+                    select(ProcessorRun)
+                    .where(ProcessorRun.project_id == project_id)
+                    .order_by(ProcessorRun.run_id)
+                )
+                .scalars()
+                .all()
+            )
             remaining_errors = session.execute(select(RunError)).scalars().all()
 
         assert len(remaining_runs) == 6
         assert len([run for run in remaining_runs if run.status == "failed"]) == 2
-        assert len([run for run in remaining_runs if run.status == "ok" and (run.note or "").strip()]) == 2
-        assert len([run for run in remaining_runs if run.status == "ok" and not (run.note or "").strip()]) == 2
+        assert (
+            len([run for run in remaining_runs if run.status == "ok" and (run.note or "").strip()])
+            == 2
+        )
+        assert (
+            len(
+                [
+                    run
+                    for run in remaining_runs
+                    if run.status == "ok" and not (run.note or "").strip()
+                ]
+            )
+            == 2
+        )
         assert len(remaining_errors) == 2
     finally:
         _reset_db_service()

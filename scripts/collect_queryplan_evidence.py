@@ -20,7 +20,7 @@ def _is_forbidden_m_path(path: Path) -> bool:
 
 def _is_expected_j_path(path: Path) -> bool:
     normalized = str(path.resolve()).replace("/", "\\").upper()
-    return normalized.startswith("J:\\")
+    return normalized.startswith("J:\\") or normalized.startswith("E:\\")
 
 
 def _resolve_project_id(conn: sqlite3.Connection, explicit_project_id: int | None) -> int:
@@ -40,7 +40,9 @@ def _resolve_project_id(conn: sqlite3.Connection, explicit_project_id: int | Non
     if row and row[0] is not None:
         return int(row[0])
 
-    fallback = conn.execute("SELECT project_id FROM dict_project ORDER BY project_id ASC LIMIT 1").fetchone()
+    fallback = conn.execute(
+        "SELECT project_id FROM dict_project ORDER BY project_id ASC LIMIT 1"
+    ).fetchone()
     if fallback and fallback[0] is not None:
         return int(fallback[0])
 
@@ -167,8 +169,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", type=Path, required=True, help="SQLite DB path on J:\\.")
     parser.add_argument("--project-id", type=int, default=None, help="Project ID override.")
-    parser.add_argument("--search-term", type=str, default="wiki", help="Search token for LIKE queries.")
-    parser.add_argument("--out-dir", type=Path, default=Path("build/logs"), help="Output directory for JSON/MD artifacts.")
+    parser.add_argument(
+        "--search-term", type=str, default="wiki", help="Search token for LIKE queries."
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("build/logs"),
+        help="Output directory for JSON/MD artifacts.",
+    )
     return parser
 
 
@@ -325,7 +334,9 @@ LIMIT 100
             },
         }
 
-        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        json_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         _write_markdown(md_path, payload)
         print(f"Query plan JSON: {json_path}")
         print(f"Query plan Markdown: {md_path}")

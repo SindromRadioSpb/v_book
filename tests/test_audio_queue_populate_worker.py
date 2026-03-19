@@ -1,4 +1,5 @@
 """Tests for AudioQueuePopulateWorker (PATCH-04)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -99,8 +100,10 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
     class _FakeSession:
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             pass
+
         def execute(self, *a, **kw):
             return _FakeResult()
 
@@ -122,7 +125,9 @@ def test_worker_empty_ids_finishes_immediately(tmp_path, monkeypatch):
     assert finished_payloads, "finished signal not emitted"
     assert finished_payloads[0]["added"] == 0
     assert finished_payloads[0]["total"] == 0
-    assert "new_item_ids" in finished_payloads[0], "new_item_ids must be present in finished payload"
+    assert (
+        "new_item_ids" in finished_payloads[0]
+    ), "new_item_ids must be present in finished payload"
     assert finished_payloads[0]["new_item_ids"] == []
 
 
@@ -150,12 +155,16 @@ def test_resolve_audio_assets_fills_asset_id():
     mock_session = MagicMock()
     mock_session.execute.return_value.all.return_value = [("speech_שלום", 42)]
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), patch(
-        "app.services.audio_cache_key_service.AudioCacheKeyService.prepare_pronunciation_payload",
-        side_effect=lambda **kwargs: {"token_text": kwargs["source_text"]},
-    ), patch(
-        "app.services.audio_cache_key_service.AudioCacheKeyService.build_speech_hash",
-        side_effect=lambda **kwargs: f"speech_{kwargs['source_text']}",
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch(
+            "app.services.audio_cache_key_service.AudioCacheKeyService.prepare_pronunciation_payload",
+            side_effect=lambda **kwargs: {"token_text": kwargs["source_text"]},
+        ),
+        patch(
+            "app.services.audio_cache_key_service.AudioCacheKeyService.build_speech_hash",
+            side_effect=lambda **kwargs: f"speech_{kwargs['source_text']}",
+        ),
     ):
         w._resolve_audio_assets(mock_session, specs)
 
@@ -173,8 +182,13 @@ def test_resolve_audio_assets_skips_already_set():
 
     w = AudioQueuePopulateWorker(kind="lemma", project_id=1)
     specs = [
-        AudioItemSpec(kind="lemma", source_id=10, snapshot_hebrew="שלום",
-                      audio_asset_id=99, audio_status="ready"),
+        AudioItemSpec(
+            kind="lemma",
+            source_id=10,
+            snapshot_hebrew="שלום",
+            audio_asset_id=99,
+            audio_status="ready",
+        ),
     ]
 
     mock_session = MagicMock()
@@ -245,8 +259,10 @@ def test_build_sentence_specs_source_label_uses_doc_filename():
     mock_session.execute.side_effect = fake_execute
 
     # Patch out SentencePronunciationService and SentencesWorkspaceService
-    with patch("app.services.sentence_pronunciation_service.SentencePronunciationService"), \
-         patch("app.services.sentences_workspace_service.SentencesWorkspaceService"):
+    with (
+        patch("app.services.sentence_pronunciation_service.SentencePronunciationService"),
+        patch("app.services.sentences_workspace_service.SentencesWorkspaceService"),
+    ):
         specs = w._build_sentence_specs(mock_session, [10])
 
     assert len(specs) == 1
@@ -274,8 +290,10 @@ def test_build_sentence_specs_source_label_fallback_on_missing_doc():
 
     mock_session.execute.side_effect = fake_execute
 
-    with patch("app.services.sentence_pronunciation_service.SentencePronunciationService"), \
-         patch("app.services.sentences_workspace_service.SentencesWorkspaceService"):
+    with (
+        patch("app.services.sentence_pronunciation_service.SentencePronunciationService"),
+        patch("app.services.sentences_workspace_service.SentencesWorkspaceService"),
+    ):
         specs = w._build_sentence_specs(mock_session, [99])
 
     assert specs[0].snapshot_source_label == "sentence:99"
@@ -299,9 +317,11 @@ def test_build_lemma_specs_source_label_is_dictionary():
 
     mock_session.execute.side_effect = fake_execute
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm") as ntm, \
-         patch("app.services.pronunciation_service.PronunciationService"), \
-         patch("app.infra.sa_models.TMEntry"):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm") as ntm,
+        patch("app.services.pronunciation_service.PronunciationService"),
+        patch("app.infra.sa_models.TMEntry"),
+    ):
         ntm.return_value.norm = "shalom"
         specs = w._build_lemma_specs(mock_session, [1])
 
@@ -327,7 +347,9 @@ def test_build_lemma_specs_niqqud_and_translation_populated():
     tm_execute_result.all.return_value = [("shalom_norm", "peace")]
 
     execute_calls = [lemma_execute_result, tm_execute_result]
-    mock_session.execute.side_effect = lambda *a, **kw: execute_calls.pop(0) if execute_calls else MagicMock()
+    mock_session.execute.side_effect = lambda *a, **kw: (
+        execute_calls.pop(0) if execute_calls else MagicMock()
+    )
 
     # PronunciationService.bulk_lookup returns niqqud for "shalom_norm"
     mock_niqqud_dto = MagicMock()
@@ -340,8 +362,10 @@ def test_build_lemma_specs_niqqud_and_translation_populated():
         r.norm = "shalom_norm"
         return r
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
-         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc),
+    ):
         specs = w._build_lemma_specs(mock_session, [10])
 
     assert len(specs) == 1

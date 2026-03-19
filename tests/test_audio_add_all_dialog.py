@@ -117,7 +117,9 @@ def test_add_all_dialog_search_selection_persists_across_queries(monkeypatch, qt
             query = self.kwargs["search_query"]
             rows = {
                 "alpha": [
-                    SimpleNamespace(doc_id=11, file_name="alpha.txt", sentence_count=5, level="aleph"),
+                    SimpleNamespace(
+                        doc_id=11, file_name="alpha.txt", sentence_count=5, level="aleph"
+                    ),
                 ],
                 "beta": [
                     SimpleNamespace(doc_id=22, file_name="beta.txt", sentence_count=7, level="bet"),

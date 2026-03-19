@@ -19,7 +19,9 @@ def test_get_build_meta_exposes_required_fields():
 
 def test_run_self_check_attaches_build_metadata(monkeypatch):
     monkeypatch.setattr(SettingsService, "get_instance", classmethod(lambda cls: object()))
-    monkeypatch.setattr(main, "_run_import_self_check", lambda _settings: (0, {"mode": "import", "ok": True}))
+    monkeypatch.setattr(
+        main, "_run_import_self_check", lambda _settings: (0, {"mode": "import", "ok": True})
+    )
     monkeypatch.setattr(
         main,
         "get_build_meta",

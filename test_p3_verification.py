@@ -3,14 +3,14 @@
 Tests the P3 verification service itself.
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
-from app.services.p3_verification_service import P3VerificationService
 from app.services.db_service import DBService
+from app.services.p3_verification_service import P3VerificationService
 
 
 class TestP3Verification(unittest.TestCase):
@@ -26,9 +26,11 @@ class TestP3Verification(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply all migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -39,7 +41,7 @@ class TestP3Verification(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -63,8 +65,9 @@ class TestP3Verification(unittest.TestCase):
     def setUp(self):
         """Clean tables before each test to ensure isolation."""
         # P3.1.5: Clean tables to avoid test pollution
-        from app.infra.sa_models import DictSource, DictEntry, TMEntry
         from sqlalchemy import delete
+
+        from app.infra.sa_models import DictEntry, DictSource, TMEntry
 
         with self.db_service.get_session() as session:
             session.execute(delete(TMEntry))
@@ -137,7 +140,9 @@ class TestP3Verification(unittest.TestCase):
 
             self.assertEqual(step.status, "PASS", f"Cancel behavior should pass: {step.error}")
             self.assertEqual(step.details["added"], 500, "Should import all 500 rows")
-            self.assertGreater(step.details["progress_callbacks"], 0, "Progress callbacks should be called")
+            self.assertGreater(
+                step.details["progress_callbacks"], 0, "Progress callbacks should be called"
+            )
             self.assertTrue(step.details["chunk_commit"], "Chunk commit should be tested")
 
     def test_sha256_dedup(self):
@@ -157,7 +162,9 @@ class TestP3Verification(unittest.TestCase):
         with self.db_service.get_session() as session:
             step = service._verify_csv_injection(session, project_id=1, options={})
 
-            self.assertEqual(step.status, "PASS", f"CSV injection protection should pass: {step.error}")
+            self.assertEqual(
+                step.status, "PASS", f"CSV injection protection should pass: {step.error}"
+            )
             self.assertTrue(step.details["sanitized"])
             self.assertEqual(step.details["example_input"], "=2+2")
             self.assertEqual(step.details["example_output"], "'=2+2")

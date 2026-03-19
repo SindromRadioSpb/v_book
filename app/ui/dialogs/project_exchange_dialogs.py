@@ -144,7 +144,11 @@ class ExportProgressDialog(QDialog):
         lines = [
             "=== Export Report ===",
             f"Bundle: {report.bundle_path}",
-            f"Size: {report.bundle_path.stat().st_size / 1024 / 1024:.1f} MB" if report.bundle_path else "N/A",
+            (
+                f"Size: {report.bundle_path.stat().st_size / 1024 / 1024:.1f} MB"
+                if report.bundle_path
+                else "N/A"
+            ),
             f"Time: {report.elapsed_seconds:.1f}s",
             "",
             "=== Project Metadata ===",
@@ -194,7 +198,10 @@ class ImportPreviewDialog(QDialog):
         self.name_edit = QLineEdit(self.manifest.project_name)
         self.name_edit.textChanged.connect(self._refresh_plan_summary)
         form_layout.addRow("Project Name:", self.name_edit)
-        form_layout.addRow("Languages:", QLabel(f"{self.manifest.project_src_lang} -> {self.manifest.project_tgt_lang}"))
+        form_layout.addRow(
+            "Languages:",
+            QLabel(f"{self.manifest.project_src_lang} -> {self.manifest.project_tgt_lang}"),
+        )
         form_layout.addRow("Schema Version:", QLabel(str(self.manifest.schema_version)))
         form_layout.addRow("Host Schema:", QLabel(str(self.preflight.host_schema_version)))
         form_layout.addRow("App Version:", QLabel(self.manifest.app_version))

@@ -40,7 +40,7 @@ YAP is currently supported as part of the ONLP lab tool kit.
 In MRLs, each token may have multiple different morphological analyses,
 where only one is relevant in context. This morphological ambiguity is represented by a
 word-lattice describing the various morpheme sequences that may combine to form it, with only
-one sequence suited in the context of the sentence. 
+one sequence suited in the context of the sentence.
 
 Morphological Disambiguation (MD) is particularly difficult in MRLs due significant morphological richness.
 
@@ -59,7 +59,7 @@ meaning that the input to YAP is a list of tokens:
 בגן
 .
 ```
-    
+
 ### Output
 
 Morphological Analysis Lattice:
@@ -128,7 +128,7 @@ are sequential and do not map to the original MA lattice.
 **Lattice and CoNLL:**
 Each line in the MD (or MA) output lattice file represents an edge in the lattice and the last column specifies the original token id.
 Each line the dependency CoNLL output file represents a node in the parse tree. The MD lattice and Dep CoNLL output files
-are aligned, meaning that in order to get back the token id of a dependency node you can look up the last column of 
+are aligned, meaning that in order to get back the token id of a dependency node you can look up the last column of
 the corresponding line in the lattice file.
 
 ## Quick Start
@@ -247,7 +247,7 @@ $
     ```python
     import requests
     impot json
-   
+
     text = 'גנן גידל דגן בגן'
     localhost_yap = "http://localhost:8000/yap/heb/joint"
     data = json.dumps({'text': "{}  ".format(text)})  # input string ends with two space characters
@@ -314,7 +314,7 @@ Each line represents a node in the tree:
 
 ### 3. Morphological and dependency schemes
 
-The scheme that we use for POS  is basically the original scheme by Simaan et al. 
+The scheme that we use for POS  is basically the original scheme by Simaan et al.
 http://www.cs.technion.ac.il/~winter/papers/tal.ps
 
 For the morphological features we used clearer names than Simaan: gen for gender, per for person, suf for suffix, etc, but it is the same.
@@ -355,7 +355,7 @@ If you use YAP for an academic publication, we'd appreciate a [note](reutts@open
 
 ## Licensing Highlights
 
-- The code is provided with a permissive license (apache 2.0), as is, and without warranties. 
+- The code is provided with a permissive license (apache 2.0), as is, and without warranties.
 - The data and lexicon the parser uses belong to [MILA](http://www.mila.cs.technion.ac.il/) at the Technion
 - For *production* use, please check with Prof. Alon Itay from The technion data/lexicon license conditions.
 
@@ -382,7 +382,7 @@ If you make use of this software for research, we would appreciate the following
     url = "https://www.aclweb.org/anthology/Q19-1003",
     doi = "10.1162/tacl_a_00253",
     pages = "33--48",
-    abstract = "In standard NLP pipelines, morphological analysis and disambiguation (MA{\&}D) precedes syntactic and semantic downstream tasks. However, for languages with complex and ambiguous word-internal structure, known as morphologically rich languages (MRLs), it has been hypothesized that syntactic context may be crucial for accurate MA{\&}D, and vice versa. In this work we empirically confirm this hypothesis for Modern Hebrew, an MRL with complex morphology and severe word-level ambiguity, in a novel transition-based framework. Specifically, we propose a joint morphosyntactic transition-based framework which formally unifies two distinct transition systems, morphological and syntactic, into a single transition-based system with joint training and joint inference. We empirically show that MA{\&}D results obtained in the joint settings outperform MA{\&}D results obtained by the respective standalone components, and that end-to-end parsing results obtained by our joint system present a new state of the art for Hebrew dependency parsing.", 
+    abstract = "In standard NLP pipelines, morphological analysis and disambiguation (MA{\&}D) precedes syntactic and semantic downstream tasks. However, for languages with complex and ambiguous word-internal structure, known as morphologically rich languages (MRLs), it has been hypothesized that syntactic context may be crucial for accurate MA{\&}D, and vice versa. In this work we empirically confirm this hypothesis for Modern Hebrew, an MRL with complex morphology and severe word-level ambiguity, in a novel transition-based framework. Specifically, we propose a joint morphosyntactic transition-based framework which formally unifies two distinct transition systems, morphological and syntactic, into a single transition-based system with joint training and joint inference. We empirically show that MA{\&}D results obtained in the joint settings outperform MA{\&}D results obtained by the respective standalone components, and that end-to-end parsing results obtained by our joint system present a new state of the art for Hebrew dependency parsing.",
 }
 ```
 

@@ -11,11 +11,11 @@ Normalization Strategy:
 
 This guarantees no desync with M5 data.
 """
+
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
 
-from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+from app.domain.hebrew_utils import normalize_whitespace, strip_cantillation, strip_nikud
 from app.domain.term_extraction.canonicalizer import canonicalize_hebrew_term
 
 logger = logging.getLogger(__name__)
@@ -29,8 +29,8 @@ class NormalizedText:
     clean: str  # Cleaned (nikud/cantillation removed, whitespace normalized)
     norm: str  # Normalized key for exact match
     mode: str = "strict"  # Normalization mode used (strict|compat)
-    canonical_key: Optional[str] = None  # For term_cluster compatibility
-    warnings: List[str] = None  # Normalization warnings
+    canonical_key: str | None = None  # For term_cluster compatibility
+    warnings: list[str] = None  # Normalization warnings
 
     def __post_init__(self):
         if self.warnings is None:
@@ -80,7 +80,7 @@ def normalize_text(lang: str, text: str, kind: str, mode: str = "strict") -> Nor
     return NormalizedText(raw=text, clean=clean, norm=norm, mode=mode, warnings=warnings)
 
 
-def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> NormalizedText:
+def _normalize_hebrew(text: str, kind: str, mode: str, warnings: list[str]) -> NormalizedText:
     """
     Hebrew-specific normalization with strict M5 compatibility.
 
@@ -104,7 +104,11 @@ def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> N
 
     if not clean:
         return NormalizedText(
-            raw=raw, clean="", norm="", mode=mode, warnings=["Text became empty after normalization"]
+            raw=raw,
+            clean="",
+            norm="",
+            mode=mode,
+            warnings=["Text became empty after normalization"],
         )
 
     # Step 3: Generate normalized key based on mode and kind
@@ -143,7 +147,7 @@ def _normalize_hebrew(text: str, kind: str, mode: str, warnings: List[str]) -> N
 
 
 def normalize_for_tm(
-    lang: str, text: str, kind: str, lemma_phrase: Optional[str] = None, mode: str = "strict"
+    lang: str, text: str, kind: str, lemma_phrase: str | None = None, mode: str = "strict"
 ) -> NormalizedText:
     """
     Convenience wrapper for TM normalization with lemma support.
@@ -168,7 +172,7 @@ def normalize_for_tm(
     return normalize_text(lang, text, kind, mode)
 
 
-def generate_variants(lang: str, text: str, kind: str) -> List[str]:
+def generate_variants(lang: str, text: str, kind: str) -> list[str]:
     """
     Generate normalized variant keys for enhanced matching.
 

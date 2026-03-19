@@ -1,8 +1,8 @@
 """Reference setup state management."""
 
 import json
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -38,16 +38,16 @@ class SetupState:
     total_docs: int = 0
 
     # Timestamps
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    last_updated_at: Optional[str] = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    last_updated_at: str | None = None
 
     # Error handling
-    error_message: Optional[str] = None
+    error_message: str | None = None
     retry_count: int = 0
 
     # Checkpoints (for resume)
-    last_checkpoint: Optional[str] = None  # JSON serialized checkpoint data
+    last_checkpoint: str | None = None  # JSON serialized checkpoint data
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -76,7 +76,7 @@ class SetupState:
             return None
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return cls.from_dict(data)
         except Exception:
@@ -84,11 +84,11 @@ class SetupState:
 
     def update_progress(
         self,
-        stage: Optional[SetupStage] = None,
-        bytes_downloaded: Optional[int] = None,
-        total_bytes: Optional[int] = None,
-        docs_processed: Optional[int] = None,
-        total_docs: Optional[int] = None,
+        stage: SetupStage | None = None,
+        bytes_downloaded: int | None = None,
+        total_bytes: int | None = None,
+        docs_processed: int | None = None,
+        total_docs: int | None = None,
     ):
         """Update progress and timestamp."""
         if stage is not None:
@@ -106,29 +106,29 @@ class SetupState:
         if total_docs is not None:
             self.total_docs = total_docs
 
-        self.last_updated_at = datetime.now(timezone.utc).isoformat()
+        self.last_updated_at = datetime.now(UTC).isoformat()
 
     def mark_started(self):
         """Mark setup as started."""
-        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.started_at = datetime.now(UTC).isoformat()
         self.last_updated_at = self.started_at
 
     def mark_completed(self):
         """Mark setup as completed."""
         self.stage = SetupStage.COMPLETED
-        self.completed_at = datetime.now(timezone.utc).isoformat()
+        self.completed_at = datetime.now(UTC).isoformat()
         self.last_updated_at = self.completed_at
 
     def mark_failed(self, error_message: str):
         """Mark setup as failed."""
         self.stage = SetupStage.FAILED
         self.error_message = error_message
-        self.last_updated_at = datetime.now(timezone.utc).isoformat()
+        self.last_updated_at = datetime.now(UTC).isoformat()
 
     def mark_cancelled(self):
         """Mark setup as cancelled."""
         self.stage = SetupStage.CANCELLED
-        self.last_updated_at = datetime.now(timezone.utc).isoformat()
+        self.last_updated_at = datetime.now(UTC).isoformat()
 
     def get_progress_percentage(self) -> float:
         """Get progress percentage (0-100)."""
@@ -144,7 +144,7 @@ class SetupState:
 
         return 0.0
 
-    def get_eta_seconds(self) -> Optional[float]:
+    def get_eta_seconds(self) -> float | None:
         """Get estimated time to completion in seconds."""
         if self.mode == "download" and self.download_speed_bps > 0:
             remaining_bytes = self.total_bytes - self.bytes_downloaded

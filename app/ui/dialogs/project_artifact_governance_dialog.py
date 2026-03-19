@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -30,11 +29,13 @@ from app.domain.dto import (
 class ProjectArtifactGovernanceDialog(QDialog):
     """Background-loaded read-only summary for heavy derived project artifacts."""
 
-    def __init__(self, project_id: int, project_name: str, parent=None, *, auto_refresh: bool = True):
+    def __init__(
+        self, project_id: int, project_name: str, parent=None, *, auto_refresh: bool = True
+    ):
         super().__init__(parent)
         self.project_id = int(project_id)
         self.project_name = str(project_name or f"Project {int(project_id)}")
-        self._summary: Optional[DerivedArtifactGovernanceSummaryDTO] = None
+        self._summary: DerivedArtifactGovernanceSummaryDTO | None = None
         self._worker = None
         self._request_seq = 0
         self._active_request_id = 0
@@ -75,7 +76,9 @@ class ProjectArtifactGovernanceDialog(QDialog):
         metrics_layout.setVerticalSpacing(8)
         self.total_docs_value = self._make_metric_value(metrics_layout, 0, 0, "Total docs")
         self.processed_docs_value = self._make_metric_value(metrics_layout, 0, 1, "Processed docs")
-        self.snapshot_coverage_value = self._make_metric_value(metrics_layout, 1, 0, "Sentence coverage")
+        self.snapshot_coverage_value = self._make_metric_value(
+            metrics_layout, 1, 0, "Sentence coverage"
+        )
         self.run_error_value = self._make_metric_value(metrics_layout, 1, 1, "Run errors")
         root.addLayout(metrics_layout)
 
@@ -226,7 +229,9 @@ class ProjectArtifactGovernanceDialog(QDialog):
 
         metric_map = {metric.artifact_key: metric for metric in summary.artifacts}
         run_error_metric = metric_map.get("run_error")
-        self.snapshot_coverage_value.setText(self._format_pct(summary.snapshot_sentence_coverage_pct))
+        self.snapshot_coverage_value.setText(
+            self._format_pct(summary.snapshot_sentence_coverage_pct)
+        )
         self.run_error_value.setText(
             f"{int(run_error_metric.quantity_value):,}" if run_error_metric is not None else "—"
         )
@@ -333,7 +338,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
         return card
 
     @staticmethod
-    def _maintenance_mode_text(mode: Optional[str]) -> str:
+    def _maintenance_mode_text(mode: str | None) -> str:
         mapping = {
             "reset_rebuild_only": "Reset/rebuild only",
             "retention_available": "Retention available",
@@ -360,7 +365,8 @@ class ProjectArtifactGovernanceDialog(QDialog):
             (
                 metric
                 for metric in metrics
-                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_preflight_hint
+                if metric.maintenance_mode == "reset_rebuild_only"
+                and metric.maintenance_preflight_hint
             ),
             None,
         )
@@ -372,7 +378,9 @@ class ProjectArtifactGovernanceDialog(QDialog):
             return
         self.set_loading(message)
 
-    def on_summary_ready(self, request_id: int, summary: DerivedArtifactGovernanceSummaryDTO) -> None:
+    def on_summary_ready(
+        self, request_id: int, summary: DerivedArtifactGovernanceSummaryDTO
+    ) -> None:
         if int(request_id) != self._active_request_id:
             return
         self.set_summary(summary)
@@ -444,7 +452,11 @@ class ProjectArtifactGovernanceDialog(QDialog):
         if self._summary is None:
             return
         processor_metric = next(
-            (metric for metric in self._summary.artifacts if metric.artifact_key == "processor_run"),
+            (
+                metric
+                for metric in self._summary.artifacts
+                if metric.artifact_key == "processor_run"
+            ),
             None,
         )
         if processor_metric is None or not processor_metric.maintenance_cli_hint:
@@ -483,7 +495,8 @@ class ProjectArtifactGovernanceDialog(QDialog):
             (
                 metric
                 for metric in self._summary.artifacts
-                if metric.maintenance_mode == "reset_rebuild_only" and metric.maintenance_preflight_hint
+                if metric.maintenance_mode == "reset_rebuild_only"
+                and metric.maintenance_preflight_hint
             ),
             None,
         )
@@ -497,7 +510,11 @@ class ProjectArtifactGovernanceDialog(QDialog):
         self.status_label.setText("Reference rebuild preflight CLI copied to clipboard.")
 
     def open_lifecycle_contract(self) -> None:
-        docs_path = Path(__file__).resolve().parents[3] / "docs" / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"
+        docs_path = (
+            Path(__file__).resolve().parents[3]
+            / "docs"
+            / "PROJECT_DATA_CACHE_LIFECYCLE_CONTRACT.md"
+        )
         if not docs_path.exists():
             self.set_error(f"Open manually: {docs_path}")
             return
@@ -505,20 +522,20 @@ class ProjectArtifactGovernanceDialog(QDialog):
             self.set_error(f"Open manually: {docs_path}")
 
     @staticmethod
-    def _parse_utc_timestamp(value: Optional[str]) -> Optional[datetime]:
+    def _parse_utc_timestamp(value: str | None) -> datetime | None:
         if not value:
             return None
         try:
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(UTC)
         except Exception:
             return None
 
     @classmethod
-    def _format_relative_refresh(cls, value: Optional[str]) -> str:
+    def _format_relative_refresh(cls, value: str | None) -> str:
         parsed = cls._parse_utc_timestamp(value)
         if parsed is None:
             return "Refreshed: n/a"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         delta_seconds = max(int((now - parsed).total_seconds()), 0)
         if delta_seconds < 10:
             rel = "just now"
@@ -531,7 +548,7 @@ class ProjectArtifactGovernanceDialog(QDialog):
         return f"Refreshed {rel} ({parsed.strftime('%Y-%m-%d %H:%M UTC')})"
 
     @staticmethod
-    def _format_pct(value: Optional[float]) -> str:
+    def _format_pct(value: float | None) -> str:
         if value is None:
             return "—"
         return f"{float(value):.2f}%"

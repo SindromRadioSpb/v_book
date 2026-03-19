@@ -23,15 +23,19 @@ from app.services.db_service import DBService
 from app.services.tm_global_service import TMGlobalService
 from app.main import get_app_dir
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Backfill tm_global from existing tm_entry records')
-    parser.add_argument('--dry-run', action='store_true', help='Dry run mode (no changes)')
-    parser.add_argument('--db-path', help='Path to database file (default: production DB)')
-    parser.add_argument('--chunk-size', type=int, default=500, help='Commit every N keys (default: 500)')
+    parser = argparse.ArgumentParser(
+        description="Backfill tm_global from existing tm_entry records"
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Dry run mode (no changes)")
+    parser.add_argument("--db-path", help="Path to database file (default: production DB)")
+    parser.add_argument(
+        "--chunk-size", type=int, default=500, help="Commit every N keys (default: 500)"
+    )
     args = parser.parse_args()
 
     # Get DB instance
@@ -76,5 +80,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

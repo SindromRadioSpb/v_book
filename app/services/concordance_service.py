@@ -1,25 +1,24 @@
 """Concordance search service (M6)."""
+
 import logging
-import re
-from typing import List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.domain.dto import KWICResult
-from app.services.db_service import DBService
 from app.infra.security import (
-    validate_query_complexity,
-    sanitize_fts5_query,
-    sanitize_for_log,
-    QueryComplexityError,
     AuditLogger,
+    QueryComplexityError,
+    sanitize_for_log,
+    sanitize_fts5_query,
+    validate_query_complexity,
 )
+from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
 
 
-def normalize_hebrew_search(query: str) -> List[str]:
+def normalize_hebrew_search(query: str) -> list[str]:
     """
     Normalize Hebrew search query to handle article variations.
 
@@ -34,7 +33,7 @@ def normalize_hebrew_search(query: str) -> List[str]:
         List of normalized query variants for FTS5 OR matching
     """
     try:
-        from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+        from app.domain.hebrew_utils import normalize_whitespace, strip_cantillation, strip_nikud
 
         # Basic normalization
         normalized = strip_nikud(query)
@@ -56,31 +55,32 @@ def normalize_hebrew_search(query: str) -> List[str]:
             # e.g., "בית הספר" → "בית ספר"
             tokens_no_article = []
             for token in tokens:
-                if token.startswith('ה') and len(token) > 1:
+                if token.startswith("ה") and len(token) > 1:
                     tokens_no_article.append(token[1:])  # Strip leading ה
                 else:
                     tokens_no_article.append(token)
 
             if tokens_no_article != tokens:
-                variants.add(' '.join(tokens_no_article))
+                variants.add(" ".join(tokens_no_article))
 
             # Generate variant with article ה on second word
             # e.g., "בית ספר" → "בית הספר"
             tokens_with_article = []
             for i, token in enumerate(tokens):
-                if i > 0 and not token.startswith('ה') and len(token) > 0:
+                if i > 0 and not token.startswith("ה") and len(token) > 0:
                     # Add article to non-first words
-                    tokens_with_article.append('ה' + token)
+                    tokens_with_article.append("ה" + token)
                 else:
                     tokens_with_article.append(token)
 
             if tokens_with_article != tokens:
-                variants.add(' '.join(tokens_with_article))
+                variants.add(" ".join(tokens_with_article))
 
         return list(variants)
 
     except Exception as e:
         from app.infra.security import sanitize_for_log
+
         logger.exception(
             f"Failed to normalize search query: {sanitize_for_log(query)}, error={str(e)}"
         )
@@ -104,8 +104,8 @@ class ConcordanceService:
         limit: int = 100,
         offset: int = 0,
         is_phrase: bool = False,
-        normalize: bool = True
-    ) -> List[KWICResult]:
+        normalize: bool = True,
+    ) -> list[KWICResult]:
         """
         Search for concordance results using FTS5.
 
@@ -161,7 +161,7 @@ class ConcordanceService:
 
             # Build OR query: "variant1" OR "variant2" OR ...
             # Variants are already normalized and safe to quote
-            fts_query = ' OR '.join(f'"{v}"' for v in variants)
+            fts_query = " OR ".join(f'"{v}"' for v in variants)
         elif is_phrase:
             # Exact phrase match - sanitize to prevent FTS5 injection
             # Note: sanitize_fts5_query() already wraps in quotes
@@ -178,7 +178,8 @@ class ConcordanceService:
         try:
             # FTS5 query with snippet() for KWIC
             # Join through: sentence_fts → document_sentence → source_document → source_corpus
-            sql = text("""
+            sql = text(
+                """
                 SELECT
                     ds.sentence_id,
                     ds.doc_id,
@@ -194,16 +195,11 @@ class ConcordanceService:
                   AND sc.project_id = :project_id
                 ORDER BY rank ASC, ds.sentence_id ASC
                 LIMIT :limit OFFSET :offset
-            """)
+            """
+            )
 
             result = session.execute(
-                sql,
-                {
-                    'q': fts_query,
-                    'project_id': project_id,
-                    'limit': limit,
-                    'offset': offset
-                }
+                sql, {"q": fts_query, "project_id": project_id, "limit": limit, "offset": offset}
             )
 
             rows = result.fetchall()
@@ -216,14 +212,16 @@ class ConcordanceService:
                 # Parse snippet markers: << match >>
                 left, match, right = self._parse_snippet(snip)
 
-                results.append(KWICResult(
-                    sentence_id=sentence_id,
-                    doc_id=doc_id,
-                    doc_name=file_name,
-                    left_context=left,
-                    match=match,
-                    right_context=right
-                ))
+                results.append(
+                    KWICResult(
+                        sentence_id=sentence_id,
+                        doc_id=doc_id,
+                        doc_name=file_name,
+                        left_context=left,
+                        match=match,
+                        right_context=right,
+                    )
+                )
 
             logger.info(f"Concordance search returned {len(results)} results")
 
@@ -274,15 +272,15 @@ class ConcordanceService:
             Tuple of (left_context, match, right_context)
         """
         # Find first match (in case of multiple matches in sentence)
-        match_start = snip.find('<<')
-        match_end = snip.find('>>', match_start)
+        match_start = snip.find("<<")
+        match_end = snip.find(">>", match_start)
 
         if match_start == -1 or match_end == -1:
             # No match markers (shouldn't happen, but defensive)
-            return ('', snip, '')
+            return ("", snip, "")
 
         left = snip[:match_start]
-        match = snip[match_start + 2:match_end]
-        right = snip[match_end + 2:]
+        match = snip[match_start + 2 : match_end]
+        right = snip[match_end + 2 :]
 
         return (left.strip(), match.strip(), right.strip())

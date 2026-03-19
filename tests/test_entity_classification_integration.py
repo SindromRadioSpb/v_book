@@ -14,14 +14,14 @@ from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import Lemma, TermCluster, DictProject
+from app.infra.sa_models import Lemma, TermCluster, DictProject, Library
 from app.services.entity_classifier import classify_text, classify_phrase, EntityClass
 
 
 def test_lemma_classification_persists():
     """Test that lemma classification is saved to database."""
     # Create temporary database
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
     try:
@@ -29,18 +29,21 @@ def test_lemma_classification_persists():
 
         # Create minimal schema
         from app.infra.sa_models import Base
+
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
-            # Create project
-            project = DictProject(name="Test Project")
+            library = Library(name="Test Library")
+            session.add(library)
+            session.flush()
+            project = DictProject(name="Test Project", library_id=library.library_id)
             session.add(project)
             session.flush()
 
             # Classify some lemmas
             test_cases = [
                 ("שלום", EntityClass.WORD_HE, False),  # Valid Hebrew word
-                ("!", EntityClass.PUNCT, True),         # Punctuation noise
+                ("!", EntityClass.PUNCT, True),  # Punctuation noise
                 ("1.2kg", EntityClass.QUANTITY_UNIT, True),  # Quantity noise
             ]
 
@@ -52,7 +55,7 @@ def test_lemma_classification_persists():
                 lemma = Lemma(
                     project_id=project.project_id,
                     lemma_text=lemma_text,
-                    pos='NOUN',
+                    pos="NOUN",
                     entity_class=result.entity_class,
                     is_noise=1 if result.is_noise else 0,
                     noise_reason=result.noise_reason,
@@ -78,31 +81,35 @@ def test_lemma_classification_persists():
             assert punct.noise_reason is not None
 
     finally:
+        engine.dispose()
         Path(db_path).unlink(missing_ok=True)
 
 
 def test_noise_filtering_query():
     """Test that noise filtering query works correctly."""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
     try:
         engine = create_engine(f"sqlite:///{db_path}")
         from app.infra.sa_models import Base
+
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
-            # Create project
-            project = DictProject(name="Test Project")
+            library = Library(name="Test Library")
+            session.add(library)
+            session.flush()
+            project = DictProject(name="Test Project", library_id=library.library_id)
             session.add(project)
             session.flush()
 
             # Add lemmas (3 valid, 2 noise)
             lemmas_data = [
                 ("שלום", 0),  # Valid
-                ("כוח", 0),   # Valid
-                ("!", 1),      # Noise
-                ("42", 1),     # Noise
+                ("כוח", 0),  # Valid
+                ("!", 1),  # Noise
+                ("42", 1),  # Noise
                 ("hello", 0),  # Valid
             ]
 
@@ -110,7 +117,7 @@ def test_noise_filtering_query():
                 lemma = Lemma(
                     project_id=project.project_id,
                     lemma_text=text,
-                    pos='NOUN',
+                    pos="NOUN",
                     is_noise=is_noise,
                 )
                 session.add(lemma)
@@ -118,47 +125,59 @@ def test_noise_filtering_query():
             session.commit()
 
             # Query without filter - should get all 5
-            all_lemmas = session.execute(
-                select(Lemma).where(Lemma.project_id == project.project_id)
-            ).scalars().all()
+            all_lemmas = (
+                session.execute(select(Lemma).where(Lemma.project_id == project.project_id))
+                .scalars()
+                .all()
+            )
             assert len(all_lemmas) == 5
 
             # Query with noise filter - should get only 3 valid
             from sqlalchemy import or_
-            valid_lemmas = session.execute(
-                select(Lemma).where(
-                    Lemma.project_id == project.project_id,
-                    or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None))
+
+            valid_lemmas = (
+                session.execute(
+                    select(Lemma).where(
+                        Lemma.project_id == project.project_id,
+                        or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)),
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(valid_lemmas) == 3
 
             # Query only noise - should get 2
-            noise_lemmas = session.execute(
-                select(Lemma).where(
-                    Lemma.project_id == project.project_id,
-                    Lemma.is_noise == 1
+            noise_lemmas = (
+                session.execute(
+                    select(Lemma).where(Lemma.project_id == project.project_id, Lemma.is_noise == 1)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(noise_lemmas) == 2
 
     finally:
+        engine.dispose()
         Path(db_path).unlink(missing_ok=True)
 
 
 def test_manual_override():
     """Test manual noise status override."""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
     try:
         engine = create_engine(f"sqlite:///{db_path}")
         from app.infra.sa_models import Base
+
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
-            # Create project
-            project = DictProject(name="Test Project")
+            library = Library(name="Test Library")
+            session.add(library)
+            session.flush()
+            project = DictProject(name="Test Project", library_id=library.library_id)
             session.add(project)
             session.flush()
 
@@ -166,7 +185,7 @@ def test_manual_override():
             lemma = Lemma(
                 project_id=project.project_id,
                 lemma_text="test",
-                pos='NOUN',
+                pos="NOUN",
                 entity_class=EntityClass.PUNCT,
                 is_noise=1,
             )
@@ -177,11 +196,8 @@ def test_manual_override():
         # Manual override - mark as valid
         with Session(engine) as session:
             from sqlalchemy import update
-            stmt = update(Lemma).where(
-                Lemma.lemma_id == lemma_id
-            ).values(
-                is_noise=0
-            )
+
+            stmt = update(Lemma).where(Lemma.lemma_id == lemma_id).values(is_noise=0)
             session.execute(stmt)
             session.commit()
 
@@ -191,22 +207,26 @@ def test_manual_override():
             assert lemma.is_noise == 0  # Now valid
 
     finally:
+        engine.dispose()
         Path(db_path).unlink(missing_ok=True)
 
 
 def test_backward_compatibility_null_handling():
     """Test that NULL is_noise is treated as valid."""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
     try:
         engine = create_engine(f"sqlite:///{db_path}")
         from app.infra.sa_models import Base
+
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
-            # Create project
-            project = DictProject(name="Test Project")
+            library = Library(name="Test Library")
+            session.add(library)
+            session.flush()
+            project = DictProject(name="Test Project", library_id=library.library_id)
             session.add(project)
             session.flush()
 
@@ -214,26 +234,32 @@ def test_backward_compatibility_null_handling():
             lemma = Lemma(
                 project_id=project.project_id,
                 lemma_text="unclassified",
-                pos='NOUN',
+                pos="NOUN",
                 entity_class=None,  # Not classified
-                is_noise=None,      # NULL
+                is_noise=None,  # NULL
             )
             session.add(lemma)
             session.commit()
 
             # Query with filter should include NULL (treated as valid)
             from sqlalchemy import or_
-            valid_lemmas = session.execute(
-                select(Lemma).where(
-                    Lemma.project_id == project.project_id,
-                    or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None))
+
+            valid_lemmas = (
+                session.execute(
+                    select(Lemma).where(
+                        Lemma.project_id == project.project_id,
+                        or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)),
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             assert len(valid_lemmas) == 1
             assert valid_lemmas[0].lemma_text == "unclassified"
 
     finally:
+        engine.dispose()
         Path(db_path).unlink(missing_ok=True)
 
 
@@ -241,15 +267,16 @@ def test_cluster_classification():
     """Test term cluster classification."""
     # Test phrase classification
     test_cases = [
-        ("בית ספר", False),           # Valid Hebrew phrase
-        ("0.25 מטר", True),            # Quantity + unit (noise)
-        ("10kN שאלה", True),           # Mixed noise
+        ("בית ספר", False),  # Valid Hebrew phrase
+        ("0.25 מטר", True),  # Quantity + unit (noise)
+        ("10kN שאלה", True),  # Mixed noise
     ]
 
     for phrase, expected_noise in test_cases:
         result = classify_phrase(phrase)
-        assert result.is_noise == expected_noise, \
-            f"Failed for '{phrase}': expected noise={expected_noise}, got {result.is_noise}"
+        assert (
+            result.is_noise == expected_noise
+        ), f"Failed for '{phrase}': expected noise={expected_noise}, got {result.is_noise}"
 
 
 def test_performance_baseline():
@@ -269,7 +296,6 @@ def test_performance_baseline():
     avg_per_call = (elapsed / (iterations * len(test_strings))) * 1000  # ms
 
     # Target: <1ms, but using safety margin of 10ms for CI environments
-    assert avg_per_call < 10, \
-        f"Classification too slow: {avg_per_call:.3f}ms (target <10ms)"
+    assert avg_per_call < 10, f"Classification too slow: {avg_per_call:.3f}ms (target <10ms)"
 
     print(f"\nPerformance: {avg_per_call:.3f}ms per classification")

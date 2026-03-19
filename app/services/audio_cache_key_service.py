@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +32,7 @@ class AudioCacheKeyService:
         src_lang: str,
         source_text: str,
         source_norm: str,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         try:
             applied = self.pronunciation_service.apply_to_text(
                 session=session,
@@ -65,7 +64,7 @@ class AudioCacheKeyService:
         src_lang: str,
         source_text: str,
         source_norm: str,
-        pronunciation_payload: Dict[str, object],
+        pronunciation_payload: dict[str, object],
     ) -> str:
         canonical = {
             "v": self.SPEECH_HASH_VERSION,
@@ -95,7 +94,7 @@ class AudioCacheKeyService:
         speed: float,
         audio_format: str,
         sample_rate_hz: int,
-        provider_model_version: Optional[str] = None,
+        provider_model_version: str | None = None,
     ) -> str:
         canonical = {
             "v": self.INPUT_HASH_VERSION,
@@ -110,6 +109,6 @@ class AudioCacheKeyService:
         return self._sha256_json(canonical)
 
     @staticmethod
-    def _sha256_json(payload: Dict[str, object]) -> str:
+    def _sha256_json(payload: dict[str, object]) -> str:
         encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

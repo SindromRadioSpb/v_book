@@ -8,6 +8,7 @@ Tests verify:
 - Chain reordering
 - Restore defaults
 """
+
 import pytest
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import QDialogButtonBox
@@ -244,10 +245,9 @@ def test_restore_defaults(dialog, qtbot, monkeypatch):
 
     # Mock message box to auto-accept
     from PyQt6.QtWidgets import QMessageBox
+
     monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
     )
 
     # Restore defaults
@@ -266,10 +266,9 @@ def test_restore_defaults_cancelled(dialog, qtbot, monkeypatch):
 
     # Mock message box to decline
     from PyQt6.QtWidgets import QMessageBox
+
     monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.No
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No
     )
 
     # Try to restore defaults

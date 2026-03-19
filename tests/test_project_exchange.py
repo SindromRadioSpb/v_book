@@ -73,51 +73,70 @@ def populated_project(temp_db):
         conn.execute("INSERT INTO library (library_id, name) VALUES (1, 'Test Library')")
 
         # Insert project
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO dict_project (project_id, library_id, name, src_lang, tgt_lang, nlp_engine)
             VALUES (1, 1, 'Test Project', 'he', 'ru', 'stanza')
-        """)
+        """
+        )
 
         # Insert corpus
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO source_corpus (corpus_id, project_id, name)
             VALUES (1, 1, 'Main Corpus')
-        """)
+        """
+        )
 
         # Insert documents
         for i in range(3):
             doc_id = i + 1
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO source_document (doc_id, corpus_id, file_path, file_name, file_ext, sha256, status)
                 VALUES (?, 1, ?, ?, 'txt', ?, 'processed')
-            """, (doc_id, f'/test/doc{doc_id}.txt', f'doc{doc_id}.txt', f'sha{doc_id:064d}'))
+            """,
+                (doc_id, f"/test/doc{doc_id}.txt", f"doc{doc_id}.txt", f"sha{doc_id:064d}"),
+            )
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO document_text (doc_id, raw_text, ocr_used)
                 VALUES (?, ?, 0)
-            """, (doc_id, f'Test text {doc_id}'))
+            """,
+                (doc_id, f"Test text {doc_id}"),
+            )
 
             # Insert sentences
             for j in range(5):
                 sent_id = i * 5 + j + 1
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
                     VALUES (?, ?, ?, ?)
-                """, (sent_id, i+1, j, f"Sentence {sent_id}"))
+                """,
+                    (sent_id, i + 1, j, f"Sentence {sent_id}"),
+                )
 
         # Insert lemmas
         for i in range(10):
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO lemma (lemma_id, project_id, lemma_text, pos)
                 VALUES (?, 1, ?, 'NOUN')
-            """, (i+1, f"lemma_{i+1}"))
+            """,
+                (i + 1, f"lemma_{i+1}"),
+            )
 
         # Insert ngrams
         for i in range(5):
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO ngram (ngram_id, project_id, n, surface_text, source_kind)
                 VALUES (?, 1, 2, ?, 'ngram')
-            """, (i+1, f"ngram_{i+1}"))
+            """,
+                (i + 1, f"ngram_{i+1}"),
+            )
 
         conn.commit()
         return 1  # project_id
@@ -173,7 +192,9 @@ def test_export_cancel_returns_cancelled_report(populated_project, tmp_path):
     assert not out_path.exists()
 
 
-def test_export_fails_fast_when_source_db_corruption_probe_fails(populated_project, tmp_path, monkeypatch):
+def test_export_fails_fast_when_source_db_corruption_probe_fails(
+    populated_project, tmp_path, monkeypatch
+):
     """Export must stop before payload creation if the source DB looks corrupt."""
     engine = ProjectExportEngine()
     out_path = tmp_path / "corrupt_export.hdleproj"
@@ -347,14 +368,18 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
     conn = sqlite3.connect(str(temp_db))
     try:
         # Force lemma batching during import.
-        next_lemma_id = conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        next_lemma_id = (
+            conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        )
         conn.executemany(
             "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
             [(next_lemma_id + i, f"lemma_batch_{i:05d}") for i in range(1200)],
         )
 
         # Add enough documents so source_document import is split into multiple gate batches.
-        next_doc_id = conn.execute("SELECT COALESCE(MAX(doc_id), 0) FROM source_document").fetchone()[0] + 1
+        next_doc_id = (
+            conn.execute("SELECT COALESCE(MAX(doc_id), 0) FROM source_document").fetchone()[0] + 1
+        )
         source_docs = []
         source_texts = []
         for i in range(600):
@@ -380,9 +405,12 @@ def test_import_routes_write_phases_through_write_gate(populated_project, temp_d
             source_texts,
         )
 
-        next_sentence_id = conn.execute(
-            "SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence"
-        ).fetchone()[0] + 1
+        next_sentence_id = (
+            conn.execute("SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence").fetchone()[
+                0
+            ]
+            + 1
+        )
         sentence_rows = []
         for i in range(600):
             sentence_id = next_sentence_id + i
@@ -446,7 +474,9 @@ def test_import_cancel_during_lemma_batch_cleans_rows(populated_project, temp_db
     """Cancel during lemma batching should return cancelled report and cleanup imported rows."""
     conn = sqlite3.connect(str(temp_db))
     try:
-        next_lemma_id = conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        next_lemma_id = (
+            conn.execute("SELECT COALESCE(MAX(lemma_id), 0) FROM lemma").fetchone()[0] + 1
+        )
         conn.executemany(
             "INSERT INTO lemma (lemma_id, project_id, lemma_text, pos) VALUES (?, 1, ?, 'NOUN')",
             [(next_lemma_id + i, f"lemma_cancel_{i:05d}") for i in range(1200)],
@@ -517,15 +547,20 @@ def test_import_cancel_during_document_sentence_batch_cleans_rows(
     """Cancel during generic batched table import should cleanup imported rows."""
     conn = sqlite3.connect(str(temp_db))
     try:
-        next_sentence_id = conn.execute(
-            "SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence"
-        ).fetchone()[0] + 1
+        next_sentence_id = (
+            conn.execute("SELECT COALESCE(MAX(sentence_id), 0) FROM document_sentence").fetchone()[
+                0
+            ]
+            + 1
+        )
         sentence_rows = []
         for i in range(600):
             sentence_id = next_sentence_id + i
             doc_id = 1 + (i % 3)
             sent_index = 1000 + i
-            sentence_rows.append((sentence_id, doc_id, sent_index, f"Sentence cancel {sentence_id}"))
+            sentence_rows.append(
+                (sentence_id, doc_id, sent_index, f"Sentence cancel {sentence_id}")
+            )
         conn.executemany(
             """
             INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
@@ -700,10 +735,12 @@ def test_export_excludes_credentials(populated_project, temp_db):
     """Test credentials table is not exported."""
     # Insert fake credential
     conn = sqlite3.connect(str(temp_db))
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO credentials (key, encrypted_value, encryption_version)
         VALUES ('test_key', 'encrypted_secret', 1)
-    """)
+    """
+    )
     conn.commit()
     conn.close()
 
@@ -762,12 +799,14 @@ def test_export_creates_payload_schema_including_document_sentence(populated_pro
         payload_conn = sqlite3.connect(str(payload_path))
         try:
             # Check table exists
-            result = payload_conn.execute("""
+            result = payload_conn.execute(
+                """
                 SELECT name FROM sqlite_master
                 WHERE type='table' AND name='document_sentence'
-            """).fetchone()
+            """
+            ).fetchone()
             assert result is not None, "document_sentence table missing from payload"
-            assert result[0] == 'document_sentence'
+            assert result[0] == "document_sentence"
 
             # Check data was exported
             result = payload_conn.execute("SELECT COUNT(*) FROM document_sentence").fetchone()
@@ -864,8 +903,9 @@ def test_export_import_roundtrip(populated_project, temp_db):
         import_counts = import_report.table_counts
 
         for table in ["library", "dict_project", "source_document", "lemma"]:
-            assert import_counts.get(table, 0) == export_counts.get(table, 0), \
-                f"Count mismatch for {table}"
+            assert import_counts.get(table, 0) == export_counts.get(
+                table, 0
+            ), f"Count mismatch for {table}"
 
 
 def test_import_fk_integrity(populated_project, temp_db):
@@ -966,7 +1006,9 @@ def test_export_filters_orphan_lemma_doc_stat_rows(populated_project, temp_db):
         payload_conn = sqlite3.connect(str(payload_path))
         try:
             count = payload_conn.execute("SELECT COUNT(*) FROM lemma_doc_stat").fetchone()[0]
-            max_lemma = payload_conn.execute("SELECT MAX(lemma_id) FROM lemma_doc_stat").fetchone()[0]
+            max_lemma = payload_conn.execute("SELECT MAX(lemma_id) FROM lemma_doc_stat").fetchone()[
+                0
+            ]
             assert count == 1
             assert max_lemma == 1
         finally:
@@ -1045,7 +1087,13 @@ def test_export_import_roundtrip_preserves_tm_global_link(populated_project, tem
                 (import_report.new_project_id,),
             ).fetchone()
             assert row is not None
-            imported_project_id, imported_lemma_id, lemma_project_id, imported_global_id, resolved_global_id = row
+            (
+                imported_project_id,
+                imported_lemma_id,
+                lemma_project_id,
+                imported_global_id,
+                resolved_global_id,
+            ) = row
             assert imported_project_id == import_report.new_project_id
             assert imported_lemma_id is not None
             assert lemma_project_id == import_report.new_project_id

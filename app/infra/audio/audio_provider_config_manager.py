@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 from app.infra.security import CredentialStore
 from app.infra.settings import SettingsService
@@ -14,27 +13,27 @@ from app.services.db_service import DBService
 from .audio_provider_config import (
     AudioProviderAuthMode,
     AudioProviderConfig,
-    get_fail_closed_key,
     get_api_key_credential_id,
     get_api_key_credential_id_key,
     get_auth_mode_key,
     get_default_voice_key,
     get_enabled_key,
+    get_fail_closed_key,
     get_format_key,
     get_max_chars_per_day_key,
     get_max_chars_per_month_key,
     get_max_chars_per_request_key,
     get_max_requests_per_day_key,
     get_max_requests_per_minute_key,
-    get_region_key,
-    get_speech_rate_key,
     get_model_path_key,
+    get_region_key,
     get_retry_attempts_key,
     get_retry_backoff_key,
     get_sample_rate_key,
     get_service_account_credential_id,
     get_service_account_credential_id_key,
     get_service_account_path_key,
+    get_speech_rate_key,
     get_timeout_key,
 )
 
@@ -46,8 +45,8 @@ class AudioProviderConfigManager:
 
     def __init__(
         self,
-        settings: Optional[SettingsService] = None,
-        cred_store: Optional[CredentialStore] = None,
+        settings: SettingsService | None = None,
+        cred_store: CredentialStore | None = None,
     ):
         self.settings = settings or SettingsService.get_instance()
         self.cred_store = cred_store
@@ -65,20 +64,29 @@ class AudioProviderConfigManager:
         except Exception:
             auth_mode = defaults.auth_mode
 
-        api_key_cred_id = self.settings.get_string(
-            get_api_key_credential_id_key(provider_id),
-            defaults.api_key_credential_id or "",
-        ).strip() or None
+        api_key_cred_id = (
+            self.settings.get_string(
+                get_api_key_credential_id_key(provider_id),
+                defaults.api_key_credential_id or "",
+            ).strip()
+            or None
+        )
 
-        service_account_cred_id = self.settings.get_string(
-            get_service_account_credential_id_key(provider_id),
-            defaults.service_account_credential_id or "",
-        ).strip() or None
+        service_account_cred_id = (
+            self.settings.get_string(
+                get_service_account_credential_id_key(provider_id),
+                defaults.service_account_credential_id or "",
+            ).strip()
+            or None
+        )
 
-        service_account_path = self.settings.get_string(
-            get_service_account_path_key(provider_id),
-            defaults.service_account_path or "",
-        ).strip() or None
+        service_account_path = (
+            self.settings.get_string(
+                get_service_account_path_key(provider_id),
+                defaults.service_account_path or "",
+            ).strip()
+            or None
+        )
 
         return AudioProviderConfig(
             provider_id=provider_id,
@@ -87,7 +95,10 @@ class AudioProviderConfigManager:
             api_key_credential_id=api_key_cred_id,
             service_account_credential_id=service_account_cred_id,
             service_account_path=service_account_path,
-            region=self.settings.get_string(get_region_key(provider_id), defaults.region or "").strip() or None,
+            region=self.settings.get_string(
+                get_region_key(provider_id), defaults.region or ""
+            ).strip()
+            or None,
             default_voice=self.settings.get_string(
                 get_default_voice_key(provider_id), defaults.default_voice or ""
             ).strip()
@@ -105,26 +116,44 @@ class AudioProviderConfigManager:
                     ),
                 ),
             ),
-            audio_format=self.settings.get_string(get_format_key(provider_id), defaults.audio_format).strip()
+            audio_format=self.settings.get_string(
+                get_format_key(provider_id), defaults.audio_format
+            ).strip()
             or defaults.audio_format,
-            sample_rate_hz=max(8000, self.settings.get_int(get_sample_rate_key(provider_id), defaults.sample_rate_hz)),
+            sample_rate_hz=max(
+                8000,
+                self.settings.get_int(get_sample_rate_key(provider_id), defaults.sample_rate_hz),
+            ),
             timeout_seconds=max(
                 3.0,
-                float(self.settings.get_string(get_timeout_key(provider_id), str(defaults.timeout_seconds)) or 15.0),
+                float(
+                    self.settings.get_string(
+                        get_timeout_key(provider_id), str(defaults.timeout_seconds)
+                    )
+                    or 15.0
+                ),
             ),
             retry_max_attempts=max(
                 1,
-                self.settings.get_int(get_retry_attempts_key(provider_id), defaults.retry_max_attempts),
+                self.settings.get_int(
+                    get_retry_attempts_key(provider_id), defaults.retry_max_attempts
+                ),
             ),
             retry_backoff_base_ms=max(
                 100,
-                self.settings.get_int(get_retry_backoff_key(provider_id), defaults.retry_backoff_base_ms),
+                self.settings.get_int(
+                    get_retry_backoff_key(provider_id), defaults.retry_backoff_base_ms
+                ),
             ),
-            model_path=self.settings.get_string(get_model_path_key(provider_id), defaults.model_path or "").strip()
+            model_path=self.settings.get_string(
+                get_model_path_key(provider_id), defaults.model_path or ""
+            ).strip()
             or None,
             max_chars_per_request=max(
                 100,
-                self.settings.get_int(get_max_chars_per_request_key(provider_id), defaults.max_chars_per_request),
+                self.settings.get_int(
+                    get_max_chars_per_request_key(provider_id), defaults.max_chars_per_request
+                ),
             ),
             max_requests_per_minute=max(
                 1,
@@ -145,10 +174,12 @@ class AudioProviderConfigManager:
                 get_max_requests_per_day_key(provider_id),
                 defaults.max_requests_per_day,
             ),
-            fail_closed=self.settings.get_bool(get_fail_closed_key(provider_id), defaults.fail_closed),
+            fail_closed=self.settings.get_bool(
+                get_fail_closed_key(provider_id), defaults.fail_closed
+            ),
         )
 
-    def _get_optional_int(self, key: str, default: Optional[int]) -> Optional[int]:
+    def _get_optional_int(self, key: str, default: int | None) -> int | None:
         if default is None:
             value = self.settings.get_int(key, 0)
             return value if value > 0 else None
@@ -166,27 +197,43 @@ class AudioProviderConfigManager:
         self.settings.set_value(get_sample_rate_key(provider_id), int(config.sample_rate_hz))
         self.settings.set_value(get_timeout_key(provider_id), float(config.timeout_seconds))
         self.settings.set_value(get_retry_attempts_key(provider_id), int(config.retry_max_attempts))
-        self.settings.set_value(get_retry_backoff_key(provider_id), int(config.retry_backoff_base_ms))
+        self.settings.set_value(
+            get_retry_backoff_key(provider_id), int(config.retry_backoff_base_ms)
+        )
         self.settings.set_value(get_model_path_key(provider_id), config.model_path or "")
 
-        self.settings.set_value(get_max_chars_per_request_key(provider_id), int(config.max_chars_per_request))
-        self.settings.set_value(get_max_requests_per_minute_key(provider_id), int(config.max_requests_per_minute))
-        self.settings.set_value(get_max_chars_per_day_key(provider_id), int(config.max_chars_per_day or 0))
-        self.settings.set_value(get_max_chars_per_month_key(provider_id), int(config.max_chars_per_month or 0))
-        self.settings.set_value(get_max_requests_per_day_key(provider_id), int(config.max_requests_per_day or 0))
+        self.settings.set_value(
+            get_max_chars_per_request_key(provider_id), int(config.max_chars_per_request)
+        )
+        self.settings.set_value(
+            get_max_requests_per_minute_key(provider_id), int(config.max_requests_per_minute)
+        )
+        self.settings.set_value(
+            get_max_chars_per_day_key(provider_id), int(config.max_chars_per_day or 0)
+        )
+        self.settings.set_value(
+            get_max_chars_per_month_key(provider_id), int(config.max_chars_per_month or 0)
+        )
+        self.settings.set_value(
+            get_max_requests_per_day_key(provider_id), int(config.max_requests_per_day or 0)
+        )
         self.settings.set_value(get_fail_closed_key(provider_id), bool(config.fail_closed))
 
         if config.api_key_credential_id:
-            self.settings.set_value(get_api_key_credential_id_key(provider_id), config.api_key_credential_id)
+            self.settings.set_value(
+                get_api_key_credential_id_key(provider_id), config.api_key_credential_id
+            )
         if config.service_account_credential_id:
             self.settings.set_value(
                 get_service_account_credential_id_key(provider_id),
                 config.service_account_credential_id,
             )
-        self.settings.set_value(get_service_account_path_key(provider_id), config.service_account_path or "")
+        self.settings.set_value(
+            get_service_account_path_key(provider_id), config.service_account_path or ""
+        )
         self.settings.sync()
 
-    def get_credential(self, credential_id: Optional[str]) -> Optional[str]:
+    def get_credential(self, credential_id: str | None) -> str | None:
         """Load decrypted credential value from CredentialStore."""
         if not credential_id:
             return None
@@ -219,7 +266,7 @@ class AudioProviderConfigManager:
             logger.warning("Failed to delete credential %s: %s", credential_id, exc)
             return False
 
-    def get_service_account_info(self, config: AudioProviderConfig) -> Optional[dict]:
+    def get_service_account_info(self, config: AudioProviderConfig) -> dict | None:
         """Resolve service-account JSON from credential store or file path."""
         if config.service_account_credential_id:
             raw = self.get_credential(config.service_account_credential_id)

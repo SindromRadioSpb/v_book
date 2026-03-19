@@ -1,7 +1,7 @@
 """Provider registry for managing MT providers."""
 
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .base_provider import BaseProvider
 
@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class ProvidersRegistry:
     """Registry for MT providers (singleton)."""
 
-    _instance: Optional['ProvidersRegistry'] = None
-    _providers: Dict[str, BaseProvider] = {}
+    _instance: Optional["ProvidersRegistry"] = None
+    _providers: dict[str, BaseProvider] = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -44,7 +44,7 @@ class ProvidersRegistry:
         self._providers[provider_id] = provider
         logger.info(f"Registered MT provider: {provider_id} ({provider.display_name})")
 
-    def get(self, provider_id: str) -> Optional[BaseProvider]:
+    def get(self, provider_id: str) -> BaseProvider | None:
         """
         Get provider by ID.
 
@@ -56,7 +56,7 @@ class ProvidersRegistry:
         """
         return self._providers.get(provider_id)
 
-    def list_providers(self) -> List[BaseProvider]:
+    def list_providers(self) -> list[BaseProvider]:
         """
         List all registered providers.
 
@@ -65,7 +65,7 @@ class ProvidersRegistry:
         """
         return list(self._providers.values())
 
-    def list_provider_ids(self) -> List[str]:
+    def list_provider_ids(self) -> list[str]:
         """
         List all registered provider IDs.
 

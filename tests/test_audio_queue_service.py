@@ -21,8 +21,7 @@ def svc():
 
 def _specs(n, kind="sentence"):
     return [
-        AudioItemSpec(kind=kind, source_id=i + 1, snapshot_hebrew=f"item_{i}")
-        for i in range(n)
+        AudioItemSpec(kind=kind, source_id=i + 1, snapshot_hebrew=f"item_{i}") for i in range(n)
     ]
 
 

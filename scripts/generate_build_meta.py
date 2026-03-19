@@ -1,4 +1,5 @@
 """Generate runtime build metadata for traceability."""
+
 from __future__ import annotations
 
 import subprocess
@@ -54,9 +55,13 @@ def main() -> int:
 
     commit = _run_git(repo_root, ["rev-parse", "HEAD"]) or "unknown"
     dirty = _is_dirty(repo_root)
-    built_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    built_at_utc = (
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
 
-    output_path.write_text(_render_module(commit=commit, dirty=dirty, built_at_utc=built_at_utc), encoding="utf-8")
+    output_path.write_text(
+        _render_module(commit=commit, dirty=dirty, built_at_utc=built_at_utc), encoding="utf-8"
+    )
 
     print(
         f"Generated build metadata: version_source=app.__version__ "
@@ -67,4 +72,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

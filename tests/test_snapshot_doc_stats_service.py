@@ -128,9 +128,15 @@ def test_snapshot_doc_stats_refresh_and_verify_detects_drift() -> None:
             doc_ids = _seed_docs(session)
             refresh = service.refresh_document_stats(session, doc_ids)
             session.commit()
-            docs = session.execute(
-                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument)
+                    .where(SourceDocument.doc_id.in_(doc_ids))
+                    .order_by(SourceDocument.doc_id.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         assert refresh.docs_seen == 2
         assert refresh.docs_valid == 2

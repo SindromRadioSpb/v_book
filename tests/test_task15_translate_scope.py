@@ -15,58 +15,75 @@ class TestCodeImports:
         from app.services.dictionary_service import DictionaryService
 
         service = DictionaryService()
-        assert hasattr(service, 'count_lemma_ids_for_translation'), \
-            "DictionaryService should have count_lemma_ids_for_translation method"
-        assert hasattr(service, 'fetch_lemma_ids_for_translation'), \
-            "DictionaryService should have fetch_lemma_ids_for_translation method"
+        assert hasattr(
+            service, "count_lemma_ids_for_translation"
+        ), "DictionaryService should have count_lemma_ids_for_translation method"
+        assert hasattr(
+            service, "fetch_lemma_ids_for_translation"
+        ), "DictionaryService should have fetch_lemma_ids_for_translation method"
 
     def test_term_extraction_service_new_methods(self):
         """Test TermExtractionService has new ID fetching methods."""
         from app.services.term_extraction_service import TermExtractionService
 
         # Check class has methods (don't instantiate - requires DBService init)
-        assert hasattr(TermExtractionService, 'count_cluster_ids_for_translation'), \
-            "TermExtractionService should have count_cluster_ids_for_translation method"
-        assert hasattr(TermExtractionService, 'fetch_cluster_ids_for_translation'), \
-            "TermExtractionService should have fetch_cluster_ids_for_translation method"
+        assert hasattr(
+            TermExtractionService, "count_cluster_ids_for_translation"
+        ), "TermExtractionService should have count_cluster_ids_for_translation method"
+        assert hasattr(
+            TermExtractionService, "fetch_cluster_ids_for_translation"
+        ), "TermExtractionService should have fetch_cluster_ids_for_translation method"
 
     def test_translate_all_filtered_worker_import(self):
         """Test TranslateAllFilteredWorker exists."""
         from app.ui.workers import TranslateAllFilteredWorker
 
-        assert hasattr(TranslateAllFilteredWorker, 'run'), \
-            "TranslateAllFilteredWorker should have run method"
-        assert hasattr(TranslateAllFilteredWorker, 'cancel'), \
-            "TranslateAllFilteredWorker should have cancel method"
+        assert hasattr(
+            TranslateAllFilteredWorker, "run"
+        ), "TranslateAllFilteredWorker should have run method"
+        assert hasattr(
+            TranslateAllFilteredWorker, "cancel"
+        ), "TranslateAllFilteredWorker should have cancel method"
 
     def test_batch_translate_dialog_scope_support(self):
         """Test BatchTranslateDialog has scope support."""
-        from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog, BatchTranslateDialog
+        from app.ui.dialogs.batch_translate_dialog import (
+            show_batch_translate_dialog,
+            BatchTranslateDialog,
+        )
 
         # Check signature includes new params
         import inspect
+
         sig = inspect.signature(show_batch_translate_dialog)
         params = sig.parameters
-        assert 'scope_enabled' in params, "show_batch_translate_dialog should have scope_enabled param"
-        assert 'filtered_count' in params, "show_batch_translate_dialog should have filtered_count param"
+        assert (
+            "scope_enabled" in params
+        ), "show_batch_translate_dialog should have scope_enabled param"
+        assert (
+            "filtered_count" in params
+        ), "show_batch_translate_dialog should have filtered_count param"
 
         # Check dialog has get_scope method
-        assert hasattr(BatchTranslateDialog, 'get_scope'), \
-            "BatchTranslateDialog should have get_scope method"
+        assert hasattr(
+            BatchTranslateDialog, "get_scope"
+        ), "BatchTranslateDialog should have get_scope method"
 
     def test_dictionary_view_updated(self):
         """Test DictionaryView has updated on_batch_translate."""
         from app.ui.dictionary_view import DictionaryView
 
-        assert hasattr(DictionaryView, '_update_page_size_combo'), \
-            "DictionaryView should have _update_page_size_combo method"
+        assert hasattr(
+            DictionaryView, "_update_page_size_combo"
+        ), "DictionaryView should have _update_page_size_combo method"
 
     def test_terms_view_updated(self):
         """Test TermsView has updated on_batch_translate."""
         from app.ui.terms_view import TermsView
 
-        assert hasattr(TermsView, '_update_page_size_combo'), \
-            "TermsView should have _update_page_size_combo method"
+        assert hasattr(
+            TermsView, "_update_page_size_combo"
+        ), "TermsView should have _update_page_size_combo method"
 
 
 class TestMethodSignatures:
@@ -82,10 +99,10 @@ class TestMethodSignatures:
         params = sig.parameters
 
         # Should have: self, session, project_id, filters, write_mode
-        assert 'session' in params
-        assert 'project_id' in params
-        assert 'filters' in params
-        assert 'write_mode' in params
+        assert "session" in params
+        assert "project_id" in params
+        assert "filters" in params
+        assert "write_mode" in params
 
     def test_fetch_lemma_ids_signature(self):
         """Test fetch_lemma_ids_for_translation signature."""
@@ -97,12 +114,12 @@ class TestMethodSignatures:
         params = sig.parameters
 
         # Should have: self, session, project_id, filters, write_mode, limit, offset
-        assert 'session' in params
-        assert 'project_id' in params
-        assert 'filters' in params
-        assert 'write_mode' in params
-        assert 'limit' in params
-        assert 'offset' in params
+        assert "session" in params
+        assert "project_id" in params
+        assert "filters" in params
+        assert "write_mode" in params
+        assert "limit" in params
+        assert "offset" in params
 
     def test_translate_all_filtered_worker_signature(self):
         """Test TranslateAllFilteredWorker __init__ signature."""
@@ -113,11 +130,11 @@ class TestMethodSignatures:
         params = sig.parameters
 
         # Should have entity_type, project_id, filters, provider_mode, write_mode, etc.
-        assert 'entity_type' in params
-        assert 'project_id' in params
-        assert 'filters' in params
-        assert 'provider_mode' in params
-        assert 'write_mode' in params
+        assert "entity_type" in params
+        assert "project_id" in params
+        assert "filters" in params
+        assert "provider_mode" in params
+        assert "write_mode" in params
 
 
 class TestBasicLogic:

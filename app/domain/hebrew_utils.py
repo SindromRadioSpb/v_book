@@ -1,7 +1,8 @@
 """Hebrew text utilities (M3)."""
-import re
+
 import logging
-from typing import List, Dict, Any
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def is_hebrew_text(text: str) -> bool:
     return bool(re.search(HEBREW_LETTERS, text))
 
 
-def merge_standalone_articles(tokens: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_standalone_articles(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Merge standalone Hebrew article/prefix tokens with following words.
 
@@ -76,28 +77,28 @@ def merge_standalone_articles(tokens: List[Dict[str, Any]]) -> List[Dict[str, An
             skip_next = False
             continue
 
-        token_text = token.get('text', '')
+        token_text = token.get("text", "")
 
         # Check if current token is a standalone prefix (single Hebrew letter)
         if len(token_text) == 1 and token_text in HEBREW_PREFIXES:
             # Check if there's a next token to potentially merge with
             if i + 1 < len(tokens):
                 next_token = tokens[i + 1]
-                next_text = next_token.get('text', '')
+                next_text = next_token.get("text", "")
 
                 # Don't merge if next token is empty or starts with certain characters
                 # Patterns to preserve:
                 # - "ה." / "ה:" / "ה)" - enumerations
                 # - "ה =" - variables/equations
                 # - "ה," / "ה;" - punctuation separation
-                if next_text and next_text[0] in '.,:;)]=':
+                if next_text and next_text[0] in ".,:;)]=":
                     # Keep separate - this is enumeration, variable, or intentional separation
                     merged.append(token)
                 else:
                     # Merge: create new token with merged text
                     # Inherit properties from the base word (next_token), not the article
                     merged_token = next_token.copy()
-                    merged_token['text'] = token_text + next_text
+                    merged_token["text"] = token_text + next_text
                     # Lemma stays as base word's lemma (article removed)
                     # POS stays as base word's POS (article is just a prefix)
 

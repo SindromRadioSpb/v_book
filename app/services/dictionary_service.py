@@ -14,9 +14,9 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import ClassVar, List, Tuple
+from typing import ClassVar
 
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.infra.fts_manager import inspect_lemma_fts_parity
@@ -64,10 +64,7 @@ class DictionaryService:
     def _is_lemma_fts_available(session: Session) -> bool:
         """Return True if lemma_fts FTS5 table exists (O(1) sqlite_master check)."""
         result = session.execute(
-            text(
-                "SELECT name FROM sqlite_master"
-                " WHERE type='table' AND name='lemma_fts'"
-            )
+            text("SELECT name FROM sqlite_master" " WHERE type='table' AND name='lemma_fts'")
         ).fetchone()
         return result is not None
 
@@ -138,7 +135,7 @@ class DictionaryService:
                     logger.warning(
                         "lemma_fts parity unhealthy for Dictionary search on %s; "
                         "falling back to LIKE. Repair with: "
-                        "python scripts/repair_lemma_fts.py --db-path \"%s\". "
+                        'python scripts/repair_lemma_fts.py --db-path "%s". '
                         "Details: %s",
                         cache_key,
                         cache_key,
@@ -207,7 +204,7 @@ class DictionaryService:
         offset: int = 0,
         sort_column: str = "freq_abs",
         sort_direction: str = "desc",
-    ) -> List[Tuple[Lemma, LemmaProjectStat]]:
+    ) -> list[tuple[Lemma, LemmaProjectStat]]:
         """Search lemmas with pagination and filtering.
 
         Args:
@@ -395,13 +392,18 @@ class DictionaryService:
         Returns:
             Total count of lemmas to translate
         """
-        stmt = select(func.count(Lemma.lemma_id.distinct())).select_from(Lemma).join(
-            LemmaProjectStat,
-            (Lemma.lemma_id == LemmaProjectStat.lemma_id)
-            & (Lemma.project_id == LemmaProjectStat.project_id)
-        ).where(
-            Lemma.project_id == project_id,
-            LemmaProjectStat.project_id == project_id,
+        stmt = (
+            select(func.count(Lemma.lemma_id.distinct()))
+            .select_from(Lemma)
+            .join(
+                LemmaProjectStat,
+                (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+                & (Lemma.project_id == LemmaProjectStat.project_id),
+            )
+            .where(
+                Lemma.project_id == project_id,
+                LemmaProjectStat.project_id == project_id,
+            )
         )
 
         # Apply standard filters (pos, hide_noise, search) with FTS5 routing
@@ -411,14 +413,14 @@ class DictionaryService:
         if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
             stmt = stmt.outerjoin(
                 TMEntry,
-                (TMEntry.lemma_id == Lemma.lemma_id) &
-                (TMEntry.kind == "lemma") &
-                (TMEntry.project_id == project_id)
+                (TMEntry.lemma_id == Lemma.lemma_id)
+                & (TMEntry.kind == "lemma")
+                & (TMEntry.project_id == project_id),
             ).where(
                 or_(
                     TMEntry.tm_id.is_(None),
                     TMEntry.translation.is_(None),
-                    TMEntry.translation == ""
+                    TMEntry.translation == "",
                 )
             )
 
@@ -433,7 +435,7 @@ class DictionaryService:
         write_mode: str,
         limit: int,
         offset: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """Fetch lemma IDs matching filters for translation (paginated).
 
         Args:
@@ -447,13 +449,17 @@ class DictionaryService:
         Returns:
             List of lemma_id integers
         """
-        stmt = select(Lemma.lemma_id).join(
-            LemmaProjectStat,
-            (Lemma.lemma_id == LemmaProjectStat.lemma_id)
-            & (Lemma.project_id == LemmaProjectStat.project_id)
-        ).where(
-            Lemma.project_id == project_id,
-            LemmaProjectStat.project_id == project_id,
+        stmt = (
+            select(Lemma.lemma_id)
+            .join(
+                LemmaProjectStat,
+                (Lemma.lemma_id == LemmaProjectStat.lemma_id)
+                & (Lemma.project_id == LemmaProjectStat.project_id),
+            )
+            .where(
+                Lemma.project_id == project_id,
+                LemmaProjectStat.project_id == project_id,
+            )
         )
 
         # Apply standard filters (pos, hide_noise, search) with FTS5 routing
@@ -463,14 +469,14 @@ class DictionaryService:
         if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
             stmt = stmt.outerjoin(
                 TMEntry,
-                (TMEntry.lemma_id == Lemma.lemma_id) &
-                (TMEntry.kind == "lemma") &
-                (TMEntry.project_id == project_id)
+                (TMEntry.lemma_id == Lemma.lemma_id)
+                & (TMEntry.kind == "lemma")
+                & (TMEntry.project_id == project_id),
             ).where(
                 or_(
                     TMEntry.tm_id.is_(None),
                     TMEntry.translation.is_(None),
-                    TMEntry.translation == ""
+                    TMEntry.translation == "",
                 )
             )
 

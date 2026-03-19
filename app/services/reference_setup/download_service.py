@@ -4,17 +4,18 @@ import hashlib
 import logging
 import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
-from .manifest import ReferenceManifest, ManifestEntry, EMBEDDED_MANIFEST
-from .state import SetupState, SetupStage
+from .manifest import EMBEDDED_MANIFEST, ManifestEntry, ReferenceManifest
+from .state import SetupStage, SetupState
 
 logger = logging.getLogger(__name__)
 
 
 class DownloadError(Exception):
     """Download-related error."""
+
     pass
 
 
@@ -61,14 +62,14 @@ class ReferenceDownloadService:
             logger.info("Using embedded manifest as fallback")
             return False
 
-    def get_latest_entry(self) -> Optional[ManifestEntry]:
+    def get_latest_entry(self) -> ManifestEntry | None:
         """Get latest manifest entry."""
         return self.manifest.get_latest()
 
     def download(
         self,
         entry: ManifestEntry,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ) -> Path:
         """
         Download reference corpus database.
@@ -182,7 +183,7 @@ class ReferenceDownloadService:
         output_path: Path,
         start_byte: int,
         total_bytes: int,
-        progress_callback: Optional[Callable[[SetupState], None]],
+        progress_callback: Callable[[SetupState], None] | None,
     ):
         """Download file with HTTP Range support for resume."""
         headers = {}
@@ -273,9 +274,8 @@ class ReferenceDownloadService:
             import zstandard as zstd
 
             dctx = zstd.ZstdDecompressor()
-            with open(compressed_path, "rb") as ifh:
-                with open(output_path, "wb") as ofh:
-                    dctx.copy_stream(ifh, ofh)
+            with open(compressed_path, "rb") as ifh, open(output_path, "wb") as ofh:
+                dctx.copy_stream(ifh, ofh)
 
             logger.info("Decompression complete (zstd)")
             return output_path

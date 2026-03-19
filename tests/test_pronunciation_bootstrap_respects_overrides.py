@@ -10,7 +10,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import PronunciationEntry
-from app.services.pronunciation_bootstrap_service import PronunciationBootstrapService, PronunciationGenerator
+from app.services.pronunciation_bootstrap_service import (
+    PronunciationBootstrapService,
+    PronunciationGenerator,
+)
 from app.services.pronunciation_service import PronunciationService
 
 
@@ -23,7 +26,10 @@ def _workspace_temp_dir(prefix: str) -> Path:
 class _FakeGenerator(PronunciationGenerator):
     def generate(self, lang: str, src_norms: list[str]):
         _ = lang
-        return {norm: {"niqqud_text": f"{norm}_auto", "ipa": None, "notes": "fake"} for norm in src_norms}
+        return {
+            norm: {"niqqud_text": f"{norm}_auto", "ipa": None, "notes": "fake"}
+            for norm in src_norms
+        }
 
 
 def test_bootstrap_respects_manual_override_even_in_rebuild_mode(monkeypatch):

@@ -62,7 +62,11 @@ def test_delete_button_uses_all_selected_documents(monkeypatch, qtbot):
 
     captured = []
     monkeypatch.setattr(view, "_confirm_delete_documents", lambda names: True)
-    monkeypatch.setattr(view, "_start_delete_documents", lambda doc_ids, doc_names: captured.append((doc_ids, doc_names)))
+    monkeypatch.setattr(
+        view,
+        "_start_delete_documents",
+        lambda doc_ids, doc_names: captured.append((doc_ids, doc_names)),
+    )
 
     selection_model = view.docs_table.selectionModel()
     for row in (0, 2):
@@ -130,7 +134,10 @@ def test_delete_confirmation_dialog_lists_all_file_names(qtbot):
     names_list = dialog.findChild(QListWidget)
     assert names_list is not None
     assert names_list.count() == 2
-    assert [names_list.item(i).text() for i in range(names_list.count())] == ["alpha.txt", "beta.txt"]
+    assert [names_list.item(i).text() for i in range(names_list.count())] == [
+        "alpha.txt",
+        "beta.txt",
+    ]
 
 
 def test_ingest_bulk_delete_does_not_call_single_delete_path(monkeypatch):
@@ -150,7 +157,9 @@ def test_ingest_bulk_delete_does_not_call_single_delete_path(monkeypatch):
     monkeypatch.setattr(
         ingest,
         "delete_document",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("single delete path must not be used")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("single delete path must not be used")
+        ),
     )
 
     success_count, error_count = ingest.bulk_delete(SimpleNamespace(), [1, 2])

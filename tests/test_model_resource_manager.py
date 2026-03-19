@@ -8,6 +8,7 @@ Tests verify:
 - is_installed() checks
 - Model listing
 """
+
 import json
 import tempfile
 import pytest
@@ -27,15 +28,12 @@ def temp_models_root(tmp_path):
 @pytest.fixture
 def manager(temp_models_root, monkeypatch):
     """Create ModelResourceManager with temp root."""
+
     # Monkeypatch get_models_root to use temp directory
     def mock_get_models_root(self):
         return temp_models_root
 
-    monkeypatch.setattr(
-        ModelResourceManager,
-        "get_models_root",
-        mock_get_models_root
-    )
+    monkeypatch.setattr(ModelResourceManager, "get_models_root", mock_get_models_root)
 
     return ModelResourceManager()
 
@@ -289,7 +287,9 @@ def test_is_installed_missing_model_file(manager, temp_models_root):
 def test_list_installed_models(manager, temp_models_root):
     """list_installed_models() returns all installed models."""
     # Create two models
-    for i, (model_id, backend) in enumerate([("test/model1", "ctranslate2"), ("test/model2", "transformers")]):
+    for i, (model_id, backend) in enumerate(
+        [("test/model1", "ctranslate2"), ("test/model2", "transformers")]
+    ):
         model_path = manager.model_dir(model_id, backend)
         model_path.mkdir(parents=True)
 

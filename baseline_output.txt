@@ -40,8 +40,7 @@ J:\Project_Vibe\V_book\run_baseline_tests.ps1:123 знак:8
 + - [OK] PyQt6
 +        ~~~~~
 Непредвиденная лексема "PyQt6" в выражении или операторе.
-Выданы сообщения не обо всех ошибках синтаксического анализа.  Исправьте перечисленные в сообщениях ошибки и повторите 
+Выданы сообщения не обо всех ошибках синтаксического анализа.  Исправьте перечисленные в сообщениях ошибки и повторите
 попытку.
     + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
     + FullyQualifiedErrorId : AmpersandNotAllowed
- 

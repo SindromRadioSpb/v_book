@@ -1,14 +1,15 @@
 """D0: Preconditions verification for Terms table math spec."""
-import sys
+
 import io
+import sys
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-print("="*70)
+print("=" * 70)
 print("D0: PRECONDITIONS VERIFICATION")
-print("="*70)
+print("=" * 70)
 
 # ================================================================
 # 1. Check dependencies
@@ -19,29 +20,33 @@ deps_ok = True
 
 try:
     import sqlalchemy
+
     print(f"  ✅ sqlalchemy: {sqlalchemy.__version__}")
 except ImportError:
-    print(f"  ❌ sqlalchemy: NOT INSTALLED")
+    print("  ❌ sqlalchemy: NOT INSTALLED")
     deps_ok = False
 
 try:
     import stanza
+
     print(f"  ✅ stanza: {stanza.__version__}")
 except ImportError:
-    print(f"  ⚠️  stanza: NOT INSTALLED (Mock engine will be used)")
+    print("  ⚠️  stanza: NOT INSTALLED (Mock engine will be used)")
 
 try:
     from PyQt6 import QtCore
+
     print(f"  ✅ PyQt6: {QtCore.PYQT_VERSION_STR}")
 except ImportError:
-    print(f"  ❌ PyQt6: NOT INSTALLED")
+    print("  ❌ PyQt6: NOT INSTALLED")
     deps_ok = False
 
 try:
     import numpy
+
     print(f"  ✅ numpy: {numpy.__version__}")
 except ImportError:
-    print(f"  ❌ numpy: NOT INSTALLED")
+    print("  ❌ numpy: NOT INSTALLED")
     deps_ok = False
 
 if not deps_ok:
@@ -55,8 +60,10 @@ if not deps_ok:
 print("\n[2/6] Checking DB schema...")
 
 from pathlib import Path
+
+from sqlalchemy import inspect, text
+
 from app.services.db_service import DBService
-from sqlalchemy import text, inspect
 
 test_db = Path("verify_preconditions.db")
 if test_db.exists():
@@ -73,7 +80,7 @@ with db_service.get_session() as session:
     schema_version = result.scalar()
     print(f"  ✅ Schema version: {schema_version}")
 
-    if schema_version != '4':
+    if schema_version != "4":
         print(f"  ⚠️  Expected schema version 4, got {schema_version}")
 
     # Check required tables
@@ -81,18 +88,18 @@ with db_service.get_session() as session:
     tables = inspector.get_table_names()
 
     required_tables = [
-        'schema_meta',
-        'library',
-        'dict_project',  # Actual table name in schema
-        'source_corpus',
-        'source_document',
-        'document_text',
-        'document_sentence',
-        'sentence_fts',
-        'ngram',
-        'ngram_project_stat',
-        'term_cluster',
-        'term_cluster_member'
+        "schema_meta",
+        "library",
+        "dict_project",  # Actual table name in schema
+        "source_corpus",
+        "source_document",
+        "document_text",
+        "document_sentence",
+        "sentence_fts",
+        "ngram",
+        "ngram_project_stat",
+        "term_cluster",
+        "term_cluster_member",
     ]
 
     for table in required_tables:
@@ -103,8 +110,8 @@ with db_service.get_session() as session:
             schema_ok = False
 
     # Notes about schema design
-    print(f"  ℹ️  Note: NP chunks stored in 'ngram' table (source_kind='np')")
-    print(f"  ℹ️  Note: Token data stored in 'lemma' and related stat tables")
+    print("  ℹ️  Note: NP chunks stored in 'ngram' table (source_kind='np')")
+    print("  ℹ️  Note: Token data stored in 'lemma' and related stat tables")
 
 DBService.shutdown()
 if test_db.exists():
@@ -119,9 +126,9 @@ if not schema_ok:
 # ================================================================
 print("\n[3/6] Testing project creation and document processing...")
 
-from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
 from app.services.process_service import ProcessService
+from app.services.project_service import ProjectService
 
 test_db = Path("verify_preconditions.db")
 DBService.initialize(test_db)
@@ -140,9 +147,7 @@ try:
     with db_service.get_session() as session:
         # Create project
         project = project_service.create_project(
-            session,
-            "Preconditions Test",
-            "Test project creation"
+            session, "Preconditions Test", "Test project creation"
         )
         print(f"  ✅ Project created: ID={project.project_id}")
 
@@ -152,7 +157,7 @@ try:
 
         # Create test document
         test_file = test_dir / "test.txt"
-        test_file.write_text("בית הספר גדול.", encoding='utf-8')
+        test_file.write_text("בית הספר גדול.", encoding="utf-8")
 
         # Import document
         doc = ingest_service.import_document(session, corpus.corpus_id, test_file)
@@ -170,13 +175,13 @@ try:
     from app.services.term_extraction_service import TermExtractionService
 
     term_service = TermExtractionService()
-    print(f"  ✅ TermExtractionService initialized")
+    print("  ✅ TermExtractionService initialized")
 
     # Check key methods exist
     required_methods = [
-        'extract_terms_for_project',
-        'list_term_clusters',
-        '_cluster_terms',
+        "extract_terms_for_project",
+        "list_term_clusters",
+        "_cluster_terms",
     ]
 
     for method in required_methods:
@@ -189,11 +194,13 @@ try:
 except Exception as e:
     print(f"  ❌ FAILED: {e}")
     import traceback
+
     traceback.print_exc()
     process_ok = False
 
 finally:
     import shutil
+
     if test_dir.exists():
         shutil.rmtree(test_dir)
     DBService.shutdown()
@@ -214,28 +221,24 @@ from app.domain.hebrew_utils import merge_standalone_articles
 # Test before merge (tokenized)
 tokens_before = [
     {"text": "ה", "lemma": "ה", "pos": "DET"},
-    {"text": "ספר", "lemma": "ספר", "pos": "NOUN"}
+    {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
 ]
 
 # Test after merge
 tokens_after = merge_standalone_articles(tokens_before)
 
-if len(tokens_after) == 1 and tokens_after[0]['text'] == "הספר":
-    print(f"  ✅ Normalization works: ['ה', 'ספר'] → ['הספר']")
+if len(tokens_after) == 1 and tokens_after[0]["text"] == "הספר":
+    print("  ✅ Normalization works: ['ה', 'ספר'] → ['הספר']")
 else:
     print(f"  ❌ Normalization broken: got {tokens_after}")
     sys.exit(1)
 
 # Test preservation of enumeration
-tokens_enum = [
-    {"text": "סעיף"},
-    {"text": "ה"},
-    {"text": "."}
-]
+tokens_enum = [{"text": "סעיף"}, {"text": "ה"}, {"text": "."}]
 tokens_enum_result = merge_standalone_articles(tokens_enum)
 
 if len(tokens_enum_result) == 3:
-    print(f"  ✅ Enumeration preserved: ['סעיף', 'ה', '.'] unchanged")
+    print("  ✅ Enumeration preserved: ['סעיף', 'ה', '.'] unchanged")
 else:
     print(f"  ❌ Enumeration not preserved: got {tokens_enum_result}")
     sys.exit(1)
@@ -247,13 +250,11 @@ print("\n[6/6] Checking canonicalizer and stats functions...")
 
 from app.domain.term_extraction.canonicalizer import (
     canonicalize_hebrew_term,
-    has_standalone_function_tokens,
-    choose_representative_term
 )
 
-print(f"  ✅ canonicalize_hebrew_term")
-print(f"  ✅ has_standalone_function_tokens")
-print(f"  ✅ choose_representative_term")
+print("  ✅ canonicalize_hebrew_term")
+print("  ✅ has_standalone_function_tokens")
+print("  ✅ choose_representative_term")
 
 # Test canonicalization
 canonical = canonicalize_hebrew_term("בית הספר")
@@ -261,10 +262,15 @@ print(f"  ✅ Canonicalization test: 'בית הספר' → '{canonical}'")
 
 # Check stats module (association_measures.py)
 try:
-    from app.domain.term_extraction.association_measures import compute_pmi, compute_llr, compute_dice
-    print(f"  ✅ compute_pmi")
-    print(f"  ✅ compute_llr")
-    print(f"  ✅ compute_dice")
+    from app.domain.term_extraction.association_measures import (
+        compute_dice,
+        compute_llr,
+        compute_pmi,
+    )
+
+    print("  ✅ compute_pmi")
+    print("  ✅ compute_llr")
+    print("  ✅ compute_dice")
 except ImportError as e:
     print(f"  ❌ Association measures module import failed: {e}")
     sys.exit(1)
@@ -272,9 +278,9 @@ except ImportError as e:
 # ================================================================
 # Summary
 # ================================================================
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print("✅ ALL PRECONDITIONS PASSED")
-print("="*70)
+print("=" * 70)
 print("\nReady to proceed with controlled verification (D1).")
 print("\nNext steps:")
 print("1. Create project with 3 documents (A, B, C)")

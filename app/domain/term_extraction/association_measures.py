@@ -6,14 +6,14 @@ Implements:
 - LLR (Log-Likelihood Ratio)
 - Dice coefficient
 """
-import math
+
 import logging
-from typing import Optional
+import math
 
 logger = logging.getLogger(__name__)
 
 
-def compute_pmi(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
+def compute_pmi(c_xy: int, c_x: int, c_y: int, n: int) -> float | None:
     """
     Compute Pointwise Mutual Information (PMI) for bigram.
 
@@ -44,7 +44,7 @@ def compute_pmi(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
         return None
 
 
-def compute_tscore(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
+def compute_tscore(c_xy: int, c_x: int, c_y: int, n: int) -> float | None:
     """
     Compute T-score for bigram.
 
@@ -81,7 +81,7 @@ def compute_tscore(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
         return None
 
 
-def compute_llr(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
+def compute_llr(c_xy: int, c_x: int, c_y: int, n: int) -> float | None:
     """
     Compute Log-Likelihood Ratio (LLR) for bigram.
 
@@ -132,17 +132,17 @@ def compute_llr(c_xy: int, c_x: int, c_y: int, n: int) -> Optional[float]:
 
     try:
         llr = 2 * (
-            safe_log_ratio(o11, e11) +
-            safe_log_ratio(o12, e12) +
-            safe_log_ratio(o21, e21) +
-            safe_log_ratio(o22, e22)
+            safe_log_ratio(o11, e11)
+            + safe_log_ratio(o12, e12)
+            + safe_log_ratio(o21, e21)
+            + safe_log_ratio(o22, e22)
         )
         return llr
     except (ValueError, ZeroDivisionError):
         return None
 
 
-def compute_dice(c_xy: int, c_x: int, c_y: int) -> Optional[float]:
+def compute_dice(c_xy: int, c_x: int, c_y: int) -> float | None:
     """
     Compute Dice coefficient for bigram.
 
@@ -185,22 +185,16 @@ def compute_all_measures(c_xy: int, c_x: int, c_y: int, n: int) -> dict:
         Dict with keys: pmi, tscore, llr, dice (values can be None)
     """
     return {
-        'pmi': compute_pmi(c_xy, c_x, c_y, n),
-        'tscore': compute_tscore(c_xy, c_x, c_y, n),
-        'llr': compute_llr(c_xy, c_x, c_y, n),
-        'dice': compute_dice(c_xy, c_x, c_y),
+        "pmi": compute_pmi(c_xy, c_x, c_y, n),
+        "tscore": compute_tscore(c_xy, c_x, c_y, n),
+        "llr": compute_llr(c_xy, c_x, c_y, n),
+        "dice": compute_dice(c_xy, c_x, c_y),
     }
 
 
 def compute_trigram_llr_approx(
-    c_xyz: int,
-    c_xy: int,
-    c_yz: int,
-    c_x: int,
-    c_y: int,
-    c_z: int,
-    n: int
-) -> Optional[float]:
+    c_xyz: int, c_xy: int, c_yz: int, c_x: int, c_y: int, c_z: int, n: int
+) -> float | None:
     """
     Approximate LLR for trigram using pairwise minimum.
 

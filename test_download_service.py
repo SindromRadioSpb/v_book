@@ -7,8 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.services.reference_setup import (
-    ReferenceDownloadService,
     EMBEDDED_MANIFEST,
+    ReferenceDownloadService,
     SetupState,
 )
 
@@ -57,7 +57,7 @@ def test_state_persistence():
     # Load
     loaded_state = SetupState.load_from_file(state_file)
     if loaded_state:
-        print(f"[OK] State loaded successfully")
+        print("[OK] State loaded successfully")
         print(f"  Mode: {loaded_state.mode}")
         print(f"  Stage: {loaded_state.stage.value}")
         print(f"  Progress: {loaded_state.get_progress_percentage():.2f}%")
@@ -86,7 +86,7 @@ def test_download_service_init():
     state_file = Path("test_download_state.json")
 
     service = ReferenceDownloadService(download_dir, state_file)
-    print(f"[OK] Service initialized")
+    print("[OK] Service initialized")
     print(f"  Download dir: {service.download_dir}")
     print(f"  State file: {service.state_file}")
     print(f"  Can resume: {service.can_resume()}")
@@ -152,6 +152,7 @@ def main():
     except Exception as e:
         print(f"\n[FAIL] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

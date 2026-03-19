@@ -3,6 +3,7 @@
 This test walks through the entire translation chain to identify
 exactly where the translation is failing.
 """
+
 import pytest
 import tempfile
 import sqlite3
@@ -137,6 +138,7 @@ def test_diagnostic_full_flow():
     except Exception as e:
         print(f"\n  [ERROR] EXCEPTION in TranslationService: {e}")
         import traceback
+
         traceback.print_exc()
         return
 
@@ -192,6 +194,7 @@ def test_diagnostic_full_flow():
     except Exception as e:
         print(f"\n  [ERROR] EXCEPTION in BatchMTTranslateService: {e}")
         import traceback
+
         traceback.print_exc()
         return
 
@@ -199,11 +202,14 @@ def test_diagnostic_full_flow():
     print("\n[STEP 5] Verifying database write...")
     try:
         from app.infra.sa_models import TMEntry
+
         with db_service.get_session() as session:
             entries = session.query(TMEntry).filter_by(kind="lemma", project_id=None).all()
             print(f"  [OK] Found {len(entries)} TM entries")
             for entry in entries:
-                print(f"    - {entry.src_text} -> {entry.translation} (status={entry.status}, origin={entry.origin})")
+                print(
+                    f"    - {entry.src_text} -> {entry.translation} (status={entry.status}, origin={entry.origin})"
+                )
 
         if not entries:
             print("\n  [ERROR] PROBLEM: No TM entries were written to database!")
@@ -214,6 +220,7 @@ def test_diagnostic_full_flow():
     except Exception as e:
         print(f"\n  [ERROR] EXCEPTION checking database: {e}")
         import traceback
+
         traceback.print_exc()
         return
 

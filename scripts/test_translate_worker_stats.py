@@ -35,9 +35,9 @@ def test_worker_attributes():
     )
 
     # Check attributes exist
-    assert hasattr(worker, 'succeeded'), "Worker должен иметь атрибут succeeded"
-    assert hasattr(worker, 'skipped'), "Worker должен иметь атрибут skipped"
-    assert hasattr(worker, 'failed'), "Worker должен иметь атрибут failed"
+    assert hasattr(worker, "succeeded"), "Worker должен иметь атрибут succeeded"
+    assert hasattr(worker, "skipped"), "Worker должен иметь атрибут skipped"
+    assert hasattr(worker, "failed"), "Worker должен иметь атрибут failed"
 
     # Check initial values
     assert worker.succeeded == 0, "Начальное значение succeeded должно быть 0"
@@ -68,11 +68,11 @@ def test_worker_signals():
     )
 
     # Check signals exist
-    assert hasattr(worker, 'progress'), "Worker должен иметь сигнал progress"
-    assert hasattr(worker, 'stats_updated'), "Worker должен иметь сигнал stats_updated"
-    assert hasattr(worker, 'row_translated'), "Worker должен иметь сигнал row_translated"
-    assert hasattr(worker, 'paused'), "Worker должен иметь сигнал paused"
-    assert hasattr(worker, 'resumed'), "Worker должен иметь сигнал resumed"
+    assert hasattr(worker, "progress"), "Worker должен иметь сигнал progress"
+    assert hasattr(worker, "stats_updated"), "Worker должен иметь сигнал stats_updated"
+    assert hasattr(worker, "row_translated"), "Worker должен иметь сигнал row_translated"
+    assert hasattr(worker, "paused"), "Worker должен иметь сигнал paused"
+    assert hasattr(worker, "resumed"), "Worker должен иметь сигнал resumed"
 
     print("[OK] Worker имеет все необходимые сигналы:")
     print("   - progress(int, int)")
@@ -107,7 +107,9 @@ def test_signal_connections():
 
     def on_stats_updated(succeeded, skipped, failed):
         received_stats.append((succeeded, skipped, failed))
-        print(f"   [STATS] stats_updated получен: succeeded={succeeded}, skipped={skipped}, failed={failed}")
+        print(
+            f"   [STATS] stats_updated получен: succeeded={succeeded}, skipped={skipped}, failed={failed}"
+        )
 
     def on_progress(completed, total):
         received_progress.append((completed, total))

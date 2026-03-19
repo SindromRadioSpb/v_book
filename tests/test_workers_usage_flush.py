@@ -24,7 +24,7 @@ def test_batch_translate_worker_forces_usage_flush(monkeypatch):
             return DummySessionCtx()
 
     class DummyBatchService:
-        def execute_batch(self, session, items, options, progress_callback, cancel_check):
+        def execute_batch(self, session, items, options, progress_callback, cancel_check, item_callback=None):
             return BatchTranslateResult(
                 total=1,
                 succeeded=1,

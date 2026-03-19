@@ -81,7 +81,9 @@ def test_review_good_updates_due_and_state(monkeypatch, qtbot):
 
         monkeypatch.setattr(UserDictionariesView, "load_dictionaries", lambda self: None)
         monkeypatch.setattr(UserDictionariesView, "load_items", lambda self: None)
-        monkeypatch.setattr("app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine))
+        monkeypatch.setattr(
+            "app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine)
+        )
 
         view = UserDictionariesView(project_id=None)
         qtbot.addWidget(view)
@@ -94,7 +96,9 @@ def test_review_good_updates_due_and_state(monkeypatch, qtbot):
         view.on_review_rate("good")
 
         with Session(engine) as session:
-            updated = session.execute(select(StudyProgress).where(StudyProgress.id == progress_id)).scalar_one()
+            updated = session.execute(
+                select(StudyProgress).where(StudyProgress.id == progress_id)
+            ).scalar_one()
             assert updated.review_count == 1
             assert updated.interval_days == 1
     finally:
@@ -123,7 +127,9 @@ def test_review_again_increments_lapse_and_resets(monkeypatch, qtbot):
 
         monkeypatch.setattr(UserDictionariesView, "load_dictionaries", lambda self: None)
         monkeypatch.setattr(UserDictionariesView, "load_items", lambda self: None)
-        monkeypatch.setattr("app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine))
+        monkeypatch.setattr(
+            "app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine)
+        )
 
         view = UserDictionariesView(project_id=None)
         qtbot.addWidget(view)
@@ -136,7 +142,9 @@ def test_review_again_increments_lapse_and_resets(monkeypatch, qtbot):
         view.on_review_rate("again")
 
         with Session(engine) as session:
-            updated = session.execute(select(StudyProgress).where(StudyProgress.id == progress_id)).scalar_one()
+            updated = session.execute(
+                select(StudyProgress).where(StudyProgress.id == progress_id)
+            ).scalar_one()
             assert updated.review_count == 0
             assert updated.interval_days == 1
             assert updated.lapse_count == 1
@@ -150,7 +158,9 @@ def test_review_play_audio_uses_current_card(monkeypatch, qtbot):
     try:
         monkeypatch.setattr(UserDictionariesView, "load_dictionaries", lambda self: None)
         monkeypatch.setattr(UserDictionariesView, "load_items", lambda self: None)
-        monkeypatch.setattr("app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine))
+        monkeypatch.setattr(
+            "app.ui.user_dictionaries_view.DBService.get_instance", lambda: _FakeDBService(engine)
+        )
 
         view = UserDictionariesView(project_id=None)
         qtbot.addWidget(view)

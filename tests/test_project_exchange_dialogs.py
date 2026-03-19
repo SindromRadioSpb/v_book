@@ -28,7 +28,9 @@ def test_import_preview_dialog_renders_preflight_plan(qtbot):
         final_project_name="Bundle Project (imported 2026-03-14)",
         name_conflict=True,
         total_rows=10,
-        warnings=["Project name 'Bundle Project' already exists, renamed to 'Bundle Project (imported 2026-03-14)'"],
+        warnings=[
+            "Project name 'Bundle Project' already exists, renamed to 'Bundle Project (imported 2026-03-14)'"
+        ],
     )
 
     dialog = ImportPreviewDialog(preflight)

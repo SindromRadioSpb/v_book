@@ -7,4 +7,5 @@ class ReferenceCorpusReadonlyError(Exception):
     Reference corpora (is_general_corpus=1) are read-only for document operations
     and cannot be deleted.
     """
+
     pass

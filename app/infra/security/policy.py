@@ -3,8 +3,8 @@
 All security limits, thresholds, and policies in one place.
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # =============================================================================
 # FILE SIZE LIMITS (bytes)
@@ -31,8 +31,8 @@ MAX_FTS5_OPERATORS = 10  # Maximum AND/OR/NOT/NEAR operators in query
 MAX_FTS5_WILDCARDS = 5  # Maximum * wildcards in query
 MAX_FTS5_PARENTHESES = 10  # Maximum nested parentheses depth
 
-FTS5_SPECIAL_CHARS = ['"', '*', '(', ')', '[', ']', '{', '}']
-FTS5_RESERVED_WORDS = ['AND', 'OR', 'NOT', 'NEAR']
+FTS5_SPECIAL_CHARS = ['"', "*", "(", ")", "[", "]", "{", "}"]
+FTS5_RESERVED_WORDS = ["AND", "OR", "NOT", "NEAR"]
 
 # =============================================================================
 # PATH SECURITY
@@ -77,9 +77,9 @@ else:  # Linux
 # =============================================================================
 
 LOG_SANITIZE_CHARS = {
-    '\r': '_',
-    '\n': '_',
-    '\t': ' ',
+    "\r": "_",
+    "\n": "_",
+    "\t": " ",
 }
 
 # =============================================================================

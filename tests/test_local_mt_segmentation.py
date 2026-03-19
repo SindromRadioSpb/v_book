@@ -7,6 +7,7 @@ Tests verify:
 - Short segment merging
 - Reassembly correctness
 """
+
 import pytest
 
 from app.services.local_mt.segmentation import (
@@ -182,7 +183,10 @@ def test_reassemble_with_translations():
     text = "Hello world this is long enough. Another sentence that is also long enough."
 
     segments = segment_text(text, min_chars=10)
-    translations = ["Shalom olam ze maspik aroch", "Mishpat acher she gam hu aroch maspik"]  # Hebrew translations
+    translations = [
+        "Shalom olam ze maspik aroch",
+        "Mishpat acher she gam hu aroch maspik",
+    ]  # Hebrew translations
 
     result = reassemble_text(segments, translations)
 
@@ -204,7 +208,7 @@ def test_reassemble_preserves_structure():
 
     # Newlines should be preserved
     assert "línea" in result
-    assert result.count('\n') >= 1  # At least one newline preserved
+    assert result.count("\n") >= 1  # At least one newline preserved
 
 
 def test_reassemble_length_mismatch():
@@ -319,6 +323,6 @@ def test_roundtrip_identity():
     assert "First sentence" in result
     assert "Second sentence" in result
     assert "Third sentence" in result
-    assert result.count('.') == 1
-    assert result.count('!') == 1
-    assert result.count('?') == 1
+    assert result.count(".") == 1
+    assert result.count("!") == 1
+    assert result.count("?") == 1

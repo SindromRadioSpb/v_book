@@ -6,9 +6,9 @@ import logging
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
@@ -33,8 +33,8 @@ from app.infra.db_path_resolver import (
     SETTINGS_KEY_DEFERRED_DB_PATH,
     SETTINGS_KEY_DEFERRED_DB_REASON,
     STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
-    clear_deferred_db_startup_guard,
     classify_db_profile,
+    clear_deferred_db_startup_guard,
     discover_baseline_db_path,
     get_default_db_path,
     inspect_db_path,
@@ -85,8 +85,8 @@ class DatabaseSwitchDialog(QDialog):
         *,
         current_db_path: Path,
         parent=None,
-        settings: Optional[SettingsService] = None,
-        restart_callback: Optional[Callable[[Path], bool]] = None,
+        settings: SettingsService | None = None,
+        restart_callback: Callable[[Path], bool] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Switch Database")
@@ -97,8 +97,8 @@ class DatabaseSwitchDialog(QDialog):
         self.baseline_db_path = discover_baseline_db_path()
         self.restart_callback = restart_callback
 
-        self._backup_worker: Optional[_DBBackupWorker] = None
-        self._backup_progress: Optional[QProgressDialog] = None
+        self._backup_worker: _DBBackupWorker | None = None
+        self._backup_progress: QProgressDialog | None = None
 
         self._init_ui()
         self._load_current_metadata()
@@ -154,7 +154,9 @@ class DatabaseSwitchDialog(QDialog):
         self.default_radio.setChecked(True)
         select_layout.addWidget(self.default_radio)
         self.default_path_label = QLabel(str(self.default_db_path))
-        self.default_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.default_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         self.default_path_label.setWordWrap(True)
         select_layout.addWidget(self.default_path_label)
 
@@ -178,7 +180,9 @@ class DatabaseSwitchDialog(QDialog):
         self.baseline_path_label = QLabel(
             str(self.baseline_db_path) if self.baseline_db_path is not None else "-"
         )
-        self.baseline_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.baseline_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         self.baseline_path_label.setWordWrap(True)
         select_layout.addWidget(self.baseline_path_label)
 
@@ -190,7 +194,9 @@ class DatabaseSwitchDialog(QDialog):
 
         self.reconnect_guidance_label = QLabel("")
         self.reconnect_guidance_label.setWordWrap(True)
-        self.reconnect_guidance_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.reconnect_guidance_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         root.addWidget(self.reconnect_guidance_label)
 
         self.status_label = QLabel("")
@@ -273,7 +279,9 @@ class DatabaseSwitchDialog(QDialog):
         if info.exists:
             lines.append(f"Size: {info.size_bytes / (1024 * 1024):.1f} MB")
             if info.schema_version is not None:
-                lines.append(f"Schema: {info.schema_version} (app supports up to {info.supported_schema_version})")
+                lines.append(
+                    f"Schema: {info.schema_version} (app supports up to {info.supported_schema_version})"
+                )
             else:
                 lines.append("Schema: unknown")
         else:
@@ -290,8 +298,12 @@ class DatabaseSwitchDialog(QDialog):
 
     def _build_reconnect_guidance(self, *, selected: Path, info, profile: str) -> str:
         guidance: list[str] = []
-        deferred_path = str(self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_PATH, "") or "").strip()
-        deferred_reason = str(self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_REASON, "") or "").strip()
+        deferred_path = str(
+            self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_PATH, "") or ""
+        ).strip()
+        deferred_reason = str(
+            self.settings.get_string(SETTINGS_KEY_DEFERRED_DB_REASON, "") or ""
+        ).strip()
         selected_resolved = selected.resolve()
         if deferred_path:
             try:
@@ -299,12 +311,16 @@ class DatabaseSwitchDialog(QDialog):
             except Exception:
                 deferred_resolved = None
             if deferred_resolved is not None and deferred_resolved == selected_resolved:
-                guidance.append("This DB was previously deferred at startup. Switching now is the explicit reconnect path.")
+                guidance.append(
+                    "This DB was previously deferred at startup. Switching now is the explicit reconnect path."
+                )
                 if deferred_reason:
                     guidance.append(f"Deferred reason: {deferred_reason}")
 
         if selected_resolved == self.default_db_path.resolve():
-            guidance.append("Recommended for the fastest local startup and the safest default operator workflow.")
+            guidance.append(
+                "Recommended for the fastest local startup and the safest default operator workflow."
+            )
             guidance.append(
                 "Use this when you want to keep working immediately and reconnect a heavier DB later from Tools -> Switch Database."
             )
@@ -313,7 +329,11 @@ class DatabaseSwitchDialog(QDialog):
             guidance.append(
                 "Recommended reconnect order: confirm the target DB, switch once, then let the restart complete before making another DB change."
             )
-            if info.exists and info.schema_version is not None and info.supported_schema_version > 0:
+            if (
+                info.exists
+                and info.schema_version is not None
+                and info.supported_schema_version > 0
+            ):
                 if info.schema_version < info.supported_schema_version:
                     guidance.append(
                         "This DB is older than the current app schema. Expect one longer restart while backup and migration complete."
@@ -348,7 +368,9 @@ class DatabaseSwitchDialog(QDialog):
         selected = self._selected_path()
         info = inspect_db_path(selected)
         if not info.exists or info.error:
-            QMessageBox.warning(self, "Backup", "Backup is available only for existing readable DB files.")
+            QMessageBox.warning(
+                self, "Backup", "Backup is available only for existing readable DB files."
+            )
             return
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -390,7 +412,7 @@ class DatabaseSwitchDialog(QDialog):
         QMessageBox.warning(self, "Backup Failed", str(message))
         self._set_status("Backup failed.")
 
-    def _validate_selected(self) -> tuple[bool, str, Optional[str]]:
+    def _validate_selected(self) -> tuple[bool, str, str | None]:
         selected = self._selected_path()
         info = inspect_db_path(selected)
 
@@ -455,7 +477,7 @@ def show_database_switch_dialog(
     *,
     current_db_path: Path,
     parent=None,
-    restart_callback: Optional[Callable[[Path], bool]] = None,
+    restart_callback: Callable[[Path], bool] | None = None,
 ) -> int:
     dialog = DatabaseSwitchDialog(
         current_db_path=current_db_path,

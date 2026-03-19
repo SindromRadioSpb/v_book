@@ -1,5 +1,4 @@
-﻿
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """PATCH-05: Real pipeline benchmark harness (sandbox-only, deterministic)."""
 
 from __future__ import annotations
@@ -27,9 +26,7 @@ LOG = logging.getLogger("pipeline_bench")
 DEFAULT_PHONIKUD_MODEL_PATH = r"M:\V_book\HDLE_Processing\models\phonikud-1.0.int8.onnx"
 DEFAULT_GCT_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_translait"
 DEFAULT_GCTTS_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_tts"
-DEFAULT_SOURCE_DB = (
-    r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db"
-)
+DEFAULT_SOURCE_DB = r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db"
 DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
 DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"
 DEFAULT_BENCH_PREFIX = "BENCH_"
@@ -119,7 +116,7 @@ def _is_forbidden_m_path(path: Path) -> bool:
 
 def _is_expected_j_path(path: Path) -> bool:
     normalized = str(path.resolve()).replace("/", "\\").upper()
-    return normalized.startswith("J:\\")
+    return normalized.startswith("J:\\") or normalized.startswith("E:\\")
 
 
 def _sqlite_backup(source_path: Path, dest_path: Path) -> None:
@@ -330,9 +327,7 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
     source_db = Path(source_db_raw).expanduser().resolve() if source_db_raw else None
     prepared_source_db_raw = str(getattr(args, "prepared_source_db", "") or "").strip()
     prepared_source_db = (
-        Path(prepared_source_db_raw).expanduser().resolve()
-        if prepared_source_db_raw
-        else None
+        Path(prepared_source_db_raw).expanduser().resolve() if prepared_source_db_raw else None
     )
     temp_root_raw = getattr(args, "temp_root", DEFAULT_TEMP_ROOT)
     temp_root = Path(temp_root_raw).expanduser().resolve()
@@ -368,7 +363,11 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         cleanup_prefix = str(getattr(args, "cleanup_prefix", DEFAULT_BENCH_PREFIX) or "").strip()
         if not cleanup_project_name and not cleanup_prefix:
             raise ValueError("cleanup requires --cleanup-project-name or --cleanup-prefix")
-        if cleanup_project_name and cleanup_prefix and not cleanup_project_name.startswith(cleanup_prefix):
+        if (
+            cleanup_project_name
+            and cleanup_prefix
+            and not cleanup_project_name.startswith(cleanup_prefix)
+        ):
             raise ValueError("--cleanup-project-name must start with --cleanup-prefix for safety")
         return
     if args.scenario == "reset_sandbox":
@@ -430,7 +429,9 @@ def _validate_runtime_contract(args: argparse.Namespace) -> None:
         raise ValueError("--lemma-limit/--term-limit/--sentence-limit must be > 0")
 
 
-def resolve_tier_preset(args: argparse.Namespace, raw_argv: list[str] | None = None) -> dict[str, Any]:
+def resolve_tier_preset(
+    args: argparse.Namespace, raw_argv: list[str] | None = None
+) -> dict[str, Any]:
     """Resolve optional benchmark tier without breaking explicit CLI overrides."""
     tier_name = str(getattr(args, "tier", "") or "").strip().lower()
     if not tier_name:
@@ -845,7 +846,9 @@ def _build_bench_project_summary(
     )
     lemma_count = (
         session.execute(
-            select(func.count()).select_from(Lemma).where(Lemma.project_id == int(bench_project.project_id))
+            select(func.count())
+            .select_from(Lemma)
+            .where(Lemma.project_id == int(bench_project.project_id))
         ).scalar()
         or 0
     )
@@ -943,6 +946,7 @@ def _resolve_bench_slice(
         ),
         False,
     )
+
 
 def _clone_slice_into_bench_project(
     session,
@@ -1187,7 +1191,9 @@ def _clone_slice_into_bench_project(
 
     session.commit()
 
-    bench_doc_ids = [doc_id_map[doc_id] for doc_id in selected_source_doc_ids if doc_id in doc_id_map]
+    bench_doc_ids = [
+        doc_id_map[doc_id] for doc_id in selected_source_doc_ids if doc_id in doc_id_map
+    ]
     bench_sentence_ids = (
         session.execute(
             select(DocumentSentence.sentence_id)
@@ -1228,37 +1234,34 @@ def _load_scope_rows(
     sentence_limit: int,
 ) -> dict[str, list[dict[str, Any]]]:
     from sqlalchemy import select
-    from app.infra.sa_models import DocumentSentence, Lemma, SourceCorpus, SourceDocument, TermCluster
+    from app.infra.sa_models import (
+        DocumentSentence,
+        Lemma,
+        SourceCorpus,
+        SourceDocument,
+        TermCluster,
+    )
 
-    lemmas = (
-        session.execute(
-            select(Lemma.lemma_id, Lemma.lemma_text, Lemma.norm_text)
-            .where(Lemma.project_id == bench_project_id)
-            .order_by(Lemma.lemma_id.asc())
-            .limit(lemma_limit)
-        )
-        .all()
-    )
-    terms = (
-        session.execute(
-            select(TermCluster.cluster_id, TermCluster.representative_he, TermCluster.norm_text)
-            .where(TermCluster.project_id == bench_project_id)
-            .order_by(TermCluster.cluster_id.asc())
-            .limit(term_limit)
-        )
-        .all()
-    )
-    sentences = (
-        session.execute(
-            select(DocumentSentence.sentence_id, DocumentSentence.text)
-            .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
-            .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
-            .where(SourceCorpus.project_id == bench_project_id)
-            .order_by(DocumentSentence.sentence_id.asc())
-            .limit(sentence_limit)
-        )
-        .all()
-    )
+    lemmas = session.execute(
+        select(Lemma.lemma_id, Lemma.lemma_text, Lemma.norm_text)
+        .where(Lemma.project_id == bench_project_id)
+        .order_by(Lemma.lemma_id.asc())
+        .limit(lemma_limit)
+    ).all()
+    terms = session.execute(
+        select(TermCluster.cluster_id, TermCluster.representative_he, TermCluster.norm_text)
+        .where(TermCluster.project_id == bench_project_id)
+        .order_by(TermCluster.cluster_id.asc())
+        .limit(term_limit)
+    ).all()
+    sentences = session.execute(
+        select(DocumentSentence.sentence_id, DocumentSentence.text)
+        .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
+        .join(SourceCorpus, SourceDocument.corpus_id == SourceCorpus.corpus_id)
+        .where(SourceCorpus.project_id == bench_project_id)
+        .order_by(DocumentSentence.sentence_id.asc())
+        .limit(sentence_limit)
+    ).all()
 
     return {
         "lemmas": [
@@ -1292,7 +1295,13 @@ def _load_scope_rows(
 
 def _run_extract_terms(session, *, bench_project_id: int, overwrite: bool) -> dict[str, Any]:
     from sqlalchemy import func, select
-    from app.infra.sa_models import Lemma, SourceCorpus, SourceDocument, TermCluster, DocumentSentence
+    from app.infra.sa_models import (
+        Lemma,
+        SourceCorpus,
+        SourceDocument,
+        TermCluster,
+        DocumentSentence,
+    )
     from app.services.term_extraction_service import TermExtractionService
 
     started = _utc_now().isoformat()
@@ -1306,7 +1315,9 @@ def _run_extract_terms(session, *, bench_project_id: int, overwrite: bool) -> di
     session.commit()
 
     if not report.success:
-        raise RuntimeError(report.error_message or "extract_terms_for_project returned success=False")
+        raise RuntimeError(
+            report.error_message or "extract_terms_for_project returned success=False"
+        )
 
     lemma_count = int(
         session.execute(
@@ -1315,7 +1326,9 @@ def _run_extract_terms(session, *, bench_project_id: int, overwrite: bool) -> di
     )
     term_count = int(
         session.execute(
-            select(func.count(TermCluster.cluster_id)).where(TermCluster.project_id == bench_project_id)
+            select(func.count(TermCluster.cluster_id)).where(
+                TermCluster.project_id == bench_project_id
+            )
         ).scalar_one()
     )
     sentence_count = int(
@@ -1348,6 +1361,7 @@ def _run_extract_terms(session, *, bench_project_id: int, overwrite: bool) -> di
         },
     }
 
+
 def _run_niqqud_bootstrap(
     session,
     *,
@@ -1365,7 +1379,9 @@ def _run_niqqud_bootstrap(
         PhonikudPronunciationGenerator,
         PronunciationBootstrapService,
     )
-    from app.services.sentence_pronunciation_bootstrap_service import SentencePronunciationBootstrapService
+    from app.services.sentence_pronunciation_bootstrap_service import (
+        SentencePronunciationBootstrapService,
+    )
 
     started = _utc_now().isoformat()
     t0 = time.perf_counter()
@@ -1575,6 +1591,7 @@ def _run_translate_bootstrap(
         "details": summaries,
     }
 
+
 def _run_tts_bootstrap(
     session,
     *,
@@ -1601,7 +1618,9 @@ def _run_tts_bootstrap(
     def _handle(scope: str, row_id: int, text: str, norm_hint: str, kind: str) -> None:
         nonlocal pending
         summaries[scope]["total"] += 1
-        norm_value = (norm_hint or "").strip() or (normalize_for_tm(src_lang, text, kind).norm or "").strip()
+        norm_value = (norm_hint or "").strip() or (
+            normalize_for_tm(src_lang, text, kind).norm or ""
+        ).strip()
         if not norm_value:
             summaries[scope]["failed"] += 1
             if len(error_samples) < 5:
@@ -1692,11 +1711,23 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     db_info = report.get("db") or {}
     bench_info = report.get("bench") or {}
     timings = report.get("timings") or {}
-    cleanup_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "cleanup_sandbox" else {}
-    reset_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "reset_sandbox" else {}
-    verify_details = ((report.get("stages") or [{}])[0].get("details") or {}) if report.get("scenario") == "verify_bench_fixture" else {}
+    cleanup_details = (
+        ((report.get("stages") or [{}])[0].get("details") or {})
+        if report.get("scenario") == "cleanup_sandbox"
+        else {}
+    )
+    reset_details = (
+        ((report.get("stages") or [{}])[0].get("details") or {})
+        if report.get("scenario") == "reset_sandbox"
+        else {}
+    )
+    verify_details = (
+        ((report.get("stages") or [{}])[0].get("details") or {})
+        if report.get("scenario") == "verify_bench_fixture"
+        else {}
+    )
     post_run_maintenance = db_info.get("post_run_maintenance") or {}
-    cycle_actions = ((report.get("maintenance_cycle") or {}).get("actions") or [])
+    cycle_actions = (report.get("maintenance_cycle") or {}).get("actions") or []
     stage_total = round(
         sum(float(stage.get("duration_sec", 0.0) or 0.0) for stage in report.get("stages", [])),
         3,
@@ -1772,13 +1803,9 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
         for check_name, check_value in sorted((verify_details.get("checks") or {}).items()):
             lines.append(f"- {check_name}: `{bool(check_value)}`")
         if verify_details.get("expected_source_doc_ids"):
-            lines.append(
-                f"- Expected source docs: `{verify_details['expected_source_doc_ids']}`"
-            )
+            lines.append(f"- Expected source docs: `{verify_details['expected_source_doc_ids']}`")
         if verify_details.get("fixture_source_doc_ids"):
-            lines.append(
-                f"- Fixture source docs: `{verify_details['fixture_source_doc_ids']}`"
-            )
+            lines.append(f"- Fixture source docs: `{verify_details['fixture_source_doc_ids']}`")
         if verify_details.get("bench_doc_ids"):
             lines.append(f"- Bench docs: `{verify_details['bench_doc_ids']}`")
         lines.append("")
@@ -1788,7 +1815,9 @@ def _write_markdown_report(report: dict[str, Any], md_path: Path) -> None:
     lines.append(f"- Working DB copy: `{float(timings.get('working_copy_sec', 0.0)):.3f} s`")
     lines.append(f"- DB initialize: `{float(timings.get('db_initialize_sec', 0.0)):.3f} s`")
     lines.append(f"- Bench slice clone: `{float(timings.get('slice_clone_sec', 0.0)):.3f} s`")
-    lines.append(f"- Pre-stage overhead total: `{float(timings.get('pre_stage_overhead_sec', 0.0)):.3f} s`")
+    lines.append(
+        f"- Pre-stage overhead total: `{float(timings.get('pre_stage_overhead_sec', 0.0)):.3f} s`"
+    )
     if timings.get("post_run_maintenance_sec") is not None:
         lines.append(
             f"- Post-run maintenance: `{float(timings.get('post_run_maintenance_sec', 0.0)):.3f} s`"
@@ -1998,15 +2027,22 @@ def run(argv: list[str] | None = None) -> int:
             t0 = time.perf_counter()
             DBService.initialize(base_db)
             report["timings"]["db_initialize_sec"] = round(time.perf_counter() - t0, 3)
-            report["timings"]["pre_stage_overhead_sec"] = float(report["timings"]["db_initialize_sec"])
+            report["timings"]["pre_stage_overhead_sec"] = float(
+                report["timings"]["db_initialize_sec"]
+            )
             db_service = DBService.get_instance()
             with db_service.get_session() as session:
                 stage_result = _run_stage(
                     "cleanup_sandbox",
                     lambda: _run_cleanup_sandbox(
                         session,
-                        cleanup_project_name=str(getattr(args, "cleanup_project_name", "") or "").strip() or None,
-                        cleanup_prefix=str(getattr(args, "cleanup_prefix", DEFAULT_BENCH_PREFIX) or "").strip(),
+                        cleanup_project_name=str(
+                            getattr(args, "cleanup_project_name", "") or ""
+                        ).strip()
+                        or None,
+                        cleanup_prefix=str(
+                            getattr(args, "cleanup_prefix", DEFAULT_BENCH_PREFIX) or ""
+                        ).strip(),
                     ),
                 )
             report["stages"].append(stage_result)
@@ -2090,7 +2126,9 @@ def run(argv: list[str] | None = None) -> int:
                 )
             report["stages"].append(stage_result)
             report["bench"] = dict(stage_result.get("details") or {})
-            report["timings"]["slice_clone_sec"] = float(stage_result.get("duration_sec", 0.0) or 0.0)
+            report["timings"]["slice_clone_sec"] = float(
+                stage_result.get("duration_sec", 0.0) or 0.0
+            )
             report["timings"]["pre_stage_overhead_sec"] = round(
                 float(report["timings"].get("base_copy_sec", 0.0))
                 + float(report["timings"].get("db_initialize_sec", 0.0))
@@ -2152,7 +2190,9 @@ def run(argv: list[str] | None = None) -> int:
                 )
             report["stages"].append(stage_result)
             report["bench"] = dict(stage_result.get("details") or {})
-            report["timings"]["slice_clone_sec"] = float(stage_result.get("duration_sec", 0.0) or 0.0)
+            report["timings"]["slice_clone_sec"] = float(
+                stage_result.get("duration_sec", 0.0) or 0.0
+            )
             report["timings"]["pre_stage_overhead_sec"] = round(
                 float(report["timings"].get("base_copy_sec", 0.0))
                 + float(report["timings"].get("db_initialize_sec", 0.0))
@@ -2213,9 +2253,7 @@ def run(argv: list[str] | None = None) -> int:
         source_db = Path(args.source_db).expanduser().resolve()
         prepared_source_db_raw = str(getattr(args, "prepared_source_db", "") or "").strip()
         prepared_source_db = (
-            Path(prepared_source_db_raw).expanduser().resolve()
-            if prepared_source_db_raw
-            else None
+            Path(prepared_source_db_raw).expanduser().resolve() if prepared_source_db_raw else None
         )
         reset_source_db = prepared_source_db or source_db
         base_db = Path(args.db_path).expanduser().resolve()
@@ -2352,7 +2390,9 @@ def run(argv: list[str] | None = None) -> int:
                             ),
                         )
                     elif stage_name == "translate_bootstrap":
-                        key_path = _resolve_json_path(args.gct_key_path, "Google Cloud Translate key")
+                        key_path = _resolve_json_path(
+                            args.gct_key_path, "Google Cloud Translate key"
+                        )
                         _configure_google_cloud_translate(key_path)
                         stage_result = _run_stage(
                             stage_name,
@@ -2387,7 +2427,8 @@ def run(argv: list[str] | None = None) -> int:
 
             report["overall_status"] = (
                 "pass"
-                if report["stages"] and all(stage.get("status") == "ok" for stage in report["stages"])
+                if report["stages"]
+                and all(stage.get("status") == "ok" for stage in report["stages"])
                 else "fail"
             )
             if (
@@ -2439,9 +2480,8 @@ def run(argv: list[str] | None = None) -> int:
         maintenance_results: dict[str, Any] = {}
         working_db_raw = (report.get("db") or {}).get("working_db")
         base_db_raw = (report.get("db") or {}).get("base_sandbox_db")
-        should_maintain = (
-            report.get("scenario") in {"cleanup_sandbox", "reset_sandbox"}
-            or bool((report.get("timings") or {}).get("working_db_reused"))
+        should_maintain = report.get("scenario") in {"cleanup_sandbox", "reset_sandbox"} or bool(
+            (report.get("timings") or {}).get("working_db_reused")
         )
         if should_maintain:
             seen_paths: set[str] = set()

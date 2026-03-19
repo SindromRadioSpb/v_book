@@ -252,4 +252,3 @@ logger.warning(
 4. Capture logs + stack traces
 5. Confirm root causes
 6. Proceed to PATCH-01 (redesign)
-

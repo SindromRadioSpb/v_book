@@ -4,10 +4,10 @@ This module provides a context manager for acquiring exclusive process locks,
 with support for detecting and removing stale locks from terminated processes.
 """
 
+import logging
 import os
 import sys
 import time
-import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -52,17 +52,13 @@ class ProcessLock:
                         import psutil
 
                         if not psutil.pid_exists(pid):
-                            logger.warning(
-                                f"Removing stale lock (PID {pid} not running)"
-                            )
+                            logger.warning(f"Removing stale lock (PID {pid} not running)")
                             self.lock_path.unlink()
                         else:
                             logger.debug(f"Lock held by running process PID {pid}")
 
                     except ImportError:
-                        logger.warning(
-                            "psutil not available - cannot detect stale locks reliably"
-                        )
+                        logger.warning("psutil not available - cannot detect stale locks reliably")
                         # Fallback: check if we can delete (Windows will prevent if locked)
                         try:
                             self.lock_path.unlink()
@@ -99,7 +95,7 @@ class ProcessLock:
                         logger.debug(f"Lock acquired: {self.lock_path}")
                         break
 
-                    except IOError:
+                    except OSError:
                         # Lock held by another process
                         self.lock_file.close()
                         self.lock_file = None
@@ -140,7 +136,7 @@ class ProcessLock:
                         logger.debug(f"Lock acquired: {self.lock_path}")
                         break
 
-                    except IOError:
+                    except OSError:
                         # Lock held by another process
                         self.lock_file.close()
                         self.lock_file = None

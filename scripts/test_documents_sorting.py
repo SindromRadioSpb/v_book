@@ -1,7 +1,16 @@
 """Test script for Documents table sorting functionality."""
+
 import sys
-from PyQt6.QtWidgets import QApplication, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QLabel
+from PyQt6.QtWidgets import (
+    QApplication,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+    QLabel,
+)
 from PyQt6.QtCore import Qt
+
 
 def test_numeric_sorting():
     """Test that numeric columns sort correctly."""
@@ -17,9 +26,9 @@ def test_numeric_sorting():
     # Create table with same structure as DocumentsView
     table = QTableWidget()
     table.setColumnCount(8)
-    table.setHorizontalHeaderLabels([
-        "ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens", "Imported", "Path"
-    ])
+    table.setHorizontalHeaderLabels(
+        ["ID", "File Name", "Size (KB)", "Status", "Sentences", "Tokens", "Imported", "Path"]
+    )
     table.setSortingEnabled(True)
 
     # Add test data (similar to load_documents)
@@ -87,5 +96,6 @@ def test_numeric_sorting():
 
     sys.exit(app.exec())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     test_numeric_sorting()

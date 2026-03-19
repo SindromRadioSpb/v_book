@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Mapping
+from collections.abc import Mapping
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QProgressBar,
+    QPushButton,
     QTextEdit,
     QVBoxLayout,
 )
@@ -23,8 +23,7 @@ _STATUS_STYLE_RED = "font-size: 14px; font-weight: bold; color: #b42318;"
 _STATUS_STYLE_AMBER = "font-size: 14px; font-weight: bold; color: #b26a00;"
 _META_LABEL_STYLE = "color: #666; font-size: 12px;"
 _ACTIVITY_LOG_STYLE = (
-    "QTextEdit { background-color: #f5f5f5; font-family: Consolas, monospace; "
-    "font-size: 11px; }"
+    "QTextEdit { background-color: #f5f5f5; font-family: Consolas, monospace; " "font-size: 11px; }"
 )
 
 
@@ -84,9 +83,7 @@ class StagedOperationProgressDialog(QDialog):
         self.setMinimumHeight(420)
         self.setModal(True)
         self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.CustomizeWindowHint
-            | Qt.WindowType.WindowTitleHint
+            Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint
         )
 
         layout = QVBoxLayout(self)

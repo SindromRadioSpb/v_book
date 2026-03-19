@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -67,11 +67,11 @@ class SnapshotReadinessService:
             stats_invalid_docs=int(coverage["stats_invalid_docs"]),
             coverage_is_degraded=bool(coverage["coverage_is_degraded"]),
             coverage_source=str(coverage["coverage_source"]),
-            latest_backfill_run_id=(
-                int(latest_run.run_id) if latest_run is not None else None
-            ),
+            latest_backfill_run_id=(int(latest_run.run_id) if latest_run is not None else None),
             latest_backfill_status=(
-                str(latest_run.status or "") if latest_run is not None and latest_run.status else None
+                str(latest_run.status or "")
+                if latest_run is not None and latest_run.status
+                else None
             ),
             latest_backfill_stage=(
                 str(latest_run.stage or "") if latest_run is not None and latest_run.stage else None
@@ -100,10 +100,10 @@ class SnapshotReadinessService:
 
     @staticmethod
     def _utc_now() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     @staticmethod
-    def _parse_note_payload(note: Optional[str]) -> dict[str, Any]:
+    def _parse_note_payload(note: str | None) -> dict[str, Any]:
         if not note:
             return {}
         try:
@@ -140,12 +140,16 @@ class SnapshotReadinessService:
             int(getattr(run, "docs_processed", 0) or 0),
             int(getattr(run, "docs_total", 0) or 0),
         )
-        is_success = str(getattr(run, "status", "") or "") == "ok" and str(
-            getattr(run, "stage", "") or ""
-        ) == "completed"
+        is_success = (
+            str(getattr(run, "status", "") or "") == "ok"
+            and str(getattr(run, "stage", "") or "") == "completed"
+        )
         if not is_success:
             return {"kind": "none", "validated_doc_count": 0, "run": run}
-        if validation_scope == "bounded" and validated_doc_count >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS:
+        if (
+            validation_scope == "bounded"
+            and validated_doc_count >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS
+        ):
             return {
                 "kind": "bounded",
                 "validated_doc_count": validated_doc_count,
@@ -171,7 +175,7 @@ class SnapshotReadinessService:
     def _find_bounded_validation_evidence(
         self,
         runs: list[ProcessorRun],
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         for run in runs:
             evidence = self._build_validation_evidence(run)
             if evidence.get("kind") == "bounded":
@@ -179,38 +183,42 @@ class SnapshotReadinessService:
         return None
 
     def _get_snapshot_coverage(self, session: Session, project_id: int) -> dict[str, Any]:
-        row = session.execute(
-            text(
-                "SELECT "
-                "  COUNT(sd.doc_id) AS processed_docs,"
-                "  COALESCE(SUM(COALESCE(sd.sentence_count, 0)), 0) AS sentence_count_total,"
-                "  COALESCE(SUM(CASE "
-                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
-                "    THEN COALESCE(sd.snapshot_sentence_count, 0) "
-                "    ELSE 0 END), 0) AS snapshot_count_total,"
-                "  SUM(CASE "
-                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
-                "      AND COALESCE(sd.sentence_count, 0) > 0 "
-                "      AND COALESCE(sd.snapshot_sentence_count, 0) >= COALESCE(sd.sentence_count, 0) "
-                "    THEN 1 ELSE 0 END) AS fully_covered_docs,"
-                "  SUM(CASE "
-                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
-                "      AND COALESCE(sd.snapshot_sentence_count, 0) = 0 "
-                "    THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
-                "  SUM(CASE "
-                "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
-                "      AND COALESCE(sd.snapshot_sentence_count, 0) > 0 "
-                "      AND COALESCE(sd.snapshot_sentence_count, 0) < COALESCE(sd.sentence_count, 0) "
-                "    THEN 1 ELSE 0 END) AS partial_snapshot_docs,"
-                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' THEN 1 ELSE 0 END) AS stats_valid_docs,"
-                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'unknown' THEN 1 ELSE 0 END) AS stats_unknown_docs,"
-                "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'invalid' THEN 1 ELSE 0 END) AS stats_invalid_docs "
-                "FROM source_document sd "
-                "JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id "
-                "WHERE sc.project_id = :pid AND sd.status = 'processed'"
-            ),
-            {"pid": int(project_id)},
-        ).mappings().one()
+        row = (
+            session.execute(
+                text(
+                    "SELECT "
+                    "  COUNT(sd.doc_id) AS processed_docs,"
+                    "  COALESCE(SUM(COALESCE(sd.sentence_count, 0)), 0) AS sentence_count_total,"
+                    "  COALESCE(SUM(CASE "
+                    "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                    "    THEN COALESCE(sd.snapshot_sentence_count, 0) "
+                    "    ELSE 0 END), 0) AS snapshot_count_total,"
+                    "  SUM(CASE "
+                    "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                    "      AND COALESCE(sd.sentence_count, 0) > 0 "
+                    "      AND COALESCE(sd.snapshot_sentence_count, 0) >= COALESCE(sd.sentence_count, 0) "
+                    "    THEN 1 ELSE 0 END) AS fully_covered_docs,"
+                    "  SUM(CASE "
+                    "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                    "      AND COALESCE(sd.snapshot_sentence_count, 0) = 0 "
+                    "    THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
+                    "  SUM(CASE "
+                    "    WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' "
+                    "      AND COALESCE(sd.snapshot_sentence_count, 0) > 0 "
+                    "      AND COALESCE(sd.snapshot_sentence_count, 0) < COALESCE(sd.sentence_count, 0) "
+                    "    THEN 1 ELSE 0 END) AS partial_snapshot_docs,"
+                    "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'valid' THEN 1 ELSE 0 END) AS stats_valid_docs,"
+                    "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'unknown' THEN 1 ELSE 0 END) AS stats_unknown_docs,"
+                    "  SUM(CASE WHEN COALESCE(sd.snapshot_stats_state, 'unknown') = 'invalid' THEN 1 ELSE 0 END) AS stats_invalid_docs "
+                    "FROM source_document sd "
+                    "JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id "
+                    "WHERE sc.project_id = :pid AND sd.status = 'processed'"
+                ),
+                {"pid": int(project_id)},
+            )
+            .mappings()
+            .one()
+        )
 
         processed_docs = int(row["processed_docs"] or 0)
         sentence_count_total = int(row["sentence_count_total"] or 0)
@@ -230,9 +238,7 @@ class SnapshotReadinessService:
                 else None
             )
             doc_full_coverage_pct = (
-                round(fully_covered_docs / processed_docs * 100.0, 4)
-                if processed_docs
-                else None
+                round(fully_covered_docs / processed_docs * 100.0, 4) if processed_docs else None
             )
         return {
             "processed_docs": processed_docs,
@@ -254,8 +260,8 @@ class SnapshotReadinessService:
         self,
         project: DictProject,
         coverage: dict[str, Any],
-        latest_run: Optional[ProcessorRun],
-        bounded_evidence: Optional[dict[str, Any]],
+        latest_run: ProcessorRun | None,
+        bounded_evidence: dict[str, Any] | None,
     ) -> str:
         processed_docs = int(coverage["processed_docs"])
         fully_covered_docs = int(coverage["fully_covered_docs"])
@@ -280,9 +286,9 @@ class SnapshotReadinessService:
         self,
         project: DictProject,
         coverage: dict[str, Any],
-        latest_run: Optional[ProcessorRun],
+        latest_run: ProcessorRun | None,
         contract_state: str,
-        bounded_evidence: Optional[dict[str, Any]],
+        bounded_evidence: dict[str, Any] | None,
     ) -> str:
         if contract_state == "no_processed_docs":
             return "No processed documents exist for this project yet."
@@ -300,7 +306,9 @@ class SnapshotReadinessService:
             return "All processed documents currently have sentence snapshots."
         if contract_state == "bounded_validated":
             evidence_run = bounded_evidence.get("run") if bounded_evidence else None
-            evidence_docs = int(bounded_evidence.get("validated_doc_count") or 0) if bounded_evidence else 0
+            evidence_docs = (
+                int(bounded_evidence.get("validated_doc_count") or 0) if bounded_evidence else 0
+            )
             if evidence_run is not None and evidence_docs > 0:
                 return (
                     "Bounded staged validation exists for this workflow. "
@@ -317,8 +325,12 @@ class SnapshotReadinessService:
                     "Some processed documents already have sentence snapshots. "
                     "Use safe read-only coverage checks before any explicit backfill decision."
                 )
-            return "Partial snapshot coverage exists, but no recent snapshot backfill run was found."
-        if bool(getattr(project, "is_general_corpus", 0)) or bool(getattr(project, "is_reference", 0)):
+            return (
+                "Partial snapshot coverage exists, but no recent snapshot backfill run was found."
+            )
+        if bool(getattr(project, "is_general_corpus", 0)) or bool(
+            getattr(project, "is_reference", 0)
+        ):
             return (
                 "Reference-scale project. Heavy backfill requires the explicit decision gate "
                 "documented in the runbook."

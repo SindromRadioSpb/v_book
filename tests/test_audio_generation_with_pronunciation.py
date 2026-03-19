@@ -10,7 +10,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.domain.normalization.normalizer import normalize_for_tm
-from app.infra.audio.base_provider import AudioGenerationRequest, AudioGenerationResult, BaseAudioProvider
+from app.infra.audio.base_provider import (
+    AudioGenerationRequest,
+    AudioGenerationResult,
+    BaseAudioProvider,
+)
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.sa_models import AudioAsset, PronunciationEntry
 from app.services.audio_generation_service import AudioGenerationService
@@ -88,7 +92,9 @@ def _workspace_temp_dir(prefix: str) -> Path:
 
 
 def _setup_registry(monkeypatch, provider):
-    monkeypatch.setattr("app.services.audio_generation_service.register_default_audio_providers", lambda: 0)
+    monkeypatch.setattr(
+        "app.services.audio_generation_service.register_default_audio_providers", lambda: 0
+    )
     AudioProvidersRegistry.reset()
     registry = AudioProvidersRegistry()
     registry.register(provider)
@@ -192,7 +198,9 @@ def test_source_payload_sanitizer_removes_taamim_and_bidi_chars(monkeypatch):
         _setup_registry(monkeypatch, _CaptureProvider())
 
         service = AudioGenerationService(settings=_SettingsStub())
-        raw_source = "\u05E8\u05B7\u05AB\u05DB\u05B6\u05D1\u200F_\u200D-\u05DE\u05D4\u05D9\u05E8\u05D5\u05EA"
+        raw_source = (
+            "\u05E8\u05B7\u05AB\u05DB\u05B6\u05D1\u200F_\u200D-\u05DE\u05D4\u05D9\u05E8\u05D5\u05EA"
+        )
         with Session(engine) as session:
             result = service.generate_one(
                 session,

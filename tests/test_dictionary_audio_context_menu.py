@@ -97,14 +97,26 @@ def _build_dictionary_view(selected_count: int):
     view.set_lemmas_noise_status_bulk = lambda _is_noise: None
     view.set_lemma_noise_status = lambda _row, _is_noise: None
 
-    state = {"translate": 0, "generate": 0, "play": 0, "playlist": 0, "add": 0, "edit_pron": 0, "bootstrap": 0}
+    state = {
+        "translate": 0,
+        "generate": 0,
+        "play": 0,
+        "playlist": 0,
+        "add": 0,
+        "edit_pron": 0,
+        "bootstrap": 0,
+    }
     view.on_batch_translate = lambda: state.__setitem__("translate", state["translate"] + 1)
     view.on_generate_audio_selected = lambda: state.__setitem__("generate", state["generate"] + 1)
     view.on_play_audio_selected = lambda: state.__setitem__("play", state["play"] + 1)
     view.on_add_selected_to_playlist = lambda: state.__setitem__("playlist", state["playlist"] + 1)
     view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add", state["add"] + 1)
-    view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron", state["edit_pron"] + 1)
-    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap", state["bootstrap"] + 1)
+    view.on_edit_pronunciation_selected = lambda: state.__setitem__(
+        "edit_pron", state["edit_pron"] + 1
+    )
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__(
+        "bootstrap", state["bootstrap"] + 1
+    )
     return view, state
 
 
@@ -132,7 +144,15 @@ def test_dictionary_context_menu_includes_audio_actions(monkeypatch):
     FakeMenu.last.actions[5].triggered.emit()
     FakeMenu.last.actions[6].triggered.emit()
 
-    assert state == {"translate": 1, "generate": 1, "play": 1, "playlist": 1, "add": 1, "edit_pron": 1, "bootstrap": 1}
+    assert state == {
+        "translate": 1,
+        "generate": 1,
+        "play": 1,
+        "playlist": 1,
+        "add": 1,
+        "edit_pron": 1,
+        "bootstrap": 1,
+    }
 
 
 def test_dictionary_selected_pronunciation_items_use_surface_norm():
@@ -156,7 +176,11 @@ def test_dictionary_selected_pronunciation_items_use_surface_norm():
 def test_dictionary_bootstrap_refreshes_view_on_success(monkeypatch):
     view = DictionaryView.__new__(DictionaryView)
     view._selected_pronunciation_items = lambda: [
-        {"src_lang": "he", "src_text": "בפלדה", "src_norm": normalize_for_tm("he", "בפלדה", "surface").norm}
+        {
+            "src_lang": "he",
+            "src_text": "בפלדה",
+            "src_norm": normalize_for_tm("he", "בפלדה", "surface").norm,
+        }
     ]
     state = {"search": 0}
     view.perform_search = lambda: state.__setitem__("search", state["search"] + 1)

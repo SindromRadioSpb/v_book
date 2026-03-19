@@ -30,6 +30,7 @@ try:
 
     # Test query validation
     from app.infra.security import validate_query_complexity
+
     try:
         validate_query_complexity("*" * 10)  # Too many wildcards
         print("  FAIL Query validation should have failed!")
@@ -60,6 +61,7 @@ try:
 
     try:
         from app.infra.security import MAX_DOCUMENT_SIZE
+
         validate_file_size(temp_path, MAX_DOCUMENT_SIZE)
         print("  OK File size validation works")
     finally:
@@ -111,6 +113,7 @@ try:
 except Exception as e:
     print(f"  FAIL Audit log failed: {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 
@@ -222,6 +225,7 @@ try:
 except Exception as e:
     print(f"  FAIL Migration application failed: {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 

@@ -1,6 +1,6 @@
 """NP-chunk extraction from processed sentences (M5.3)."""
+
 import logging
-from typing import List, Dict, Set
 
 from app.domain.hebrew_utils import merge_standalone_articles
 
@@ -8,24 +8,24 @@ logger = logging.getLogger(__name__)
 
 # Stop POS tags - these terminate NP candidates
 STOP_POS = {
-    'PUNCT',   # Punctuation
-    'ADP',     # Adposition (prepositions)
-    'CCONJ',   # Coordinating conjunction
-    'SCONJ',   # Subordinating conjunction
-    'PRON',    # Pronoun
-    'VERB',    # Verb
-    'AUX',     # Auxiliary
-    'PART',    # Particle
+    "PUNCT",  # Punctuation
+    "ADP",  # Adposition (prepositions)
+    "CCONJ",  # Coordinating conjunction
+    "SCONJ",  # Subordinating conjunction
+    "PRON",  # Pronoun
+    "VERB",  # Verb
+    "AUX",  # Auxiliary
+    "PART",  # Particle
 }
 
 # Core NP POS tags
-CORE_NP_POS = {'NOUN', 'PROPN'}
+CORE_NP_POS = {"NOUN", "PROPN"}
 
 # Modifier POS tags
-MODIFIER_POS = {'ADJ', 'NUM'}
+MODIFIER_POS = {"ADJ", "NUM"}
 
 # DET allowed only as first token
-DET_POS = {'DET'}
+DET_POS = {"DET"}
 
 
 def is_valid_np_token(pos: str, is_first: bool = False) -> bool:
@@ -47,10 +47,8 @@ def is_valid_np_token(pos: str, is_first: bool = False) -> bool:
 
 
 def extract_np_chunks_from_sentence(
-    tokens: List[Dict],
-    min_len: int = 2,
-    max_len: int = 5
-) -> List[Dict]:
+    tokens: list[dict], min_len: int = 2, max_len: int = 5
+) -> list[dict]:
     """
     Extract noun phrase chunks from a single sentence.
 
@@ -84,7 +82,7 @@ def extract_np_chunks_from_sentence(
     current_start_idx = 0
 
     for idx, token in enumerate(tokens):
-        if token['pos'] in STOP_POS:
+        if token["pos"] in STOP_POS:
             # Save current segment if not empty
             if current_segment:
                 segments.append((current_segment, current_start_idx))
@@ -110,7 +108,7 @@ def extract_np_chunks_from_sentence(
 
                 # Extract tokens and POS
                 span_tokens = [t[0] for t in span]
-                pos_tags = [t['pos'] for t in span_tokens]
+                pos_tags = [t["pos"] for t in span_tokens]
                 token_indices = [t[1] for t in span]
 
                 # Validate NP composition
@@ -122,25 +120,27 @@ def extract_np_chunks_from_sentence(
                 span_tokens = merge_standalone_articles(span_tokens)
 
                 # Build surface and lemma forms
-                surface_tokens = [tok['text'] for tok in span_tokens]
-                lemma_tokens = [tok['lemma'] for tok in span_tokens]
+                surface_tokens = [tok["text"] for tok in span_tokens]
+                lemma_tokens = [tok["lemma"] for tok in span_tokens]
 
-                surface_text = ' '.join(surface_tokens)
-                lemma_phrase = ' '.join(lemma_tokens)
-                pos_pattern = '|'.join(pos_tags)
+                surface_text = " ".join(surface_tokens)
+                lemma_phrase = " ".join(lemma_tokens)
+                pos_pattern = "|".join(pos_tags)
 
-                np_chunks.append({
-                    'n': length,
-                    'surface_text': surface_text,
-                    'lemma_phrase': lemma_phrase,
-                    'pos_pattern': pos_pattern,
-                    'token_ids': token_indices,
-                })
+                np_chunks.append(
+                    {
+                        "n": length,
+                        "surface_text": surface_text,
+                        "lemma_phrase": lemma_phrase,
+                        "pos_pattern": pos_pattern,
+                        "token_ids": token_indices,
+                    }
+                )
 
     return np_chunks
 
 
-def _is_valid_np_span(pos_tags: List[str]) -> bool:
+def _is_valid_np_span(pos_tags: list[str]) -> bool:
     """
     Validate NP span according to composition rules.
 

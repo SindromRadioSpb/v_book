@@ -22,14 +22,16 @@ print(f"Size: {db_path.stat().st_size / (1024**3):.2f} GB")
 print()
 
 # Document status
-cur.execute("""
+cur.execute(
+    """
     SELECT status, COUNT(*) as count
     FROM source_document sd
     JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
     WHERE sc.project_id = 1
     GROUP BY status
     ORDER BY status
-""")
+"""
+)
 
 print("Document Status:")
 print("-" * 80)
@@ -37,9 +39,9 @@ total = 0
 processed = 0
 for status, count in cur.fetchall():
     total += count
-    if status == 'processed':
+    if status == "processed":
         processed = count
-    pct = (count / 387639 * 100)
+    pct = count / 387639 * 100
     print(f"  {status:12s}: {count:7,} ({pct:5.1f}%)")
 
 print(f"  {'TOTAL':12s}: {total:7,}")
@@ -56,11 +58,13 @@ if total > 0:
 cur.execute("SELECT COUNT(*) FROM lemma WHERE project_id = 1")
 lemma_count = cur.fetchone()[0]
 
-cur.execute("""
+cur.execute(
+    """
     SELECT SUM(freq_abs)
     FROM lemma_project_stat
     WHERE project_id = 1
-""")
+"""
+)
 token_count = cur.fetchone()[0] or 0
 
 print("Lemma Statistics:")
@@ -72,7 +76,8 @@ if processed > 0:
 print()
 
 # Latest documents
-cur.execute("""
+cur.execute(
+    """
     SELECT doc_id, status
     FROM source_document sd
     JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
@@ -80,7 +85,8 @@ cur.execute("""
       AND status IN ('processed', 'processing')
     ORDER BY doc_id DESC
     LIMIT 5
-""")
+"""
+)
 
 print("Latest processed:")
 for doc_id, status in cur.fetchall():
@@ -88,7 +94,8 @@ for doc_id, status in cur.fetchall():
 print()
 
 # Processing time
-cur.execute("""
+cur.execute(
+    """
     SELECT
         MIN(processed_at) as first,
         MAX(processed_at) as last
@@ -97,7 +104,8 @@ cur.execute("""
     WHERE sc.project_id = 1
       AND status = 'processed'
       AND processed_at IS NOT NULL
-""")
+"""
+)
 times = cur.fetchone()
 if times and times[0]:
     print("Processing timeline:")

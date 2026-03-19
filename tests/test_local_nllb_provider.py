@@ -8,9 +8,10 @@ Tests verify:
 - Error handling
 - Worker lifecycle management
 """
+
 import pytest
 from unittest.mock import Mock, MagicMock, patch
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.infra.translators.base_provider import (
@@ -54,47 +55,11 @@ def mock_model_manager():
 @pytest.fixture
 def db_session():
     """Create in-memory database session for glossary testing."""
+    from app.infra.sa_models import TMEntry, TMAlias
+
     engine = create_engine("sqlite:///:memory:")
-
-    # Create minimal TM schema
-    with engine.connect() as conn:
-        conn.execute(text("PRAGMA foreign_keys = OFF"))
-
-        conn.execute(text("""
-            CREATE TABLE tm_entry (
-                tm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NULL,
-                kind TEXT NOT NULL,
-                src_lang TEXT NOT NULL,
-                tgt_lang TEXT NOT NULL,
-                src_text TEXT NOT NULL,
-                src_norm TEXT NOT NULL,
-                translation TEXT NOT NULL,
-                translation_norm TEXT NULL,
-                pos TEXT NULL,
-                domain TEXT NULL,
-                notes TEXT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                confidence REAL NULL,
-                origin TEXT NOT NULL,
-                source_ref TEXT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                approved_at TEXT NULL,
-                approved_by TEXT NULL
-            )
-        """))
-
-        conn.execute(text("""
-            CREATE TABLE tm_alias (
-                alias_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tm_id INTEGER NOT NULL,
-                alias_text TEXT NOT NULL,
-                alias_norm TEXT NOT NULL
-            )
-        """))
-
-        conn.commit()
+    TMEntry.__table__.create(engine, checkfirst=True)
+    TMAlias.__table__.create(engine, checkfirst=True)
 
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
@@ -144,8 +109,13 @@ def test_map_iso_to_nllb_unsupported():
 
 def test_provider_properties(mock_model_manager, mock_worker):
     """Provider properties are correct."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             assert provider.provider_id == "local_nllb"
@@ -157,8 +127,13 @@ def test_provider_properties(mock_model_manager, mock_worker):
 
 def test_provider_healthcheck(mock_model_manager, mock_worker):
     """Healthcheck returns worker status."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             # Worker alive
@@ -185,8 +160,13 @@ def test_translate_simple(mock_model_manager, mock_worker):
         inference_time_ms=100.0,
     )
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             request = TranslationRequest(
@@ -212,8 +192,13 @@ def test_translate_simple(mock_model_manager, mock_worker):
 
 def test_translate_empty_text(mock_model_manager, mock_worker):
     """Translate empty text returns empty."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             request = TranslationRequest(
@@ -237,6 +222,7 @@ def test_translate_empty_text(mock_model_manager, mock_worker):
 
 def test_translate_long_text(mock_model_manager, mock_worker):
     """Long text is segmented and reassembled."""
+
     # Mock worker to return segment-by-segment translations
     def mock_translate(req: WorkerRequest) -> WorkerResult:
         # Simple mock: add [TRANSLATED] marker
@@ -249,8 +235,13 @@ def test_translate_long_text(mock_model_manager, mock_worker):
 
     mock_worker.translate.side_effect = mock_translate
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             # Long text with multiple sentences
@@ -301,8 +292,13 @@ def test_translate_with_glossary(mock_model_manager, mock_worker, db_session):
         inference_time_ms=100.0,
     )
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider(db_session=db_session)
 
             request = TranslationRequest(
@@ -329,8 +325,13 @@ def test_translate_without_glossary(mock_model_manager, mock_worker):
         inference_time_ms=100.0,
     )
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             # No db_session provided
             provider = LocalNLLBProvider(db_session=None)
 
@@ -354,8 +355,13 @@ def test_translate_without_glossary(mock_model_manager, mock_worker):
 
 def test_translate_unsupported_language(mock_model_manager, mock_worker):
     """Unsupported language returns error."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             request = TranslationRequest(
@@ -382,8 +388,13 @@ def test_translate_worker_error(mock_model_manager, mock_worker):
         error="Worker failed",
     )
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             request = TranslationRequest(
@@ -396,13 +407,21 @@ def test_translate_worker_error(mock_model_manager, mock_worker):
 
             assert result.is_error
             assert result.error_kind == TranslationErrorKind.SERVER
-            assert "Worker translation error" in result.error_message or "Translation failed" in result.error_message
+            assert (
+                "Worker translation error" in result.error_message
+                or "Translation failed" in result.error_message
+            )
 
 
 def test_translate_no_worker(mock_model_manager):
     """Translation without worker returns error."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=None):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=None
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
             provider.worker = None  # Force no worker
 
@@ -426,8 +445,13 @@ def test_translate_no_worker(mock_model_manager):
 
 def test_provider_shutdown(mock_model_manager, mock_worker):
     """Provider shuts down worker cleanly."""
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             provider.shutdown()
@@ -444,7 +468,10 @@ def test_provider_init_model_not_installed():
     mock_manager = Mock()
     mock_manager.is_installed = Mock(return_value=(False, "Model not found"))
 
-    with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+        return_value=mock_manager,
+    ):
         with pytest.raises(RuntimeError, match="Model not installed"):
             LocalNLLBProvider()
 
@@ -463,8 +490,13 @@ def test_translate_various_language_pairs(mock_model_manager, mock_worker):
         inference_time_ms=100.0,
     )
 
-    with patch("app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker):
-        with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager", return_value=mock_model_manager):
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.start_worker", return_value=mock_worker
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
             provider = LocalNLLBProvider()
 
             # Test pairs

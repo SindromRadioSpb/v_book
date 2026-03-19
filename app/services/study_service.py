@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
@@ -30,18 +28,18 @@ class StudyService:
     MIN_EASE_FACTOR = 1.3
 
     @staticmethod
-    def _now(now: Optional[datetime] = None) -> datetime:
-        value = now or datetime.now(timezone.utc)
+    def _now(now: datetime | None = None) -> datetime:
+        value = now or datetime.now(UTC)
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @staticmethod
     def _to_iso(dt_value: datetime) -> str:
-        return dt_value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return dt_value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     @staticmethod
-    def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+    def _parse_iso(ts: str | None) -> datetime | None:
         if not ts:
             return None
         value = ts.strip()
@@ -52,8 +50,8 @@ class StudyService:
                 value = value[:-1] + "+00:00"
             dt_value = datetime.fromisoformat(value)
             if dt_value.tzinfo is None:
-                dt_value = dt_value.replace(tzinfo=timezone.utc)
-            return dt_value.astimezone(timezone.utc)
+                dt_value = dt_value.replace(tzinfo=UTC)
+            return dt_value.astimezone(UTC)
         except Exception:
             return None
 
@@ -61,7 +59,7 @@ class StudyService:
         self,
         session: Session,
         canonical_hash: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> int:
         """Ensure global progress row exists for canonical hash."""
         clean_hash = (canonical_hash or "").strip()
@@ -95,7 +93,7 @@ class StudyService:
         session: Session,
         progress_id: int,
         state: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> None:
         """Optional compatibility seed for legacy imported `study_state` values."""
         row = session.get(StudyProgress, progress_id)
@@ -132,21 +130,23 @@ class StudyService:
     def get_progress_summaries(
         self,
         session: Session,
-        canonical_hashes: List[str],
-        now: Optional[datetime] = None,
-    ) -> Dict[str, StudyProgressSummaryDTO]:
+        canonical_hashes: list[str],
+        now: datetime | None = None,
+    ) -> dict[str, StudyProgressSummaryDTO]:
         """Resolve progress summaries in batch."""
         now_dt = self._now(now)
         keys = sorted({(h or "").strip() for h in canonical_hashes if (h or "").strip()})
         if not keys:
             return {}
 
-        rows = session.execute(
-            select(StudyProgress).where(StudyProgress.canonical_hash.in_(keys))
-        ).scalars().all()
+        rows = (
+            session.execute(select(StudyProgress).where(StudyProgress.canonical_hash.in_(keys)))
+            .scalars()
+            .all()
+        )
         by_hash = {row.canonical_hash: row for row in rows}
 
-        result: Dict[str, StudyProgressSummaryDTO] = {}
+        result: dict[str, StudyProgressSummaryDTO] = {}
         for key in keys:
             row = by_hash.get(key)
             if not row:
@@ -192,8 +192,8 @@ class StudyService:
         dictionary_id: int | None,
         scope_origin_project_id: int | None,
         limit: int,
-        now: Optional[datetime] = None,
-    ) -> List[StudyCardDTO]:
+        now: datetime | None = None,
+    ) -> list[StudyCardDTO]:
         """Get due cards ordered deterministically."""
         now_dt = self._now(now)
         now_str = self._to_iso(now_dt)
@@ -226,7 +226,7 @@ class StudyService:
             asc(UserDictionaryItem.item_id),
         ).limit(max(int(limit), 1))
 
-        cards: List[StudyCardDTO] = []
+        cards: list[StudyCardDTO] = []
         for item, progress, tm_global in session.execute(stmt).all():
             summary = StudyProgressSummaryDTO(
                 progress_id=progress.id,
@@ -282,7 +282,7 @@ class StudyService:
         session: Session,
         progress_id: int,
         rating: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> StudyProgressSummaryDTO:
         """Apply SM-2 review rating and return updated summary."""
         row = session.get(StudyProgress, progress_id)
@@ -348,7 +348,7 @@ class StudyService:
     def compute_study_state(
         self,
         summary: StudyProgressSummaryDTO,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> str:
         """Compute semantic study state from summary."""
         if summary.is_suspended:
@@ -372,8 +372,8 @@ class StudyService:
     def compute_due_human(
         self,
         summary: StudyProgressSummaryDTO,
-        now: Optional[datetime] = None,
-    ) -> Optional[str]:
+        now: datetime | None = None,
+    ) -> str | None:
         """Human-readable due status."""
         due_dt = self._parse_iso(summary.due_at)
         if due_dt is None:
@@ -392,9 +392,9 @@ class StudyService:
     @staticmethod
     def compute_translation_tier(
         *,
-        translation: Optional[str],
-        status: Optional[str],
-        origin: Optional[str],
+        translation: str | None,
+        status: str | None,
+        origin: str | None,
     ) -> str:
         """Compute translation tier token from tm_global fields."""
         if not (translation or "").strip():
@@ -410,9 +410,9 @@ class StudyService:
     @staticmethod
     def compute_origin_kind(
         *,
-        origin_project_id: Optional[int],
-        origin_source_ref: Optional[str],
-        origin_entity_type: Optional[str],
+        origin_project_id: int | None,
+        origin_source_ref: str | None,
+        origin_entity_type: str | None,
     ) -> str:
         """Compute origin token for UI."""
         if origin_project_id is not None:

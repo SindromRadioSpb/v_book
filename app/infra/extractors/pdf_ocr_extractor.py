@@ -1,4 +1,5 @@
 """PDF OCR extractor (Premium feature)."""
+
 import logging
 from pathlib import Path
 
@@ -8,8 +9,9 @@ logger = logging.getLogger(__name__)
 def is_ocr_available() -> bool:
     """Check if OCR dependencies are available."""
     try:
-        import pytesseract
         import pdf2image
+        import pytesseract
+
         return True
     except ImportError:
         return False
@@ -55,7 +57,7 @@ def extract_text(file_path: Path) -> str:
         for page_num, image in enumerate(images):
             logger.info(f"OCR processing page {page_num + 1}...")
             # Perform OCR with Hebrew language support
-            text = pytesseract.image_to_string(image, lang='heb+eng')
+            text = pytesseract.image_to_string(image, lang="heb+eng")
             if text and text.strip():
                 pages_text.append(text.strip())
 

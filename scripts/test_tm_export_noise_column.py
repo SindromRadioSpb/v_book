@@ -3,6 +3,7 @@
 Usage:
     python scripts/test_tm_export_noise_column.py
 """
+
 import sys
 from pathlib import Path
 
@@ -52,6 +53,7 @@ try:
     # Read and verify Excel file
     try:
         import openpyxl
+
         wb = openpyxl.load_workbook(export_path)
         ws = wb.active
 
@@ -78,9 +80,21 @@ try:
             print()
 
             # Count Noise values
-            noise_count = sum(1 for row in ws.iter_rows(min_row=2, values_only=True) if row[noise_col_index - 1] == "Noise")
-            valid_count = sum(1 for row in ws.iter_rows(min_row=2, values_only=True) if row[noise_col_index - 1] == "Valid")
-            empty_count = sum(1 for row in ws.iter_rows(min_row=2, values_only=True) if not row[noise_col_index - 1])
+            noise_count = sum(
+                1
+                for row in ws.iter_rows(min_row=2, values_only=True)
+                if row[noise_col_index - 1] == "Noise"
+            )
+            valid_count = sum(
+                1
+                for row in ws.iter_rows(min_row=2, values_only=True)
+                if row[noise_col_index - 1] == "Valid"
+            )
+            empty_count = sum(
+                1
+                for row in ws.iter_rows(min_row=2, values_only=True)
+                if not row[noise_col_index - 1]
+            )
 
             print(f"Statistics:")
             print(f"  Noise entries: {noise_count}")
@@ -102,6 +116,7 @@ try:
 except Exception as e:
     print(f"[FAIL] Export failed: {e}")
     import traceback
+
     traceback.print_exc()
 
 finally:

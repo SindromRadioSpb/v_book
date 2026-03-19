@@ -211,7 +211,9 @@ def test_snapshot_readiness_service_uses_read_only_session_without_commit() -> N
 
         service = SnapshotReadinessService()
         with db.get_read_session() as session:
-            session.commit = lambda: (_ for _ in ()).throw(AssertionError("commit should not be called"))
+            session.commit = lambda: (_ for _ in ()).throw(
+                AssertionError("commit should not be called")
+            )
             summary = service.get_project_summary(session, project_id)
 
         assert summary.project_id == project_id

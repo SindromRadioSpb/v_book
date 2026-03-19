@@ -8,6 +8,7 @@ Covers:
 - Read engine applies the same PRAGMA tuning as the write engine
 - DatabaseManager.close() disposes both engines
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -88,21 +89,14 @@ def test_write_visible_from_read_session(tmp_db):
     # Write a row via write session
     with tmp_db.get_session() as w_sess:
         w_sess.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS _patch_c_test "
-                "(id INTEGER PRIMARY KEY, val TEXT)"
-            )
+            text("CREATE TABLE IF NOT EXISTS _patch_c_test " "(id INTEGER PRIMARY KEY, val TEXT)")
         )
-        w_sess.execute(
-            text("INSERT INTO _patch_c_test VALUES (1, 'hello')")
-        )
+        w_sess.execute(text("INSERT INTO _patch_c_test VALUES (1, 'hello')"))
         w_sess.commit()
 
     # Read it back via read session
     with tmp_db.get_read_session() as r_sess:
-        val = r_sess.execute(
-            text("SELECT val FROM _patch_c_test WHERE id=1")
-        ).scalar()
+        val = r_sess.execute(text("SELECT val FROM _patch_c_test WHERE id=1")).scalar()
 
     assert val == "hello"
 

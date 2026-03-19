@@ -152,11 +152,7 @@ class TestWorkspaceManager:
         qtbot.addWidget(workspace)
 
         # Invalid version
-        layout = {
-            "layout_schema_version": 999,
-            "sidebar_visible": True,
-            "splitter_state": "00"
-        }
+        layout = {"layout_schema_version": 999, "sidebar_visible": True, "splitter_state": "00"}
 
         success = workspace.restore_layout(layout)
         assert success is False
@@ -168,11 +164,7 @@ class TestWorkspaceManager:
         workspace.show()  # Must show widget
 
         # Invalid hex
-        layout = {
-            "layout_schema_version": 1,
-            "sidebar_visible": True,
-            "splitter_state": "not_hex"
-        }
+        layout = {"layout_schema_version": 1, "sidebar_visible": True, "splitter_state": "not_hex"}
         success = workspace.restore_layout(layout)
         assert success is False
 

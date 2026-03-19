@@ -51,4 +51,3 @@ def test_sentences_add_to_user_dict_refreshes_linked_views(monkeypatch, qtbot):
     assert info_calls
     assert view._user_dict_add_worker is None
     assert view._user_dict_target_dictionary_id is None
-

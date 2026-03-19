@@ -94,7 +94,9 @@ def _compile_stmt(stmt, session) -> str:
     )
 
 
-def _build_live_queries(session, *, project_id: int, search_term: str) -> list[tuple[str, str, str]]:
+def _build_live_queries(
+    session, *, project_id: int, search_term: str
+) -> list[tuple[str, str, str]]:
     dict_service = DictionaryService()
     doc_service = DocumentService()
     filters = {"pos": "All", "hide_noise": True, "search": ""}
@@ -124,30 +126,36 @@ def _build_live_queries(session, *, project_id: int, search_term: str) -> list[t
     )
     dictionary_page_stmt = dictionary_page_stmt.limit(100).offset(0)
 
-    dictionary_count_stmt = select(func.count(Lemma.lemma_id)).where(
-        Lemma.project_id == project_id
-    )
+    dictionary_count_stmt = select(func.count(Lemma.lemma_id)).where(Lemma.project_id == project_id)
     dictionary_count_stmt = dict_service._apply_filters(
         dictionary_count_stmt,
         filters,
         session=session,
     )
 
-    picker_empty_stmt = doc_service.build_project_documents_query(
-        project_id,
-        search_query=None,
-        sort_by="doc_id",
-        sort_dir="desc",
-        session=session,
-    ).limit(50).offset(0)
+    picker_empty_stmt = (
+        doc_service.build_project_documents_query(
+            project_id,
+            search_query=None,
+            sort_by="doc_id",
+            sort_dir="desc",
+            session=session,
+        )
+        .limit(50)
+        .offset(0)
+    )
 
-    picker_search_stmt = doc_service.build_project_documents_query(
-        project_id,
-        search_query=search_term,
-        sort_by="file_name",
-        sort_dir="asc",
-        session=session,
-    ).limit(50).offset(0)
+    picker_search_stmt = (
+        doc_service.build_project_documents_query(
+            project_id,
+            search_query=search_term,
+            sort_by="file_name",
+            sort_dir="asc",
+            session=session,
+        )
+        .limit(50)
+        .offset(0)
+    )
 
     return [
         (
@@ -220,7 +228,9 @@ def main() -> int:
         report_lines.append(f"- DB size bytes: `{args.db_path.stat().st_size}`")
         report_lines.append(f"- Project ID: `{project_id}`")
         report_lines.append(f"- Search term: `{args.search_term}`")
-        report_lines.append("- Query source: `DictionaryService` / `DocumentService` live statements")
+        report_lines.append(
+            "- Query source: `DictionaryService` / `DocumentService` live statements"
+        )
         report_lines.append("")
 
         report_lines.append("## Index Snapshot")
@@ -278,9 +288,7 @@ def main() -> int:
             "- Dictionary first-page flow is index-driven when ordering uses "
             "`lemma_project_stat.lemma_id` as tie-breaker."
         )
-        report_lines.append(
-            "- Dictionary count uses `idx_lemma_noise` and remains a bounded read."
-        )
+        report_lines.append("- Dictionary count uses `idx_lemma_noise` and remains a bounded read.")
         if query_temp_btree.get("picker_page_empty"):
             report_lines.append(
                 "- Document picker empty search still uses temporary sort; "

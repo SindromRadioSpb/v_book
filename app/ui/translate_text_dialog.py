@@ -6,27 +6,27 @@ Allows users to:
 - View translation metadata (provider, cache, glossary, latency)
 - Copy translated text to clipboard
 """
-import logging
-from typing import Optional
 
+import logging
+
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
-    QVBoxLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
-    QTextEdit,
-    QPushButton,
-    QComboBox,
-    QProgressBar,
-    QGroupBox,
     QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 
-from app.services.translation_service import TranslationService, TranslationResult
-from app.ui.workers import SingleTextTranslateWorker
 from app.infra.security import sanitize_for_log
+from app.services.translation_service import TranslationResult, TranslationService
+from app.ui.workers import SingleTextTranslateWorker
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,9 @@ class TranslateTextDialog(QDialog):
     # Signal emitted when translation completes (for testing)
     translation_completed = pyqtSignal(TranslationResult)
 
-    def __init__(self, parent=None, initial_text: str = "", src_lang: str = "en", tgt_lang: str = "he"):
+    def __init__(
+        self, parent=None, initial_text: str = "", src_lang: str = "en", tgt_lang: str = "he"
+    ):
         """Initialize translate text dialog.
 
         Args:
@@ -68,9 +70,9 @@ class TranslateTextDialog(QDialog):
         self.setMinimumSize(700, 600)
 
         self.translation_service = TranslationService()
-        self.translate_worker: Optional[SingleTextTranslateWorker] = None
+        self.translate_worker: SingleTextTranslateWorker | None = None
         self._translation_request_seq = 0
-        self._active_translation_seq: Optional[int] = None
+        self._active_translation_seq: int | None = None
         self._retired_translate_workers: list[SingleTextTranslateWorker] = []
 
         self.initial_text = initial_text
@@ -204,7 +206,7 @@ class TranslateTextDialog(QDialog):
         if getattr(worker, "_hdle_cleanup_done", False):
             return
 
-        setattr(worker, "_hdle_cleanup_done", True)
+        worker._hdle_cleanup_done = True
 
         if worker is self.translate_worker:
             self.translate_worker = None
@@ -248,11 +250,13 @@ class TranslateTextDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Same Language",
-                "Source and target languages are the same.\n\nPlease select different languages."
+                "Source and target languages are the same.\n\nPlease select different languages.",
             )
             return
 
-        logger.info(f"Translating text ({src_lang} → {tgt_lang}): {sanitize_for_log(source_text[:50])}")
+        logger.info(
+            f"Translating text ({src_lang} → {tgt_lang}): {sanitize_for_log(source_text[:50])}"
+        )
 
         # Cancel previous worker if running
         if self.translate_worker:
@@ -302,7 +306,7 @@ class TranslateTextDialog(QDialog):
         self.cancel_btn.setVisible(False)
         self.metadata_label.setText("Translation cancelled")
 
-    def on_translation_result(self, result: TranslationResult, request_seq: Optional[int] = None):
+    def on_translation_result(self, result: TranslationResult, request_seq: int | None = None):
         """Handle translation result from worker."""
         if request_seq is not None and request_seq != self._active_translation_seq:
             logger.debug(
@@ -335,24 +339,26 @@ class TranslateTextDialog(QDialog):
         if result.source:
             metadata_lines.append(f"Source: {result.source}")
 
-        if hasattr(result, 'cache_hit'):
+        if hasattr(result, "cache_hit"):
             cache_status = "Yes ✓" if result.cache_hit else "No"
             metadata_lines.append(f"Cache Hit: {cache_status}")
 
-        if hasattr(result, 'used_glossary'):
+        if hasattr(result, "used_glossary"):
             glossary_status = "Yes ✓" if result.used_glossary else "No"
             metadata_lines.append(f"Used Glossary: {glossary_status}")
 
-        if hasattr(result, 'latency_ms') and result.latency_ms is not None:
+        if hasattr(result, "latency_ms") and result.latency_ms is not None:
             metadata_lines.append(f"Latency: {result.latency_ms} ms")
 
         # Additional metadata from result.meta (if available)
-        if hasattr(result, 'meta') and result.meta:
-            if 'segment_count' in result.meta:
+        if hasattr(result, "meta") and result.meta:
+            if "segment_count" in result.meta:
                 metadata_lines.append(f"Segments: {result.meta['segment_count']}")
-            if 'applied_terms_count' in result.meta:
-                metadata_lines.append(f"Glossary Terms Applied: {result.meta['applied_terms_count']}")
-            if 'model_id' in result.meta:
+            if "applied_terms_count" in result.meta:
+                metadata_lines.append(
+                    f"Glossary Terms Applied: {result.meta['applied_terms_count']}"
+                )
+            if "model_id" in result.meta:
                 metadata_lines.append(f"Model: {result.meta['model_id']}")
 
         metadata_text = " | ".join(metadata_lines) if metadata_lines else "No metadata available"
@@ -367,7 +373,7 @@ class TranslateTextDialog(QDialog):
         # Emit signal (for testing)
         self.translation_completed.emit(result)
 
-    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_translation_error(self, error_msg: str, request_seq: int | None = None):
         """Handle translation error from worker."""
         if request_seq is not None and request_seq != self._active_translation_seq:
             logger.debug(
@@ -391,7 +397,7 @@ class TranslateTextDialog(QDialog):
             f"Check:\n"
             f"- MT providers enabled in Settings\n"
             f"- Local model installed (if using Local MT)\n"
-            f"- Network connection (if using cloud providers)"
+            f"- Network connection (if using cloud providers)",
         )
 
         # Reset UI
@@ -413,6 +419,7 @@ class TranslateTextDialog(QDialog):
             # Brief feedback
             self.copy_btn.setText("Copied ✓")
             from PyQt6.QtCore import QTimer
+
             QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy to Clipboard"))
 
     def closeEvent(self, event):
@@ -425,7 +432,9 @@ class TranslateTextDialog(QDialog):
         super().closeEvent(event)
 
 
-def show_translate_text_dialog(parent=None, initial_text: str = "", src_lang: str = "en", tgt_lang: str = "he"):
+def show_translate_text_dialog(
+    parent=None, initial_text: str = "", src_lang: str = "en", tgt_lang: str = "he"
+):
     """Show translate text dialog.
 
     Args:

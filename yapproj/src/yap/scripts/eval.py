@@ -42,4 +42,3 @@ if __name__ == '__main__':
       total_uem += ret[3]
       total_sent += 1
    print float(correct_head)/total, correct_label, float(correct_label)/total, total_uem, float(total_uem)/total_sent
-

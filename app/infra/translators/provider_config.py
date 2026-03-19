@@ -17,7 +17,6 @@ Backward Compatibility:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
 from enum import Enum
 
 
@@ -49,12 +48,12 @@ class ProviderAuthConfig:
     mode: ProviderAuthMode = ProviderAuthMode.NONE
 
     # Credential IDs (references to CredentialStore)
-    api_key_credential_id: Optional[str] = None
-    service_account_credential_id: Optional[str] = None
+    api_key_credential_id: str | None = None
+    service_account_credential_id: str | None = None
 
     # Optional: Path to service account JSON file (alternative to storing in CredentialStore)
     # Use this if user prefers file-based SA JSON instead of DB storage
-    service_account_path: Optional[str] = None
+    service_account_path: str | None = None
 
     def is_configured(self) -> bool:
         """Check if authentication is properly configured."""
@@ -99,14 +98,14 @@ class ProviderLimitsConfig:
 
     # Rate limits (requests)
     max_requests_per_minute: int = 60  # Conservative default
-    max_requests_per_hour: Optional[int] = None  # Optional
-    max_requests_per_day: Optional[int] = None  # Optional
+    max_requests_per_hour: int | None = None  # Optional
+    max_requests_per_day: int | None = None  # Optional
 
     # Rate limits (characters)
-    max_chars_per_minute: Optional[int] = None  # Optional
-    max_chars_per_hour: Optional[int] = None  # Optional
-    max_chars_per_day: Optional[int] = None  # Optional
-    max_chars_per_month: Optional[int] = None  # For free tier enforcement
+    max_chars_per_minute: int | None = None  # Optional
+    max_chars_per_hour: int | None = None  # Optional
+    max_chars_per_day: int | None = None  # Optional
+    max_chars_per_month: int | None = None  # For free tier enforcement
 
     # Behavior on limit exceeded
     fail_closed: bool = True  # If True, reject translation when limit exceeded
@@ -147,7 +146,7 @@ class ProviderRetryPolicy:
     max_backoff_ms: int = 10000  # 10 seconds cap
 
     # Which HTTP status codes to retry
-    retry_on_status: List[int] = field(
+    retry_on_status: list[int] = field(
         default_factory=lambda: [429, 503]  # Rate limit, service unavailable
     )
 
@@ -231,12 +230,13 @@ class ProviderConfig:
     auth: ProviderAuthConfig = field(default_factory=ProviderAuthConfig)
     limits: ProviderLimitsConfig = field(default_factory=ProviderLimitsConfig)
     retry: ProviderRetryPolicy = field(default_factory=ProviderRetryPolicy)
-    ui_meta: Optional[ProviderUiMeta] = None
+    ui_meta: ProviderUiMeta | None = None
 
 
 # =============================================================================
 # Settings Keys (for SettingsService / QSettings)
 # =============================================================================
+
 
 def get_auth_mode_key(provider_id: str) -> str:
     """Get QSettings key for auth mode."""
@@ -296,6 +296,7 @@ def get_rate_limit_key(provider_id: str) -> str:
 # =============================================================================
 # Credential ID Helpers
 # =============================================================================
+
 
 def get_api_key_credential_id(provider_id: str) -> str:
     """Get credential ID for API key in CredentialStore."""

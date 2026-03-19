@@ -16,13 +16,12 @@ Scoring algorithm (deterministic):
 
 import logging
 from datetime import datetime
-from typing import Optional, List, Tuple, Dict
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import TMEntry, TMGlobal
 from app.infra.db_retry import retry_on_db_locked
+from app.infra.sa_models import TMEntry, TMGlobal
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class TMGlobalService:
     """Service for managing global canonical TM layer."""
 
     @staticmethod
-    def score_candidate(entry: TMEntry) -> Tuple[int, int, int, str, int]:
+    def score_candidate(entry: TMEntry) -> tuple[int, int, int, str, int]:
         """Compute deterministic score tuple for a tm_entry.
 
         Returns (has_translation, status_rank, origin_rank, updated_at, -tm_id) for sorting.
@@ -68,11 +67,11 @@ class TMGlobalService:
         translation: str,
         status: str = "draft",
         origin: str = "mt_auto",
-        confidence: Optional[float] = None,
+        confidence: float | None = None,
         is_noise: int = 0,
-        noise_reason: Optional[str] = None,
-        notes: Optional[str] = None,
-        source_tm_id: Optional[int] = None,
+        noise_reason: str | None = None,
+        notes: str | None = None,
+        source_tm_id: int | None = None,
         force_update: bool = False,
     ) -> TMGlobal:
         """Upsert a tm_global row. If exists, update only if new entry wins scoring.
@@ -207,7 +206,14 @@ class TMGlobalService:
             self.propagate_to_entries(
                 session=session,
                 tm_global_id=g.tm_global_id,
-                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"]
+                fields=[
+                    "translation",
+                    "status",
+                    "origin",
+                    "confidence",
+                    "is_noise",
+                    "noise_reason",
+                ],
             )
 
         return g
@@ -217,7 +223,7 @@ class TMGlobalService:
         self,
         session: Session,
         tm_global_id: int,
-        fields: Optional[List[str]] = None,
+        fields: list[str] | None = None,
     ) -> int:
         """Push tm_global translation/status to all linked tm_entries.
 
@@ -229,15 +235,15 @@ class TMGlobalService:
         Returns:
             Number of tm_entries updated
         """
-        g = session.execute(
-            select(TMGlobal).where(TMGlobal.tm_global_id == tm_global_id)
-        ).scalar()
+        g = session.execute(select(TMGlobal).where(TMGlobal.tm_global_id == tm_global_id)).scalar()
         if not g:
             return 0
 
-        entries = session.execute(
-            select(TMEntry).where(TMEntry.tm_global_id == tm_global_id)
-        ).scalars().all()
+        entries = (
+            session.execute(select(TMEntry).where(TMEntry.tm_global_id == tm_global_id))
+            .scalars()
+            .all()
+        )
 
         fields = fields or ["translation"]
         count = 0
@@ -270,7 +276,7 @@ class TMGlobalService:
         session: Session,
         chunk_size: int = 500,
         dry_run: bool = False,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Backfill tm_global from existing tm_entry rows.
 
         Groups by (src_lang, tgt_lang, kind, src_norm), picks best entry per group,
@@ -291,15 +297,12 @@ class TMGlobalService:
         }
 
         # Get all distinct keys
-        key_stmt = (
-            select(
-                TMEntry.src_lang,
-                TMEntry.tgt_lang,
-                TMEntry.kind,
-                TMEntry.src_norm,
-            )
-            .group_by(TMEntry.src_lang, TMEntry.tgt_lang, TMEntry.kind, TMEntry.src_norm)
-        )
+        key_stmt = select(
+            TMEntry.src_lang,
+            TMEntry.tgt_lang,
+            TMEntry.kind,
+            TMEntry.src_norm,
+        ).group_by(TMEntry.src_lang, TMEntry.tgt_lang, TMEntry.kind, TMEntry.src_norm)
         keys = session.execute(key_stmt).all()
 
         logger.info(f"Backfill: Found {len(keys)} unique keys")

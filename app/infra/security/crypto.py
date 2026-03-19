@@ -11,13 +11,12 @@ Security properties:
 
 import os
 import secrets
-from typing import Tuple
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .policy import AES_KEY_SIZE, AES_NONCE_SIZE
 from .errors import CredentialStoreError
+from .policy import AES_KEY_SIZE, AES_NONCE_SIZE
 
 
 def generate_key() -> bytes:
@@ -146,8 +145,8 @@ def derive_key_from_password(password: str, salt: bytes) -> bytes:
         Currently not used - master key stored in OS keyring.
         Kept for future use if keyring unavailable.
     """
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -155,4 +154,4 @@ def derive_key_from_password(password: str, salt: bytes) -> bytes:
         salt=salt,
         iterations=600_000,  # OWASP recommendation (2023)
     )
-    return kdf.derive(password.encode('utf-8'))
+    return kdf.derive(password.encode("utf-8"))

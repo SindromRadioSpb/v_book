@@ -10,6 +10,7 @@ Covers:
 - DictionaryService: TTL count cache (hit, miss, expiry)
 - DictionaryService: invalidate_count_cache clears entries
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -80,9 +81,7 @@ def _seed(session: Session, count: int = 20) -> int:
     lib = Library(name="L")
     session.add(lib)
     session.flush()
-    proj = DictProject(
-        library_id=lib.library_id, name="P", src_lang="he", tgt_lang="ru"
-    )
+    proj = DictProject(library_id=lib.library_id, name="P", src_lang="he", tgt_lang="ru")
     session.add(proj)
     session.flush()
     for i in range(count):
@@ -125,12 +124,14 @@ def test_ensure_lemma_fts_creates_table():
         assert result == {"lemma_fts": True}
 
         conn2 = sqlite3.connect(db_path)
-        tables = {r[0] for r in conn2.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
-        triggers = {r[0] for r in conn2.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger'"
-        ).fetchall()}
+        tables = {
+            r[0]
+            for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        triggers = {
+            r[0]
+            for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
+        }
         conn2.close()
 
         assert "lemma_fts" in tables
@@ -246,12 +247,16 @@ def test_like_fallback_used_when_lemma_fts_parity_unhealthy(tmp_path):
         session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_au"))
         session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ad"))
         session.execute(text("DROP TABLE IF EXISTS lemma_fts"))
-        session.execute(text("""
+        session.execute(
+            text(
+                """
             CREATE VIRTUAL TABLE lemma_fts USING fts5(
                 lemma_text,
                 tokenize='unicode61 remove_diacritics 1'
             )
-        """))
+        """
+            )
+        )
         session.execute(
             text("INSERT INTO lemma_fts(rowid, lemma_text) VALUES(:rowid, :lemma_text)"),
             {"rowid": 999999, "lemma_text": "unique_term_0000"},
@@ -285,9 +290,7 @@ def test_like_fallback_used_when_lemma_fts_semantic_drift_unhealthy(fts_engine):
     with Session(fts_engine) as session:
         project_id = _seed(session, count=20)
         lemma_id = session.execute(
-            text(
-                "SELECT MIN(lemma_id) FROM lemma WHERE project_id = :project_id"
-            ),
+            text("SELECT MIN(lemma_id) FROM lemma WHERE project_id = :project_id"),
             {"project_id": project_id},
         ).scalar_one()
         session.execute(text("DROP TRIGGER IF EXISTS trg_lemma_fts_ai"))

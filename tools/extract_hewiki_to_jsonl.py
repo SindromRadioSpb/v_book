@@ -1,9 +1,9 @@
-﻿import json
+﻿import importlib
+import importlib.util
+import json
 import os
 import sys
-import importlib
-import importlib.util
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 WX_REPO = r"J:\Project_Vibe\V_book\tools\Wikiextractor-V2"
@@ -14,8 +14,10 @@ OUT_JSONL = r"J:\Project_Vibe\V_book\ref_corpora\hewiki\hewiki_docs.jsonl"
 SOURCE = "hewiki"
 DUMP_VERSION = os.path.basename(DUMP_PATH)
 
+
 def one_line(text: str) -> str:
     return " ".join((text or "").split())
+
 
 def load_wx_main():
     """
@@ -62,6 +64,7 @@ def load_wx_main():
         raise AttributeError(f"'main' not found in loaded module: {wx_path}")
     return main_fn, str(wx_path)
 
+
 def main() -> None:
     if not os.path.isfile(DUMP_PATH):
         raise FileNotFoundError(f"Dump not found: {DUMP_PATH}")
@@ -81,7 +84,7 @@ def main() -> None:
     ]
     kkwargs = {"--templates": TEMPLATES_PATH}
 
-    extracted_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    extracted_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     n = 0
 
     out_path = Path(OUT_JSONL)
@@ -121,6 +124,7 @@ def main() -> None:
 
     print("DONE. Total docs:", n)
     print("OUT:", str(out_path))
+
 
 if __name__ == "__main__":
     main()

@@ -49,6 +49,7 @@ def _ensure_qapp():
     global _qapp
     # Must import here (after any sys.path manipulation the caller may do)
     from PyQt6.QtWidgets import QApplication
+
     if QApplication.instance() is None:
         _qapp = QApplication(sys.argv)
     else:
@@ -60,14 +61,17 @@ def _ensure_qapp():
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Task 22 E2E smoke runner — documents metadata + sentences + TM kind filter"
     )
-    p.add_argument("--db-path", default=None,
-                   help="Path to SQLite DB (default: resolved like app.main)")
-    p.add_argument("--project-id", type=int, default=12,
-                   help="Project ID to test against (default: 12)")
+    p.add_argument(
+        "--db-path", default=None, help="Path to SQLite DB (default: resolved like app.main)"
+    )
+    p.add_argument(
+        "--project-id", type=int, default=12, help="Project ID to test against (default: 12)"
+    )
     p.add_argument(
         "--doc-path",
         default=(
@@ -77,16 +81,24 @@ def _parse_args() -> argparse.Namespace:
         ),
         help="Absolute path to .docx document to ingest",
     )
-    p.add_argument("--headless", action="store_true",
-                   help="Run without displaying any windows (suppresses widget.show())")
-    p.add_argument("--timeout-sec", type=int, default=900,
-                   help="Global timeout for long operations in seconds (default: 900)")
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without displaying any windows (suppresses widget.show())",
+    )
+    p.add_argument(
+        "--timeout-sec",
+        type=int,
+        default=900,
+        help="Global timeout for long operations in seconds (default: 900)",
+    )
     return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+
 
 def _setup_logging(repo_root: Path) -> logging.Logger:
     log_dir = repo_root / "logs"
@@ -118,6 +130,7 @@ def _setup_logging(repo_root: Path) -> logging.Logger:
 # DB path resolution (mirrors app.main.get_app_dir logic)
 # ---------------------------------------------------------------------------
 
+
 def _resolve_db_path(custom: Optional[str]) -> Path:
     if custom:
         return Path(custom).resolve()
@@ -133,6 +146,7 @@ def _resolve_db_path(custom: Optional[str]) -> Path:
 # ---------------------------------------------------------------------------
 # Step result
 # ---------------------------------------------------------------------------
+
 
 class StepResult:
     def __init__(self, name: str, passed: bool, message: str = ""):
@@ -156,6 +170,7 @@ _msgbox_log: List[Dict[str, str]] = []
 def _install_messagebox_intercept() -> None:
     """Monkeypatch all QMessageBox statics to prevent blocking."""
     from PyQt6.QtWidgets import QMessageBox
+
     logger = logging.getLogger("smoke_task22.msgbox")
 
     def _intercept(kind: str, parent, title, text, *args, **kwargs):
@@ -167,23 +182,16 @@ def _install_messagebox_intercept() -> None:
             return QMessageBox.StandardButton.Yes
         return QMessageBox.StandardButton.Ok
 
-    QMessageBox.question = staticmethod(
-        lambda *a, **kw: _intercept("question", *a, **kw)
-    )
-    QMessageBox.warning = staticmethod(
-        lambda *a, **kw: _intercept("warning", *a, **kw)
-    )
-    QMessageBox.information = staticmethod(
-        lambda *a, **kw: _intercept("information", *a, **kw)
-    )
-    QMessageBox.critical = staticmethod(
-        lambda *a, **kw: _intercept("critical", *a, **kw)
-    )
+    QMessageBox.question = staticmethod(lambda *a, **kw: _intercept("question", *a, **kw))
+    QMessageBox.warning = staticmethod(lambda *a, **kw: _intercept("warning", *a, **kw))
+    QMessageBox.information = staticmethod(lambda *a, **kw: _intercept("information", *a, **kw))
+    QMessageBox.critical = staticmethod(lambda *a, **kw: _intercept("critical", *a, **kw))
 
 
 # ---------------------------------------------------------------------------
 # Worker wait helper — start worker and wait for finished/error via QEventLoop
 # ---------------------------------------------------------------------------
+
 
 def _wait_worker(worker, timeout_ms: int = 120_000) -> Tuple[bool, Optional[str]]:
     """
@@ -244,16 +252,16 @@ _settings_backup: Dict[str, Any] = {}
 
 def _backup_settings() -> None:
     from app.infra.settings import SettingsService
+
     s = SettingsService.get_instance()
     for key in _SETTINGS_KEYS:
         _settings_backup[key] = s.get_json(key, None)
-    logging.getLogger("smoke_task22").debug(
-        "Settings backup: %s", _settings_backup
-    )
+    logging.getLogger("smoke_task22").debug("Settings backup: %s", _settings_backup)
 
 
 def _restore_settings() -> None:
     from app.infra.settings import SettingsService
+
     s = SettingsService.get_instance()
     for key, val in _settings_backup.items():
         s.set_value(key, val)
@@ -263,6 +271,7 @@ def _restore_settings() -> None:
 # ---------------------------------------------------------------------------
 # Main smoke runner
 # ---------------------------------------------------------------------------
+
 
 class SmokeTask22Runner:
     """
@@ -319,11 +328,11 @@ class SmokeTask22Runner:
         db = DBService.get_instance()
         with db.get_session() as session:
             proj = ProjectService().get_project(session, self.project_id)
-            assert proj is not None, \
-                f"Project {self.project_id} not found in DB — check --project-id arg"
+            assert (
+                proj is not None
+            ), f"Project {self.project_id} not found in DB — check --project-id arg"
             corpus = ProjectService().get_default_corpus(session, self.project_id)
-            assert corpus is not None, \
-                f"No default corpus for project {self.project_id}"
+            assert corpus is not None, f"No default corpus for project {self.project_id}"
             self.corpus_id = corpus.corpus_id
             self.src_lang = getattr(proj, "src_lang", "he") or "he"
         return (
@@ -336,29 +345,34 @@ class SmokeTask22Runner:
         from app.infra.sa_models import SourceDocument
         from sqlalchemy import select
 
-        assert self.doc_path.exists(), \
-            f"Document file not found: {self.doc_path}\nProvide correct --doc-path"
+        assert (
+            self.doc_path.exists()
+        ), f"Document file not found: {self.doc_path}\nProvide correct --doc-path"
         assert self.corpus_id is not None, "corpus_id not set (A1 must pass first)"
 
         db = DBService.get_instance()
 
         # Check if already ingested by file_name in this corpus
         with db.get_session() as session:
-            existing = session.execute(
-                select(SourceDocument).where(
-                    SourceDocument.corpus_id == self.corpus_id,
-                    SourceDocument.file_name == self.doc_path.name,
+            existing = (
+                session.execute(
+                    select(SourceDocument).where(
+                        SourceDocument.corpus_id == self.corpus_id,
+                        SourceDocument.file_name == self.doc_path.name,
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if existing:
                 self.doc_id = existing.doc_id
                 return (
-                    f"Already ingested: doc_id={self.doc_id} "
-                    f"status={existing.status} (reusing)"
+                    f"Already ingested: doc_id={self.doc_id} " f"status={existing.status} (reusing)"
                 )
 
         # Not yet ingested — use IngestWorker (same path as UI Add Files button)
         from app.ui.workers import IngestWorker
+
         worker = IngestWorker(
             corpus_id=self.corpus_id,
             file_paths=[self.doc_path],
@@ -426,8 +440,7 @@ class SmokeTask22Runner:
             )
 
         assert dto.tag == "test", f"tag mismatch after save: {dto.tag!r}"
-        assert dto.link_url == "https://www.facebook.com/", \
-            f"link_url mismatch: {dto.link_url!r}"
+        assert dto.link_url == "https://www.facebook.com/", f"link_url mismatch: {dto.link_url!r}"
         assert dto.level == "gimel", f"level mismatch: {dto.level!r}"
         assert dto.topic == "fisics", f"topic mismatch: {dto.topic!r}"
         return "tag='test' link='https://www.facebook.com/' level='gimel' topic='fisics'"
@@ -442,8 +455,7 @@ class SmokeTask22Runner:
 
         assert dto is not None, f"Document {self.doc_id} not found"
         assert dto.tag == "test", f"DB tag={dto.tag!r} (expected 'test')"
-        assert dto.link_url == "https://www.facebook.com/", \
-            f"DB link_url={dto.link_url!r}"
+        assert dto.link_url == "https://www.facebook.com/", f"DB link_url={dto.link_url!r}"
         assert dto.level == "gimel", f"DB level={dto.level!r}"
         assert dto.topic == "fisics", f"DB topic={dto.topic!r}"
         return "All 4 metadata fields verified in fresh DB read (tag/link/level/topic)"
@@ -472,10 +484,8 @@ class SmokeTask22Runner:
         finally:
             QDesktopServices.openUrl = staticmethod(original)
 
-        assert len(captured) == 1, \
-            f"Expected exactly 1 openUrl call, got {len(captured)}"
-        assert "facebook.com" in captured[0], \
-            f"Unexpected URL in openUrl: {captured[0]!r}"
+        assert len(captured) == 1, f"Expected exactly 1 openUrl call, got {len(captured)}"
+        assert "facebook.com" in captured[0], f"Unexpected URL in openUrl: {captured[0]!r}"
         return f"openUrl called once with: {captured[0]}"
 
     def _a6b_link_click_negative_javascript(self) -> str:
@@ -498,7 +508,7 @@ class SmokeTask22Runner:
             parsed = urlparse(url)
             # DocumentsView guard: only call openUrl for http/https
             if parsed.scheme in ("http", "https"):
-                QDesktopServices.openUrl(QUrl(url))   # must NOT execute
+                QDesktopServices.openUrl(QUrl(url))  # must NOT execute
             # else: silent block (same as DocumentsView shows error dialog)
         finally:
             QDesktopServices.openUrl = staticmethod(original)
@@ -530,10 +540,14 @@ class SmokeTask22Runner:
         if current_status == "processed":
             # Already processed — just verify sentences exist
             with db.get_session() as session:
-                count = session.execute(
-                    select(func.count(DocumentSentence.sentence_id))
-                    .where(DocumentSentence.doc_id == self.doc_id)
-                ).scalar_one_or_none() or 0
+                count = (
+                    session.execute(
+                        select(func.count(DocumentSentence.sentence_id)).where(
+                            DocumentSentence.doc_id == self.doc_id
+                        )
+                    ).scalar_one_or_none()
+                    or 0
+                )
             assert count > 0, (
                 f"Status=processed but no sentences in document_sentence "
                 f"for doc_id={self.doc_id} — possible orphan state"
@@ -542,9 +556,10 @@ class SmokeTask22Runner:
 
         # Run ProcessWorker (same as UI "Process with NLP" button)
         from app.ui.workers import ProcessWorker
+
         worker = ProcessWorker(
             doc_ids=[self.doc_id],
-            use_mock=True,   # mock NLP (rule-based) for speed & no Stanza requirement
+            use_mock=True,  # mock NLP (rule-based) for speed & no Stanza requirement
             use_gpu=False,
         )
 
@@ -560,15 +575,18 @@ class SmokeTask22Runner:
 
         sc = process_result.get("success_count", 0)
         ec = process_result.get("error_count", 0)
-        assert sc > 0 or ec == 0, \
-            f"ProcessWorker finished with 0 successes and {ec} errors"
+        assert sc > 0 or ec == 0, f"ProcessWorker finished with 0 successes and {ec} errors"
 
         # Verify sentences created
         with db.get_session() as session:
-            count = session.execute(
-                select(func.count(DocumentSentence.sentence_id))
-                .where(DocumentSentence.doc_id == self.doc_id)
-            ).scalar_one_or_none() or 0
+            count = (
+                session.execute(
+                    select(func.count(DocumentSentence.sentence_id)).where(
+                        DocumentSentence.doc_id == self.doc_id
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
 
         assert count > 0, (
             f"ProcessWorker ran successfully but no DocumentSentence rows for "
@@ -583,15 +601,14 @@ class SmokeTask22Runner:
         db = DBService.get_instance()
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
-            total = svc.count_sentences(
-                session, self.project_id, doc_id_filter=self.doc_id
-            )
+            total = svc.count_sentences(session, self.project_id, doc_id_filter=self.doc_id)
             assert total > 0, (
                 f"count_sentences=0 for project_id={self.project_id} "
                 f"doc_id={self.doc_id} — NLP processing may not have run"
             )
             dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
                 page=1,
                 page_size=25,
@@ -603,14 +620,10 @@ class SmokeTask22Runner:
         for dto in dtos[:3]:
             assert dto.sentence_id > 0, "sentence_id must be positive"
             assert dto.text, "sentence text must be non-empty"
-            assert dto.doc_id == self.doc_id, \
-                f"dto.doc_id={dto.doc_id} != expected {self.doc_id}"
+            assert dto.doc_id == self.doc_id, f"dto.doc_id={dto.doc_id} != expected {self.doc_id}"
 
         sample = dtos[0].text[:60].replace("\n", " ")
-        return (
-            f"total={total} sentences, page1={len(dtos)}, "
-            f"first='{sample}...'"
-        )
+        return f"total={total} sentences, page1={len(dtos)}, " f"first='{sample}...'"
 
     # ==================================================================
     # Section C — Sentences actions
@@ -626,9 +639,11 @@ class SmokeTask22Runner:
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
             dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
-                page=1, page_size=10,
+                page=1,
+                page_size=10,
             )
             assert len(dtos) > 0, "No sentences to translate"
 
@@ -659,9 +674,7 @@ class SmokeTask22Runner:
             write_mode="fill_empty",
         )
 
-        worker = BatchTranslateWorker(
-            items=items, options=options, tab_type="sentences"
-        )
+        worker = BatchTranslateWorker(items=items, options=options, tab_type="sentences")
 
         ok, err = _wait_worker(worker, timeout_ms=self.timeout_ms)
         assert ok, (
@@ -674,9 +687,11 @@ class SmokeTask22Runner:
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
             updated_dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
-                page=1, page_size=10,
+                page=1,
+                page_size=10,
             )
         translated = [d for d in updated_dtos if d.translation]
         assert len(translated) > 0, (
@@ -699,18 +714,24 @@ class SmokeTask22Runner:
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
             dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
-                page=1, page_size=10,
+                page=1,
+                page_size=10,
             )
             assert len(dtos) > 0, "No sentences for bootstrap"
             texts = [d.text for d in dtos]
 
             # Check if pronunciation data already exists
-            existing_count = session.execute(
-                select(func.count(PronunciationEntry.source_text))
-                .where(PronunciationEntry.source_text.in_(texts))
-            ).scalar_one_or_none() or 0
+            existing_count = (
+                session.execute(
+                    select(func.count(PronunciationEntry.source_text)).where(
+                        PronunciationEntry.source_text.in_(texts)
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
 
         if existing_count > 0:
             return (
@@ -724,11 +745,10 @@ class SmokeTask22Runner:
             from app.services.pronunciation_bootstrap_service import (
                 PronunciationBootstrapService,
             )
+
             bootstrap_svc = PronunciationBootstrapService()
 
-            selected_items = [
-                {"source_text": t, "source_group": "sentence"} for t in texts
-            ]
+            selected_items = [{"source_text": t, "source_group": "sentence"} for t in texts]
 
             with db.get_session() as session:
                 result = bootstrap_svc.bootstrap(
@@ -748,7 +768,8 @@ class SmokeTask22Runner:
             # Bootstrap may fail due to missing niqqud data — that's not a regression
             self.logger.warning(
                 "PronunciationBootstrapService.bootstrap raised: %s "
-                "(this is acceptable if no niqqud source data exists)", exc
+                "(this is acceptable if no niqqud source data exists)",
+                exc,
             )
             return (
                 f"Bootstrap attempted but raised: {exc}. "
@@ -758,15 +779,16 @@ class SmokeTask22Runner:
 
         # Re-verify
         with db.get_session() as session:
-            new_count = session.execute(
-                select(func.count(PronunciationEntry.source_text))
-                .where(PronunciationEntry.source_text.in_(texts))
-            ).scalar_one_or_none() or 0
+            new_count = (
+                session.execute(
+                    select(func.count(PronunciationEntry.source_text)).where(
+                        PronunciationEntry.source_text.in_(texts)
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
 
-        return (
-            f"After bootstrap: {new_count}/{len(texts)} texts have "
-            f"pronunciation entries"
-        )
+        return f"After bootstrap: {new_count}/{len(texts)} texts have " f"pronunciation entries"
 
     def _c9c_generate_audio(self) -> str:
         """Generate audio for first 10 sentences via BatchGenerateAudioWorker."""
@@ -778,9 +800,11 @@ class SmokeTask22Runner:
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
             dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
-                page=1, page_size=10,
+                page=1,
+                page_size=10,
             )
             assert len(dtos) > 0, "No sentences for audio generation"
             proj = ProjectService().get_project(session, self.project_id)
@@ -797,6 +821,7 @@ class SmokeTask22Runner:
         ]
 
         from app.ui.workers import BatchGenerateAudioWorker
+
         worker = BatchGenerateAudioWorker(
             items=items,
             provider_mode="chain",
@@ -811,15 +836,12 @@ class SmokeTask22Runner:
         )
 
         # Verify audio records created
-        norms = list({
-            SentencesWorkspaceService._norm(src_lang, dto.text) for dto in dtos
-        })
+        norms = list({SentencesWorkspaceService._norm(src_lang, dto.text) for dto in dtos})
         with db.get_session() as session:
             from app.services.audio_asset_service import AudioAssetService
+
             audio_svc = AudioAssetService()
-            audio_map = audio_svc.bulk_get_status_any(
-                session, lang=src_lang, norm_texts=norms
-            )
+            audio_map = audio_svc.bulk_get_status_any(session, lang=src_lang, norm_texts=norms)
 
         ready_count = sum(1 for s in audio_map.values() if s == "ready")
         assert ready_count > 0, (
@@ -827,10 +849,7 @@ class SmokeTask22Runner:
             f"Status map (first 5): {dict(list(audio_map.items())[:5])}. "
             "Check TTS provider credentials."
         )
-        return (
-            f"Audio ready: {ready_count}/{len(norms)} norms "
-            f"(src_lang={src_lang})"
-        )
+        return f"Audio ready: {ready_count}/{len(norms)} norms " f"(src_lang={src_lang})"
 
     def _c10_play_audio(self) -> str:
         """Verify play_async fires without crash (monkeypatched)."""
@@ -842,9 +861,11 @@ class SmokeTask22Runner:
         with db.get_session() as session:
             svc = SentencesWorkspaceService()
             dtos = svc.list_sentences(
-                session, self.project_id,
+                session,
+                self.project_id,
                 doc_id_filter=self.doc_id,
-                page=1, page_size=1,
+                page=1,
+                page_size=1,
             )
             assert len(dtos) > 0, "No sentences for play test"
             proj = ProjectService().get_project(session, self.project_id)
@@ -857,6 +878,7 @@ class SmokeTask22Runner:
 
         # Monkeypatch AudioPlaybackService to avoid real audio output in smoke test
         from app.services import audio_playback_service as _aps_module
+
         _orig_cls = _aps_module.AudioPlaybackService
 
         class _MockPlayback:
@@ -871,14 +893,11 @@ class SmokeTask22Runner:
         finally:
             _aps_module.AudioPlaybackService = _orig_cls
 
-        assert len(play_calls) == 1, \
-            f"Expected exactly 1 play_async call, got {len(play_calls)}"
-        assert play_calls[0]["src_lang"] == src_lang, \
-            f"play_async src_lang mismatch: {play_calls[0]!r}"
-        return (
-            f"play_async called: src_lang={src_lang} "
-            f"norm='{norm[:50]}...'"
-        )
+        assert len(play_calls) == 1, f"Expected exactly 1 play_async call, got {len(play_calls)}"
+        assert (
+            play_calls[0]["src_lang"] == src_lang
+        ), f"play_async src_lang mismatch: {play_calls[0]!r}"
+        return f"play_async called: src_lang={src_lang} " f"norm='{norm[:50]}...'"
 
     # ==================================================================
     # Section D — TM Kind multi-select filter + persistence
@@ -935,16 +954,15 @@ class SmokeTask22Runner:
 
         # Verify D11 set the value correctly
         restored = settings.get_json("tm_panel/kind_filter", None)
-        assert isinstance(restored, list), \
-            f"Expected list in QSettings, got {type(restored).__name__}: {restored!r}"
-        assert set(restored) == {"lemma", "surface"}, \
-            f"Restored kinds mismatch: {restored!r}"
+        assert isinstance(
+            restored, list
+        ), f"Expected list in QSettings, got {type(restored).__name__}: {restored!r}"
+        assert set(restored) == {"lemma", "surface"}, f"Restored kinds mismatch: {restored!r}"
 
         # Test None = All (backward compat fallback)
         settings.set_value("tm_panel/kind_filter", None)
         restored_none = settings.get_json("tm_panel/kind_filter", None)
-        assert restored_none is None, \
-            f"Expected None after set_value(None), got: {restored_none!r}"
+        assert restored_none is None, f"Expected None after set_value(None), got: {restored_none!r}"
 
         # Verify None kinds behaves as "All" in service
         db = DBService.get_instance()
@@ -953,9 +971,7 @@ class SmokeTask22Runner:
             all_entries = svc.search_tm_entries(session, filters={}, limit=9999)
         with db.get_session() as session:
             # kinds=None is falsy → no filter applied (same as no kinds key)
-            no_filter = svc.search_tm_entries(
-                session, filters={"kinds": None}, limit=9999
-            )
+            no_filter = svc.search_tm_entries(session, filters={"kinds": None}, limit=9999)
         assert len(no_filter) == len(all_entries), (
             f"kinds=None should return all entries ({len(all_entries)}), "
             f"but returned {len(no_filter)}"
@@ -963,9 +979,7 @@ class SmokeTask22Runner:
 
         # Also test [] (empty list) = All
         with db.get_session() as session:
-            empty_filter = svc.search_tm_entries(
-                session, filters={"kinds": []}, limit=9999
-            )
+            empty_filter = svc.search_tm_entries(session, filters={"kinds": []}, limit=9999)
         assert len(empty_filter) == len(all_entries), (
             f"kinds=[] should return all entries ({len(all_entries)}), "
             f"but returned {len(empty_filter)}"
@@ -1014,9 +1028,7 @@ class SmokeTask22Runner:
 
         db = DBService.get_instance()
         with db.get_session() as session:
-            results = DocumentService().list_documents(
-                session, self.corpus_id, tag_filter="test"
-            )
+            results = DocumentService().list_documents(session, self.corpus_id, tag_filter="test")
         ids = [d.doc_id for d in results]
         assert self.doc_id in ids, (
             f"Tag filter 'test' did not return doc_id={self.doc_id}. "
@@ -1066,28 +1078,28 @@ class SmokeTask22Runner:
 
         steps = [
             # — A) Document ingest + metadata —
-            ("A1: Check project 12 exists",             self._a1_check_project),
-            ("A2: Ingest document",                     self._a2_ingest_document),
-            ("A3: Document visible in service",         self._a3_document_visible_in_service),
-            ("A4: Edit metadata (tag/link/level/topic)",self._a4_edit_metadata),
-            ("A5: Metadata persisted in DB",            self._a5_metadata_persisted),
-            ("A6a: Link click positive (https://)",     self._a6a_link_click_positive),
-            ("A6b: Link click negative (javascript:)",  self._a6b_link_click_negative_javascript),
+            ("A1: Check project 12 exists", self._a1_check_project),
+            ("A2: Ingest document", self._a2_ingest_document),
+            ("A3: Document visible in service", self._a3_document_visible_in_service),
+            ("A4: Edit metadata (tag/link/level/topic)", self._a4_edit_metadata),
+            ("A5: Metadata persisted in DB", self._a5_metadata_persisted),
+            ("A6a: Link click positive (https://)", self._a6a_link_click_positive),
+            ("A6b: Link click negative (javascript:)", self._a6b_link_click_negative_javascript),
             # — B) NLP + Sentences —
-            ("B7: NLP processing (ProcessWorker)",      self._b7_nlp_process),
-            ("B8: Sentences tab data",                  self._b8_sentences_tab_data),
+            ("B7: NLP processing (ProcessWorker)", self._b7_nlp_process),
+            ("B8: Sentences tab data", self._b8_sentences_tab_data),
             # — C) Sentences batch actions —
-            ("C9a: Translate Selected (BatchTranslateWorker)",  self._c9a_translate_selected),
-            ("C9b: Pronunciation Bootstrap",                    self._c9b_pronunciation_bootstrap),
-            ("C9c: Generate Audio (BatchGenerateAudioWorker)",  self._c9c_generate_audio),
-            ("C10: Play Audio (monkeypatched)",                 self._c10_play_audio),
+            ("C9a: Translate Selected (BatchTranslateWorker)", self._c9a_translate_selected),
+            ("C9b: Pronunciation Bootstrap", self._c9b_pronunciation_bootstrap),
+            ("C9c: Generate Audio (BatchGenerateAudioWorker)", self._c9c_generate_audio),
+            ("C10: Play Audio (monkeypatched)", self._c10_play_audio),
             # — D) TM Kind filter —
             ("D11: Kind filter applied (lemma+surface)", self._d11_kind_filter_applied),
-            ("D12: Kind filter persisted in QSettings",  self._d12_kind_filter_persisted),
+            ("D12: Kind filter persisted in QSettings", self._d12_kind_filter_persisted),
             # — E) Documents search/filter/sort —
-            ("E13a: Title search",          self._e13a_title_search),
-            ("E13b: Tag filter",            self._e13b_tag_filter),
-            ("E13c: Sort stability",        self._e13c_sort_stability),
+            ("E13a: Title search", self._e13a_title_search),
+            ("E13b: Tag filter", self._e13b_tag_filter),
+            ("E13c: Sort stability", self._e13c_sort_stability),
         ]
 
         total = len(steps)
@@ -1110,6 +1122,7 @@ class SmokeTask22Runner:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     args = _parse_args()
@@ -1144,11 +1157,13 @@ def main() -> None:
 
     # 4. Initialize DBService
     from app.services.db_service import DBService
+
     DBService.initialize(db_path)
     logger.info("DBService initialized")
 
     # 5. Initialize SettingsService (requires QApplication)
     from app.infra.settings import SettingsService
+
     SettingsService.get_instance()
 
     # 6. Backup QSettings keys we will modify

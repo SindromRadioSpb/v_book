@@ -25,30 +25,30 @@ Architecture:
 
 import json
 import logging
-import time
 import random
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
 
+from google.api_core import exceptions as google_exceptions
 from google.cloud import translate_v3
 from google.oauth2 import service_account
-from google.api_core import exceptions as google_exceptions
+from sqlalchemy.exc import OperationalError
+
+from app.infra.security import CredentialStore
+from app.infra.settings import SettingsService
+from app.services.mt_usage_tracker import MTUsageTracker
 
 from ..base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 from ..provider_config import ProviderAuthMode
 from ..provider_config_manager import ProviderConfigManager
-from app.infra.settings import SettingsService
-from app.infra.security import CredentialStore
-from app.services.mt_usage_tracker import MTUsageTracker
-from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +72,11 @@ class GoogleCloudTranslateProvider(BaseProvider):
 
     # Deferred usage queue for "database is locked" windows.
     # Key: (provider_id, minute_key, day_key, month_key) -> [char_count, request_count]
-    _usage_pending: Dict[tuple[str, str, str, str], list[int]] = defaultdict(lambda: [0, 0])
+    _usage_pending: dict[tuple[str, str, str, str], list[int]] = defaultdict(lambda: [0, 0])
     _usage_pending_lock = threading.Lock()
     _usage_suspend_until: float = 0.0
     _usage_queue_loaded: bool = False
-    _usage_queue_path: Optional[Path] = None
+    _usage_queue_path: Path | None = None
     _usage_locked_events: int = 0
     _usage_locked_chars: int = 0
     _usage_locked_requests: int = 0
@@ -86,8 +86,8 @@ class GoogleCloudTranslateProvider(BaseProvider):
 
     def __init__(
         self,
-        config_manager: Optional[ProviderConfigManager] = None,
-        cred_store: Optional[CredentialStore] = None,
+        config_manager: ProviderConfigManager | None = None,
+        cred_store: CredentialStore | None = None,
     ):
         """Initialize provider.
 
@@ -102,8 +102,8 @@ class GoogleCloudTranslateProvider(BaseProvider):
         """
         self._config_manager = config_manager
         self._cred_store = cred_store
-        self._client: Optional[translate_v3.TranslationServiceClient] = None
-        self._project_id: Optional[str] = None
+        self._client: translate_v3.TranslationServiceClient | None = None
+        self._project_id: str | None = None
 
     @property
     def provider_id(self) -> str:
@@ -166,9 +166,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
         # Load service account JSON from CredentialStore
         if config.auth.service_account_credential_id:
             # Load from encrypted DB
-            sa_json_str = config_mgr.get_credential(
-                config.auth.service_account_credential_id
-            )
+            sa_json_str = config_mgr.get_credential(config.auth.service_account_credential_id)
             if not sa_json_str:
                 error_msg = (
                     f"Service Account JSON not found in credential store "
@@ -188,7 +186,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
         elif config.auth.service_account_path:
             # Load from file
             try:
-                with open(config.auth.service_account_path, 'r') as f:
+                with open(config.auth.service_account_path) as f:
                     sa_info = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 error_msg = (
@@ -220,9 +218,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
         # Create client
         try:
             self._client = translate_v3.TranslationServiceClient(credentials=credentials)
-            logger.info(
-                f"[{self.provider_id}] Client initialized (project: {self._project_id})"
-            )
+            logger.info(f"[{self.provider_id}] Client initialized (project: {self._project_id})")
         except Exception as e:
             error_msg = f"Failed to create Translation API client: {e}"
             logger.error(f"[{self.provider_id}] {error_msg}")
@@ -445,9 +441,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
             except google_exceptions.ResourceExhausted as e:
                 # Quota exceeded (could be 403 or 429 depending on quota type)
                 latency_ms = int((time.time() - start_time) * 1000)
-                logger.error(
-                    f"[{self.provider_id}] [{trace_id}] Quota exceeded: {e}"
-                )
+                logger.error(f"[{self.provider_id}] [{trace_id}] Quota exceeded: {e}")
                 return TranslationResult(
                     provider_id=self.provider_id,
                     error_kind=TranslationErrorKind.QUOTA,
@@ -458,9 +452,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
             except google_exceptions.InvalidArgument as e:
                 # 400 - Invalid request (bad language code, etc.)
                 latency_ms = int((time.time() - start_time) * 1000)
-                logger.error(
-                    f"[{self.provider_id}] [{trace_id}] Invalid request: {e}"
-                )
+                logger.error(f"[{self.provider_id}] [{trace_id}] Invalid request: {e}")
                 return TranslationResult(
                     provider_id=self.provider_id,
                     error_kind=TranslationErrorKind.INVALID_REQUEST,
@@ -500,7 +492,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
         )
 
     @classmethod
-    def _get_usage_queue_path(cls) -> Optional[Path]:
+    def _get_usage_queue_path(cls) -> Path | None:
         """Get persistent queue path near the active SQLite DB."""
         if cls._usage_queue_path is not None:
             return cls._usage_queue_path
@@ -540,8 +532,9 @@ class GoogleCloudTranslateProvider(BaseProvider):
                     "char_count": delta[0],
                     "request_count": delta[1],
                 }
-                for (provider_id, minute_key, day_key, month_key), delta
-                in sorted(cls._usage_pending.items())
+                for (provider_id, minute_key, day_key, month_key), delta in sorted(
+                    cls._usage_pending.items()
+                )
             ],
         }
 
@@ -599,12 +592,14 @@ class GoogleCloudTranslateProvider(BaseProvider):
                     continue
 
         if loaded:
-            logger.info(f"[google_cloud_translate] Loaded {loaded} deferred usage buckets from disk")
+            logger.info(
+                f"[google_cloud_translate] Loaded {loaded} deferred usage buckets from disk"
+            )
 
     def _consume_usage_lock_warning_locked(
         self,
         force: bool = False,
-    ) -> Optional[tuple[int, int, int, int]]:
+    ) -> tuple[int, int, int, int] | None:
         """Return aggregated lock warning payload and reset counters. Lock must be held."""
         cls = type(self)
 
@@ -655,7 +650,10 @@ class GoogleCloudTranslateProvider(BaseProvider):
         usage_key = (provider_id, minute_key, day_key, month_key)
 
         with cls._usage_pending_lock:
-            if usage_key not in cls._usage_pending and len(cls._usage_pending) >= cls._MAX_PENDING_USAGE_BUCKETS:
+            if (
+                usage_key not in cls._usage_pending
+                and len(cls._usage_pending) >= cls._MAX_PENDING_USAGE_BUCKETS
+            ):
                 logger.warning(
                     f"[{self.provider_id}] Usage queue full ({cls._MAX_PENDING_USAGE_BUCKETS} buckets), "
                     f"dropping deferred usage bucket {usage_key[1]}"
@@ -688,8 +686,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
             if not cls._usage_pending:
                 return
             pending_items = [
-                (key, (delta[0], delta[1]))
-                for key, delta in cls._usage_pending.items()
+                (key, (delta[0], delta[1])) for key, delta in cls._usage_pending.items()
             ]
 
         try:
@@ -697,7 +694,10 @@ class GoogleCloudTranslateProvider(BaseProvider):
 
             with DBService.get_instance().get_session() as session:
                 tracker = MTUsageTracker(session)
-                for (provider_id, minute_key, day_key, month_key), (chars, requests) in pending_items:
+                for (provider_id, minute_key, day_key, month_key), (
+                    chars,
+                    requests,
+                ) in pending_items:
                     tracker.record_spend_for_keys(
                         provider_id=provider_id,
                         minute_key=minute_key,
@@ -730,9 +730,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
                 return
             raise
         except Exception as e:
-            logger.warning(
-                f"[{self.provider_id}] [{trace_id}] Deferred usage flush failed: {e}"
-            )
+            logger.warning(f"[{self.provider_id}] [{trace_id}] Deferred usage flush failed: {e}")
 
     @classmethod
     def flush_deferred_usage_now(cls, trace_id: str = "batch-end") -> None:
@@ -744,7 +742,9 @@ class GoogleCloudTranslateProvider(BaseProvider):
         provider._flush_pending_usage(trace_id=trace_id, force=True)
         provider._emit_usage_lock_warning_if_due(trace_id=trace_id, force=True)
 
-    def _record_usage_with_fallback(self, trace_id: str, char_count: int, request_count: int) -> None:
+    def _record_usage_with_fallback(
+        self, trace_id: str, char_count: int, request_count: int
+    ) -> None:
         """Record usage immediately; queue deltas when DB is locked."""
         cls = type(self)
         self._load_usage_queue_once()
@@ -774,14 +774,10 @@ class GoogleCloudTranslateProvider(BaseProvider):
                 )
                 cls._usage_suspend_until = time.time() + 1.0
                 return
-            logger.error(
-                f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}"
-            )
+            logger.error(f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}")
         except Exception as e:
             # Non-lock failures are logged but don't fail translation.
-            logger.error(
-                f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}"
-            )
+            logger.error(f"[{self.provider_id}] [{trace_id}] Failed to record usage: {e}")
 
     def _calculate_backoff(
         self,
@@ -791,7 +787,7 @@ class GoogleCloudTranslateProvider(BaseProvider):
         use_jitter: bool,
     ) -> int:
         """Calculate exponential backoff with optional jitter."""
-        backoff = min(base_ms * (2 ** attempt), max_ms)
+        backoff = min(base_ms * (2**attempt), max_ms)
         if use_jitter:
             # Add +/- 25% jitter
             jitter = random.uniform(0.75, 1.25)

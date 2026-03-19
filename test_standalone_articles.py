@@ -1,16 +1,17 @@
 """Test standalone articles canonicalization (M5.2 fix)."""
-import sys
+
 import io
+import sys
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from app.domain.term_extraction.canonicalizer import canonicalize_hebrew_term
 
-print("="*70)
+print("=" * 70)
 print("TEST: Standalone Articles Canonicalization (M5.2 Fix)")
-print("="*70)
+print("=" * 70)
 
 # Test cases: (surface, lemma, expected_canonical)
 test_cases = [
@@ -19,20 +20,17 @@ test_cases = [
     ("בית הספר", "בית ספר", "בית_ספר"),
     ("לבית הספר", "בית ספר", "בית_ספר"),
     ("בבית ספר", "בית ספר", "בית_ספר"),
-
     # Standalone article cases (M5.2 fix)
     ("בית ה ספר", "בית ה ספר", "בית_ספר"),  # Article separate
-    ("ה ספר", "ה ספר", "ספר"),                # Article only
-    ("ב בית", "ב בית", "בית"),                # Prefix separate
-    ("ל ספר", "ל ספר", "ספר"),                # Prefix separate
-
+    ("ה ספר", "ה ספר", "ספר"),  # Article only
+    ("ב בית", "ב בית", "בית"),  # Prefix separate
+    ("ל ספר", "ל ספר", "ספר"),  # Prefix separate
     # Multiple standalone prefixes
-    ("ב ה ספר", "ב ה ספר", "ספר"),           # Two prefixes separate
-    ("ל ה בית", "ל ה בית", "בית"),           # Two prefixes separate
-
+    ("ב ה ספר", "ב ה ספר", "ספר"),  # Two prefixes separate
+    ("ל ה בית", "ל ה בית", "בית"),  # Two prefixes separate
     # Edge cases
-    ("הספר", "ספר", "ספר"),                  # Single word with article
-    ("ספר", "ספר", "ספר"),                   # Single word bare
+    ("הספר", "ספר", "ספר"),  # Single word with article
+    ("ספר", "ספר", "ספר"),  # Single word bare
 ]
 
 passed = 0
@@ -54,9 +52,9 @@ for i, (surface, lemma, expected) in enumerate(test_cases, 1):
     print(f"   Expected: '{expected}'")
     print(f"   Got:      '{result}'")
 
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print(f"RESULTS: {passed} passed, {failed} failed")
-print("="*70)
+print("=" * 70)
 
 if failed == 0:
     print("✅ ALL TESTS PASSED")

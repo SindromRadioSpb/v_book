@@ -3,11 +3,16 @@
 Progress dialog for batch translation with cancel support.
 """
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QGroupBox
-)
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class BatchProgressDialog(QDialog):
@@ -44,9 +49,7 @@ class BatchProgressDialog(QDialog):
 
         # Disable close button (only Cancel button should work)
         self.setWindowFlags(
-            Qt.WindowType.Dialog |
-            Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.WindowTitleHint
+            Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint
         )
 
         layout = QVBoxLayout()

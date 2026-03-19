@@ -15,20 +15,20 @@ Glossary Support: Yes (via Custom Translator or inline dictionary)
   - Inline dictionary can be passed in request (supports term mapping on-the-fly)
   - For this implementation: Inline dictionary in PATCH-P1-T05
 """
+
 import json
 import logging
 import time
-import urllib.request
 import urllib.error
 import urllib.parse
+import urllib.request
 import uuid
-from typing import Optional
 
 from app.infra.translators.base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ class MicrosoftTranslatorProvider(BaseProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        region: Optional[str] = None,
+        api_key: str | None = None,
+        region: str | None = None,
         endpoint: str = "https://api.cognitive.microsofttranslator.com",
         timeout_seconds: float = 10.0,
     ):

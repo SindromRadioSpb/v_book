@@ -1,16 +1,27 @@
 """Concordance view - KWIC search (M6)."""
-import logging
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSpinBox, QCheckBox, QProgressBar
-)
-from PyQt6.QtCore import Qt, pyqtSignal
 
-from app.ui.workers import ConcordanceSearchWorker
-from app.ui.dialogs import show_error
+import logging
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.infra.security import QueryComplexityError, validate_query_complexity
 from app.services.db_service import DBService
-from app.infra.security import validate_query_complexity, QueryComplexityError
+from app.ui.dialogs import show_error
+from app.ui.workers import ConcordanceSearchWorker
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +69,9 @@ class ConcordanceView(QWidget):
 
         self.normalize_checkbox = QCheckBox("Normalize")
         self.normalize_checkbox.setChecked(True)
-        self.normalize_checkbox.setToolTip("Find article variants (e.g., 'בית ספר' finds 'בית הספר')")
+        self.normalize_checkbox.setToolTip(
+            "Find article variants (e.g., 'בית ספר' finds 'בית הספר')"
+        )
         search_layout.addWidget(self.normalize_checkbox)
 
         search_layout.addWidget(QLabel("Limit:"))
@@ -76,9 +89,9 @@ class ConcordanceView(QWidget):
         # Results table
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(5)
-        self.results_table.setHorizontalHeaderLabels([
-            "Document", "Left Context", "Match", "Right Context", "ID"
-        ])
+        self.results_table.setHorizontalHeaderLabels(
+            ["Document", "Left Context", "Match", "Right Context", "ID"]
+        )
 
         # Set column behavior
         header = self.results_table.horizontalHeader()
@@ -124,16 +137,15 @@ class ConcordanceView(QWidget):
         except QueryComplexityError as e:
             # Show user-friendly error message
             error_messages = {
-                "LENGTH_EXCEEDED": f"Query is too long (max 500 characters).\n\nPlease shorten your search query.",
-                "WILDCARD_LIMIT": f"Too many wildcards (*) in query (max 5).\n\nPlease reduce the number of wildcards.",
-                "OPERATOR_LIMIT": f"Too many search operators (AND/OR/NOT/NEAR) in query (max 10).\n\nPlease simplify your query.",
-                "PARENTHESES_DEPTH": f"Query has too many nested parentheses (max 10 levels).\n\nPlease simplify the query structure.",
-                "UNBALANCED_PARENTHESES": f"Parentheses are not balanced.\n\nPlease check that every '(' has a matching ')'.",
+                "LENGTH_EXCEEDED": "Query is too long (max 500 characters).\n\nPlease shorten your search query.",
+                "WILDCARD_LIMIT": "Too many wildcards (*) in query (max 5).\n\nPlease reduce the number of wildcards.",
+                "OPERATOR_LIMIT": "Too many search operators (AND/OR/NOT/NEAR) in query (max 10).\n\nPlease simplify your query.",
+                "PARENTHESES_DEPTH": "Query has too many nested parentheses (max 10 levels).\n\nPlease simplify the query structure.",
+                "UNBALANCED_PARENTHESES": "Parentheses are not balanced.\n\nPlease check that every '(' has a matching ')'.",
             }
 
             error_msg = error_messages.get(
-                e.reason,
-                f"Query is too complex: {e.reason}\n\nPlease simplify your search."
+                e.reason, f"Query is too complex: {e.reason}\n\nPlease simplify your search."
             )
 
             show_error(self, "Query Validation Error", error_msg)
@@ -158,7 +170,7 @@ class ConcordanceView(QWidget):
             limit=limit,
             offset=0,
             is_phrase=is_phrase,
-            normalize=normalize
+            normalize=normalize,
         )
 
         self.search_worker.results_ready.connect(self.on_search_results)

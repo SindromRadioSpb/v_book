@@ -30,7 +30,9 @@ def test_translation_resolve_worker_uses_read_session(monkeypatch):
             return {}
 
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: _FakeDB())
-    monkeypatch.setattr("app.services.translation_service.TranslationService", _FakeTranslationService)
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService", _FakeTranslationService
+    )
 
     worker = TranslationResolveWorker(items=[("alpha", "lemma")], project_id=1)
     worker.run()
@@ -56,7 +58,9 @@ def test_single_text_translate_worker_cancel_suppresses_result(monkeypatch, qtbo
             return SimpleNamespace(translation="done", source="mt", provider="fake")
 
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: _FakeDB())
-    monkeypatch.setattr("app.services.translation_service.TranslationService", _FakeTranslationService)
+    monkeypatch.setattr(
+        "app.services.translation_service.TranslationService", _FakeTranslationService
+    )
 
     worker = SingleTextTranslateWorker(text="hello", src_lang="en", tgt_lang="ru")
     captured = []

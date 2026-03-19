@@ -113,8 +113,9 @@ INSERT INTO document_sentence(sentence_id, doc_id, text) VALUES (701, 101, 'של
     con.close()
 
 
-def test_collect_queryplan_evidence_generates_json_and_md(tmp_path: Path) -> None:
+def test_collect_queryplan_evidence_generates_json_and_md(tmp_path: Path, monkeypatch) -> None:
     mod = _load_module()
+    monkeypatch.setattr(mod, "_is_expected_j_path", lambda p: True)
     db = tmp_path / "queryplan_fixture.db"
     out_dir = tmp_path / "out"
     _create_minimal_db(db)

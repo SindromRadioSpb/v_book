@@ -6,7 +6,6 @@ import io
 import math
 import struct
 import wave
-from typing import Tuple
 
 
 def synthesize_tone_wav(
@@ -14,7 +13,7 @@ def synthesize_tone_wav(
     text: str,
     speed: float,
     sample_rate_hz: int = 16000,
-) -> Tuple[bytes, int]:
+) -> tuple[bytes, int]:
     """Generate short deterministic mono WAV based on input text.
 
     This intentionally does not attempt real TTS. It is a safe stub that

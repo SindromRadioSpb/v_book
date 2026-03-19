@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ class AudioPlaybackService:
         subprocess.Popen(["xdg-open", str(path)])
 
     @staticmethod
-    def launch_audio_file(path: Path, *, label: str = "", play_mode: Optional[str] = None) -> None:
+    def launch_audio_file(path: Path, *, label: str = "", play_mode: str | None = None) -> None:
         """Play one audio file using internal player (fallback: external launcher)."""
         try:
             from app.services.audio_player_service import AudioPlayerService
@@ -55,9 +55,9 @@ class AudioPlaybackService:
     def launch_audio_files(
         paths: Sequence[Path],
         *,
-        labels: Optional[Sequence[str]] = None,
+        labels: Sequence[str] | None = None,
         play_mode: str = "enqueue",
-        contexts: Optional[Sequence[Dict[str, object]]] = None,
+        contexts: Sequence[dict[str, object]] | None = None,
         start_immediately: bool = False,
     ) -> int:
         """Play/enqueue many audio files using internal player (fallback: first external)."""
@@ -117,8 +117,8 @@ class AudioPlaybackService:
         *,
         lang: str,
         norm_text: str,
-        source_text: Optional[str] = None,
-    ) -> Optional[Path]:
+        source_text: str | None = None,
+    ) -> Path | None:
         speech_hash = None
         if source_text:
             payload = AudioPlaybackService._cache_keys.prepare_pronunciation_payload(
@@ -144,10 +144,15 @@ class AudioPlaybackService:
         else:
             filters.append(AudioAsset.norm_text == norm_text)
 
-        stmt = select(AudioAsset).where(and_(*filters)).order_by(
-            desc(AudioAsset.updated_at),
-            desc(AudioAsset.asset_id),
-        ).limit(1)
+        stmt = (
+            select(AudioAsset)
+            .where(and_(*filters))
+            .order_by(
+                desc(AudioAsset.updated_at),
+                desc(AudioAsset.asset_id),
+            )
+            .limit(1)
+        )
         row = session.execute(stmt).scalar_one_or_none()
         if not row or not row.audio_rel_path:
             return None

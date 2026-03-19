@@ -118,7 +118,12 @@ def test_action_policy_playlist_play_selected_requires_ready(panel):
     summary_ready = dict(summary_missing)
     summary_ready.update(
         {
-            "single_info": {"row": 0, "kind": "term", "status": "ready", "has_source_payload": True},
+            "single_info": {
+                "row": 0,
+                "kind": "term",
+                "status": "ready",
+                "has_source_payload": True,
+            },
             "single_status": "ready",
             "any_ready": True,
             "any_missing": False,
@@ -150,6 +155,8 @@ def test_action_policy_history_play_selected_requires_ready(panel):
         "any_stale": True,
         "any_missing": False,
     }
-    states = panel._compute_action_state("history", summary, has_current_source=False)  # noqa: SLF001
+    states = panel._compute_action_state(
+        "history", summary, has_current_source=False
+    )  # noqa: SLF001
     assert states["history_play_selected"]["enabled"] is False
     assert "playable" in states["history_play_selected"]["reason"].lower()

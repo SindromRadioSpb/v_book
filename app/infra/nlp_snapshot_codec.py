@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Iterable, List
+from collections.abc import Iterable
+from typing import Any
 
 from app.infra.nlp_engines.base import Sentence, Token
 
@@ -15,7 +16,7 @@ def build_sentence_text_hash(text: str) -> str:
 
 
 def serialize_nlp_sentences(sentences: Iterable[Sentence]) -> str:
-    payload: List[dict[str, Any]] = []
+    payload: list[dict[str, Any]] = []
     for sentence in sentences:
         sentence_text = str(getattr(sentence, "text", "") or "")
         payload.append(
@@ -35,12 +36,12 @@ def serialize_nlp_sentences(sentences: Iterable[Sentence]) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def deserialize_nlp_sentences(payload_json: str) -> List[Sentence]:
+def deserialize_nlp_sentences(payload_json: str) -> list[Sentence]:
     raw_payload = json.loads(str(payload_json or "[]"))
     if not isinstance(raw_payload, list):
         raise ValueError("sentence NLP snapshot payload must be a list")
 
-    sentences: List[Sentence] = []
+    sentences: list[Sentence] = []
     for raw_sentence in raw_payload:
         if not isinstance(raw_sentence, dict):
             raise ValueError("sentence NLP snapshot item must be an object")

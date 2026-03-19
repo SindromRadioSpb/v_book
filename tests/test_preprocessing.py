@@ -1,4 +1,5 @@
 """Test preprocessing (M3)."""
+
 import pytest
 from app.domain.preprocessing import preprocess_text
 from app.domain.hebrew_utils import strip_nikud, is_hebrew_text

@@ -1,4 +1,5 @@
 """Test Extract Terms for Project 7."""
+
 import sys
 from pathlib import Path
 
@@ -21,9 +22,7 @@ print("=" * 80)
 print()
 
 # Check project exists
-project = session.execute(
-    select(DictProject).where(DictProject.project_id == 7)
-).scalar()
+project = session.execute(select(DictProject).where(DictProject.project_id == 7)).scalar()
 
 if not project:
     print("[ERROR] Project 7 not found!")
@@ -41,9 +40,7 @@ print()
 
 # Check existing terms
 existing_terms = session.execute(
-    select(func.count(TermCluster.cluster_id)).where(
-        TermCluster.project_id == 7
-    )
+    select(func.count(TermCluster.cluster_id)).where(TermCluster.project_id == 7)
 ).scalar()
 
 print(f"Existing term clusters: {existing_terms}")
@@ -51,10 +48,7 @@ print()
 
 # Check tm_entry for terms
 existing_tm = session.execute(
-    select(func.count(TMEntry.tm_id)).where(
-        TMEntry.project_id == 7,
-        TMEntry.kind == "term_cluster"
-    )
+    select(func.count(TMEntry.tm_id)).where(TMEntry.project_id == 7, TMEntry.kind == "term_cluster")
 ).scalar()
 
 print(f"TM entries for terms: {existing_tm}")
@@ -63,9 +57,7 @@ print()
 # Check if tm_global links are set
 linked_tm = session.execute(
     select(func.count(TMEntry.tm_id)).where(
-        TMEntry.project_id == 7,
-        TMEntry.kind == "term_cluster",
-        TMEntry.tm_global_id.isnot(None)
+        TMEntry.project_id == 7, TMEntry.kind == "term_cluster", TMEntry.tm_global_id.isnot(None)
     )
 ).scalar()
 
@@ -74,19 +66,21 @@ print()
 
 # Sample some terms
 print("Sample terms (first 10, sorted by frequency):")
-terms = session.execute(
-    select(TermCluster).where(
-        TermCluster.project_id == 7
-    ).order_by(TermCluster.freq_abs.desc()).limit(10)
-).scalars().all()
+terms = (
+    session.execute(
+        select(TermCluster)
+        .where(TermCluster.project_id == 7)
+        .order_by(TermCluster.freq_abs.desc())
+        .limit(10)
+    )
+    .scalars()
+    .all()
+)
 
 for i, term in enumerate(terms, 1):
     # Check if has tm_entry
     tm = session.execute(
-        select(TMEntry).where(
-            TMEntry.project_id == 7,
-            TMEntry.cluster_id == term.cluster_id
-        )
+        select(TMEntry).where(TMEntry.project_id == 7, TMEntry.cluster_id == term.cluster_id)
     ).scalar()
 
     translation = tm.translation if tm else ""

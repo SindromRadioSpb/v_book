@@ -11,7 +11,6 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class EntityClass(str, Enum):
@@ -47,7 +46,7 @@ class ClassificationResult:
 
     entity_class: str  # EntityClass value
     is_noise: bool
-    noise_reason: Optional[str]  # NoiseReason value or None
+    noise_reason: str | None  # NoiseReason value or None
     norm_text: str  # Normalized text
 
 
@@ -254,7 +253,13 @@ def _is_pure_hebrew(text: str, ratios: dict) -> bool:
     # Allow Hebrew letters + Hebrew-specific markers
     allowed = set(text)
     for c in allowed:
-        if not (_is_hebrew_char(c) or c in " \t" or c == HEBREW_GERESH or c == HEBREW_GERSHAYIM or c == HEBREW_MAQAF):
+        if not (
+            _is_hebrew_char(c)
+            or c in " \t"
+            or c == HEBREW_GERESH
+            or c == HEBREW_GERSHAYIM
+            or c == HEBREW_MAQAF
+        ):
             # Check if it's actually a Hebrew letter
             if _is_hebrew_char(c):
                 continue
@@ -458,7 +463,9 @@ def classify_phrase(raw: str) -> ClassificationResult:
     # Aggregate: if majority tokens are noise -> phrase is noise
     if noise_count / len(tokens) >= 0.5:
         # Find dominant noise reason
-        noise_reasons = [res.noise_reason for res in token_results if res.is_noise and res.noise_reason]
+        noise_reasons = [
+            res.noise_reason for res in token_results if res.is_noise and res.noise_reason
+        ]
         if noise_reasons:
             # Most frequent reason
             dominant_reason = max(set(noise_reasons), key=noise_reasons.count)

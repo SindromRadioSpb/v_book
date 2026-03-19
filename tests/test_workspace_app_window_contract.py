@@ -37,7 +37,9 @@ def _fresh_window(monkeypatch, qtbot):
     settings.set_value("workspace/active_workspace", "workspace.projects")
     settings.sync()
 
-    monkeypatch.setattr("app.ui.project_dashboard.ProjectDashboard.load_projects", lambda self: None)
+    monkeypatch.setattr(
+        "app.ui.project_dashboard.ProjectDashboard.load_projects", lambda self: None
+    )
     monkeypatch.setattr("app.ui.project_dashboard.ProjectService", lambda: object())
     monkeypatch.setattr("app.ui.app_window.ProjectService", lambda: object())
     window = AppWindow()
@@ -72,7 +74,9 @@ def test_pending_project_tab_routes_after_open(monkeypatch, qtbot):
 
     monkeypatch.setattr("app.ui.app_window.ProjectView", _StubProjectView)
     monkeypatch.setattr(window, "_is_valid_project_id", lambda project_id: True)
-    monkeypatch.setattr(window, "_lookup_project_name", lambda project_id: f"Project {int(project_id)}")
+    monkeypatch.setattr(
+        window, "_lookup_project_name", lambda project_id: f"Project {int(project_id)}"
+    )
 
     window._set_current_project_context(None, "")
     window._open_current_project_tab("terms")
@@ -90,7 +94,9 @@ def test_open_project_recreates_cached_view_when_identity_changed(monkeypatch, q
 
     monkeypatch.setattr("app.ui.app_window.ProjectView", _StubProjectView)
     monkeypatch.setattr(window, "_is_valid_project_id", lambda project_id: True)
-    monkeypatch.setattr(window, "_lookup_project_identity", lambda project_id: ("Recreated", "created-new"))
+    monkeypatch.setattr(
+        window, "_lookup_project_identity", lambda project_id: ("Recreated", "created-new")
+    )
 
     stale = _StubProjectView(55)
     stale.project_created_at = "created-old"
@@ -141,7 +147,9 @@ def test_collect_shortcut_conflicts_respects_multi_shortcuts(monkeypatch, qtbot)
     window = _fresh_window(monkeypatch, qtbot)
 
     a1 = QAction("A1", window)
-    a1.setShortcuts([QKeySequence("Ctrl+Shift+U"), QKeySequence(f"Ctrl+Shift+{_HEBREW_SHORTCUT_KEY_MAP['U']}")])
+    a1.setShortcuts(
+        [QKeySequence("Ctrl+Shift+U"), QKeySequence(f"Ctrl+Shift+{_HEBREW_SHORTCUT_KEY_MAP['U']}")]
+    )
     window.addAction(a1)
 
     a2 = QAction("A2", window)
@@ -189,7 +197,9 @@ def test_deferred_reconnect_prompt_mentions_single_restart_path(monkeypatch, qtb
     settings.set_value("workspace/active_workspace", "workspace.projects")
     settings.sync()
 
-    monkeypatch.setattr("app.ui.project_dashboard.ProjectDashboard.load_projects", lambda self: None)
+    monkeypatch.setattr(
+        "app.ui.project_dashboard.ProjectDashboard.load_projects", lambda self: None
+    )
     monkeypatch.setattr("app.ui.project_dashboard.ProjectService", lambda: object())
     monkeypatch.setattr("app.ui.app_window.ProjectService", lambda: object())
 

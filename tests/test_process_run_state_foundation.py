@@ -61,13 +61,12 @@ def test_processor_run_migration_adds_run_state_columns() -> None:
         conn = sqlite3.connect(str(db_path))
         try:
             schema_version = int(
-                conn.execute(
-                    "SELECT value FROM schema_meta WHERE key='schema_version'"
-                ).fetchone()[0]
+                conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
+                    0
+                ]
             )
             columns = [
-                row[1]
-                for row in conn.execute("PRAGMA table_info('processor_run')").fetchall()
+                row[1] for row in conn.execute("PRAGMA table_info('processor_run')").fetchall()
             ]
         finally:
             conn.close()
@@ -136,9 +135,9 @@ def test_recover_from_crash_only_marks_running_runs_failed() -> None:
         assert recovered == 1
 
         with db.get_session() as session:
-            runs = session.execute(
-                select(ProcessorRun).order_by(ProcessorRun.run_id)
-            ).scalars().all()
+            runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id)).scalars().all()
+            )
             errors = session.execute(select(RunError).order_by(RunError.error_id)).scalars().all()
 
         assert runs[0].status == "failed"

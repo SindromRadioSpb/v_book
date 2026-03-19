@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class AudioErrorKind(Enum):
@@ -33,7 +33,7 @@ class AudioGenerationRequest:
     audio_format: str = "wav"
     trace_id: str = ""
     timeout_seconds: float = 15.0
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -43,10 +43,10 @@ class AudioGenerationResult:
     provider_id: str = ""
     audio_bytes: bytes = b""
     mime_type: str = "audio/wav"
-    duration_ms: Optional[int] = None
-    error_kind: Optional[AudioErrorKind] = None
-    error_message: Optional[str] = None
-    meta: Dict[str, Any] = field(default_factory=dict)
+    duration_ms: int | None = None
+    error_kind: AudioErrorKind | None = None
+    error_message: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_success(self) -> bool:

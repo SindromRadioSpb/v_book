@@ -9,7 +9,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Optional, Tuple
 
 from app.infra.audio.audio_provider_config import AudioProviderAuthMode
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
@@ -73,7 +72,11 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
             )
 
         language_code = self._language_code(request.source_lang)
-        voice_name = request.voice_id if request.voice_id and request.voice_id != "default" else (cfg.default_voice or "")
+        voice_name = (
+            request.voice_id
+            if request.voice_id and request.voice_id != "default"
+            else (cfg.default_voice or "")
+        )
         encoding = self._audio_encoding((request.audio_format or cfg.audio_format or "wav").lower())
         speaking_rate = max(0.5, min(2.0, request.speed))
 
@@ -141,9 +144,15 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
                     can_retry_without_voice_name = False
                     body["voice"].pop("name", None)
                     payload = json.dumps(body).encode("utf-8")
-                    req = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
+                    req = urllib.request.Request(
+                        endpoint, data=payload, headers=headers, method="POST"
+                    )
                     continue
-                if attempt < attempts and err_kind in {AudioErrorKind.NETWORK, AudioErrorKind.RATE_LIMIT, AudioErrorKind.SERVER}:
+                if attempt < attempts and err_kind in {
+                    AudioErrorKind.NETWORK,
+                    AudioErrorKind.RATE_LIMIT,
+                    AudioErrorKind.SERVER,
+                }:
                     time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
                     continue
                 return AudioGenerationResult(
@@ -173,7 +182,7 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
             error_message="Google TTS failed after retries",
         )
 
-    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], Optional[str]]:
+    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], str | None]:
         """Return available voice names for a language."""
         cfg = self._config_manager.load_config(self.provider_id)
         if cfg.auth_mode != AudioProviderAuthMode.SERVICE_ACCOUNT_JSON:
@@ -184,9 +193,8 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
         except Exception as exc:
             return [], str(exc)
 
-        endpoint = (
-            "https://texttospeech.googleapis.com/v1/voices?"
-            + urllib.parse.urlencode({"languageCode": language_code})
+        endpoint = "https://texttospeech.googleapis.com/v1/voices?" + urllib.parse.urlencode(
+            {"languageCode": language_code}
         )
         req = urllib.request.Request(
             endpoint,
@@ -213,7 +221,7 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
         except Exception as exc:
             return [], str(exc)
 
-    def _resolve_access_token_and_project(self, cfg) -> Tuple[str, str]:
+    def _resolve_access_token_and_project(self, cfg) -> tuple[str, str]:
         sa_info = self._config_manager.get_service_account_info(cfg)
         if not sa_info:
             raise ValueError("Service account JSON is not configured")
@@ -263,7 +271,7 @@ class GoogleCloudTTSProvider(BaseAudioProvider):
         return "audio/wav"
 
     @staticmethod
-    def _classify_http_error(error: urllib.error.HTTPError) -> Tuple[AudioErrorKind, str]:
+    def _classify_http_error(error: urllib.error.HTTPError) -> tuple[AudioErrorKind, str]:
         code = int(error.code)
         body = ""
         try:

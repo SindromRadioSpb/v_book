@@ -132,7 +132,9 @@ def test_track_finished_marks_played_in_db(monkeypatch, qtbot, tmp_path):
         calls["rate_used"] = rate_used
 
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: _FakeDB())
-    monkeypatch.setattr("app.services.audio_queue_service.AudioQueueService.mark_played", _fake_mark_played)
+    monkeypatch.setattr(
+        "app.services.audio_queue_service.AudioQueueService.mark_played", _fake_mark_played
+    )
 
     expected_rate = player.get_playback_rate()
     panel._on_track_finished({"label": "x", "context": {"item_id": 99}})
@@ -156,7 +158,9 @@ def test_track_finished_without_item_id_does_not_write_db(monkeypatch, qtbot, tm
         calls["mark"] += 1
 
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: _FakeDB())
-    monkeypatch.setattr("app.services.audio_queue_service.AudioQueueService.mark_played", _fake_mark_played)
+    monkeypatch.setattr(
+        "app.services.audio_queue_service.AudioQueueService.mark_played", _fake_mark_played
+    )
 
     panel._on_track_finished({"label": "x", "context": {"kind": "lemma"}})
 
@@ -210,8 +214,12 @@ def test_go_to_source_disabled_for_multi_selection(qtbot, tmp_path):
     sel = panel.queue_table.selectionModel()
     idx0 = panel._queue_model.index(0, 0)  # noqa: SLF001
     idx1 = panel._queue_model.index(1, 0)  # noqa: SLF001
-    sel.select(idx0, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
-    sel.select(idx1, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+    sel.select(
+        idx0, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    )
+    sel.select(
+        idx1, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    )
 
     assert panel.goto_source_btn.isEnabled() is False
 
@@ -239,7 +247,9 @@ def test_play_from_row_blocks_stale_without_fresh_audio(monkeypatch, qtbot, tmp_
     player._tracks[0].context["audio_status"] = "stale"  # noqa: SLF001
 
     shown_messages: list[str] = []
-    monkeypatch.setattr(panel, "_show_status_message", lambda msg, timeout_ms=4500: shown_messages.append(str(msg)))
+    monkeypatch.setattr(
+        panel, "_show_status_message", lambda msg, timeout_ms=4500: shown_messages.append(str(msg))
+    )
 
     panel._play_from_row(0)
 
@@ -285,8 +295,16 @@ def test_queue_niqqudize_sentences_uses_sentence_dialog(monkeypatch, qtbot, tmp_
         "app.ui.dialogs.pronunciation_bootstrap_dialog.show_pronunciation_bootstrap_dialog",
         _fake_lexical_dialog,
     )
-    monkeypatch.setattr(panel, "_mark_queue_sources_stale", lambda _keys: called.__setitem__("stale", called["stale"] + 1))
-    monkeypatch.setattr(panel, "_refresh_display_contexts", lambda: called.__setitem__("refresh", called["refresh"] + 1))
+    monkeypatch.setattr(
+        panel,
+        "_mark_queue_sources_stale",
+        lambda _keys: called.__setitem__("stale", called["stale"] + 1),
+    )
+    monkeypatch.setattr(
+        panel,
+        "_refresh_display_contexts",
+        lambda: called.__setitem__("refresh", called["refresh"] + 1),
+    )
 
     panel._on_queue_niqqudize_selected([0])
 
@@ -301,7 +319,9 @@ def test_queue_translate_finished_emits_data_changed(qtbot, tmp_path, monkeypatc
     captured = []
     panel.data_changed.connect(captured.append)
 
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: None
+    )
 
     class _Dialog:
         def set_completed(self):

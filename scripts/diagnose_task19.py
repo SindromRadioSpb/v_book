@@ -1,4 +1,5 @@
 """Diagnostic script for Task 19 tm_global implementation."""
+
 import sys
 from pathlib import Path
 
@@ -22,7 +23,9 @@ def main():
 
     # 1. Check schema version
     print("\n1. Schema Version:")
-    result = session.execute(text("SELECT value FROM schema_meta WHERE key='schema_version'")).scalar()
+    result = session.execute(
+        text("SELECT value FROM schema_meta WHERE key='schema_version'")
+    ).scalar()
     print(f"   Current schema version: {result}")
     if int(result) < 15:
         print("   ❌ ERROR: Migration 015 NOT applied! Run migrations first.")
@@ -35,6 +38,7 @@ def main():
     print("\n2. tm_global table:")
     try:
         from app.infra.sa_models import TMGlobal
+
         count = session.execute(select(func.count(TMGlobal.tm_global_id))).scalar()
         print(f"   ✅ tm_global table exists")
         print(f"   Total tm_global rows: {count}")
@@ -47,6 +51,7 @@ def main():
     print("\n3. tm_entry.tm_global_id column:")
     try:
         from app.infra.sa_models import TMEntry
+
         linked = session.execute(
             select(func.count(TMEntry.tm_id)).where(TMEntry.tm_global_id.isnot(None))
         ).scalar()
@@ -75,28 +80,34 @@ def main():
     print(f"   Normalized: {src_norm}")
 
     # Check tm_entry for projects 6 and 7
-    entries = session.execute(
-        select(TMEntry).where(
-            TMEntry.project_id.in_([6, 7]),
-            TMEntry.kind == "lemma",
-            TMEntry.src_norm == src_norm
-        ).order_by(TMEntry.project_id)
-    ).scalars().all()
+    entries = (
+        session.execute(
+            select(TMEntry)
+            .where(
+                TMEntry.project_id.in_([6, 7]),
+                TMEntry.kind == "lemma",
+                TMEntry.src_norm == src_norm,
+            )
+            .order_by(TMEntry.project_id)
+        )
+        .scalars()
+        .all()
+    )
 
     if not entries:
         print(f"   ⚠️  No tm_entry found for '{test_lemma}' in projects 6 or 7")
     else:
         print(f"   Found {len(entries)} tm_entry rows:")
         for e in entries:
-            print(f"     - Project {e.project_id}: tm_id={e.tm_id}, translation='{e.translation}', "
-                  f"tm_global_id={e.tm_global_id}, status={e.status}, origin={e.origin}")
+            print(
+                f"     - Project {e.project_id}: tm_id={e.tm_id}, translation='{e.translation}', "
+                f"tm_global_id={e.tm_global_id}, status={e.status}, origin={e.origin}"
+            )
 
     # Check tm_global for this lemma
     global_entry = session.execute(
         select(TMGlobal).where(
-            TMGlobal.src_lang == "he",
-            TMGlobal.kind == "lemma",
-            TMGlobal.src_norm == src_norm
+            TMGlobal.src_lang == "he", TMGlobal.kind == "lemma", TMGlobal.src_norm == src_norm
         )
     ).scalar()
 
@@ -112,14 +123,18 @@ def main():
 
     # 5. Check recent translations (last 10)
     print("\n5. Recent tm_entry updates (last 10):")
-    recent = session.execute(
-        select(TMEntry).order_by(TMEntry.updated_at.desc()).limit(10)
-    ).scalars().all()
+    recent = (
+        session.execute(select(TMEntry).order_by(TMEntry.updated_at.desc()).limit(10))
+        .scalars()
+        .all()
+    )
 
     for e in recent:
-        print(f"   - tm_id={e.tm_id}, project_id={e.project_id}, kind={e.kind}, "
-              f"src_text='{e.src_text[:20]}', translation='{e.translation[:30]}', "
-              f"tm_global_id={e.tm_global_id}, updated_at={e.updated_at}")
+        print(
+            f"   - tm_id={e.tm_id}, project_id={e.project_id}, kind={e.kind}, "
+            f"src_text='{e.src_text[:20]}', translation='{e.translation[:30]}', "
+            f"tm_global_id={e.tm_global_id}, updated_at={e.updated_at}"
+        )
 
     # 6. Summary
     print("\n" + "=" * 80)

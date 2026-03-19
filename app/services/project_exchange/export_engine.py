@@ -7,29 +7,29 @@ import sqlite3
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Callable
 
 from sqlalchemy import select
 
 from app import __version__ as APP_VERSION
+from app.infra.fts_manager import ensure_fts_tables
+from app.infra.sa_models import Lemma, PronunciationEntry, TermCluster, TMEntry, UserDictionaryItem
 from app.infra.security import validate_path_security
 from app.services.db_service import DBService
 from app.services.project_exchange import bundle_format
 from app.services.project_exchange.constants import (
-    TABLE_INSERT_ORDER,
-    EXCLUDED_TABLES,
     BUNDLE_FORMAT_VERSION,
+    EXCLUDED_TABLES,
     PRONUNCIATION_METADATA_FILENAME,
+    TABLE_INSERT_ORDER,
 )
 from app.services.project_exchange.dto import (
     ExportOptions,
     ExportReport,
     ManifestInfo,
 )
-from app.infra.fts_manager import ensure_fts_tables
-from app.infra.sa_models import Lemma, PronunciationEntry, TermCluster, TMEntry, UserDictionaryItem
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,12 @@ def _get_migrations_dir() -> Path:
     Returns:
         Path to app/infra/migrations directory
     """
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # PyInstaller bundle - migrations are in sys._MEIPASS/app/infra/migrations
-        return Path(sys._MEIPASS) / 'app' / 'infra' / 'migrations'
+        return Path(sys._MEIPASS) / "app" / "infra" / "migrations"
     else:
         # Development - relative path from project root
-        return Path('app/infra/migrations')
+        return Path("app/infra/migrations")
 
 
 class ProjectExportEngine:
@@ -66,8 +66,8 @@ class ProjectExportEngine:
         project_id: int,
         out_path: Path,
         options: ExportOptions = ExportOptions(),
-        progress_callback: Optional[Callable[[str, int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Callable[[str, int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> ExportReport:
         """Export a project to a .hdleproj bundle.
 
@@ -172,7 +172,7 @@ class ProjectExportEngine:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
 
     @staticmethod
-    def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
+    def _check_cancelled(cancel_check: Callable[[], bool] | None) -> None:
         if cancel_check and bool(cancel_check()):
             raise ExportCancelled("Export cancelled by user.")
 
@@ -191,6 +191,7 @@ class ProjectExportEngine:
 
         # Check project exists
         from sqlalchemy import text
+
         with self.db_service.get_session() as session:
             result = session.execute(
                 text("SELECT COUNT(*) FROM dict_project WHERE project_id = :project_id"),
@@ -253,7 +254,9 @@ class ProjectExportEngine:
                 conn.set_progress_handler(_progress_handler, 10_000)
                 quick_rows: list[str] = []
                 try:
-                    quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+                    quick_rows = [
+                        str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()
+                    ]
                 except sqlite3.OperationalError as exc:
                     msg = str(exc).lower()
                     if "interrupted" in msg and quick_check_timeout_sec > 0:
@@ -271,7 +274,9 @@ class ProjectExportEngine:
                     )
                 elif not quick_rows or any(row.lower() != "ok" for row in quick_rows):
                     probe["ok"] = False
-                    probe["quick_check_error"] = "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+                    probe["quick_check_error"] = (
+                        "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+                    )
 
                 try:
                     conn.execute("SELECT 1 FROM tm_entry LIMIT 1").fetchone()
@@ -294,7 +299,9 @@ class ProjectExportEngine:
     def _format_host_db_corruption_error(db_path: Path, probe: dict[str, object]) -> str:
         """Format an actionable export error for corrupt or unreadable source DBs."""
         details: list[str] = []
-        quick_rows = [str(value) for value in (probe.get("quick_check_rows") or []) if str(value).strip()]
+        quick_rows = [
+            str(value) for value in (probe.get("quick_check_rows") or []) if str(value).strip()
+        ]
         quick_error = str(probe.get("quick_check_error") or "").strip()
         tm_error = str(probe.get("tm_entry_probe_error") or "").strip()
 
@@ -321,8 +328,8 @@ class ProjectExportEngine:
         project_id: int,
         payload_path: Path,
         options: ExportOptions,
-        progress_callback: Optional[Callable[[str, int, int], None]],
-        cancel_check: Optional[Callable[[], bool]],
+        progress_callback: Callable[[str, int, int], None] | None,
+        cancel_check: Callable[[], bool] | None,
     ) -> dict[str, int]:
         """Create payload.sqlite with project data.
 
@@ -355,11 +362,11 @@ class ProjectExportEngine:
             logger.info(f"Applying {len(migration_files)} migrations to payload")
             for mig_file in migration_files:
                 self._check_cancelled(cancel_check)
-                with open(mig_file, "r", encoding="utf-8") as f:
+                with open(mig_file, encoding="utf-8") as f:
                     payload_conn.executescript(f.read())
 
             # Attach host DB
-            payload_conn.execute(f"ATTACH DATABASE ? AS host", (str(host_db_path),))
+            payload_conn.execute("ATTACH DATABASE ? AS host", (str(host_db_path),))
 
             # Disable FK checks during export (we insert in topological order but ATTACH doesn't guarantee)
             payload_conn.execute("PRAGMA foreign_keys = OFF")
@@ -374,7 +381,13 @@ class ProjectExportEngine:
 
             # Copy data table by table
             table_counts = {}
-            export_order = [t for t in TABLE_INSERT_ORDER if not options.include_snapshots and t != "project_snapshot" or options.include_snapshots]
+            export_order = [
+                t
+                for t in TABLE_INSERT_ORDER
+                if not options.include_snapshots
+                and t != "project_snapshot"
+                or options.include_snapshots
+            ]
 
             for i, table_name in enumerate(export_order):
                 self._check_cancelled(cancel_check)
@@ -451,7 +464,7 @@ class ProjectExportEngine:
         table_name: str,
         project_id: int,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> int:
         """Export a single table from host to payload.
 
@@ -466,54 +479,54 @@ class ProjectExportEngine:
         logger.debug(f"Exporting table: {table_name}")
         # Table-specific export queries
         queries = {
-            "library": f"""
+            "library": """
                 INSERT OR REPLACE INTO library
                 SELECT l.* FROM host.library l
                 WHERE l.library_id = (SELECT library_id FROM host.dict_project WHERE project_id = ?)
             """,
-            "dict_project": f"""
+            "dict_project": """
                 INSERT OR REPLACE INTO dict_project
                 SELECT * FROM host.dict_project WHERE project_id = ?
             """,
-            "source_corpus": f"""
+            "source_corpus": """
                 INSERT OR REPLACE INTO source_corpus
                 SELECT * FROM host.source_corpus WHERE project_id = ?
             """,
-            "source_document": f"""
+            "source_document": """
                 INSERT OR REPLACE INTO source_document
                 SELECT d.* FROM host.source_document d
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
-            "document_text": f"""
+            "document_text": """
                 INSERT OR REPLACE INTO document_text
                 SELECT dt.* FROM host.document_text dt
                 JOIN host.source_document d ON dt.doc_id = d.doc_id
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
-            "document_sentence": f"""
+            "document_sentence": """
                 INSERT OR REPLACE INTO document_sentence
                 SELECT ds.* FROM host.document_sentence ds
                 JOIN host.source_document d ON ds.doc_id = d.doc_id
                 JOIN host.source_corpus c ON d.corpus_id = c.corpus_id
                 WHERE c.project_id = ?
             """,
-            "lemma": f"""
+            "lemma": """
                 INSERT OR REPLACE INTO lemma
                 SELECT * FROM host.lemma WHERE project_id = ?
             """,
-            "ngram": f"""
+            "ngram": """
                 INSERT OR REPLACE INTO ngram
                 SELECT * FROM host.ngram WHERE project_id = ?
             """,
-            "ngram_component": f"""
+            "ngram_component": """
                 INSERT OR REPLACE INTO ngram_component
                 SELECT nc.* FROM host.ngram_component nc
                 JOIN host.ngram n ON nc.ngram_id = n.ngram_id
                 WHERE n.project_id = ?
             """,
-            "lemma_doc_stat": f"""
+            "lemma_doc_stat": """
                 INSERT OR REPLACE INTO lemma_doc_stat
                 SELECT s.* FROM host.lemma_doc_stat s
                 JOIN host.lemma l ON l.lemma_id = s.lemma_id AND l.project_id = s.project_id
@@ -527,7 +540,7 @@ class ProjectExportEngine:
                     )
                   )
             """,
-            "lemma_project_stat": f"""
+            "lemma_project_stat": """
                 INSERT OR REPLACE INTO lemma_project_stat
                 SELECT s.* FROM host.lemma_project_stat s
                 JOIN host.lemma l ON l.lemma_id = s.lemma_id AND l.project_id = s.project_id
@@ -539,7 +552,7 @@ class ProjectExportEngine:
                     )
                   )
             """,
-            "ngram_doc_stat": f"""
+            "ngram_doc_stat": """
                 INSERT OR REPLACE INTO ngram_doc_stat
                 SELECT s.* FROM host.ngram_doc_stat s
                 JOIN host.ngram n ON n.ngram_id = s.ngram_id AND n.project_id = s.project_id
@@ -553,7 +566,7 @@ class ProjectExportEngine:
                     )
                   )
             """,
-            "ngram_project_stat": f"""
+            "ngram_project_stat": """
                 INSERT OR REPLACE INTO ngram_project_stat
                 SELECT s.* FROM host.ngram_project_stat s
                 JOIN host.ngram n ON n.ngram_id = s.ngram_id AND n.project_id = s.project_id
@@ -565,25 +578,25 @@ class ProjectExportEngine:
                     )
                   )
             """,
-            "term_cluster": f"""
+            "term_cluster": """
                 INSERT OR REPLACE INTO term_cluster
                 SELECT * FROM host.term_cluster WHERE project_id = ?
             """,
-            "term_cluster_member": f"""
+            "term_cluster_member": """
                 INSERT OR REPLACE INTO term_cluster_member
                 SELECT tcm.* FROM host.term_cluster_member tcm
                 JOIN host.term_cluster tc ON tcm.cluster_id = tc.cluster_id
                 WHERE tc.project_id = ?
             """,
-            "term_card": f"""
+            "term_card": """
                 INSERT OR REPLACE INTO term_card
                 SELECT * FROM host.term_card WHERE project_id = ?
             """,
-            "translation_memory": f"""
+            "translation_memory": """
                 INSERT OR REPLACE INTO translation_memory
                 SELECT * FROM host.translation_memory WHERE project_id = ?
             """,
-            "tm_global": f"""
+            "tm_global": """
                 INSERT OR REPLACE INTO tm_global
                 SELECT tg.*
                 FROM host.tm_global tg
@@ -594,51 +607,51 @@ class ProjectExportEngine:
                       AND te.tm_global_id IS NOT NULL
                 )
             """,
-            "tm_entry": f"""
+            "tm_entry": """
                 INSERT OR REPLACE INTO tm_entry
                 SELECT * FROM host.tm_entry WHERE project_id = ?
             """,
-            "tm_entry_history": f"""
+            "tm_entry_history": """
                 INSERT OR REPLACE INTO tm_entry_history
                 SELECT teh.* FROM host.tm_entry_history teh
                 JOIN host.tm_entry te ON teh.tm_id = te.tm_id
                 WHERE te.project_id = ?
             """,
-            "tm_alias": f"""
+            "tm_alias": """
                 INSERT OR REPLACE INTO tm_alias
                 SELECT ta.* FROM host.tm_alias ta
                 JOIN host.tm_entry te ON ta.tm_id = te.tm_id
                 WHERE te.project_id = ?
             """,
-            "dict_source": f"""
+            "dict_source": """
                 INSERT OR REPLACE INTO dict_source
                 SELECT * FROM host.dict_source WHERE project_id = ?
             """,
-            "dict_entry": f"""
+            "dict_entry": """
                 INSERT OR REPLACE INTO dict_entry
                 SELECT de.* FROM host.dict_entry de
                 JOIN host.dict_source ds ON de.dict_source_id = ds.dict_source_id
                 WHERE ds.project_id = ?
             """,
-            "term_alias": f"""
+            "term_alias": """
                 INSERT OR REPLACE INTO term_alias
                 SELECT * FROM host.term_alias WHERE project_id = ?
             """,
-            "stopword_set": f"""
+            "stopword_set": """
                 INSERT OR REPLACE INTO stopword_set
                 SELECT * FROM host.stopword_set WHERE project_id = ?
             """,
-            "stopword_item": f"""
+            "stopword_item": """
                 INSERT OR REPLACE INTO stopword_item
                 SELECT si.* FROM host.stopword_item si
                 JOIN host.stopword_set ss ON si.stopset_id = ss.stopset_id
                 WHERE ss.project_id = ?
             """,
-            "term_search": f"""
+            "term_search": """
                 INSERT OR REPLACE INTO term_search
                 SELECT * FROM host.term_search WHERE project_id = ?
             """,
-            "project_snapshot": f"""
+            "project_snapshot": """
                 INSERT OR REPLACE INTO project_snapshot
                 SELECT * FROM host.project_snapshot WHERE project_id = ?
             """,
@@ -663,7 +676,7 @@ class ProjectExportEngine:
             rowcount = cursor.rowcount
             logger.debug(f"  Exported {rowcount} rows from {table_name}")
             return rowcount
-        except sqlite3.IntegrityError as e:
+        except sqlite3.IntegrityError:
             logger.error(f"FK constraint failed while exporting table {table_name}")
             logger.error(f"Query: {query[:200]}...")
             raise
@@ -690,13 +703,16 @@ class ProjectExportEngine:
         """
         # Get project metadata
         from sqlalchemy import text
+
         with self.db_service.get_session() as session:
             result = session.execute(
-                text("""
+                text(
+                    """
                 SELECT name, src_lang, tgt_lang
                 FROM dict_project
                 WHERE project_id = :project_id
-                """),
+                """
+                ),
                 {"project_id": project_id},
             ).fetchone()
 
@@ -719,7 +735,7 @@ class ProjectExportEngine:
             project_name=project_name,
             project_src_lang=src_lang,
             project_tgt_lang=tgt_lang,
-            exported_at=datetime.now(timezone.utc).isoformat(),
+            exported_at=datetime.now(UTC).isoformat(),
             table_counts=table_counts,
             pronunciation_metadata_count=pronunciation_metadata_count,
         )
@@ -753,14 +769,14 @@ class ProjectExportEngine:
         """Yield deterministic norm chunks for IN-clause queries."""
         size = max(1, int(chunk_size))
         for idx in range(0, len(norms), size):
-            yield norms[idx: idx + size]
+            yield norms[idx : idx + size]
 
     def _export_pronunciation_metadata(
         self,
         project_id: int,
         out_path: Path,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> int:
         """Export project-intersection pronunciation metadata sidecar."""
         from sqlalchemy import text
@@ -776,24 +792,42 @@ class ProjectExportEngine:
                 return 0
 
             norms: set[str] = set()
-            lemma_norms = session.execute(
-                select(Lemma.norm_text).where(Lemma.project_id == project_id).where(Lemma.norm_text.is_not(None))
-            ).scalars().all()
-            term_norms = session.execute(
-                select(TermCluster.norm_text)
-                .where(TermCluster.project_id == project_id)
-                .where(TermCluster.norm_text.is_not(None))
-            ).scalars().all()
-            tm_norms = session.execute(
-                select(TMEntry.src_norm)
-                .where(TMEntry.project_id == project_id)
-                .where(TMEntry.src_norm.is_not(None))
-            ).scalars().all()
-            ud_norms = session.execute(
-                select(UserDictionaryItem.src_norm)
-                .where(UserDictionaryItem.origin_project_id == project_id)
-                .where(UserDictionaryItem.src_norm.is_not(None))
-            ).scalars().all()
+            lemma_norms = (
+                session.execute(
+                    select(Lemma.norm_text)
+                    .where(Lemma.project_id == project_id)
+                    .where(Lemma.norm_text.is_not(None))
+                )
+                .scalars()
+                .all()
+            )
+            term_norms = (
+                session.execute(
+                    select(TermCluster.norm_text)
+                    .where(TermCluster.project_id == project_id)
+                    .where(TermCluster.norm_text.is_not(None))
+                )
+                .scalars()
+                .all()
+            )
+            tm_norms = (
+                session.execute(
+                    select(TMEntry.src_norm)
+                    .where(TMEntry.project_id == project_id)
+                    .where(TMEntry.src_norm.is_not(None))
+                )
+                .scalars()
+                .all()
+            )
+            ud_norms = (
+                session.execute(
+                    select(UserDictionaryItem.src_norm)
+                    .where(UserDictionaryItem.origin_project_id == project_id)
+                    .where(UserDictionaryItem.src_norm.is_not(None))
+                )
+                .scalars()
+                .all()
+            )
             for item in [*lemma_norms, *term_norms, *tm_norms, *ud_norms]:
                 norm = (item or "").strip()
                 if norm:
@@ -816,12 +850,16 @@ class ProjectExportEngine:
             rows = []
             for norm_chunk in self._chunk_norms(sorted_norms, norm_chunk_size):
                 self._check_cancelled(cancel_check)
-                chunk_rows = session.execute(
-                    select(PronunciationEntry)
-                    .where(PronunciationEntry.lang == src_lang)
-                    .where(PronunciationEntry.src_norm.in_(norm_chunk))
-                    .order_by(PronunciationEntry.src_norm.asc())
-                ).scalars().all()
+                chunk_rows = (
+                    session.execute(
+                        select(PronunciationEntry)
+                        .where(PronunciationEntry.lang == src_lang)
+                        .where(PronunciationEntry.src_norm.in_(norm_chunk))
+                        .order_by(PronunciationEntry.src_norm.asc())
+                    )
+                    .scalars()
+                    .all()
+                )
                 rows.extend(chunk_rows)
             if not rows:
                 return 0
@@ -831,7 +869,17 @@ class ProjectExportEngine:
             with out.open("w", encoding="utf-8", newline="") as handle:
                 writer = csv.writer(handle, delimiter="\t")
                 writer.writerow(
-                    ["lang", "src_norm", "niqqud_text", "ipa", "reading_text", "source", "confidence", "is_override", "notes"]
+                    [
+                        "lang",
+                        "src_norm",
+                        "niqqud_text",
+                        "ipa",
+                        "reading_text",
+                        "source",
+                        "confidence",
+                        "is_override",
+                        "notes",
+                    ]
                 )
                 for row in rows:
                     writer.writerow(

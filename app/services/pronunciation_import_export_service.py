@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import csv
 import logging
-from pathlib import Path
 import xml.etree.ElementTree as ET
-from typing import Dict
+from pathlib import Path
 
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
@@ -44,7 +43,7 @@ class PronunciationImportExportService:
         delimiter: str = "\t",
         include_auto: bool = True,
         include_manual: bool = True,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Export pronunciation entries to TSV/CSV."""
         out = Path(out_path).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +73,11 @@ class PronunciationImportExportService:
                         row.ipa or "",
                         row.reading_text or "",
                         row.source,
-                        "" if row.confidence is None else f"{float(row.confidence):.6f}".rstrip("0").rstrip("."),
+                        (
+                            ""
+                            if row.confidence is None
+                            else f"{float(row.confidence):.6f}".rstrip("0").rstrip(".")
+                        ),
                         int(row.is_override or 0),
                         row.notes or "",
                     ]
@@ -89,7 +92,7 @@ class PronunciationImportExportService:
         in_path: Path,
         delimiter: str = "\t",
         allow_auto_overwrite: bool = False,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Import pronunciation entries from TSV/CSV with manual-wins merge."""
         file_path = Path(in_path).resolve()
         if not file_path.exists():
@@ -111,7 +114,11 @@ class PronunciationImportExportService:
                         skipped += 1
                         continue
                     source = (row.get("source") or "import_csv").strip().lower()
-                    is_override = str(row.get("is_override") or "0").strip() in {"1", "true", "True"}
+                    is_override = str(row.get("is_override") or "0").strip() in {
+                        "1",
+                        "true",
+                        "True",
+                    }
                     confidence_raw = (row.get("confidence") or "").strip()
                     confidence = None
                     if confidence_raw:
@@ -133,9 +140,7 @@ class PronunciationImportExportService:
                         notes=row.get("notes"),
                         allow_auto_overwrite=allow_auto_overwrite,
                     )
-                    if before is None:
-                        updated += 1
-                    elif (
+                    if before is None or (
                         (before.niqqud_text or "") != (after.niqqud_text or "")
                         or (before.ipa or "") != (after.ipa or "")
                         or (before.reading_text or "") != (after.reading_text or "")
@@ -166,19 +171,26 @@ class PronunciationImportExportService:
         lang: str,
         include_auto: bool = True,
         include_manual: bool = True,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Export IPA pronunciation entries to PLS lexicon."""
         out = Path(out_path).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
         lang_clean = (lang or "").strip()
 
-        rows = session.execute(
-            select(PronunciationEntry)
-            .where(PronunciationEntry.lang == lang_clean)
-            .order_by(asc(PronunciationEntry.src_norm))
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(PronunciationEntry)
+                .where(PronunciationEntry.lang == lang_clean)
+                .order_by(asc(PronunciationEntry.src_norm))
+            )
+            .scalars()
+            .all()
+        )
 
-        root = ET.Element("lexicon", attrib={"version": "1.0", "{http://www.w3.org/XML/1998/namespace}lang": lang_clean})
+        root = ET.Element(
+            "lexicon",
+            attrib={"version": "1.0", "{http://www.w3.org/XML/1998/namespace}lang": lang_clean},
+        )
         root.set("xmlns", self.PLS_NS)
         exported = 0
         for row in rows:
@@ -209,7 +221,7 @@ class PronunciationImportExportService:
         default_lang: str = "he",
         is_override: bool = False,
         allow_auto_overwrite: bool = False,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Import PLS lexicon (IPA phoneme profile)."""
         file_path = Path(in_path).resolve()
         if not file_path.exists():

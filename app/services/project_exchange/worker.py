@@ -5,21 +5,21 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.services.project_exchange.export_engine import ProjectExportEngine
-from app.services.project_exchange.import_engine import ProjectImportEngine
 from app.services.project_exchange.dto import (
     ExportOptions,
     ImportOptions,
-    ExportReport,
-    ImportReport,
 )
+from app.services.project_exchange.export_engine import ProjectExportEngine
+from app.services.project_exchange.import_engine import ProjectImportEngine
 
 logger = logging.getLogger(__name__)
 
 
 def _format_heavy_operation_busy_error(operation_label: str, error: Exception) -> str:
     active_ops = list(getattr(error, "active_ops", []) or [])
-    active_names = [str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)]
+    active_names = [
+        str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)
+    ]
     active_names = [name for name in active_names if name]
     if active_names:
         details = "\n".join(f"- {name}" for name in active_names[:5])
@@ -39,7 +39,7 @@ class ProjectExportWorker(QThread):
     """Worker thread for project export."""
 
     progress = pyqtSignal(str, int, int)  # stage, current, total
-    finished = pyqtSignal(object)          # ExportReport
+    finished = pyqtSignal(object)  # ExportReport
     error = pyqtSignal(str)
 
     def __init__(self, project_id: int, out_path: Path, options: ExportOptions):
@@ -102,7 +102,7 @@ class ProjectImportWorker(QThread):
     """Worker thread for project import."""
 
     progress = pyqtSignal(str, int, int)  # stage, current, total
-    finished = pyqtSignal(object)          # ImportReport
+    finished = pyqtSignal(object)  # ImportReport
     error = pyqtSignal(str)
 
     def __init__(self, bundle_path: Path, options: ImportOptions):
@@ -161,11 +161,15 @@ class ProjectImportWorker(QThread):
         error_str = str(error)
 
         if "schema" in error_str.lower() and "requires" in error_str.lower():
-            return f"Import failed: {error_str}\n\nPlease update HDLE Premium to import this bundle."
+            return (
+                f"Import failed: {error_str}\n\nPlease update HDLE Premium to import this bundle."
+            )
         elif "Checksum mismatch" in error_str or "corrupted" in error_str.lower():
             return "Import failed: Bundle is corrupted or tampered.\n\nPlease re-download the bundle and try again."
         elif "Project name" in error_str and "already exists" in error_str:
-            return f"Import failed: {error_str}\n\nPlease use a different name or enable auto-rename."
+            return (
+                f"Import failed: {error_str}\n\nPlease use a different name or enable auto-rename."
+            )
         elif "Permission denied" in error_str or "Access is denied" in error_str:
             return "Import failed: Permission denied. Check file permissions and try again."
         else:

@@ -21,19 +21,13 @@ def test_worker_creation():
 
     # Test 1: Create worker for Lemma
     print("\n[Test 1] Create BulkNoiseUpdateWorker for Lemma")
-    worker = BulkNoiseUpdateWorker(
-        model_class="Lemma",
-        item_ids=[1, 2, 3],
-        is_noise=True
-    )
+    worker = BulkNoiseUpdateWorker(model_class="Lemma", item_ids=[1, 2, 3], is_noise=True)
     print(f"  [OK] Worker created: model_class={worker.model_class}, items={len(worker.item_ids)}")
 
     # Test 2: Create worker for TermCluster
     print("\n[Test 2] Create BulkNoiseUpdateWorker for TermCluster")
     worker = BulkNoiseUpdateWorker(
-        model_class="TermCluster",
-        item_ids=[10, 20, 30, 40],
-        is_noise=False
+        model_class="TermCluster", item_ids=[10, 20, 30, 40], is_noise=False
     )
     print(f"  [OK] Worker created: model_class={worker.model_class}, items={len(worker.item_ids)}")
 

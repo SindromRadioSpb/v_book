@@ -793,4 +793,3 @@ python -m app.tools.p3_verify --out-dir runtime/verifications/p3/custom
 **Reports:**
 - `runtime/verifications/p3/<timestamp>/P3_VERIFICATION_REPORT.json`
 - `runtime/verifications/p3/<timestamp>/P3_VERIFICATION_REPORT.md`
-

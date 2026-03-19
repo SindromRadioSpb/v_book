@@ -6,7 +6,7 @@ Provides atomic can_spend() and record_spend() operations for concurrent access.
 
 import logging
 from datetime import datetime
-from typing import Optional, Tuple
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -31,7 +31,7 @@ class MTUsageTracker:
         provider_id: str,
         char_count: int,
         limits: ProviderLimitsConfig,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Check if spending is allowed based on budget limits.
 
         Args:
@@ -94,7 +94,7 @@ class MTUsageTracker:
         provider_id: str,
         char_count: int,
         request_count: int = 1,
-        timestamp_utc: Optional[datetime] = None,
+        timestamp_utc: datetime | None = None,
         commit: bool = True,
     ) -> None:
         """Record usage atomically.

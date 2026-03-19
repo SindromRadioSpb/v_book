@@ -1,4 +1,5 @@
 """Simple test for numeric sorting."""
+
 from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
 from PyQt6.QtCore import Qt
 
@@ -19,13 +20,13 @@ for row, doc_id in enumerate(test_ids):
     size_kb = doc_id * 5.5
     size_item = QTableWidgetItem()
     size_item.setData(Qt.ItemDataRole.DisplayRole, size_kb)
-    size_item.setText(f'{size_kb:.1f}')
+    size_item.setText(f"{size_kb:.1f}")
     table.setItem(row, 1, size_item)
 
 table.setSortingEnabled(True)
 
-print('✓ Numeric sorting setup: OK')
-print('✓ Test IDs:', test_ids)
-print('✓ Expected sort order: [1, 2, 10] not [1, 10, 2]')
-print('✓ Sorting enabled on QTableWidget')
-print('✓ All tests passed!')
+print("✓ Numeric sorting setup: OK")
+print("✓ Test IDs:", test_ids)
+print("✓ Expected sort order: [1, 2, 10] not [1, 10, 2]")
+print("✓ Sorting enabled on QTableWidget")
+print("✓ All tests passed!")

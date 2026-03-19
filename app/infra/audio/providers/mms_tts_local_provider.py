@@ -83,7 +83,10 @@ class MMSTTSLocalProvider(BaseAudioProvider):
                 provider_id=self.provider_id,
                 audio_bytes=audio_bytes,
                 mime_type="audio/wav",
-                meta={"sample_rate": sample_rate, "model_path": config.model_path or self.DEFAULT_MODEL_ID},
+                meta={
+                    "sample_rate": sample_rate,
+                    "model_path": config.model_path or self.DEFAULT_MODEL_ID,
+                },
             )
         except ImportError as exc:
             return AudioGenerationResult(

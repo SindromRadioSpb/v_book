@@ -8,7 +8,6 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Optional, Tuple
 
 from app.infra.audio.audio_provider_config import AudioProviderAuthMode
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
@@ -70,10 +69,16 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
             )
 
         language_code = self._language_code(request.source_lang)
-        voice_name = request.voice_id if request.voice_id and request.voice_id != "default" else (cfg.default_voice or "")
+        voice_name = (
+            request.voice_id
+            if request.voice_id and request.voice_id != "default"
+            else (cfg.default_voice or "")
+        )
         if not voice_name:
             voice_name = "he-IL-HilaNeural"
-        output_format, mime_type = self._output_format((request.audio_format or cfg.audio_format or "wav").lower())
+        output_format, mime_type = self._output_format(
+            (request.audio_format or cfg.audio_format or "wav").lower()
+        )
 
         ssml = (request.options or {}).get("ssml")
         if not isinstance(ssml, str) or not ssml.strip():
@@ -114,7 +119,11 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
                     )
             except urllib.error.HTTPError as http_err:
                 err_kind, err_msg = self._classify_http_error(http_err)
-                if attempt < attempts and err_kind in {AudioErrorKind.NETWORK, AudioErrorKind.RATE_LIMIT, AudioErrorKind.SERVER}:
+                if attempt < attempts and err_kind in {
+                    AudioErrorKind.NETWORK,
+                    AudioErrorKind.RATE_LIMIT,
+                    AudioErrorKind.SERVER,
+                }:
                     time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
                     continue
                 return AudioGenerationResult(
@@ -144,7 +153,7 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
             error_message="Azure TTS failed after retries",
         )
 
-    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], Optional[str]]:
+    def list_voices(self, *, language_code: str = "he-IL") -> tuple[list[str], str | None]:
         """Return available Azure voice names for a language."""
         cfg = self._config_manager.load_config(self.provider_id)
         if cfg.auth_mode != AudioProviderAuthMode.API_KEY:
@@ -194,7 +203,7 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
         return raw_lang or "he-IL"
 
     @staticmethod
-    def _output_format(fmt: str) -> Tuple[str, str]:
+    def _output_format(fmt: str) -> tuple[str, str]:
         if fmt in {"mp3", "mpeg"}:
             return "audio-24khz-48kbitrate-mono-mp3", "audio/mpeg"
         if fmt in {"ogg", "opus"}:
@@ -216,7 +225,7 @@ class AzureSpeechTTSProvider(BaseAudioProvider):
         )
 
     @staticmethod
-    def _classify_http_error(error: urllib.error.HTTPError) -> Tuple[AudioErrorKind, str]:
+    def _classify_http_error(error: urllib.error.HTTPError) -> tuple[AudioErrorKind, str]:
         code = int(error.code)
         body = ""
         try:

@@ -77,11 +77,7 @@ class TestLayoutPersistence:
         workspace.show()
 
         # Save layout with wrong version
-        layout = {
-            "layout_schema_version": 999,
-            "sidebar_visible": True,
-            "splitter_state": "00"
-        }
+        layout = {"layout_schema_version": 999, "sidebar_visible": True, "splitter_state": "00"}
         settings.set_json("workspace/layout", layout)
         settings.sync()
 

@@ -159,7 +159,9 @@ def test_playlist_display_refresh_nonfatal_on_error(panel, caplog):
         ]
     )
     panel._refresh_sentence_display = lambda _s, _p: 0
-    panel._refresh_lemma_display = lambda _s, _p: (_ for _ in ()).throw(RuntimeError("resolver failure"))
+    panel._refresh_lemma_display = lambda _s, _p: (_ for _ in ()).throw(
+        RuntimeError("resolver failure")
+    )
     panel._refresh_term_display = lambda _s, _p: 0
 
     with caplog.at_level(logging.WARNING):

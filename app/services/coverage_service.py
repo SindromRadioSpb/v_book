@@ -9,16 +9,16 @@ Optimized for performance: 1-3 SQL queries per metric, no N+1.
 """
 
 import logging
-from typing import List
-from sqlalchemy.orm import Session
-from sqlalchemy import select, func, and_, or_
 
-from app.infra.sa_models import Lemma, LemmaProjectStat, TermCluster, TMEntry, DictEntry
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session
+
 from app.domain.dto import (
     CoverageMetrics,
     LemmaCoverageRow,
     TermClusterCoverageRow,
 )
+from app.infra.sa_models import DictEntry, Lemma, LemmaProjectStat, TermCluster, TMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,7 @@ class CoverageService:
             CoverageMetrics
         """
         # Count total lemmas
-        stmt_total = (
-            select(func.count())
-            .select_from(Lemma)
-            .where(Lemma.project_id == project_id)
-        )
+        stmt_total = select(func.count()).select_from(Lemma).where(Lemma.project_id == project_id)
         total = session.execute(stmt_total).scalar() or 0
 
         if total == 0:
@@ -57,7 +53,6 @@ class CoverageService:
 
         # Count covered lemmas using a single query with LEFT JOINs
         # A lemma is covered if it has a TM entry or dict entry
-        from app.domain.normalization import normalize_for_tm
 
         # Build subquery for TM coverage
         tm_statuses = ["approved"]
@@ -204,7 +199,7 @@ class CoverageService:
         limit: int = 100,
         order_by: str = "freq",
         include_draft: bool = False,
-    ) -> List[LemmaCoverageRow]:
+    ) -> list[LemmaCoverageRow]:
         """List untranslated lemmas.
 
         Args:
@@ -294,7 +289,7 @@ class CoverageService:
         limit: int = 100,
         order_by: str = "termhood",
         include_draft: bool = False,
-    ) -> List[TermClusterCoverageRow]:
+    ) -> list[TermClusterCoverageRow]:
         """List untranslated term clusters.
 
         Args:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from app.services.audio_usage_tracker import AudioBudgetLimits
 
@@ -24,23 +23,23 @@ class AudioProviderConfig:
     provider_id: str
     enabled: bool = True
     auth_mode: AudioProviderAuthMode = AudioProviderAuthMode.NONE
-    api_key_credential_id: Optional[str] = None
-    service_account_credential_id: Optional[str] = None
-    service_account_path: Optional[str] = None
-    region: Optional[str] = None
-    default_voice: Optional[str] = None
+    api_key_credential_id: str | None = None
+    service_account_credential_id: str | None = None
+    service_account_path: str | None = None
+    region: str | None = None
+    default_voice: str | None = None
     speech_rate: float = 1.0
     audio_format: str = "wav"
     sample_rate_hz: int = 24000
     timeout_seconds: float = 15.0
     retry_max_attempts: int = 2
     retry_backoff_base_ms: int = 500
-    model_path: Optional[str] = None
+    model_path: str | None = None
     max_chars_per_request: int = 10000
     max_requests_per_minute: int = 60
-    max_chars_per_day: Optional[int] = None
-    max_chars_per_month: Optional[int] = None
-    max_requests_per_day: Optional[int] = None
+    max_chars_per_day: int | None = None
+    max_chars_per_month: int | None = None
+    max_requests_per_day: int | None = None
     fail_closed: bool = True
 
     @property

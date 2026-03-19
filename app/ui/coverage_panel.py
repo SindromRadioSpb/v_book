@@ -9,30 +9,27 @@ Displays:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
 
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QProgressBar,
-    QComboBox,
-    QCheckBox,
-    QFileDialog,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
 
-from app.services.db_service import DBService
-from app.ui.workers import CoverageWorker
 from app.domain.dto import CoverageMetrics, LemmaCoverageRow, TermClusterCoverageRow
+from app.ui.workers import CoverageWorker
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +42,15 @@ class CoveragePanel(QWidget):
     def __init__(self, project_id: int):
         super().__init__()
         self.project_id = project_id
-        self.worker: Optional[CoverageWorker] = None
+        self.worker: CoverageWorker | None = None
         self._coverage_request_seq = 0
         self._active_coverage_seq = 0
         self._coverage_retry_pending = False
         self._coverage_cancel_requested = False
-        self._last_lemma_metrics: Optional[CoverageMetrics] = None
-        self._last_cluster_metrics: Optional[CoverageMetrics] = None
-        self._last_untranslated_lemmas: List[LemmaCoverageRow] = []
-        self._last_untranslated_clusters: List[TermClusterCoverageRow] = []
+        self._last_lemma_metrics: CoverageMetrics | None = None
+        self._last_cluster_metrics: CoverageMetrics | None = None
+        self._last_untranslated_lemmas: list[LemmaCoverageRow] = []
+        self._last_untranslated_clusters: list[TermClusterCoverageRow] = []
         self.init_ui()
         self.load_coverage()
 
@@ -201,7 +198,9 @@ class CoveragePanel(QWidget):
         # Table
         self.clusters_table = QTableWidget()
         self.clusters_table.setColumnCount(4)
-        self.clusters_table.setHorizontalHeaderLabels(["Term", "Canonical", "Termhood", "Frequency"])
+        self.clusters_table.setHorizontalHeaderLabels(
+            ["Term", "Canonical", "Termhood", "Frequency"]
+        )
         self.clusters_table.setAlternatingRowColors(True)
         self.clusters_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.clusters_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -271,7 +270,9 @@ class CoveragePanel(QWidget):
             lambda error_msg, seq=request_seq: self.on_coverage_error(error_msg, seq)
         )
         self.worker.finished.connect(
-            lambda seq=request_seq, worker=self.worker: self._on_coverage_worker_finished(worker, seq)
+            lambda seq=request_seq, worker=self.worker: self._on_coverage_worker_finished(
+                worker, seq
+            )
         )
         self.worker.start()
 
@@ -300,7 +301,7 @@ class CoveragePanel(QWidget):
             f"({cluster_metrics.uncovered} untranslated)"
         )
 
-    def _apply_untranslated_lemmas(self, lemmas: List[LemmaCoverageRow]) -> None:
+    def _apply_untranslated_lemmas(self, lemmas: list[LemmaCoverageRow]) -> None:
         self._last_untranslated_lemmas = list(lemmas)
         self.lemmas_table.setRowCount(len(lemmas))
         for row_idx, lemma in enumerate(lemmas):
@@ -311,13 +312,15 @@ class CoveragePanel(QWidget):
 
         self.lemmas_table.resizeColumnsToContents()
 
-    def _apply_untranslated_clusters(self, clusters: List[TermClusterCoverageRow]) -> None:
+    def _apply_untranslated_clusters(self, clusters: list[TermClusterCoverageRow]) -> None:
         self._last_untranslated_clusters = list(clusters)
         self.clusters_table.setRowCount(len(clusters))
         for row_idx, cluster in enumerate(clusters):
             self.clusters_table.setItem(row_idx, 0, QTableWidgetItem(cluster.representative_he))
             self.clusters_table.setItem(row_idx, 1, QTableWidgetItem(cluster.canonical_key or ""))
-            termhood_str = f"{cluster.termhood_score:.3f}" if cluster.termhood_score is not None else "N/A"
+            termhood_str = (
+                f"{cluster.termhood_score:.3f}" if cluster.termhood_score is not None else "N/A"
+            )
             self.clusters_table.setItem(row_idx, 2, QTableWidgetItem(termhood_str))
             self.clusters_table.setItem(row_idx, 3, QTableWidgetItem(str(cluster.freq_abs)))
 
@@ -335,7 +338,7 @@ class CoveragePanel(QWidget):
             or bool(self._last_untranslated_clusters)
         )
 
-    def _format_metrics_line(self, title: str, metrics: Optional[CoverageMetrics]) -> str:
+    def _format_metrics_line(self, title: str, metrics: CoverageMetrics | None) -> str:
         if metrics is None:
             return f"- {title}: still loading exact metrics"
         return (
@@ -413,7 +416,7 @@ class CoveragePanel(QWidget):
             return
         self.status_label.setText(f"Coverage report exported: {file_path}")
 
-    def on_coverage_partial_results(self, results: dict, request_seq: Optional[int] = None):
+    def on_coverage_partial_results(self, results: dict, request_seq: int | None = None):
         """Render the fast coverage layers before lemma coverage is ready."""
         if request_seq is not None and request_seq != self._active_coverage_seq:
             logger.debug(
@@ -424,8 +427,8 @@ class CoveragePanel(QWidget):
             return
 
         cluster_metrics: CoverageMetrics = results["cluster_metrics"]
-        lemmas: List[LemmaCoverageRow] = results["untranslated_lemmas"]
-        clusters: List[TermClusterCoverageRow] = results["untranslated_clusters"]
+        lemmas: list[LemmaCoverageRow] = results["untranslated_lemmas"]
+        clusters: list[TermClusterCoverageRow] = results["untranslated_clusters"]
 
         self._apply_cluster_metrics(cluster_metrics)
         self._apply_untranslated_lemmas(lemmas)
@@ -434,7 +437,9 @@ class CoveragePanel(QWidget):
         self._set_lemma_metrics_pending()
         self.status_label.setText("Coverage tables ready. Counting lemma coverage...")
 
-    def on_lemma_metrics_ready(self, lemma_metrics: CoverageMetrics, request_seq: Optional[int] = None):
+    def on_lemma_metrics_ready(
+        self, lemma_metrics: CoverageMetrics, request_seq: int | None = None
+    ):
         """Apply the expensive lemma metric after the panel is already usable."""
         if request_seq is not None and request_seq != self._active_coverage_seq:
             logger.debug(
@@ -449,7 +454,7 @@ class CoveragePanel(QWidget):
         self.status_label.setText("Ready")
         logger.info("Coverage data loaded successfully")
 
-    def on_coverage_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_coverage_error(self, error_msg: str, request_seq: int | None = None):
         """Handle coverage error."""
         if request_seq is not None and request_seq != self._active_coverage_seq:
             logger.debug(
@@ -462,7 +467,7 @@ class CoveragePanel(QWidget):
         self.status_label.setText(f"Error: {error_msg}")
         logger.error(f"Coverage error: {error_msg}")
 
-    def _on_coverage_worker_finished(self, worker: Optional[CoverageWorker], request_seq: int) -> None:
+    def _on_coverage_worker_finished(self, worker: CoverageWorker | None, request_seq: int) -> None:
         if self.worker is worker:
             self.worker = None
 

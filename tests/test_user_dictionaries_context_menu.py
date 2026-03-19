@@ -96,13 +96,25 @@ def _build_view(selected_count: int):
         "suspended_flags": [],
         "due_called": 0,
     }
-    view.on_translate_selected = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
-    view.on_generate_audio_selected = lambda: state.__setitem__("audio_called", state["audio_called"] + 1)
+    view.on_translate_selected = lambda: state.__setitem__(
+        "translate_called", state["translate_called"] + 1
+    )
+    view.on_generate_audio_selected = lambda: state.__setitem__(
+        "audio_called", state["audio_called"] + 1
+    )
     view.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
-    view.on_add_selected_to_playlist = lambda: state.__setitem__("playlist_called", state["playlist_called"] + 1)
-    view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
-    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
-    view.on_sentence_niqqud_bootstrap_selected = lambda: state.__setitem__("niqqud_called", state["niqqud_called"] + 1)
+    view.on_add_selected_to_playlist = lambda: state.__setitem__(
+        "playlist_called", state["playlist_called"] + 1
+    )
+    view.on_edit_pronunciation_selected = lambda: state.__setitem__(
+        "edit_pron_called", state["edit_pron_called"] + 1
+    )
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__(
+        "bootstrap_called", state["bootstrap_called"] + 1
+    )
+    view.on_sentence_niqqud_bootstrap_selected = lambda: state.__setitem__(
+        "niqqud_called", state["niqqud_called"] + 1
+    )
     view.set_selected_noise_status = lambda flag: state["noise_flags"].append(flag)
     view.set_selected_suspension = lambda flag: state["suspended_flags"].append(flag)
     view.set_selected_due_now = lambda: state.__setitem__("due_called", state["due_called"] + 1)
@@ -132,16 +144,36 @@ def test_user_dict_context_menu_includes_translate_and_noise_actions(monkeypatch
     assert "Suspend Selected (3 rows)" in actions
     assert "Resume Selected (3 rows)" in actions
 
-    next(a for a in FakeMenu.last.actions if a.text == "Translate Selected (3 rows)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Generate Audio Selected (3 rows)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Play Audio Selected (3 rows)").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (3 rows)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (3 rows)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Niqqud Selected - Sentence Niqqud Bootstrap").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Noise (3 rows)").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Valid (3 rows)").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Mark Selected as Due now (3 rows)").triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Translate Selected (3 rows)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Generate Audio Selected (3 rows)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Play Audio Selected (3 rows)"
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (3 rows)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (3 rows)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Niqqud Selected - Sentence Niqqud Bootstrap"
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Mark Selected as Noise (3 rows)"
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Mark Selected as Valid (3 rows)"
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Mark Selected as Due now (3 rows)"
+    ).triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Suspend Selected (3 rows)").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Resume Selected (3 rows)").triggered.emit()
 
@@ -194,6 +226,7 @@ def test_user_dict_edit_pronunciation_uses_surface_norm(monkeypatch):
     UserDictionariesView.on_edit_pronunciation_selected(view)
 
     assert captured["src_norm"] == normalize_for_tm("he", "הפרק הזמן", "surface").norm
+
 
 def test_user_dict_selected_pronunciation_items_skip_sentence_rows():
     view = UserDictionariesView.__new__(UserDictionariesView)

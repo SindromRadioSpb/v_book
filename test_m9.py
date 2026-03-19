@@ -13,9 +13,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.infra.sa_models import TermCluster, TMEntry
 from app.services.db_service import DBService
 from app.services.export_service import ExportService
-from app.infra.sa_models import DictProject, TMEntry, TermCluster
 
 
 class TestM9ExportCenter(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestM9ExportCenter(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test database."""
-        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         cls.temp_db.close()
         cls.db_path = cls.temp_db.name
 
@@ -34,9 +34,10 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Apply M7 TM migration (required for tm_entry table)
         import sqlite3
+
         migration_path = Path("schema/004_m7_translation_memory.sql")
         if migration_path.exists():
-            migration_sql = migration_path.read_text(encoding='utf-8')
+            migration_sql = migration_path.read_text(encoding="utf-8")
             con = sqlite3.connect(cls.db_path)
             con.executescript(migration_sql)
             con.close()
@@ -44,6 +45,7 @@ class TestM9ExportCenter(unittest.TestCase):
         # Create test project
         with cls.db_service.get_session() as session:
             from app.services.project_service import ProjectService
+
             project_service = ProjectService()
             project = project_service.create_project(
                 session,
@@ -95,6 +97,7 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Clean up temp exports
         import shutil
+
         if os.path.exists(cls.temp_dir):
             shutil.rmtree(cls.temp_dir)
 
@@ -159,8 +162,13 @@ class TestM9ExportCenter(unittest.TestCase):
         # Check headers (row 1)
         headers = [cell.value for cell in ws[1]]
         expected_headers = [
-            "Source (Hebrew)", "Translation (Russian)", "Status",
-            "Origin", "Kind", "Frequency", "Notes"
+            "Source (Hebrew)",
+            "Translation (Russian)",
+            "Status",
+            "Origin",
+            "Kind",
+            "Frequency",
+            "Notes",
         ]
 
         for expected in expected_headers:
@@ -197,10 +205,15 @@ class TestM9ExportCenter(unittest.TestCase):
         # Check some expected metrics exist
         metrics = {ws.cell(row=i, column=1).value for i in range(2, ws.max_row + 1)}
         expected_metrics = {
-            "Project Name", "Project ID", "Documents",
-            "Lemmas (Unique Words)", "Lemmas with Translation",
-            "Lemma Coverage (%)", "TM Approval Rate (%)", "Term Approval Rate (%)",
-            "TM Entries per Lemma (%)"
+            "Project Name",
+            "Project ID",
+            "Documents",
+            "Lemmas (Unique Words)",
+            "Lemmas with Translation",
+            "Lemma Coverage (%)",
+            "TM Approval Rate (%)",
+            "Term Approval Rate (%)",
+            "TM Entries per Lemma (%)",
         }
 
         for expected in expected_metrics:
@@ -210,7 +223,9 @@ class TestM9ExportCenter(unittest.TestCase):
         for i in range(2, ws.max_row + 1):
             metric_name = ws.cell(row=i, column=1).value
             value = ws.cell(row=i, column=2).value
-            if metric_name and ("Coverage (%)" in str(metric_name) or "Approval Rate (%)" in str(metric_name)):
+            if metric_name and (
+                "Coverage (%)" in str(metric_name) or "Approval Rate (%)" in str(metric_name)
+            ):
                 # Extract percentage value
                 if isinstance(value, str) and value.endswith("%"):
                     pct_value = float(value.rstrip("%"))
@@ -234,7 +249,7 @@ class TestM9ExportCenter(unittest.TestCase):
         self.assertTrue(os.path.exists(output_path))
 
         # No temp files should remain
-        temp_files = [f for f in os.listdir(self.temp_dir) if f.endswith('.tmp')]
+        temp_files = [f for f in os.listdir(self.temp_dir) if f.endswith(".tmp")]
         self.assertEqual(len(temp_files), 0, "No temp files should remain after export")
 
         print("[OK] Atomic write verified - no temp files left")
@@ -268,7 +283,7 @@ class TestM9ExportCenter(unittest.TestCase):
             self.service.export_tm_csv(session, output_path, project_id=self.project_id)
 
         # Read and verify escaping
-        with open(output_path, 'r', encoding='utf-8') as f:
+        with open(output_path, encoding="utf-8") as f:
             content = f.read()
 
             # Should have prefixed with single quote
@@ -288,18 +303,14 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # CSV export
         with self.db_service.get_session() as session:
-            csv_count = self.service.export_tm_csv(
-                session, csv_path, project_id=self.project_id
-            )
+            csv_count = self.service.export_tm_csv(session, csv_path, project_id=self.project_id)
 
         self.assertTrue(os.path.exists(csv_path))
         self.assertGreater(csv_count, 0)
 
         # JSON export
         with self.db_service.get_session() as session:
-            json_count = self.service.export_tm_json(
-                session, json_path, project_id=self.project_id
-            )
+            json_count = self.service.export_tm_json(session, json_path, project_id=self.project_id)
 
         self.assertTrue(os.path.exists(json_path))
         self.assertGreater(json_count, 0)
@@ -315,6 +326,7 @@ class TestM9ExportCenter(unittest.TestCase):
         # Create empty project
         with self.db_service.get_session() as session:
             from app.services.project_service import ProjectService
+
             project_service = ProjectService()
             empty_project = project_service.create_project(
                 session,
@@ -328,15 +340,14 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Should not crash on empty project
         with self.db_service.get_session() as session:
-            count = self.service.export_xlsx(
-                session, output_path, project_id=empty_project_id
-            )
+            count = self.service.export_xlsx(session, output_path, project_id=empty_project_id)
 
         # File should still be created with sheets
         self.assertTrue(os.path.exists(output_path))
 
         try:
             import openpyxl
+
             wb = openpyxl.load_workbook(output_path)
             self.assertIn("Dictionary", wb.sheetnames)
             self.assertIn("Statistics", wb.sheetnames)
@@ -364,6 +375,7 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Parse XML
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -424,9 +436,7 @@ class TestM9ExportCenter(unittest.TestCase):
         output_path = os.path.join(self.temp_dir, "test_export.tmx")
 
         with self.db_service.get_session() as session:
-            count = self.service.export_tmx(
-                session, output_path, project_id=self.project_id
-            )
+            count = self.service.export_tmx(session, output_path, project_id=self.project_id)
 
         # File should exist
         self.assertTrue(os.path.exists(output_path))
@@ -434,6 +444,7 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Parse XML
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -468,12 +479,16 @@ class TestM9ExportCenter(unittest.TestCase):
         # Add a pinned translation to a term cluster
         with self.db_service.get_session() as session:
             from app.services.term_card_service import TermCardService
+
             card_service = TermCardService()
 
             # Get first cluster and pin a translation
-            clusters = session.query(TermCluster).filter(
-                TermCluster.project_id == self.project_id
-            ).limit(1).all()
+            clusters = (
+                session.query(TermCluster)
+                .filter(TermCluster.project_id == self.project_id)
+                .limit(1)
+                .all()
+            )
 
             if clusters:
                 cluster = clusters[0]
@@ -489,6 +504,7 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Parse and check for pinned prop
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -537,6 +553,7 @@ class TestM9ExportCenter(unittest.TestCase):
 
         # Parse XML (should not crash)
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -559,13 +576,18 @@ class TestM9ExportCenter(unittest.TestCase):
         # Add pinned translation to approved cluster
         with self.db_service.get_session() as session:
             from app.services.term_card_service import TermCardService
+
             card_service = TermCardService()
 
             # Get approved cluster and pin translation
-            cluster = session.query(TermCluster).filter(
-                TermCluster.project_id == self.project_id,
-                TermCluster.curation_status == "approved"
-            ).first()
+            cluster = (
+                session.query(TermCluster)
+                .filter(
+                    TermCluster.project_id == self.project_id,
+                    TermCluster.curation_status == "approved",
+                )
+                .first()
+            )
 
             if cluster:
                 card_service.pin_translation(session, cluster.cluster_id, "закреплённый", "ru")
@@ -576,12 +598,16 @@ class TestM9ExportCenter(unittest.TestCase):
 
         with self.db_service.get_session() as session:
             self.service.export_tbx(
-                session, output_path, project_id=self.project_id,
-                approved_only=True, include_pinned=True
+                session,
+                output_path,
+                project_id=self.project_id,
+                approved_only=True,
+                include_pinned=True,
             )
 
         # Parse and verify Russian langSet exists with pinned term
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -620,7 +646,7 @@ class TestM9ExportCenter(unittest.TestCase):
         self.assertTrue(os.path.exists(output_path))
 
         # No temp files should remain
-        temp_files = [f for f in os.listdir(self.temp_dir) if f.endswith('.tmp')]
+        temp_files = [f for f in os.listdir(self.temp_dir) if f.endswith(".tmp")]
         self.assertEqual(len(temp_files), 0, "No temp files should remain")
 
         print("[OK] XML atomic write verified")

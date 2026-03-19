@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
 
 from .base_provider import BaseAudioProvider
 
@@ -13,8 +12,8 @@ logger = logging.getLogger(__name__)
 class AudioProvidersRegistry:
     """Singleton registry for audio providers."""
 
-    _instance: Optional["AudioProvidersRegistry"] = None
-    _providers: Dict[str, BaseAudioProvider] = {}
+    _instance: AudioProvidersRegistry | None = None
+    _providers: dict[str, BaseAudioProvider] = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -36,14 +35,14 @@ class AudioProvidersRegistry:
         self._providers[provider_id] = provider
         logger.info("Registered audio provider: %s (%s)", provider_id, provider.display_name)
 
-    def get(self, provider_id: str) -> Optional[BaseAudioProvider]:
+    def get(self, provider_id: str) -> BaseAudioProvider | None:
         """Get provider by ID."""
         return self._providers.get(provider_id)
 
-    def list_provider_ids(self) -> List[str]:
+    def list_provider_ids(self) -> list[str]:
         """Return sorted provider IDs."""
         return sorted(self._providers.keys())
 
-    def list_providers(self) -> List[BaseAudioProvider]:
+    def list_providers(self) -> list[BaseAudioProvider]:
         """Return provider instances."""
         return [self._providers[k] for k in self.list_provider_ids()]

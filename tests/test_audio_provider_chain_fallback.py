@@ -9,7 +9,12 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.infra.audio.base_provider import AudioErrorKind, AudioGenerationRequest, AudioGenerationResult, BaseAudioProvider
+from app.infra.audio.base_provider import (
+    AudioErrorKind,
+    AudioGenerationRequest,
+    AudioGenerationResult,
+    BaseAudioProvider,
+)
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.sa_models import AudioAsset
 from app.services.audio_generation_service import AudioGenerationService
@@ -87,7 +92,9 @@ def _workspace_temp_dir(prefix: str) -> Path:
 
 
 def _prepare_service(monkeypatch, settings):
-    monkeypatch.setattr("app.services.audio_generation_service.register_default_audio_providers", lambda: 0)
+    monkeypatch.setattr(
+        "app.services.audio_generation_service.register_default_audio_providers", lambda: 0
+    )
     registry = AudioProvidersRegistry()
     registry.reset()
     registry = AudioProvidersRegistry()

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
 
 from app.infra.resource_paths import ResourcePaths
 
@@ -32,7 +32,7 @@ class DBPathInfo:
     path: Path
     exists: bool
     size_bytes: int
-    schema_version: Optional[int]
+    schema_version: int | None
     supported_schema_version: int
     error: str = ""
 
@@ -40,11 +40,11 @@ class DBPathInfo:
 @dataclass(frozen=True)
 class StartupDBDecision:
     resolved: ResolvedDBPath
-    deferred_original_path: Optional[Path] = None
+    deferred_original_path: Path | None = None
     deferred_reason: str = ""
 
 
-def _normalize_path(raw_value: Optional[str]) -> Optional[Path]:
+def _normalize_path(raw_value: str | None) -> Path | None:
     text = str(raw_value or "").strip()
     if not text:
         return None
@@ -60,9 +60,9 @@ def get_default_db_path(*, settings=None, resource_paths_cls=ResourcePaths) -> P
 
 
 def resolve_db_path(
-    cli_db_path: Optional[str],
+    cli_db_path: str | None,
     *,
-    env: Optional[Mapping[str, str]] = None,
+    env: Mapping[str, str] | None = None,
     settings=None,
     resource_paths_cls=ResourcePaths,
 ) -> ResolvedDBPath:
@@ -89,7 +89,7 @@ def resolve_db_path(
     return ResolvedDBPath(path=default_path, source="DEFAULT")
 
 
-def discover_baseline_db_path() -> Optional[Path]:
+def discover_baseline_db_path() -> Path | None:
     candidate = DEV_HEWIKI_BASELINE_DB_PATH.resolve()
     if candidate.exists() and candidate.is_file():
         return candidate
@@ -119,11 +119,14 @@ def is_protected_reference_db_path(
     intentionally excluded from heavy snapshot-backfill runs unless the operator crosses an
     explicit decision gate.
     """
-    return classify_db_profile(
-        path,
-        settings=settings,
-        resource_paths_cls=resource_paths_cls,
-    ) == "Baseline (dev)"
+    return (
+        classify_db_profile(
+            path,
+            settings=settings,
+            resource_paths_cls=resource_paths_cls,
+        )
+        == "Baseline (dev)"
+    )
 
 
 def get_supported_schema_version() -> int:
@@ -160,7 +163,7 @@ def inspect_db_path(path: Path) -> DBPathInfo:
             error="Selected path is not a file.",
         )
 
-    schema_version: Optional[int] = None
+    schema_version: int | None = None
     error = ""
     try:
         with sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=2.0) as conn:
@@ -194,9 +197,9 @@ def clear_deferred_db_startup_guard(*, settings) -> None:
 
 
 def choose_startup_db_path(
-    cli_db_path: Optional[str],
+    cli_db_path: str | None,
     *,
-    env: Optional[Mapping[str, str]] = None,
+    env: Mapping[str, str] | None = None,
     settings=None,
     resource_paths_cls=ResourcePaths,
 ) -> StartupDBDecision:

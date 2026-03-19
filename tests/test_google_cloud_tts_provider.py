@@ -52,7 +52,9 @@ def test_google_tts_retries_without_voice_name_when_saved_voice_invalid():
             b'{"error":{"message":"Voice \\"he-IL-Neural2-B\\" does not exist. Is it misspelled?"}}'
         ),
     )
-    ok_payload = json.dumps({"audioContent": base64.b64encode(b"wav-bytes").decode("ascii")}).encode("utf-8")
+    ok_payload = json.dumps(
+        {"audioContent": base64.b64encode(b"wav-bytes").decode("ascii")}
+    ).encode("utf-8")
 
     request = AudioGenerationRequest(
         source_text="shalom",
@@ -61,7 +63,9 @@ def test_google_tts_retries_without_voice_name_when_saved_voice_invalid():
         trace_id="test-google-voice-fallback",
     )
 
-    with patch("urllib.request.urlopen", side_effect=[bad_voice_error, _Response(ok_payload)]) as mock_urlopen:
+    with patch(
+        "urllib.request.urlopen", side_effect=[bad_voice_error, _Response(ok_payload)]
+    ) as mock_urlopen:
         result = provider.generate(request)
 
     assert result.is_success is True
@@ -74,4 +78,3 @@ def test_google_tts_retries_without_voice_name_when_saved_voice_invalid():
     second_body = json.loads(second_req.data.decode("utf-8"))
     assert first_body["voice"].get("name") == "he-IL-Neural2-B"
     assert "name" not in second_body["voice"]
-

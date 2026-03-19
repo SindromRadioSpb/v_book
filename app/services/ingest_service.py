@@ -1,28 +1,35 @@
 """Document ingestion service."""
+
 import logging
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
 from sqlalchemy import bindparam, delete, select, text
+from sqlalchemy.orm import Session
 
-from app.infra.sa_models import SourceDocument, DocumentText, SourceCorpus, DictProject
-from app.infra.db_retry import with_retry_on_locked
-from app.infra.util.hashing import sha256_file
-from app.infra.extractors import txt_extractor, docx_extractor, pdf_extractor, pdf_ocr_extractor, pptx_extractor
-from app.infra.fts_manager import ensure_fts_tables
-from app.services.db_service import DBService
 from app.domain.exceptions import ReferenceCorpusReadonlyError
+from app.infra.db_retry import with_retry_on_locked
+from app.infra.extractors import (
+    docx_extractor,
+    pdf_extractor,
+    pdf_ocr_extractor,
+    pptx_extractor,
+    txt_extractor,
+)
+from app.infra.fts_manager import ensure_fts_tables
+from app.infra.sa_models import DictProject, DocumentText, SourceCorpus, SourceDocument
 from app.infra.security import (
+    MAX_DOCUMENT_SIZE,
+    AuditLogger,
+    PathSecurityError,
+    ValidationError,
+    sanitize_for_log,
     validate_file_size,
     validate_path_security,
-    sanitize_for_log,
-    MAX_DOCUMENT_SIZE,
-    ValidationError,
-    PathSecurityError,
-    AuditLogger,
 )
+from app.infra.util.hashing import sha256_file
+from app.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +38,10 @@ class IngestService:
     """Service for document ingestion."""
 
     SUPPORTED_EXTENSIONS = {
-        '.txt': 'text',
-        '.docx': 'docx',
-        '.pptx': 'pptx',
-        '.pdf': 'pdf',
+        ".txt": "text",
+        ".docx": "docx",
+        ".pptx": "pptx",
+        ".pdf": "pdf",
     }
 
     def __init__(self):
@@ -68,13 +75,13 @@ class IngestService:
         ocr_used = False
 
         try:
-            if ext == '.txt':
+            if ext == ".txt":
                 text = txt_extractor.extract_text(file_path)
-            elif ext == '.docx':
+            elif ext == ".docx":
                 text = docx_extractor.extract_text(file_path)
-            elif ext == '.pptx':
+            elif ext == ".pptx":
                 text = pptx_extractor.extract_text(file_path)
-            elif ext == '.pdf':
+            elif ext == ".pdf":
                 if use_ocr:
                     try:
                         text = pdf_ocr_extractor.extract_text(file_path)
@@ -154,8 +161,7 @@ class IngestService:
             validate_file_size(safe_path, MAX_DOCUMENT_SIZE, file_type="document")
         except ValidationError as e:
             logger.warning(
-                f"File size limit exceeded: {sanitize_for_log(file_path.name)}, "
-                f"size={e.value}"
+                f"File size limit exceeded: {sanitize_for_log(file_path.name)}, " f"size={e.value}"
             )
 
             # Audit: Log BLOCK event
@@ -193,8 +199,7 @@ class IngestService:
 
         # Check for duplicates
         stmt = select(SourceDocument).where(
-            SourceDocument.corpus_id == corpus_id,
-            SourceDocument.sha256 == file_hash
+            SourceDocument.corpus_id == corpus_id, SourceDocument.sha256 == file_hash
         )
         existing = session.execute(stmt).scalar_one_or_none()
 
@@ -211,7 +216,7 @@ class IngestService:
 
         # Get file metadata
         file_stat = file_path.stat()
-        file_mtime = datetime.fromtimestamp(file_stat.st_mtime, tz=timezone.utc).strftime(
+        file_mtime = datetime.fromtimestamp(file_stat.st_mtime, tz=UTC).strftime(
             "%Y-%m-%dT%H:%M:%S.%fZ"
         )
 
@@ -224,7 +229,7 @@ class IngestService:
             file_size_bytes=file_stat.st_size,
             sha256=file_hash,
             file_mtime_utc=file_mtime,
-            status='imported',
+            status="imported",
         )
         session.add(doc)
         session.flush()  # Get doc_id
@@ -266,9 +271,9 @@ class IngestService:
         self,
         session: Session,
         corpus_id: int,
-        file_paths: List[Path],
+        file_paths: list[Path],
         use_ocr: bool = False,
-    ) -> List[tuple[Path, Optional[SourceDocument], Optional[str]]]:
+    ) -> list[tuple[Path, SourceDocument | None, str | None]]:
         """
         Import multiple documents in batch.
 
@@ -293,21 +298,20 @@ class IngestService:
 
         return results
 
-    def get_document_text(self, session: Session, doc_id: int) -> Optional[str]:
+    def get_document_text(self, session: Session, doc_id: int) -> str | None:
         """Get raw text for a document."""
         doc_text = session.get(DocumentText, doc_id)
         return doc_text.raw_text if doc_text else None
 
-    def _load_documents_for_delete(self, session: Session, doc_ids: List[int]) -> List[SourceDocument]:
+    def _load_documents_for_delete(
+        self, session: Session, doc_ids: list[int]
+    ) -> list[SourceDocument]:
         """Load target documents once and preserve caller order."""
         ordered_ids = [int(doc_id) for doc_id in doc_ids]
         if not ordered_ids:
             return []
         rows = (
-            session.execute(
-                select(SourceDocument)
-                .where(SourceDocument.doc_id.in_(ordered_ids))
-            )
+            session.execute(select(SourceDocument).where(SourceDocument.doc_id.in_(ordered_ids)))
             .scalars()
             .all()
         )
@@ -317,7 +321,7 @@ class IngestService:
     def _ensure_documents_are_mutable(
         self,
         session: Session,
-        docs: List[SourceDocument],
+        docs: list[SourceDocument],
     ) -> None:
         """Raise when any selected document belongs to a reference corpus."""
         for doc in docs:
@@ -334,10 +338,10 @@ class IngestService:
     def _delete_documents_atomic(
         self,
         session: Session,
-        docs: List[SourceDocument],
+        docs: list[SourceDocument],
         *,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ) -> Tuple[int, int]:
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> tuple[int, int]:
         """Delete documents in one transaction without expensive FK cascade scans."""
         if not docs:
             return 0, 0
@@ -370,6 +374,7 @@ class IngestService:
                 if info["status"] == "processed":
                     if process_service is None:
                         from app.services.process_service import ProcessService
+
                         process_service = ProcessService()
                     if not process_service.remove_document_stats(session, info["doc_id"]):
                         raise RuntimeError(
@@ -379,12 +384,12 @@ class IngestService:
 
             ids_param = bindparam("doc_ids", expanding=True)
             params = {"doc_ids": doc_ids}
-            sentence_ids_sql = (
-                "SELECT sentence_id FROM document_sentence WHERE doc_id IN :doc_ids"
-            )
+            sentence_ids_sql = "SELECT sentence_id FROM document_sentence WHERE doc_id IN :doc_ids"
 
             session.execute(
-                text("UPDATE run_error SET doc_id = NULL WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                text("UPDATE run_error SET doc_id = NULL WHERE doc_id IN :doc_ids").bindparams(
+                    ids_param
+                ),
                 params,
             )
             session.execute(
@@ -449,7 +454,9 @@ class IngestService:
                 params,
             )
             session.execute(
-                text("DELETE FROM document_sentence WHERE doc_id IN :doc_ids").bindparams(ids_param),
+                text("DELETE FROM document_sentence WHERE doc_id IN :doc_ids").bindparams(
+                    ids_param
+                ),
                 params,
             )
             session.execute(
@@ -506,7 +513,7 @@ class IngestService:
         except ReferenceCorpusReadonlyError:
             session.rollback()
             raise
-        except Exception as e:
+        except Exception:
             logger.exception(f"Failed to delete document {doc_id}")
             session.rollback()
             return False
@@ -514,10 +521,10 @@ class IngestService:
     def bulk_delete(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         *,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ) -> Tuple[int, int]:
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> tuple[int, int]:
         """
         Delete multiple documents with delta statistics.
 
@@ -561,8 +568,9 @@ class IngestService:
             ValueError: If validation fails (empty, too long, forbidden chars, extension mismatch)
             Exception: If document not found or rename fails
         """
-        from app.infra.security import AuditLogger, sanitize_for_log
         import os
+
+        from app.infra.security import AuditLogger, sanitize_for_log
 
         # Validate new name
         new_file_name = new_file_name.strip()
@@ -573,12 +581,10 @@ class IngestService:
             raise ValueError("File name cannot exceed 255 characters")
 
         # Check for forbidden characters (same as CreateProjectDialog)
-        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        forbidden_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
         bad_chars = [char for char in new_file_name if char in forbidden_chars]
         if bad_chars:
-            raise ValueError(
-                f"File name cannot contain forbidden characters: / \\ : * ? \" < > |"
-            )
+            raise ValueError('File name cannot contain forbidden characters: / \\ : * ? " < > |')
 
         # Get document
         doc = session.get(SourceDocument, doc_id)
@@ -607,9 +613,7 @@ class IngestService:
         session.commit()
         session.refresh(doc)
 
-        logger.info(
-            f"Renamed document {doc_id}: '{old_name}' → '{new_file_name}'"
-        )
+        logger.info(f"Renamed document {doc_id}: '{old_name}' → '{new_file_name}'")
 
         # Audit log
         try:

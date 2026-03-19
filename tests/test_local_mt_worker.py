@@ -9,6 +9,7 @@ Note: Full integration tests with spawned worker processes are skipped
 because monkeypatch doesn't work across process boundaries with spawn context.
 These tests focus on unit testing the client-side logic and data structures.
 """
+
 from pathlib import Path
 from unittest.mock import Mock
 

@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import PronunciationEntry
-from app.services.pronunciation_bootstrap_service import PronunciationBootstrapService, PronunciationGenerator
+from app.services.pronunciation_bootstrap_service import (
+    PronunciationBootstrapService,
+    PronunciationGenerator,
+)
 from app.services.pronunciation_service import PronunciationService
 
 
@@ -25,7 +28,10 @@ class _FakeGenerator(PronunciationGenerator):
     def generate(self, lang: str, src_norms: list[str]):
         _ = lang
         # Append a Hebrew PATAH (U+05B7) so has_hebrew_nikud() accepts the value.
-        return {norm: {"niqqud_text": norm + "\u05B7", "ipa": None, "notes": "fake"} for norm in src_norms}
+        return {
+            norm: {"niqqud_text": norm + "\u05B7", "ipa": None, "notes": "fake"}
+            for norm in src_norms
+        }
 
 
 class _MismatchGenerator(PronunciationGenerator):
@@ -33,7 +39,11 @@ class _MismatchGenerator(PronunciationGenerator):
         _ = lang
         return {
             text: {
-                "niqqud_text": ("\u05e4\u05e8\u05e7 \u05d6\u05de\u05df" if text == "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df" else text),
+                "niqqud_text": (
+                    "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df"
+                    if text == "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df"
+                    else text
+                ),
                 "ipa": None,
                 "notes": "fake_mismatch",
             }
@@ -149,8 +159,18 @@ def test_bootstrap_selected_items_respects_source_group_filters():
                 include_terms=False,
                 include_user_dictionary=False,
                 selected_items=[
-                    {"src_lang": "he", "src_norm": "lemma_norm", "src_text": "lemma text", "source_group": "lemmas"},
-                    {"src_lang": "he", "src_norm": "term_norm", "src_text": "term text", "source_group": "terms"},
+                    {
+                        "src_lang": "he",
+                        "src_norm": "lemma_norm",
+                        "src_text": "lemma text",
+                        "source_group": "lemmas",
+                    },
+                    {
+                        "src_lang": "he",
+                        "src_norm": "term_norm",
+                        "src_text": "term text",
+                        "source_group": "terms",
+                    },
                 ],
             )
             session.commit()
@@ -182,8 +202,18 @@ def test_bootstrap_selected_items_uses_surface_norm_for_lemmas_and_terms():
                 include_terms=True,
                 include_user_dictionary=False,
                 selected_items=[
-                    {"src_lang": "he", "src_norm": "same_norm", "src_text": "alpha", "source_group": "lemmas"},
-                    {"src_lang": "he", "src_norm": "same_norm", "src_text": "beta", "source_group": "terms"},
+                    {
+                        "src_lang": "he",
+                        "src_norm": "same_norm",
+                        "src_text": "alpha",
+                        "source_group": "lemmas",
+                    },
+                    {
+                        "src_lang": "he",
+                        "src_norm": "same_norm",
+                        "src_text": "beta",
+                        "source_group": "terms",
+                    },
                 ],
             )
             session.commit()
@@ -251,8 +281,18 @@ def test_bootstrap_skips_when_generated_has_no_nikud_marks():
         service = PronunciationBootstrapService(generator=_MismatchGenerator())
 
         selected = [
-            {"src_lang": "he", "src_norm": "shared_norm", "src_text": "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df", "source_group": "terms"},
-            {"src_lang": "he", "src_norm": "shared_norm", "src_text": "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df", "source_group": "terms"},
+            {
+                "src_lang": "he",
+                "src_norm": "shared_norm",
+                "src_text": "\u05e4\u05e8\u05e7 \u05d4\u05d6\u05de\u05df",
+                "source_group": "terms",
+            },
+            {
+                "src_lang": "he",
+                "src_norm": "shared_norm",
+                "src_text": "\u05e4\u05e8\u05e7 \u05d6\u05de\u05df",
+                "source_group": "terms",
+            },
         ]
 
         with Session(engine) as session:
@@ -316,7 +356,11 @@ def test_bootstrap_accepts_spacing_only_structure_variation():
             assert result.updated == 1
             assert result.skipped == 0
 
-            row = session.query(PronunciationEntry).filter(PronunciationEntry.src_norm == src_norm).one_or_none()
+            row = (
+                session.query(PronunciationEntry)
+                .filter(PronunciationEntry.src_norm == src_norm)
+                .one_or_none()
+            )
             assert row is not None
             assert row.niqqud_text is not None and row.niqqud_text.strip() != ""
             assert "\u05b7" in row.niqqud_text or "\u05b9" in row.niqqud_text

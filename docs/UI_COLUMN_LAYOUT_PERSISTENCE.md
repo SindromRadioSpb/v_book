@@ -1,7 +1,7 @@
 ﻿# UI Column Layout Persistence (Dictionary / Terms / Documents / Term Cards / Translation Memory)
 
-**Status:** COMPLETE  
-**Date:** 2026-02-17  
+**Status:** COMPLETE
+**Date:** 2026-02-17
 **Manual smoke-check:** PASS (confirmed after implementation)
 
 ## Scope

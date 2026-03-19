@@ -17,7 +17,9 @@ def test_pronunciation_bootstrap_health_fails_with_clear_remediation_when_model_
     settings._settings.clear()
     settings.set_value("resources/data_root", str(tmp_path / "data"))
     settings.set_value("pronunciation/phonikud/enabled", True)
-    settings.set_value("pronunciation/phonikud/model_path", str(tmp_path / "missing" / "model.onnx"))
+    settings.set_value(
+        "pronunciation/phonikud/model_path", str(tmp_path / "missing" / "model.onnx")
+    )
     settings.sync()
 
     class _FakeAdapter:
@@ -53,7 +55,9 @@ def test_sentence_niqqud_bootstrap_health_same_behavior(tmp_path):
     settings._settings.clear()
     settings.set_value("resources/data_root", str(tmp_path / "data"))
     settings.set_value("pronunciation/phonikud/enabled", True)
-    settings.set_value("pronunciation/phonikud/model_path", str(tmp_path / "missing" / "model.onnx"))
+    settings.set_value(
+        "pronunciation/phonikud/model_path", str(tmp_path / "missing" / "model.onnx")
+    )
     settings.sync()
 
     class _FakeAdapter:
@@ -95,9 +99,7 @@ def test_mt_health_respects_master_switch(tmp_path):
 
     checks = HealthCheckService(settings=settings)._check_cloud_providers()
     cloud_mt = next(
-        item.to_dict()
-        for item in checks
-        if item.check_id == "cloud_mt:google_cloud_translate"
+        item.to_dict() for item in checks if item.check_id == "cloud_mt:google_cloud_translate"
     )
     assert cloud_mt["status"] == "optional"
     assert "master switch" in cloud_mt["message"].lower()
@@ -123,9 +125,7 @@ def test_mt_health_warns_when_enabled_in_chain_without_credentials(tmp_path):
 
     checks = HealthCheckService(settings=settings)._check_cloud_providers()
     cloud_mt = next(
-        item.to_dict()
-        for item in checks
-        if item.check_id == "cloud_mt:google_cloud_translate"
+        item.to_dict() for item in checks if item.check_id == "cloud_mt:google_cloud_translate"
     )
     assert cloud_mt["status"] == "warn"
     assert "credentials are missing" in cloud_mt["message"].lower()

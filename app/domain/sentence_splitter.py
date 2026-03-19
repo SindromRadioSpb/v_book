@@ -1,7 +1,7 @@
 """Sentence splitting utilities."""
-import re
+
 import logging
-from typing import List
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -15,29 +15,27 @@ class SentenceSplitter:
     """
 
     # Sentence-ending punctuation
-    SENTENCE_ENDERS = r'[.!?。！？]+'
+    SENTENCE_ENDERS = r"[.!?。！？]+"
 
     # Abbreviations that don't end sentences (Hebrew examples)
     ABBREVIATIONS = {
         'ד"ר',  # Doctor
-        'פרופ',  # Professor
-        'מר',  # Mr.
-        'גב',  # Ms.
+        "פרופ",  # Professor
+        "מר",  # Mr.
+        "גב",  # Ms.
         'ת"א',  # Tel Aviv
-        'י-ם',  # Jerusalem
+        "י-ם",  # Jerusalem
         'בע"מ',  # Ltd.
-        'ת.ד',  # P.O. Box
+        "ת.ד",  # P.O. Box
     }
 
     def __init__(self):
         # Compile regex for sentence splitting
         self.sentence_pattern = re.compile(
-            f'({self.SENTENCE_ENDERS})'
-            r'(?:\s+|$)',  # Followed by whitespace or end
-            re.MULTILINE
+            f"({self.SENTENCE_ENDERS})" r"(?:\s+|$)", re.MULTILINE  # Followed by whitespace or end
         )
 
-    def split(self, text: str) -> List[str]:
+    def split(self, text: str) -> list[str]:
         """
         Split text into sentences.
 
@@ -55,14 +53,14 @@ class SentenceSplitter:
         current = []
 
         # Split by lines first (preserves paragraph structure)
-        lines = text.split('\n')
+        lines = text.split("\n")
 
         for line in lines:
             line = line.strip()
             if not line:
                 # Empty line might end a sentence
                 if current:
-                    sentences.append(' '.join(current))
+                    sentences.append(" ".join(current))
                     current = []
                 continue
 
@@ -75,7 +73,7 @@ class SentenceSplitter:
                     continue
 
                 # Check if followed by punctuation
-                punct = parts[i + 1].strip() if i + 1 < len(parts) else ''
+                punct = parts[i + 1].strip() if i + 1 < len(parts) else ""
 
                 # Add to current sentence
                 current.append(text_part)
@@ -83,13 +81,13 @@ class SentenceSplitter:
                     current.append(punct)
 
                 # If we have sentence-ending punctuation, finish sentence
-                if punct and not self._is_abbreviation(' '.join(current)):
-                    sentences.append(' '.join(current))
+                if punct and not self._is_abbreviation(" ".join(current)):
+                    sentences.append(" ".join(current))
                     current = []
 
         # Add remaining text as last sentence
         if current:
-            sentences.append(' '.join(current))
+            sentences.append(" ".join(current))
 
         # Filter and clean
         sentences = [s.strip() for s in sentences if s.strip()]
@@ -105,7 +103,7 @@ class SentenceSplitter:
         return False
 
 
-def split_into_sentences(text: str) -> List[str]:
+def split_into_sentences(text: str) -> list[str]:
     """
     Convenience function to split text into sentences.
 

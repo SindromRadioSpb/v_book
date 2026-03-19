@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from PyQt6.QtWidgets import QDialog, QMessageBox, QWidget
 
 from app.services.audio_queue_service import AudioItemSpec, AudioQueueService
 
 
-def _to_int(value: Any) -> Optional[int]:
+def _to_int(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
@@ -23,8 +24,8 @@ def _normalize_kind(raw: str) -> str:
     return value
 
 
-def _build_specs(items: Iterable[Dict[str, Any]]) -> List[AudioItemSpec]:
-    specs: List[AudioItemSpec] = []
+def _build_specs(items: Iterable[dict[str, Any]]) -> list[AudioItemSpec]:
+    specs: list[AudioItemSpec] = []
     for payload in items:
         if not isinstance(payload, dict):
             continue
@@ -48,9 +49,7 @@ def _build_specs(items: Iterable[Dict[str, Any]]) -> List[AudioItemSpec]:
                 ).strip()
                 or None,
                 snapshot_translation=str(
-                    payload.get("translation")
-                    or payload.get("snapshot_translation")
-                    or ""
+                    payload.get("translation") or payload.get("snapshot_translation") or ""
                 ).strip()
                 or None,
                 snapshot_source_label=src_label or None,
@@ -61,7 +60,9 @@ def _build_specs(items: Iterable[Dict[str, Any]]) -> List[AudioItemSpec]:
     return specs
 
 
-def _refresh_audio_player_playlists(parent: Optional[QWidget], *, select_playlist_id: Optional[int] = None) -> None:
+def _refresh_audio_player_playlists(
+    parent: QWidget | None, *, select_playlist_id: int | None = None
+) -> None:
     """Best-effort refresh for Audio Player playlists tab after external modifications."""
     if parent is None:
         return
@@ -88,10 +89,10 @@ def _refresh_audio_player_playlists(parent: Optional[QWidget], *, select_playlis
 def add_selected_items_to_playlist_dialog(
     *,
     parent: QWidget,
-    items: Iterable[Dict[str, Any]],
+    items: Iterable[dict[str, Any]],
     db_manager: Any = None,
-    default_playlist_id: Optional[int] = None,
-    default_after_entry_id: Optional[int] = None,
+    default_playlist_id: int | None = None,
+    default_after_entry_id: int | None = None,
 ) -> bool:
     """Open AddQueueToPlaylistDialog and persist selected items to playlist.
 

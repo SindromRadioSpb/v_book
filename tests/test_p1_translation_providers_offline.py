@@ -3,6 +3,7 @@
 These tests verify that providers can be instantiated without API keys
 and return proper error responses instead of crashing.
 """
+
 import pytest
 
 from app.infra.translators.base_provider import (

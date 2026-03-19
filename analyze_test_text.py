@@ -1,21 +1,23 @@
 """Analyze expected terms for specific test text."""
-import sys
+
 import io
+import sys
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from pathlib import Path
+
 from app.services.db_service import DBService
-from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
 from app.services.process_service import ProcessService
+from app.services.project_service import ProjectService
 from app.services.term_extraction_service import TermExtractionService
 
-print("="*70)
+print("=" * 70)
 print("ANALYSIS: Expected terms for specific test text")
-print("="*70)
+print("=" * 70)
 
 # Test text
 test_text = """בית ספר גדול.
@@ -42,7 +44,7 @@ term_service = TermExtractionService()
 test_dir = Path("test_data_analysis")
 test_dir.mkdir(exist_ok=True)
 test_file = test_dir / "hebrew_test.txt"
-test_file.write_text(test_text, encoding='utf-8')
+test_file.write_text(test_text, encoding="utf-8")
 
 try:
     with db_service.get_session() as session:
@@ -62,19 +64,16 @@ try:
             include_np=False,  # Disable NP for cleaner results
             min_freq=1,
             ngram_ns=(2,),  # Only bigrams
-            overwrite=True
+            overwrite=True,
         )
 
-        print(f"Extraction results:")
+        print("Extraction results:")
         print(f"  N-grams extracted: {report.ngrams_extracted}")
         print(f"  Clusters created: {report.clusters_created}")
 
         # List all clusters
         clusters = term_service.list_term_clusters(
-            session,
-            project.project_id,
-            top_n=100,
-            preset='freq'
+            session, project.project_id, top_n=100, preset="freq"
         )
 
         print(f"\n{'='*70}")
@@ -90,16 +89,16 @@ try:
 
             # Get cluster members
             members = term_service.get_cluster_members(session, cluster.cluster_id)
-            print(f"   Variants:")
+            print("   Variants:")
             for member in members:
                 print(f"     - '{member['surface_text']}' (freq: {member['freq_abs']})")
             print()
 
         print(f"{'='*70}")
-        print(f"SUMMARY FOR UI:")
+        print("SUMMARY FOR UI:")
         print(f"{'='*70}")
         print(f"Total terms in 'Term' column: {len(clusters)}")
-        print(f"\nExpected entries (representatives):")
+        print("\nExpected entries (representatives):")
         for i, cluster in enumerate(clusters, 1):
             print(f"{i}. {cluster.representative_he}")
 

@@ -11,7 +11,9 @@ from scripts import repair_db_corruption as mod
 def _create_db_then_truncate(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("CREATE TABLE tm_entry (tm_id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT)")
+        conn.execute(
+            "CREATE TABLE tm_entry (tm_id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT)"
+        )
         conn.execute("INSERT INTO tm_entry(tm_id, project_id, kind) VALUES (1, 1, 'lemma')")
         conn.commit()
     finally:

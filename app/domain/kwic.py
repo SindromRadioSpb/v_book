@@ -1,6 +1,6 @@
 """KWIC (Key Word In Context) formatting (M6)."""
+
 import logging
-from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +9,7 @@ def format_kwic(
     sentence: str,
     match: str,
     context_chars: int = 50,
-) -> Tuple[str, str, str]:
+) -> tuple[str, str, str]:
     """
     Format a sentence as KWIC (left, match, right).
 

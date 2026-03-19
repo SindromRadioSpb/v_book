@@ -7,6 +7,7 @@ These tests verify:
 - Settings-driven configuration
 - Deterministic behavior (no real API calls)
 """
+
 import logging
 import pytest
 from unittest.mock import MagicMock
@@ -57,6 +58,7 @@ def mock_settings(monkeypatch):
 
     # Monkeypatch SettingsService.get_instance to return mock
     from app.infra import settings
+
     monkeypatch.setattr(settings.SettingsService, "get_instance", lambda: mock_instance)
 
     # Return settings_data so tests can modify it
@@ -100,8 +102,7 @@ def test_chain_network_fail_then_success(
 
         def __init__(self):
             super().__init__(
-                simulate_error=TranslationErrorKind.NETWORK,
-                error_probability=1.0  # Always fail
+                simulate_error=TranslationErrorKind.NETWORK, error_probability=1.0  # Always fail
             )
 
     class SuccessProvider(MockProvider):
@@ -165,10 +166,7 @@ def test_chain_auth_fail_then_success_logs_config_issue(
             return "Mock Auth Fail"
 
         def __init__(self):
-            super().__init__(
-                simulate_error=TranslationErrorKind.AUTH,
-                error_probability=1.0
-            )
+            super().__init__(simulate_error=TranslationErrorKind.AUTH, error_probability=1.0)
 
     class SuccessProvider(MockProvider):
         @property
@@ -225,10 +223,7 @@ def test_chain_no_fallback_stops_after_first(
             return "mock_network_fail"
 
         def __init__(self):
-            super().__init__(
-                simulate_error=TranslationErrorKind.NETWORK,
-                error_probability=1.0
-            )
+            super().__init__(simulate_error=TranslationErrorKind.NETWORK, error_probability=1.0)
 
     class SuccessProvider(MockProvider):
         @property
@@ -398,10 +393,7 @@ def test_chain_all_providers_fail_returns_last_error(
             return "fail1"
 
         def __init__(self):
-            super().__init__(
-                simulate_error=TranslationErrorKind.NETWORK,
-                error_probability=1.0
-            )
+            super().__init__(simulate_error=TranslationErrorKind.NETWORK, error_probability=1.0)
 
     class Fail2Provider(MockProvider):
         @property
@@ -409,10 +401,7 @@ def test_chain_all_providers_fail_returns_last_error(
             return "fail2"
 
         def __init__(self):
-            super().__init__(
-                simulate_error=TranslationErrorKind.SERVER,
-                error_probability=1.0
-            )
+            super().__init__(simulate_error=TranslationErrorKind.SERVER, error_probability=1.0)
 
     registry.register(Fail1Provider())
     registry.register(Fail2Provider())

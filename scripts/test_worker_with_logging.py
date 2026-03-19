@@ -1,9 +1,10 @@
 """Test worker startup with detailed logging (mimics app behavior)."""
+
 import sys
 import logging
 from pathlib import Path
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Setup logging like the app does
     logging.basicConfig(
         level=logging.DEBUG,
@@ -20,7 +21,9 @@ if __name__ == '__main__':
     logger.info("Importing worker module...")
     from app.infra.local_mt.worker_process import LocalMTWorker
 
-    model_path = Path(r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2")
+    model_path = Path(
+        r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"
+    )
 
     logger.info(f"Model path: {model_path}")
     logger.info(f"Resolved: {model_path.resolve()}")

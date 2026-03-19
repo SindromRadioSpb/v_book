@@ -8,28 +8,28 @@ Handles normalization of Hebrew terms to merge surface variants:
 
 All should map to same canonical key: "בית_ספר"
 """
-import re
-import logging
-from typing import Optional
 
-from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+import logging
+import re
+
+from app.domain.hebrew_utils import normalize_whitespace, strip_cantillation, strip_nikud
 
 logger = logging.getLogger(__name__)
 
 # Hebrew prefixes (single letters that attach to words)
 HEBREW_PREFIXES = {
-    'ב': 'in/at',
-    'כ': 'like/as',
-    'ל': 'to/for',
-    'מ': 'from',
-    'ו': 'and',
-    'ש': 'that/which',
-    'ה': 'the'  # article
+    "ב": "in/at",
+    "כ": "like/as",
+    "ל": "to/for",
+    "מ": "from",
+    "ו": "and",
+    "ש": "that/which",
+    "ה": "the",  # article
 }
 
 # Hebrew quotes (gershayim/geresh)
-GERSHAYIM = '\u05F4'  # ״
-GERESH = '\u05F3'    # ׳
+GERSHAYIM = "\u05F4"  # ״
+GERESH = "\u05F3"  # ׳
 
 
 def normalize_quotes(text: str) -> str:
@@ -75,7 +75,12 @@ def strip_prefixes(word: str) -> str:
     return word
 
 
-def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = None, strip_prefixes_enabled: bool = True, joiner: str = "_") -> str:
+def canonicalize_hebrew_term(
+    surface_text: str,
+    lemma_phrase: str | None = None,
+    strip_prefixes_enabled: bool = True,
+    joiner: str = "_",
+) -> str:
     """
     Create canonical key for Hebrew term clustering.
 
@@ -131,10 +136,7 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
     # 5. Filter standalone articles/prefixes (M5.2 fix for separate articles)
     # Remove single-char tokens that are prefixes (e.g., "ה", "ב", "ל")
     # This handles cases where tokenizer separates articles: "ה ספר" → ["ה", "ספר"]
-    tokens = [
-        tok for tok in tokens
-        if not (len(tok) == 1 and tok in HEBREW_PREFIXES)
-    ]
+    tokens = [tok for tok in tokens if not (len(tok) == 1 and tok in HEBREW_PREFIXES)]
 
     # 6. Strip prefixes from each remaining token (if enabled)
     if strip_prefixes_enabled:
@@ -148,13 +150,13 @@ def canonicalize_hebrew_term(surface_text: str, lemma_phrase: Optional[str] = No
 
     # Remove punctuation but KEEP Hebrew, numbers, Latin letters, joiner, and spaces
     # CRITICAL: DO NOT remove numbers (0-9) or Latin letters (a-zA-Z)
-    allowed_pattern = r'[^\u0590-\u05FF0-9a-zA-Z_\s]'
-    canonical = re.sub(allowed_pattern, '', canonical)
+    allowed_pattern = r"[^\u0590-\u05FF0-9a-zA-Z_\s]"
+    canonical = re.sub(allowed_pattern, "", canonical)
 
     return canonical
 
 
-def get_cluster_key(surface_text: str, lemma_phrase: Optional[str] = None) -> str:
+def get_cluster_key(surface_text: str, lemma_phrase: str | None = None) -> str:
     """
     Get cluster key for a term.
 
@@ -228,10 +230,7 @@ def choose_representative_term(terms: list[dict]) -> str:
         return ""
 
     # FIRST: Filter out terms with standalone function tokens (garbage terms)
-    valid_terms = [
-        t for t in terms
-        if not has_standalone_function_tokens(t['surface_text'])
-    ]
+    valid_terms = [t for t in terms if not has_standalone_function_tokens(t["surface_text"])]
 
     # If all terms are invalid (edge case), fall back to original list
     # (better to show something than nothing, but this shouldn't happen)
@@ -239,8 +238,7 @@ def choose_representative_term(terms: list[dict]) -> str:
 
     # THEN: Sort by freq desc, length asc, alphabetically
     sorted_terms = sorted(
-        candidates,
-        key=lambda t: (-t.get('freq_abs', 0), len(t['surface_text']), t['surface_text'])
+        candidates, key=lambda t: (-t.get("freq_abs", 0), len(t["surface_text"]), t["surface_text"])
     )
 
-    return sorted_terms[0]['surface_text']
+    return sorted_terms[0]["surface_text"]

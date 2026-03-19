@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
@@ -28,21 +27,21 @@ class HealthCheckItem:
     message: str
     remediation: str = ""
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return asdict(self)
 
 
 class HealthCheckService:
     """Centralized health checks with actionable remediation hints."""
 
-    def __init__(self, *, settings: Optional[SettingsService] = None):
+    def __init__(self, *, settings: SettingsService | None = None):
         self.settings = settings or SettingsService.get_instance()
         self.resources = ResourceRegistry(settings=self.settings)
         self.audio_cfg = AudioProviderConfigManager(settings=self.settings)
         self.mt_cfg = ProviderConfigManager(settings=self.settings)
 
-    def run_all(self) -> Dict[str, object]:
-        items: List[HealthCheckItem] = []
+    def run_all(self) -> dict[str, object]:
+        items: list[HealthCheckItem] = []
         items.extend(self._check_required_resources())
         items.append(self._check_pronunciation_bootstrap())
         items.append(self._check_sentence_niqqud_bootstrap())
@@ -59,8 +58,8 @@ class HealthCheckService:
             "items": [item.to_dict() for item in items],
         }
 
-    def _check_required_resources(self) -> List[HealthCheckItem]:
-        checks: List[HealthCheckItem] = []
+    def _check_required_resources(self) -> list[HealthCheckItem]:
+        checks: list[HealthCheckItem] = []
         for entry in self.resources.list_entries():
             status = self.resources.get_status(entry.id)
             if not entry.required:
@@ -100,7 +99,9 @@ class HealthCheckService:
     def _check_pronunciation_bootstrap(self) -> HealthCheckItem:
         model_path = self.settings.get_string("pronunciation/phonikud/model_path", "")
         enabled = self.settings.get_bool("pronunciation/phonikud/enabled", True)
-        report = PhonikudAdapter(model_path=model_path, enabled=enabled).health_check(["שלום", "תחנה"])
+        report = PhonikudAdapter(model_path=model_path, enabled=enabled).health_check(
+            ["שלום", "תחנה"]
+        )
         if report.status == "ok":
             return HealthCheckItem(
                 check_id="bootstrap:pronunciation",
@@ -137,8 +138,8 @@ class HealthCheckService:
             remediation="Install local model resources and retry Health Check.",
         )
 
-    def _check_cloud_providers(self) -> List[HealthCheckItem]:
-        checks: List[HealthCheckItem] = []
+    def _check_cloud_providers(self) -> list[HealthCheckItem]:
+        checks: list[HealthCheckItem] = []
 
         # Audio providers (optional readiness)
         for provider_id, title in (

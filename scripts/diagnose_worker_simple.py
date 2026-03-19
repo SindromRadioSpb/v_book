@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from multiprocessing.connection import Connection
 
+
 def worker_func(conn: Connection, model_path: str):
     """Worker function."""
     # Clear inherited handlers
@@ -32,10 +33,15 @@ def worker_func(conn: Connection, model_path: str):
         logging.error(f"Worker failed: {e}", exc_info=True)
         conn.send({"ok": False, "error": str(e)})
 
+
 if __name__ == "__main__":
     print("Testing model load in multiprocessing spawn context...")
 
-    model_path = str(Path(r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"))
+    model_path = str(
+        Path(
+            r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"
+        )
+    )
 
     ctx = multiprocessing.get_context("spawn")
     parent_conn, child_conn = multiprocessing.Pipe()

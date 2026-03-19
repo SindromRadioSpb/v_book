@@ -1,4 +1,5 @@
 """Test for Task 19 cross-project translation propagation fix."""
+
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -95,8 +96,9 @@ def test_cross_project_propagation(in_memory_db):
 
     # CRITICAL: Verify project 6 received propagated translation
     session.refresh(entry_p6)
-    assert entry_p6.translation == "Тест", \
-        f"Expected project 6 to receive propagated translation, but got: '{entry_p6.translation}'"
+    assert (
+        entry_p6.translation == "Тест"
+    ), f"Expected project 6 to receive propagated translation, but got: '{entry_p6.translation}'"
     assert entry_p6.status == "approved"
     assert entry_p6.origin == "user_edit"
 
@@ -159,8 +161,9 @@ def test_edit_propagation(in_memory_db):
 
     # Verify propagation to project 6
     session.refresh(entry_p6)
-    assert entry_p6.translation == "Новый", \
-        f"Expected project 6 to receive updated translation, but got: '{entry_p6.translation}'"
+    assert (
+        entry_p6.translation == "Новый"
+    ), f"Expected project 6 to receive updated translation, but got: '{entry_p6.translation}'"
     assert entry_p6.status == "approved"
 
 
@@ -219,6 +222,7 @@ def test_no_overwrite_higher_score(in_memory_db):
 
     # Verify project 7 received higher-scored translation from global
     session.refresh(entry_p7)
-    assert entry_p7.translation == "Хороший", \
-        f"Expected project 7 to receive higher-scored translation, but got: '{entry_p7.translation}'"
+    assert (
+        entry_p7.translation == "Хороший"
+    ), f"Expected project 7 to receive higher-scored translation, but got: '{entry_p7.translation}'"
     assert entry_p7.status == "approved"

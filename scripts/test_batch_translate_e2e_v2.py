@@ -13,12 +13,12 @@ from pathlib import Path
 
 # UTF-8 encoding for stdout
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def main():
             project = project_service.create_project(
                 session,
                 name="Test_Translation",
-                description="E2E test project for batch translation V2"
+                description="E2E test project for batch translation V2",
             )
             print(f"  ✓ Created project: {project.name} (ID: {project.project_id})")
         else:
@@ -81,16 +81,15 @@ def main():
 
         if len(docs) == 0:
             print("  Importing test document...")
-            test_file = Path(r"J:\Project_Vibe\V_book -info files\Тестовые тексты\Test_Translation.txt")
+            test_file = Path(
+                r"J:\Project_Vibe\V_book -info files\Тестовые тексты\Test_Translation.txt"
+            )
             if not test_file.exists():
                 print(f"  [ERROR] Test file not found: {test_file}")
                 return 1
 
             doc_service.ingest_document(
-                session,
-                project_id=project.project_id,
-                file_path=test_file,
-                title="Test Document"
+                session, project_id=project.project_id, file_path=test_file, title="Test Document"
             )
             print("  ✓ Document imported")
         else:
@@ -115,9 +114,11 @@ def main():
         # Step 4: Extract terms
         print("\n[STEP 4] Extracting terms...")
         term_service = TermExtractionService()
-        clusters = session.execute(
-            select(TermCluster).where(TermCluster.project_id == project.project_id)
-        ).scalars().all()
+        clusters = (
+            session.execute(select(TermCluster).where(TermCluster.project_id == project.project_id))
+            .scalars()
+            .all()
+        )
 
         if len(clusters) == 0:
             print("  Running term extraction...")
@@ -133,19 +134,20 @@ def main():
             print("  ✓ Terms extracted")
 
             # Refresh
-            clusters = session.execute(
-                select(TermCluster).where(TermCluster.project_id == project.project_id)
-            ).scalars().all()
+            clusters = (
+                session.execute(
+                    select(TermCluster).where(TermCluster.project_id == project.project_id)
+                )
+                .scalars()
+                .all()
+            )
         else:
             print(f"  ✓ Found {len(clusters)} existing term clusters")
 
         # Step 5: Initialize providers
         print("\n[STEP 5] Initializing MT providers...")
         try:
-            count = initialize_local_providers(
-                db_session=session,
-                project_id=project.project_id
-            )
+            count = initialize_local_providers(db_session=session, project_id=project.project_id)
             print(f"  ✓ Registered {count} local providers")
         except Exception as e:
             print(f"  [WARNING] Provider init failed: {e}")
@@ -153,15 +155,17 @@ def main():
 
         # Step 6: Test Dictionary batch translate
         print("\n[STEP 6] Testing Dictionary batch translate...")
-        lemmas = session.execute(
-            select(Lemma).where(Lemma.project_id == project.project_id)
-        ).scalars().all()
+        lemmas = (
+            session.execute(select(Lemma).where(Lemma.project_id == project.project_id))
+            .scalars()
+            .all()
+        )
 
         print(f"  Found {len(lemmas)} lemmas")
 
         if len(lemmas) > 0:
             # Take first 5 lemmas
-            test_lemmas = lemmas[:min(5, len(lemmas))]
+            test_lemmas = lemmas[: min(5, len(lemmas))]
             items = [
                 BatchTranslateItem(
                     entity_type="lemma",
@@ -203,7 +207,7 @@ def main():
 
         if len(clusters) > 0:
             # Take first 5 clusters
-            test_clusters = clusters[:min(5, len(clusters))]
+            test_clusters = clusters[: min(5, len(clusters))]
             items = [
                 BatchTranslateItem(
                     entity_type="term_cluster",
@@ -245,7 +249,9 @@ def main():
         print("E2E TEST COMPLETE")
         print("=" * 80)
         print("\nNext steps:")
-        print("1. Launch app: python -m app.main --db-path J:\\Project_Vibe\\V_book\\hdle_premium.db")
+        print(
+            "1. Launch app: python -m app.main --db-path J:\\Project_Vibe\\V_book\\hdle_premium.db"
+        )
         print("2. Open Test_Translation project")
         print("3. Verify translations appear in Dictionary and Terms tabs")
         print("\n")

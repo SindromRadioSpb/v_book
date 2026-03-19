@@ -1,4 +1,5 @@
 """PDF text extractor."""
+
 import logging
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def extract_text(file_path: Path) -> str:
         result = "\n\n".join(pages_text)
 
         if not result.strip():
-            logger.warning(f"No text extracted from PDF (may be scanned). Try OCR extractor.")
+            logger.warning("No text extracted from PDF (may be scanned). Try OCR extractor.")
 
         logger.info(f"Extracted {len(result)} characters from {len(pages_text)} pages")
         return result

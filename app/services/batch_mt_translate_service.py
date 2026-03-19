@@ -5,19 +5,19 @@ Supports provider selection, write modes, chunked commits, and per-row error han
 """
 
 import logging
-import uuid
 import time
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import List, Optional, Callable
 from datetime import datetime
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.infra.sa_models import TMEntry, TermCluster, Lemma
-from app.services.translation_service import TranslationService
-from app.services.tm_global_service import TMGlobalService
 from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.sa_models import Lemma, TermCluster, TMEntry
+from app.services.tm_global_service import TMGlobalService
+from app.services.translation_service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +25,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BatchTranslateItem:
     """Single item to translate."""
+
     entity_type: str  # "lemma" | "term_cluster" | "tm_entry"
     entity_id: str  # Row identifier (lemma_text | representative_he | tm_id)
     source_text: str
     src_lang: str
     tgt_lang: str
-    current_translation: Optional[str]
-    project_id: Optional[int]
+    current_translation: str | None
+    project_id: int | None
 
 
 @dataclass
 class BatchTranslateOptions:
     """Options for batch translation."""
+
     provider_mode: str  # "chain" | "force:<provider_id>"
     write_mode: str  # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
     chunk_size: int = 50
@@ -47,25 +49,27 @@ class BatchTranslateOptions:
 @dataclass
 class BatchTranslateRowResult:
     """Result for a single row."""
+
     entity_id: str
     source_text: str
-    old_translation: Optional[str]
-    new_translation: Optional[str]
-    provider_id: Optional[str]
+    old_translation: str | None
+    new_translation: str | None
+    provider_id: str | None
     cache_hit: bool
-    latency_ms: Optional[int]
-    error_message: Optional[str]
+    latency_ms: int | None
+    error_message: str | None
     skipped: bool
 
 
 @dataclass
 class BatchTranslateResult:
     """Overall batch result."""
+
     total: int
     succeeded: int
     skipped: int
     failed: int
-    row_results: List[BatchTranslateRowResult]
+    row_results: list[BatchTranslateRowResult]
     trace_id: str
     elapsed_ms: int
 
@@ -79,11 +83,13 @@ class BatchMTTranslateService:
     def execute_batch(
         self,
         session: Session,
-        items: List[BatchTranslateItem],
+        items: list[BatchTranslateItem],
         options: BatchTranslateOptions,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        item_callback: Optional[Callable[["BatchTranslateRowResult"], None]] = None,  # PATCH-17-01: Per-item events
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        item_callback: (
+            Callable[["BatchTranslateRowResult"], None] | None
+        ) = None,  # PATCH-17-01: Per-item events
     ) -> BatchTranslateResult:
         """Execute batch translation.
 
@@ -125,9 +131,7 @@ class BatchMTTranslateService:
 
             try:
                 # Process chunk
-                chunk_results = self._process_chunk(
-                    session, chunk, options, trace_id, cancel_check
-                )
+                chunk_results = self._process_chunk(session, chunk, options, trace_id, cancel_check)
 
                 row_results.extend(chunk_results)
 
@@ -149,7 +153,9 @@ class BatchMTTranslateService:
                 # Commit chunk (unless dry_run)
                 if not options.dry_run:
                     session.commit()
-                    chunk_succeeded = sum(1 for r in chunk_results if not r.skipped and not r.error_message)
+                    chunk_succeeded = sum(
+                        1 for r in chunk_results if not r.skipped and not r.error_message
+                    )
                     chunk_failed = sum(1 for r in chunk_results if r.error_message)
                     logger.debug(
                         f"[JOB:{trace_id[:8]}] Committed chunk {chunk_start}-{chunk_end}: "
@@ -166,17 +172,19 @@ class BatchMTTranslateService:
 
                 # Mark all chunk items as failed
                 for item in chunk:
-                    row_results.append(BatchTranslateRowResult(
-                        entity_id=item.entity_id,
-                        source_text=item.source_text,
-                        old_translation=item.current_translation,
-                        new_translation=None,
-                        provider_id=None,
-                        cache_hit=False,
-                        latency_ms=None,
-                        error_message=f"Chunk error: {str(e)}",
-                        skipped=False,
-                    ))
+                    row_results.append(
+                        BatchTranslateRowResult(
+                            entity_id=item.entity_id,
+                            source_text=item.source_text,
+                            old_translation=item.current_translation,
+                            new_translation=None,
+                            provider_id=None,
+                            cache_hit=False,
+                            latency_ms=None,
+                            error_message=f"Chunk error: {str(e)}",
+                            skipped=False,
+                        )
+                    )
                     failed += 1
                     completed += 1
 
@@ -207,11 +215,11 @@ class BatchMTTranslateService:
     def _process_chunk(
         self,
         session: Session,
-        chunk: List[BatchTranslateItem],
+        chunk: list[BatchTranslateItem],
         options: BatchTranslateOptions,
         trace_id: str,
-        cancel_check: Optional[Callable[[], bool]],
-    ) -> List[BatchTranslateRowResult]:
+        cancel_check: Callable[[], bool] | None,
+    ) -> list[BatchTranslateRowResult]:
         """Process a single chunk of items."""
         results = []
 
@@ -219,32 +227,36 @@ class BatchMTTranslateService:
             # Check cancel
             if cancel_check and cancel_check():
                 # Mark remaining items as skipped
-                results.append(BatchTranslateRowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=None,
-                    provider_id=None,
-                    cache_hit=False,
-                    latency_ms=None,
-                    error_message="Cancelled",
-                    skipped=True,
-                ))
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message="Cancelled",
+                        skipped=True,
+                    )
+                )
                 continue
 
             # Check write_mode (skip logic)
             if self._should_skip(item, options.write_mode):
-                results.append(BatchTranslateRowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=None,
-                    provider_id=None,
-                    cache_hit=False,
-                    latency_ms=None,
-                    error_message=None,
-                    skipped=True,
-                ))
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message=None,
+                        skipped=True,
+                    )
+                )
                 continue
 
             # Translate and write
@@ -299,8 +311,8 @@ class BatchMTTranslateService:
                 force_provider_id = options.provider_mode.split(":", 1)[1]
                 logger.info(f"Using force provider: {force_provider_id}")
 
-                from app.infra.translators.providers_registry import ProvidersRegistry
                 from app.infra.translators.base_provider import TranslationRequest
+                from app.infra.translators.providers_registry import ProvidersRegistry
 
                 registry = ProvidersRegistry()
                 provider = registry.get(force_provider_id)
@@ -330,7 +342,9 @@ class BatchMTTranslateService:
                 mt_result = provider.translate(mt_request)
 
                 if mt_result.error_kind:
-                    logger.error(f"Force provider '{force_provider_id}' failed: {mt_result.error_message}")
+                    logger.error(
+                        f"Force provider '{force_provider_id}' failed: {mt_result.error_message}"
+                    )
                     return BatchTranslateRowResult(
                         entity_id=item.entity_id,
                         source_text=item.source_text,
@@ -344,7 +358,9 @@ class BatchMTTranslateService:
                     )
 
                 # Success - create translation result
-                from app.services.translation_service import TranslationResult as ServiceTranslationResult
+                from app.services.translation_service import (
+                    TranslationResult as ServiceTranslationResult,
+                )
 
                 translation_result = ServiceTranslationResult(
                     translation=mt_result.translated_text,
@@ -450,9 +466,13 @@ class BatchMTTranslateService:
         if item.entity_type == "lemma":
             self._write_lemma(session, item, translation, force_global_update=force_global_update)
         elif item.entity_type == "term_cluster":
-            self._write_term_cluster(session, item, translation, force_global_update=force_global_update)
+            self._write_term_cluster(
+                session, item, translation, force_global_update=force_global_update
+            )
         elif item.entity_type == "tm_entry":
-            self._write_tm_entry(session, item, translation, force_global_update=force_global_update)
+            self._write_tm_entry(
+                session, item, translation, force_global_update=force_global_update
+            )
         elif item.entity_type == "surface":
             self._write_surface(session, item, translation, force_global_update=force_global_update)
         else:

@@ -37,6 +37,7 @@ def test_clamp_rate_invalid():
 @pytest.fixture(scope="module")
 def qapp():
     from PyQt6.QtCore import QCoreApplication
+
     return QCoreApplication.instance() or QCoreApplication(sys.argv)
 
 

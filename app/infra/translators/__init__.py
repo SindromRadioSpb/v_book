@@ -1,10 +1,10 @@
 """Machine Translation provider infrastructure."""
 
 from .base_provider import (
+    BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
-    BaseProvider,
 )
 
 __all__ = [

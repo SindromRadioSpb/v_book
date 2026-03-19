@@ -10,13 +10,13 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
+from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.audio import AudioGenerationRequest
+from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
 from app.infra.audio.local_providers_setup import register_default_audio_providers
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.resource_paths import ResourcePaths
@@ -27,7 +27,6 @@ from app.services.audio_cache_key_service import AudioCacheKeyService
 from app.services.audio_usage_tracker import AudioUsageTracker
 from app.services.pronunciation_quality_service import PronunciationQualityService
 from app.services.pronunciation_service import PronunciationService
-from app.domain.normalization.normalizer import normalize_for_tm
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ def _get_app_dir() -> Path:
     return ResourcePaths.resolve_data_root(create=True)
 
 
-def list_available_audio_providers() -> List[str]:
+def list_available_audio_providers() -> list[str]:
     """List registered audio provider IDs (auto-register defaults once)."""
     register_default_audio_providers()
     return AudioProvidersRegistry().list_provider_ids()
@@ -56,8 +55,8 @@ class AudioGenerationService:
     def __init__(
         self,
         *,
-        settings: Optional[SettingsService] = None,
-        audio_asset_service: Optional[AudioAssetService] = None,
+        settings: SettingsService | None = None,
+        audio_asset_service: AudioAssetService | None = None,
     ):
         self.settings = settings or SettingsService.get_instance()
         self.audio_asset_service = audio_asset_service or AudioAssetService()
@@ -66,8 +65,10 @@ class AudioGenerationService:
         self.pronunciation_service = PronunciationService()
         register_default_audio_providers()
 
-    def _resolve_voice_speed(self) -> Tuple[str, float]:
-        voice_id = (self.settings.get_string("audio/voice_id", "default") or "default").strip() or "default"
+    def _resolve_voice_speed(self) -> tuple[str, float]:
+        voice_id = (
+            self.settings.get_string("audio/voice_id", "default") or "default"
+        ).strip() or "default"
         speed_raw = self.settings.get_string("audio/speed", "1.0")
         try:
             speed = float(speed_raw)
@@ -76,7 +77,7 @@ class AudioGenerationService:
         speed = max(0.5, min(2.0, speed))
         return voice_id, speed
 
-    def _resolve_provider_chain(self, provider_mode: str) -> List[str]:
+    def _resolve_provider_chain(self, provider_mode: str) -> list[str]:
         registry = AudioProvidersRegistry()
         if not self.settings.get_bool("audio/providers/enabled", True):
             return []
@@ -92,9 +93,7 @@ class AudioGenerationService:
         if not isinstance(chain, list) or not chain:
             chain = list(self.DEFAULT_CHAIN)
         resolved = [
-            pid
-            for pid in chain
-            if registry.get(str(pid)) and self._is_provider_enabled(str(pid))
+            pid for pid in chain if registry.get(str(pid)) and self._is_provider_enabled(str(pid))
         ]
         if not resolved:
             resolved = [
@@ -141,7 +140,7 @@ class AudioGenerationService:
         parts = re.findall(r"\w+|[^\w]+", source_text, flags=re.UNICODE)
         if not parts:
             return source_text
-        token_norms: Dict[str, str] = {}
+        token_norms: dict[str, str] = {}
         for part in parts:
             if not part or not part.strip() or not any(ch.isalnum() for ch in part):
                 continue
@@ -159,7 +158,7 @@ class AudioGenerationService:
         if not entries:
             return source_text
 
-        result_parts: List[str] = []
+        result_parts: list[str] = []
         changed = False
         for part in parts:
             norm = token_norms.get(part)
@@ -194,10 +193,10 @@ class AudioGenerationService:
         input_hash: str,
         voice_id: str,
         speed: float,
-        generation_tag: Optional[str] = None,
+        generation_tag: str | None = None,
     ) -> str:
         digest = hashlib.sha256(
-            f"{src_lang}|{input_hash}|{voice_id}|{speed:.2f}".encode("utf-8")
+            f"{src_lang}|{input_hash}|{voice_id}|{speed:.2f}".encode()
         ).hexdigest()[:20]
         safe_provider = provider_id.replace("/", "_").replace("\\", "_")
         safe_lang = src_lang.replace("/", "_").replace("\\", "_")
@@ -247,14 +246,19 @@ class AudioGenerationService:
         provider_mode: str = "chain",
         force_regenerate: bool = False,
         trace_id: str = "",
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Generate audio for source text only (translation is intentionally ignored)."""
         source_text = PronunciationQualityService.sanitize_tts_text((src_text or "").strip())
         source_norm_clean = (source_norm or "").strip()
         source_lang_clean = (src_lang or "").strip()
 
         if not source_text or not source_norm_clean or not source_lang_clean:
-            return {"ok": False, "status": "failed", "provider_id": None, "error": "invalid source payload"}
+            return {
+                "ok": False,
+                "status": "failed",
+                "provider_id": None,
+                "error": "invalid source payload",
+            }
 
         global_voice_id, global_speed = self._resolve_voice_speed()
         provider_chain = self._resolve_provider_chain(provider_mode)
@@ -402,7 +406,7 @@ class AudioGenerationService:
             prepared_text = pronunciation_payload.get("token_text") or source_text
             prepared_text = PronunciationQualityService.sanitize_tts_text(str(prepared_text))
             is_pron_valid = bool(pronunciation_payload.get("is_valid", True))
-            fallback_reason: Optional[str] = None
+            fallback_reason: str | None = None
             if not prepared_text:
                 prepared_text = source_text
                 fallback_reason = "qc:tts_sanitized_fallback:empty_after_tts_sanitize"
@@ -418,7 +422,7 @@ class AudioGenerationService:
                     source_norm_clean,
                     req_trace,
                 )
-            options: Dict[str, object] = {}
+            options: dict[str, object] = {}
             if self._provider_supports_ssml(provider_id):
                 ssml_payload = (pronunciation_payload.get("ssml") or "").strip()
                 if ssml_payload and is_pron_valid:
@@ -460,7 +464,9 @@ class AudioGenerationService:
                 provider=provider_id,
                 input_hash=input_hash,
             )
-            previous_row = str(previous_asset.audio_rel_path or "").strip() if previous_asset else None
+            previous_row = (
+                str(previous_asset.audio_rel_path or "").strip() if previous_asset else None
+            )
 
             generation_tag = uuid.uuid4().hex[:12] if force_regenerate else None
             rel_path = self._asset_rel_path(

@@ -9,18 +9,20 @@ Usage:
     # At app startup:
     initialize_local_providers(db_session, project_id)
 """
+
 import logging
 import threading
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.infra.translators.providers_registry import ProvidersRegistry
-from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
-from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
-from app.infra.translators.providers.google_cloud_translate_provider import GoogleCloudTranslateProvider
-from app.infra.translators.provider_config_manager import ProviderConfigManager
 from app.infra.settings import SettingsService
+from app.infra.translators.provider_config_manager import ProviderConfigManager
+from app.infra.translators.providers.google_cloud_translate_provider import (
+    GoogleCloudTranslateProvider,
+)
+from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
+from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
+from app.infra.translators.providers_registry import ProvidersRegistry
 from app.services.local_models import ModelResourceManager
 
 logger = logging.getLogger(__name__)
@@ -57,8 +59,8 @@ LOCAL_PROVIDERS_CONFIG = [
 
 
 def initialize_local_providers(
-    db_session: Optional[Session] = None,
-    project_id: Optional[int] = None,
+    db_session: Session | None = None,
+    project_id: int | None = None,
     force_register: bool = False,
 ) -> int:
     """
@@ -103,9 +105,7 @@ def initialize_local_providers(
                     f"Attempting to register anyway (will fail if used)."
                 )
             else:
-                logger.info(
-                    f"Skipping {provider_class.__name__}: model not installed ({reason})"
-                )
+                logger.info(f"Skipping {provider_class.__name__}: model not installed ({reason})")
                 continue
 
         # Initialize provider
@@ -209,7 +209,7 @@ def unregister_local_providers() -> int:
         provider = registry.get(provider_id)
         if provider:
             # Shutdown provider if it has shutdown method
-            if hasattr(provider, 'shutdown'):
+            if hasattr(provider, "shutdown"):
                 try:
                     provider.shutdown()
                 except Exception as e:
@@ -250,11 +250,7 @@ def get_installed_local_providers() -> list:
         List of provider IDs that have models installed
     """
     status = check_local_providers_available()
-    return [
-        provider_id
-        for provider_id, info in status.items()
-        if info["available"]
-    ]
+    return [provider_id for provider_id, info in status.items() if info["available"]]
 
 
 def register_google_translate() -> bool:
@@ -326,8 +322,8 @@ def register_google_cloud_translate() -> bool:
 
 def initialize_provider_lazy(
     provider_id: str,
-    db_session: Optional[Session] = None,
-    project_id: Optional[int] = None,
+    db_session: Session | None = None,
+    project_id: int | None = None,
 ) -> bool:
     """
     Lazily initialize a single local provider if not already registered.
@@ -363,9 +359,12 @@ def initialize_provider_lazy(
 
         # Check if another thread is currently initializing this provider
         if provider_id in _initializing_providers:
-            logger.info(f"Provider {provider_id} is being initialized by another thread, waiting...")
+            logger.info(
+                f"Provider {provider_id} is being initialized by another thread, waiting..."
+            )
             # Release lock and wait a bit, then retry
             import time
+
             time.sleep(1)
             return initialize_provider_lazy(provider_id, db_session, project_id)
 
@@ -403,7 +402,9 @@ def initialize_provider_lazy(
 
         # Initialize provider
         provider_class = provider_config["provider_class"]
-        logger.info(f"Starting initialization of {provider_id} (this may take 10-30s for model loading)...")
+        logger.info(
+            f"Starting initialization of {provider_id} (this may take 10-30s for model loading)..."
+        )
         provider = provider_class(
             model_id=model_id,
             backend=backend,

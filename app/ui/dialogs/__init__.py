@@ -26,6 +26,7 @@ try:
 except ImportError:
     # Fallback if the above doesn't work
     import importlib.util
+
     dialogs_path = parent_dir / "dialogs.py"
     spec = importlib.util.spec_from_file_location("dialogs_legacy", dialogs_path)
     dialogs_module = importlib.util.module_from_spec(spec)
@@ -39,11 +40,11 @@ except ImportError:
     show_warning = dialogs_module.show_warning
 
 # Import new batch translation dialogs
+from app.ui.dialogs.batch_progress_dialog import BatchProgressDialog
 from app.ui.dialogs.batch_translate_dialog import (
     BatchTranslateDialog,
     show_batch_translate_dialog,
 )
-from app.ui.dialogs.batch_progress_dialog import BatchProgressDialog
 
 __all__ = [
     # Legacy dialogs

@@ -147,7 +147,9 @@ def _run_batch(monkeypatch, session: Session, tm_ids: list[int], write_mode: str
 
 def test_translate_selected_fill_empty_only(monkeypatch, tm_session):
     """Fill-empty mode updates only rows with empty translations."""
-    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    tm_ids = [
+        entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    ]
     _run_batch(monkeypatch, tm_session, tm_ids, "FILL_EMPTY")
 
     rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
@@ -158,7 +160,9 @@ def test_translate_selected_fill_empty_only(monkeypatch, tm_session):
 
 def test_translate_selected_overwrite(monkeypatch, tm_session):
     """Overwrite mode updates every selected row."""
-    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    tm_ids = [
+        entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    ]
     _run_batch(monkeypatch, tm_session, tm_ids, "OVERWRITE")
 
     rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
@@ -169,7 +173,9 @@ def test_translate_selected_overwrite(monkeypatch, tm_session):
 
 def test_translate_selected_skip_non_empty(monkeypatch, tm_session):
     """Skip-non-empty mode keeps non-empty translations intact."""
-    tm_ids = [entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()]
+    tm_ids = [
+        entry.tm_id for entry in tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
+    ]
     _run_batch(monkeypatch, tm_session, tm_ids, "SKIP_NON_EMPTY")
 
     rows = tm_session.query(TMEntry).order_by(TMEntry.tm_id.asc()).all()
@@ -329,8 +335,13 @@ def test_tm_panel_entrypoint_uses_selected_tm_ids(monkeypatch):
     panel.build_filters = lambda: {}
     panel.perform_search = lambda: None
 
-    monkeypatch.setattr("app.ui.dialogs.show_batch_translate_dialog", lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"))
-    monkeypatch.setattr("app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog)
+    monkeypatch.setattr(
+        "app.ui.dialogs.show_batch_translate_dialog",
+        lambda **kwargs: (True, "chain", "FILL_EMPTY", "current_page"),
+    )
+    monkeypatch.setattr(
+        "app.ui.dialogs.batch_progress_dialog_v3.BatchProgressDialogV3", DummyProgressDialog
+    )
     monkeypatch.setattr("app.ui.workers.BatchTranslateWorker", DummyWorker)
     monkeypatch.setattr("app.services.db_service.DBService.get_instance", lambda: DummyDB())
     monkeypatch.setattr(
@@ -427,12 +438,24 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
         "edit_pron_called": 0,
         "bootstrap_called": 0,
     }
-    panel.on_batch_translate = lambda: state.__setitem__("translate_called", state["translate_called"] + 1)
-    panel.on_generate_audio_selected = lambda: state.__setitem__("generate_called", state["generate_called"] + 1)
-    panel.on_play_audio_selected = lambda: state.__setitem__("play_called", state["play_called"] + 1)
-    panel.on_add_selected_to_playlist = lambda: state.__setitem__("playlist_called", state["playlist_called"] + 1)
-    panel.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron_called", state["edit_pron_called"] + 1)
-    panel.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap_called", state["bootstrap_called"] + 1)
+    panel.on_batch_translate = lambda: state.__setitem__(
+        "translate_called", state["translate_called"] + 1
+    )
+    panel.on_generate_audio_selected = lambda: state.__setitem__(
+        "generate_called", state["generate_called"] + 1
+    )
+    panel.on_play_audio_selected = lambda: state.__setitem__(
+        "play_called", state["play_called"] + 1
+    )
+    panel.on_add_selected_to_playlist = lambda: state.__setitem__(
+        "playlist_called", state["playlist_called"] + 1
+    )
+    panel.on_edit_pronunciation_selected = lambda: state.__setitem__(
+        "edit_pron_called", state["edit_pron_called"] + 1
+    )
+    panel.on_pronunciation_bootstrap_selected = lambda: state.__setitem__(
+        "bootstrap_called", state["bootstrap_called"] + 1
+    )
     panel.set_entries_noise_status_bulk = lambda _flag: None
 
     monkeypatch.setattr("app.ui.translation_management_panel.QMenu", FakeMenu)
@@ -453,9 +476,15 @@ def test_tm_panel_context_menu_includes_translate_selected(monkeypatch):
     FakeMenu.last.actions[0].triggered.emit()
     FakeMenu.last.actions[1].triggered.emit()
     FakeMenu.last.actions[2].triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2 rows)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2 rows)...").triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2 rows)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Mispronounced -> Add Pronunciation..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2 rows)..."
+    ).triggered.emit()
     assert state["translate_called"] == 1
     assert state["generate_called"] == 1
     assert state["play_called"] == 1
@@ -485,7 +514,9 @@ def test_selected_pronunciation_items_prefer_raw_src_norm():
 
 def test_tm_add_selected_to_playlist_uses_dbservice_instance(monkeypatch):
     panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
-    panel._get_selected_audio_items = lambda: [{"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}]
+    panel._get_selected_audio_items = lambda: [
+        {"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}
+    ]
 
     sentinel_db = object()
     captured = {}
@@ -501,14 +532,20 @@ def test_tm_add_selected_to_playlist_uses_dbservice_instance(monkeypatch):
     TranslationManagementPanel.on_add_selected_to_playlist(panel)
 
     assert captured["parent"] is panel
-    assert captured["items"] == [{"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}]
+    assert captured["items"] == [
+        {"kind": "lemma", "source_id": 1, "project_id": 2, "src_text": "a"}
+    ]
     assert captured["db_manager"] is sentinel_db
 
 
 def test_tm_bootstrap_refreshes_search_on_success(monkeypatch):
     panel = TranslationManagementPanel.__new__(TranslationManagementPanel)
     panel._get_selected_pronunciation_items = lambda: [
-        {"src_lang": "he", "src_text": "prefix_a", "src_norm": normalize_for_tm("he", "prefix_a", "surface").norm}
+        {
+            "src_lang": "he",
+            "src_text": "prefix_a",
+            "src_norm": normalize_for_tm("he", "prefix_a", "surface").norm,
+        }
     ]
     state = {"search": 0}
     panel.perform_search = lambda: state.__setitem__("search", state["search"] + 1)

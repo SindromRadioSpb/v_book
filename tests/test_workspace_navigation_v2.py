@@ -75,7 +75,10 @@ def test_sidebar_project_search_emits_workspace_open_project_action(qtbot):
     sidebar = SidebarWidget()
     qtbot.addWidget(sidebar)
     sidebar.set_project_catalog(
-        [{"project_id": 7, "name": "Physics Basics"}, {"project_id": 11, "name": "Advanced Physics"}],
+        [
+            {"project_id": 7, "name": "Physics Basics"},
+            {"project_id": 11, "name": "Advanced Physics"},
+        ],
         recent_ids=[11],
     )
 

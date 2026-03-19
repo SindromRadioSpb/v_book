@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QHelpEvent
@@ -73,7 +72,7 @@ class TableLayoutController:
         settings: SettingsService,
         table_id: str,
         table: QAbstractItemView,
-        default_widths: Optional[dict[int, int]] = None,
+        default_widths: dict[int, int] | None = None,
         minimum_section_width: int = 60,
         save_debounce_ms: int = 400,
         enable_overflow_tooltips: bool = True,
@@ -86,7 +85,7 @@ class TableLayoutController:
         self.minimum_section_width = minimum_section_width
         self._signature_key = f"table/{self.table_id}/header_signature"
         self._is_applying = False
-        self._overflow_tooltip_filter: Optional[_OverflowTooltipFilter] = None
+        self._overflow_tooltip_filter: _OverflowTooltipFilter | None = None
         self._enable_overflow_tooltips = enable_overflow_tooltips
 
         self._save_timer = QTimer(self.header)

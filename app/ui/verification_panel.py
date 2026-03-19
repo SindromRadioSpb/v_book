@@ -8,24 +8,23 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
+    QComboBox,
+    QFileDialog,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QComboBox,
-    QPushButton,
-    QProgressBar,
-    QPlainTextEdit,
-    QFileDialog,
     QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 
 from app.services.db_service import DBService
 from app.ui.workers import P1VerificationWorker
@@ -40,9 +39,9 @@ class VerificationPanel(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.worker: Optional[P1VerificationWorker] = None
-        self.current_report_md: Optional[str] = None
-        self.current_report_json: Optional[str] = None
+        self.worker: P1VerificationWorker | None = None
+        self.current_report_md: str | None = None
+        self.current_report_json: str | None = None
         self.init_ui()
         self.load_db_path()
         self.load_projects()
@@ -69,7 +68,9 @@ class VerificationPanel(QWidget):
             "Automated verification that TM entries persist through re-extraction and restart.\n"
             "⚠️ Runs on snapshot - production DB is never modified."
         )
-        info_label.setStyleSheet("color: #666; padding: 10px; background: #f5f5f5; border-radius: 4px;")
+        info_label.setStyleSheet(
+            "color: #666; padding: 10px; background: #f5f5f5; border-radius: 4px;"
+        )
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
@@ -89,7 +90,9 @@ class VerificationPanel(QWidget):
 
         db_layout.addLayout(db_path_layout)
 
-        db_note = QLabel("Note: Verification runs on a snapshot copy. Your production DB will not be modified.")
+        db_note = QLabel(
+            "Note: Verification runs on a snapshot copy. Your production DB will not be modified."
+        )
         db_note.setStyleSheet("color: #0288d1; font-size: 11px;")
         db_note.setWordWrap(True)
         db_layout.addWidget(db_note)
@@ -116,7 +119,9 @@ class VerificationPanel(QWidget):
         controls_layout = QHBoxLayout()
 
         self.run_btn = QPushButton("▶ Run P1 Scenario 7")
-        self.run_btn.setStyleSheet("QPushButton { background: #4caf50; color: white; font-weight: bold; padding: 8px 16px; }")
+        self.run_btn.setStyleSheet(
+            "QPushButton { background: #4caf50; color: white; font-weight: bold; padding: 8px 16px; }"
+        )
         self.run_btn.clicked.connect(self.on_run)
         controls_layout.addWidget(self.run_btn)
 
@@ -149,7 +154,9 @@ class VerificationPanel(QWidget):
 
         # Status Badge
         self.status_label = QLabel("Status: Ready")
-        self.status_label.setStyleSheet("font-weight: bold; padding: 4px 8px; background: #e0e0e0; border-radius: 4px;")
+        self.status_label.setStyleSheet(
+            "font-weight: bold; padding: 4px 8px; background: #e0e0e0; border-radius: 4px;"
+        )
         layout.addWidget(self.status_label)
 
         # Log Output
@@ -174,7 +181,7 @@ class VerificationPanel(QWidget):
             else:
                 self.db_path_edit.setText("(No database loaded)")
                 self.run_btn.setEnabled(False)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load DB path")
             self.db_path_edit.setText("(Error loading DB)")
             self.run_btn.setEnabled(False)
@@ -190,8 +197,9 @@ class VerificationPanel(QWidget):
                 return
 
             with db_service.get_session() as session:
-                from app.infra.sa_models import DictProject
                 from sqlalchemy import select
+
+                from app.infra.sa_models import DictProject
 
                 stmt = select(DictProject).order_by(DictProject.project_id)
                 projects = session.execute(stmt).scalars().all()
@@ -208,13 +216,12 @@ class VerificationPanel(QWidget):
                     # Add individual projects
                     for project in projects:
                         self.project_combo.addItem(
-                            f"{project.name} (ID: {project.project_id})",
-                            project.project_id
+                            f"{project.name} (ID: {project.project_id})", project.project_id
                         )
 
                     self.run_btn.setEnabled(True)
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load projects")
             self.project_combo.clear()
             self.project_combo.addItem("(Error loading projects)")
@@ -223,10 +230,7 @@ class VerificationPanel(QWidget):
     def on_browse_db(self):
         """Browse for DB file."""
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Database File",
-            "",
-            "SQLite Database (*.db);;All Files (*)"
+            self, "Select Database File", "", "SQLite Database (*.db);;All Files (*)"
         )
 
         if file_path:
@@ -238,29 +242,17 @@ class VerificationPanel(QWidget):
                 self.load_projects()
             except Exception as e:
                 logger.exception("Failed to load DB")
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to load database:\n\n{str(e)}"
-                )
+                QMessageBox.critical(self, "Error", f"Failed to load database:\n\n{str(e)}")
 
     def on_run(self):
         """Run P1 verification."""
         db_path = self.db_path_edit.text()
         if not db_path or db_path.startswith("("):
-            QMessageBox.warning(
-                self,
-                "No Database",
-                "Please select a valid database file."
-            )
+            QMessageBox.warning(self, "No Database", "Please select a valid database file.")
             return
 
         if not Path(db_path).exists():
-            QMessageBox.critical(
-                self,
-                "Database Not Found",
-                f"Database file not found:\n{db_path}"
-            )
+            QMessageBox.critical(self, "Database Not Found", f"Database file not found:\n{db_path}")
             return
 
         # Get selected project
@@ -270,7 +262,9 @@ class VerificationPanel(QWidget):
         self.log_output.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Status: Running...")
-        self.status_label.setStyleSheet("font-weight: bold; padding: 4px 8px; background: #ffc107; border-radius: 4px;")
+        self.status_label.setStyleSheet(
+            "font-weight: bold; padding: 4px 8px; background: #ffc107; border-radius: 4px;"
+        )
         self.current_report_md = None
         self.current_report_json = None
 
@@ -284,7 +278,7 @@ class VerificationPanel(QWidget):
         self.worker = P1VerificationWorker(
             db_path=db_path,
             project_id=project_id,
-            out_dir=None  # Use default runtime/verifications/p1/<timestamp>
+            out_dir=None,  # Use default runtime/verifications/p1/<timestamp>
         )
 
         self.worker.progress.connect(self.on_progress)
@@ -326,7 +320,9 @@ class VerificationPanel(QWidget):
 
         style = status_styles.get(status, "background: #e0e0e0;")
         self.status_label.setText(f"Status: {status}")
-        self.status_label.setStyleSheet(f"font-weight: bold; padding: 4px 8px; border-radius: 4px; {style}")
+        self.status_label.setStyleSheet(
+            f"font-weight: bold; padding: 4px 8px; border-radius: 4px; {style}"
+        )
 
         # Enable controls
         self.run_btn.setEnabled(True)
@@ -341,7 +337,7 @@ class VerificationPanel(QWidget):
                 "Verification Complete",
                 f"✅ P1 Scenario 7 verification PASSED!\n\n"
                 f"TM entries persisted through all phases.\n\n"
-                f"Report: {report_md}"
+                f"Report: {report_md}",
             )
         elif status == "PARTIAL":
             QMessageBox.warning(
@@ -349,7 +345,7 @@ class VerificationPanel(QWidget):
                 "Verification Partial",
                 f"⚠️ P1 Scenario 7 verification PARTIAL\n\n"
                 f"Some tests passed, but not all.\n\n"
-                f"Report: {report_md}"
+                f"Report: {report_md}",
             )
         elif status == "SKIPPED":
             QMessageBox.information(
@@ -357,7 +353,7 @@ class VerificationPanel(QWidget):
                 "Verification Skipped",
                 f"ℹ️ P1 Scenario 7 verification SKIPPED\n\n"
                 f"No processed data found in project.\n\n"
-                f"Report: {report_md}"
+                f"Report: {report_md}",
             )
         else:
             QMessageBox.critical(
@@ -365,7 +361,7 @@ class VerificationPanel(QWidget):
                 "Verification Failed",
                 f"❌ P1 Scenario 7 verification FAILED\n\n"
                 f"Check the log for details.\n\n"
-                f"Report: {report_md}"
+                f"Report: {report_md}",
             )
 
         logger.info(f"Verification complete: {status}")
@@ -373,7 +369,9 @@ class VerificationPanel(QWidget):
     def on_failed(self, error_summary: str, error_details: str):
         """Handle verification failed."""
         self.status_label.setText("Status: ERROR")
-        self.status_label.setStyleSheet("font-weight: bold; padding: 4px 8px; background: #f44336; color: white; border-radius: 4px;")
+        self.status_label.setStyleSheet(
+            "font-weight: bold; padding: 4px 8px; background: #f44336; color: white; border-radius: 4px;"
+        )
 
         # Enable controls
         self.run_btn.setEnabled(True)
@@ -392,11 +390,7 @@ class VerificationPanel(QWidget):
     def on_open_report(self):
         """Open report in default viewer."""
         if not self.current_report_md:
-            QMessageBox.warning(
-                self,
-                "No Report",
-                "No report available. Run verification first."
-            )
+            QMessageBox.warning(self, "No Report", "No report available. Run verification first.")
             return
 
         # Open report directory
@@ -414,27 +408,20 @@ class VerificationPanel(QWidget):
 
         except Exception as e:
             logger.exception("Failed to open report")
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to open report directory:\n\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to open report directory:\n\n{str(e)}")
 
     def on_copy_summary(self):
         """Copy summary to clipboard."""
         if not self.current_report_json:
-            QMessageBox.warning(
-                self,
-                "No Report",
-                "No report available. Run verification first."
-            )
+            QMessageBox.warning(self, "No Report", "No report available. Run verification first.")
             return
 
         try:
             import json
+
             from PyQt6.QtWidgets import QApplication
 
-            with open(self.current_report_json, 'r', encoding='utf-8') as f:
+            with open(self.current_report_json, encoding="utf-8") as f:
                 report = json.load(f)
 
             summary = f"""P1 Scenario 7 Verification Summary
@@ -460,18 +447,12 @@ Report: {self.current_report_md}
             clipboard.setText(summary)
 
             QMessageBox.information(
-                self,
-                "Summary Copied",
-                "Verification summary copied to clipboard!"
+                self, "Summary Copied", "Verification summary copied to clipboard!"
             )
 
         except Exception as e:
             logger.exception("Failed to copy summary")
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to copy summary:\n\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to copy summary:\n\n{str(e)}")
 
     def on_back(self):
         """Go back to dashboard."""
@@ -481,7 +462,7 @@ Report: {self.current_report_md}
                 self,
                 "Cancel Verification?",
                 "Verification is running. Cancel and go back?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
 
             if reply == QMessageBox.StandardButton.Yes:

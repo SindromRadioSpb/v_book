@@ -1,43 +1,53 @@
 """Terms view - MWE extraction and clustering (M5+)."""
-import logging
-from typing import Optional
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableView, QLabel, QSpinBox,
-    QComboBox, QLineEdit, QProgressBar, QCheckBox, QMenu, QMessageBox
-)
-from PyQt6.QtCore import Qt, QModelIndex, QTimer
-from PyQt6.QtGui import QAction
 
-from app.infra.settings import SettingsService
-from app.services.term_extraction_service import TermExtractionService
-from app.services.translation_service import TranslationService
-from app.services.audio_playback_service import AudioPlaybackService
-from app.services.user_dictionary_service import UserDictionaryService
+import logging
+
+from PyQt6.QtCore import QModelIndex, Qt, QTimer
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+)
+
 from app.domain.normalization.normalizer import normalize_for_tm
-from app.ui.dialogs import show_error, show_info, WhyTranslationDialog
-from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+from app.infra.settings import SettingsService
+from app.services.audio_playback_service import AudioPlaybackService
+from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
+from app.services.db_service import DBService
+from app.services.term_extraction_service import TermExtractionService
+from app.services.tm_global_service import TMGlobalService
+from app.services.translation_service import TranslationService
+from app.services.user_dictionary_service import UserDictionaryService
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
+from app.ui.dialogs import WhyTranslationDialog, show_batch_translate_dialog, show_error, show_info
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
 from app.ui.dialogs.term_extraction_progress_dialog import TermExtractionProgressDialog
-from app.ui.dialogs import show_batch_translate_dialog
-from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
-from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.models_qt import TermClusterTableModel
 from app.ui.multi_sort_proxy import MultiSortProxyModel
 from app.ui.table_layout_controller import TableLayoutController
-from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.workers import (
-    TranslationResolveWorker,
-    BatchTranslateWorker,
     BatchGenerateAudioWorker,
-    TermsSearchWorker,
-    UserDictionaryBulkAddWorker,
+    BatchTranslateWorker,
     CrossViewOverlayWorker,
+    TermsSearchWorker,
+    TranslationResolveWorker,
+    UserDictionaryBulkAddWorker,
 )
-from app.services.db_service import DBService
-from app.services.tm_global_service import TMGlobalService
-from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +65,11 @@ class TermsView(QWidget):
         self.audio_playback_service = AudioPlaybackService()
         self.settings = SettingsService.get_instance()
         self.extract_worker = None
-        self.extract_progress_dialog: Optional[TermExtractionProgressDialog] = None
-        self.translation_worker: Optional[TranslationResolveWorker] = None
-        self.batch_translate_worker: Optional[BatchTranslateWorker] = None
-        self.batch_audio_worker: Optional[BatchGenerateAudioWorker] = None
-        self.overlay_worker: Optional[CrossViewOverlayWorker] = None
+        self.extract_progress_dialog: TermExtractionProgressDialog | None = None
+        self.translation_worker: TranslationResolveWorker | None = None
+        self.batch_translate_worker: BatchTranslateWorker | None = None
+        self.batch_audio_worker: BatchGenerateAudioWorker | None = None
+        self.overlay_worker: CrossViewOverlayWorker | None = None
 
         # Pagination state
         self.current_page = 1
@@ -220,7 +230,9 @@ class TermsView(QWidget):
         self.terms_table = QTableView()
         self.terms_table.setModel(self.proxy_model)  # Use proxy model
         self.terms_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.terms_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)  # Bulk selection
+        self.terms_table.setSelectionMode(
+            QTableView.SelectionMode.ExtendedSelection
+        )  # Bulk selection
         # M7 P1: Enable editing for Translation column
         self.terms_table.setEditTriggers(
             QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed
@@ -242,24 +254,24 @@ class TermsView(QWidget):
             table_id="terms_view",
             table=self.terms_table,
             default_widths={
-                0: 46,   # UD
+                0: 46,  # UD
                 1: 260,  # Term
                 2: 180,  # Lemma
-                3: 85,   # Freq
-                4: 90,   # DocFreq
-                5: 90,   # Members
-                6: 90,   # PMI
-                7: 90,   # LLR
-                8: 90,   # Dice
+                3: 85,  # Freq
+                4: 90,  # DocFreq
+                5: 90,  # Members
+                6: 90,  # PMI
+                7: 90,  # LLR
+                8: 90,  # Dice
                 9: 105,  # Weirdness
-                10: 105, # Keyness
-                11: 105, # Termhood
-                12: 260, # Translation
-                13: 120, # Source
-                14: 110, # Status
+                10: 105,  # Keyness
+                11: 105,  # Termhood
+                12: 260,  # Translation
+                13: 120,  # Source
+                14: 110,  # Status
                 15: 90,  # Noise
-                16: 110, # Last Review
-                17: 180, # Niqqud
+                16: 110,  # Last Review
+                17: 180,  # Niqqud
                 18: 90,  # Audio
             },
         )
@@ -367,9 +379,13 @@ class TermsView(QWidget):
                     default_ref_id = self.term_service._get_default_reference_corpus_id(session)
                     if default_ref_id and default_ref_id != self.project_id:
                         # Auto-assign default reference corpus for this project
-                        self.term_service.set_reference_project(session, self.project_id, default_ref_id)
+                        self.term_service.set_reference_project(
+                            session, self.project_id, default_ref_id
+                        )
                         current_ref = default_ref_id
-                        logger.info(f"Auto-assigned default reference corpus (ID: {default_ref_id}) to project {self.project_id}")
+                        logger.info(
+                            f"Auto-assigned default reference corpus (ID: {default_ref_id}) to project {self.project_id}"
+                        )
 
                 # Clear and populate combo
                 self.reference_combo.clear()
@@ -389,7 +405,7 @@ class TermsView(QWidget):
                 # Set current selection
                 self.reference_combo.setCurrentIndex(current_index)
 
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load reference projects")
 
     def on_reference_changed(self, index: int):
@@ -398,11 +414,7 @@ class TermsView(QWidget):
             reference_id = self.reference_combo.currentData()
 
             with self.db_service.get_session() as session:
-                self.term_service.set_reference_project(
-                    session,
-                    self.project_id,
-                    reference_id
-                )
+                self.term_service.set_reference_project(session, self.project_id, reference_id)
 
             # Refresh terms table
             self.current_page = 1
@@ -430,7 +442,7 @@ class TermsView(QWidget):
             "hide_noise": self.hide_noise_checkbox.isChecked(),
         }
 
-    def _get_source_filter(self) -> Optional[str]:
+    def _get_source_filter(self) -> str | None:
         """Get source filter value from combo."""
         source = self.source_combo.currentText()
         if source == "All":
@@ -451,7 +463,9 @@ class TermsView(QWidget):
         self.current_page = 1
         self._search_timer.start()
 
-    def perform_search(self, *, include_total_count: bool = True, preserve_existing_state: bool = False):
+    def perform_search(
+        self, *, include_total_count: bool = True, preserve_existing_state: bool = False
+    ):
         """Perform search with current filters and pagination."""
         # Cancel previous worker if running
         if self.search_worker and self.search_worker.isRunning():
@@ -495,7 +509,9 @@ class TermsView(QWidget):
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
         )
         self.search_worker.finished.connect(
-            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(worker, seq)
+            lambda seq=request_seq, worker=self.search_worker: self._on_search_worker_finished(
+                worker, seq
+            )
         )
         self.search_worker.start()
 
@@ -515,9 +531,9 @@ class TermsView(QWidget):
     def on_search_results(
         self,
         clusters: list,
-        request_seq: Optional[int] = None,
+        request_seq: int | None = None,
         *,
-        preserved_state: Optional[dict] = None,
+        preserved_state: dict | None = None,
         include_total_count: bool = True,
     ):
         """Handle search results from worker."""
@@ -543,7 +559,9 @@ class TermsView(QWidget):
                 self.status_label.setText(f"Loaded {start}-{end} term clusters (counting total...)")
             else:
                 end = min(self.current_offset + len(clusters), self.total_count)
-                self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} term clusters")
+                self.status_label.setText(
+                    f"Showing {start}-{end} of {self.total_count:,} term clusters"
+                )
 
         self.update_pagination_controls()
 
@@ -551,13 +569,13 @@ class TermsView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 self._update_last_extract_info(session)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load last extraction info")
 
         self.start_overlay_worker(clusters, request_seq)
         self.start_translation_worker(clusters)
 
-    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+    def on_search_count_ready(self, total_count: int, request_seq: int | None = None):
         """Handle deferred total-count result from worker."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -573,7 +591,9 @@ class TermsView(QWidget):
         else:
             start = self.current_offset + 1
             end = min(self.current_offset + len(self.terms_model.clusters), self.total_count)
-            self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} term clusters")
+            self.status_label.setText(
+                f"Showing {start}-{end} of {self.total_count:,} term clusters"
+            )
         self.update_pagination_controls()
 
     def _snapshot_cluster_state(self) -> dict[int, dict]:
@@ -601,7 +621,9 @@ class TermsView(QWidget):
             }
         return snapshot
 
-    def _rehydrate_cluster_state(self, clusters: list, preserved_state: dict[int, dict]) -> dict[int, object]:
+    def _rehydrate_cluster_state(
+        self, clusters: list, preserved_state: dict[int, dict]
+    ) -> dict[int, object]:
         translation_results: dict[int, object] = {}
         if not preserved_state:
             return translation_results
@@ -617,7 +639,7 @@ class TermsView(QWidget):
                 translation_results[row] = payload["translation_result"]
         return translation_results
 
-    def start_overlay_worker(self, clusters: list, request_seq: Optional[int] = None) -> None:
+    def start_overlay_worker(self, clusters: list, request_seq: int | None = None) -> None:
         if not clusters:
             return
         if self.overlay_worker and self.overlay_worker.isRunning():
@@ -649,7 +671,9 @@ class TermsView(QWidget):
             lambda error_msg, overlay_seq=seq: self.on_overlay_error(error_msg, overlay_seq)
         )
         self.overlay_worker.finished.connect(
-            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(worker, overlay_seq)
+            lambda overlay_seq=seq, worker=self.overlay_worker: self._on_overlay_worker_finished(
+                worker, overlay_seq
+            )
         )
         self.overlay_worker.start()
 
@@ -662,7 +686,9 @@ class TermsView(QWidget):
             self._pending_overlay_clusters = None
             QTimer.singleShot(0, lambda: self.start_overlay_worker(pending))
 
-    def on_overlay_results(self, overlay_map: dict, overlay_seq: int, *, request_seq: Optional[int] = None) -> None:
+    def on_overlay_results(
+        self, overlay_map: dict, overlay_seq: int, *, request_seq: int | None = None
+    ) -> None:
         if overlay_seq != self._active_overlay_seq:
             return
         if request_seq is not None and request_seq != self._active_search_seq:
@@ -731,7 +757,9 @@ class TermsView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 overlay_map = self.user_dict_service.resolve_cross_view_status(session, payloads)
-                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
+                pronunciation_map = self.user_dict_service._resolve_pronunciation_overlay(
+                    session, raw_norm_pairs
+                )
         except Exception as e:
             logger.warning("Failed to resolve terms study overlays: %s", e)
             return
@@ -740,7 +768,9 @@ class TermsView(QWidget):
             src_norm = _cluster_norm(cluster)
             raw_src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
             raw_src_norm = (raw_src_norm or "").strip() or (cluster.norm_text or "").strip()
-            canonical_hash = self.user_dict_service.build_canonical_hash("he", "ru", "term_cluster", src_norm)
+            canonical_hash = self.user_dict_service.build_canonical_hash(
+                "he", "ru", "term_cluster", src_norm
+            )
             overlay = overlay_map.get(canonical_hash)
             if not overlay:
                 cluster.in_user_dictionary_count = 0
@@ -777,7 +807,7 @@ class TermsView(QWidget):
                 cluster.pronunciation_confidence = row_pron.get("pronunciation_confidence")
                 cluster.pronunciation_qc = row_pron.get("pronunciation_qc")
 
-    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_search_error(self, error_msg: str, request_seq: int | None = None):
         """Handle search error."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -908,6 +938,7 @@ class TermsView(QWidget):
     def on_extract(self):
         """Handle extract terms button."""
         from PyQt6.QtWidgets import QMessageBox
+
         from app.ui.workers import ProjectTermExtractionWorker
 
         reply = QMessageBox.question(
@@ -917,7 +948,7 @@ class TermsView(QWidget):
             "Large projects are processed in resumable batches.\n"
             "If extraction is interrupted, re-running will resume the latest staged run.\n\n"
             "This may take a few minutes for large corpora.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -939,9 +970,9 @@ class TermsView(QWidget):
 
         # PERF-SCALE PATCH-K: throttle check вЂ” block concurrent term extraction.
         from app.services.pipeline_throttler import PipelineThrottler
+
         if not PipelineThrottler.instance().check_and_warn(
-            "term_extract", parent=self,
-            operation_label="Term Extraction"
+            "term_extract", parent=self, operation_label="Term Extraction"
         ):
             # Re-enable UI since we're not starting
             self.extract_btn.setEnabled(True)
@@ -995,7 +1026,7 @@ class TermsView(QWidget):
         if self.extract_progress_dialog:
             self.extract_progress_dialog.update_state(state)
 
-    def _finish_extract_dialog(self, *, accepted: bool, failed_message: Optional[str] = None) -> None:
+    def _finish_extract_dialog(self, *, accepted: bool, failed_message: str | None = None) -> None:
         dialog = self.extract_progress_dialog
         if not dialog:
             return
@@ -1038,7 +1069,7 @@ class TermsView(QWidget):
             if self.extract_progress_dialog:
                 self.extract_progress_dialog.set_completed()
             self._finish_extract_dialog(accepted=True)
-            msg = f"Term extraction successful!\n\n"
+            msg = "Term extraction successful!\n\n"
             msg += f"N-grams: {report.ngrams_extracted}\n"
             msg += f"NP chunks: {report.np_chunks_extracted}\n"
             msg += f"Clusters: {report.clusters_created}"
@@ -1069,7 +1100,9 @@ class TermsView(QWidget):
             self.status_label.setText("Extraction failed")
             self._finish_extract_dialog(
                 accepted=False,
-                failed_message=str(getattr(report, "error_message", "") or "Unknown extraction error"),
+                failed_message=str(
+                    getattr(report, "error_message", "") or "Unknown extraction error"
+                ),
             )
             show_error(self, "Extraction Failed", report.error_message)
 
@@ -1125,7 +1158,9 @@ class TermsView(QWidget):
             lambda error_msg, seq=request_seq: self.on_translation_error(error_msg, seq)
         )
         self.translation_worker.finished.connect(
-            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(worker, seq)
+            lambda seq=request_seq, worker=self.translation_worker: self._on_translation_worker_finished(
+                worker, seq
+            )
         )
         self.translation_worker.start()
 
@@ -1142,7 +1177,7 @@ class TermsView(QWidget):
             self._pending_translation_clusters = None
             QTimer.singleShot(0, lambda: self.start_translation_worker(pending_clusters))
 
-    def on_translation_results(self, results: dict, request_seq: Optional[int] = None):
+    def on_translation_results(self, results: dict, request_seq: int | None = None):
         """M7 P1: Handle translation results from worker."""
         if request_seq is not None and request_seq != getattr(self, "_active_translation_seq", 0):
             logger.debug(
@@ -1157,7 +1192,7 @@ class TermsView(QWidget):
         # Update model with results
         self.terms_model.update_translations(results)
 
-    def on_translation_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_translation_error(self, error_msg: str, request_seq: int | None = None):
         """M7 P1: Handle translation worker error."""
         if request_seq is not None and request_seq != getattr(self, "_active_translation_seq", 0):
             logger.debug(
@@ -1186,9 +1221,11 @@ class TermsView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 # Save to TM
-                from app.infra.sa_models import TMEntry, TermCluster
                 from datetime import datetime
+
                 from sqlalchemy import select
+
+                from app.infra.sa_models import TermCluster, TMEntry
 
                 # Get cluster canonical_key from database
                 stmt = select(TermCluster).where(
@@ -1203,6 +1240,7 @@ class TermsView(QWidget):
 
                 # Normalize representative_he to match what TranslationResolveWorker uses
                 from app.domain.normalization.normalizer import normalize_for_tm
+
                 normalized = normalize_for_tm("he", cluster.representative_he, "term_cluster")
                 src_norm = normalized.norm
 
@@ -1258,7 +1296,9 @@ class TermsView(QWidget):
                     session.commit()
 
                 def _on_retry(attempt: int, total_attempts: int, delay: float, _error: str) -> None:
-                    self.status_label.setText(f"Database is busy, retrying ({attempt}/{total_attempts})...")
+                    self.status_label.setText(
+                        f"Database is busy, retrying ({attempt}/{total_attempts})..."
+                    )
 
                 with serialized_db_write("terms.inline_tm_save"):
                     with_retry_on_locked(
@@ -1271,9 +1311,13 @@ class TermsView(QWidget):
                 # Update status in model to "approved"
                 cluster.translation_status = "approved"
                 status_idx = self.terms_model.index(row, 14)  # Status column
-                self.terms_model.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
+                self.terms_model.dataChanged.emit(
+                    status_idx, status_idx, [Qt.ItemDataRole.DisplayRole]
+                )
 
-                logger.info(f"Saved TM entry for term: {cluster.representative_he} -> {translation_value}")
+                logger.info(
+                    f"Saved TM entry for term: {cluster.representative_he} -> {translation_value}"
+                )
 
         except Exception as e:
             logger.exception("Failed to save TM entry")
@@ -1315,9 +1359,11 @@ class TermsView(QWidget):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             cluster = self.terms_model.clusters[source_row]
             src_norm = normalize_for_tm("he", cluster.representative_he, "surface").norm
-            src_norm = (src_norm or "").strip() or (cluster.norm_text or "").strip() or normalize_for_tm(
-                "he", cluster.representative_he, "term_cluster"
-            ).norm
+            src_norm = (
+                (src_norm or "").strip()
+                or (cluster.norm_text or "").strip()
+                or normalize_for_tm("he", cluster.representative_he, "term_cluster").norm
+            )
             if not src_norm:
                 continue
             items.append(
@@ -1361,7 +1407,9 @@ class TermsView(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self._on_generate_audio_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -1440,7 +1488,9 @@ class TermsView(QWidget):
             start_immediately=True,
         )
 
-    def _play_audio_items(self, items: list[dict], *, play_mode: str, start_immediately: bool = False) -> None:
+    def _play_audio_items(
+        self, items: list[dict], *, play_mode: str, start_immediately: bool = False
+    ) -> None:
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -1468,9 +1518,7 @@ class TermsView(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")
@@ -1510,14 +1558,18 @@ class TermsView(QWidget):
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected rows scope."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         selected_items = self._selected_pronunciation_items()
         changed = False
         if not selected_items:
             changed = show_pronunciation_bootstrap_dialog(parent=self)
         else:
-            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            changed = show_pronunciation_bootstrap_dialog(
+                parent=self, selected_items=selected_items
+            )
         if changed:
             self.refresh_current_page_after_operation()
 
@@ -1541,7 +1593,9 @@ class TermsView(QWidget):
             batch_action.triggered.connect(self.on_batch_translate)
             menu.addAction(batch_action)
 
-            generate_audio_action = QAction(f"Generate Audio Selected ({len(selected_rows)} rows)...", self)
+            generate_audio_action = QAction(
+                f"Generate Audio Selected ({len(selected_rows)} rows)...", self
+            )
             generate_audio_action.triggered.connect(self.on_generate_audio_selected)
             menu.addAction(generate_audio_action)
 
@@ -1549,17 +1603,23 @@ class TermsView(QWidget):
             play_audio_action.triggered.connect(self.on_play_audio_selected)
             menu.addAction(play_audio_action)
 
-            add_action = QAction(f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self)
+            add_action = QAction(
+                f"Add Selected to User Dictionary ({len(selected_rows)} rows)...", self
+            )
             add_action.triggered.connect(self.on_add_selected_to_user_dictionary)
             menu.addAction(add_action)
-            add_playlist_action = QAction(f"Add Selected to Playlist ({len(selected_rows)} rows)...", self)
+            add_playlist_action = QAction(
+                f"Add Selected to Playlist ({len(selected_rows)} rows)...", self
+            )
             add_playlist_action.triggered.connect(self.on_add_selected_to_playlist)
             menu.addAction(add_playlist_action)
 
             edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
             edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
             menu.addAction(edit_pron_action)
-            bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self)
+            bootstrap_pron_action = QAction(
+                f"Pronunciation Bootstrap Selected ({len(selected_rows)} rows)...", self
+            )
             bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
             menu.addAction(bootstrap_pron_action)
             menu.addSeparator()
@@ -1575,12 +1635,20 @@ class TermsView(QWidget):
         # Check if multiple rows selected
         if len(selected_rows) > 1:
             # Bulk operations
-            mark_valid_bulk_action = QAction(f"вњ“ Mark Selected as Valid ({len(selected_rows)} rows)", self)
-            mark_valid_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(False))
+            mark_valid_bulk_action = QAction(
+                f"вњ“ Mark Selected as Valid ({len(selected_rows)} rows)", self
+            )
+            mark_valid_bulk_action.triggered.connect(
+                lambda: self.set_clusters_noise_status_bulk(False)
+            )
             menu.addAction(mark_valid_bulk_action)
 
-            mark_noise_bulk_action = QAction(f"вњ— Mark Selected as Noise ({len(selected_rows)} rows)", self)
-            mark_noise_bulk_action.triggered.connect(lambda: self.set_clusters_noise_status_bulk(True))
+            mark_noise_bulk_action = QAction(
+                f"вњ— Mark Selected as Noise ({len(selected_rows)} rows)", self
+            )
+            mark_noise_bulk_action.triggered.connect(
+                lambda: self.set_clusters_noise_status_bulk(True)
+            )
             menu.addAction(mark_noise_bulk_action)
         else:
             # Single row operation
@@ -1588,11 +1656,15 @@ class TermsView(QWidget):
 
             if current_is_noise:
                 mark_valid_action = QAction("вњ“ Mark as Valid (remove from noise)", self)
-                mark_valid_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, False))
+                mark_valid_action.triggered.connect(
+                    lambda: self.set_cluster_noise_status(source_row, False)
+                )
                 menu.addAction(mark_valid_action)
             else:
                 mark_noise_action = QAction("вњ— Mark as Noise", self)
-                mark_noise_action.triggered.connect(lambda: self.set_cluster_noise_status(source_row, True))
+                mark_noise_action.triggered.connect(
+                    lambda: self.set_cluster_noise_status(source_row, True)
+                )
                 menu.addAction(mark_noise_action)
 
         # Show menu
@@ -1650,7 +1722,9 @@ class TermsView(QWidget):
 
         from PyQt6.QtWidgets import QProgressDialog
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -1706,6 +1780,7 @@ class TermsView(QWidget):
         if not translation_result:
             # If no result yet, create a minimal one
             from app.services.translation_service import TranslationResult
+
             translation_result = TranslationResult(
                 translation=cluster.translation or "(no translation)",
                 source="unknown",
@@ -1723,13 +1798,14 @@ class TermsView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 from sqlalchemy import update
+
                 from app.infra.sa_models import TermCluster
 
                 # Update is_noise field
-                stmt = update(TermCluster).where(
-                    TermCluster.cluster_id == cluster.cluster_id
-                ).values(
-                    is_noise=1 if is_noise else 0
+                stmt = (
+                    update(TermCluster)
+                    .where(TermCluster.cluster_id == cluster.cluster_id)
+                    .values(is_noise=1 if is_noise else 0)
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_term_clusters(session, [cluster.cluster_id])
@@ -1748,6 +1824,7 @@ class TermsView(QWidget):
         except Exception as e:
             logger.exception(f"Failed to update noise status for cluster {cluster.cluster_id}")
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to update noise status: {e}")
 
     def set_clusters_noise_status_bulk(self, is_noise: bool):
@@ -1777,14 +1854,15 @@ class TermsView(QWidget):
         # P0: Confirmation dialog for > 100 rows
         if count > 100:
             from PyQt6.QtWidgets import QMessageBox
+
             reply = QMessageBox.question(
                 self,
-                'Confirm Bulk Action',
-                f'You are about to mark {count:,} term clusters as {status_text}.\n\n'
-                f'This operation cannot be undone easily.\n\n'
-                f'Continue?',
+                "Confirm Bulk Action",
+                f"You are about to mark {count:,} term clusters as {status_text}.\n\n"
+                f"This operation cannot be undone easily.\n\n"
+                f"Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No  # Default to No for safety
+                QMessageBox.StandardButton.No,  # Default to No for safety
             )
             if reply == QMessageBox.StandardButton.No:
                 logger.info(f"User cancelled bulk noise update for {count} clusters")
@@ -1802,13 +1880,14 @@ class TermsView(QWidget):
         try:
             with self.db_service.get_session() as session:
                 from sqlalchemy import update
+
                 from app.infra.sa_models import TermCluster
 
                 # Bulk update using WHERE IN
-                stmt = update(TermCluster).where(
-                    TermCluster.cluster_id.in_(cluster_ids)
-                ).values(
-                    is_noise=1 if is_noise else 0
+                stmt = (
+                    update(TermCluster)
+                    .where(TermCluster.cluster_id.in_(cluster_ids))
+                    .values(is_noise=1 if is_noise else 0)
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_term_clusters(session, cluster_ids)
@@ -1823,6 +1902,7 @@ class TermsView(QWidget):
 
                 # Show success message
                 from app.ui.dialogs import show_info
+
                 show_info(self, "Success", f"Marked {len(cluster_ids)} term clusters as {status}")
 
                 # Reload to apply filter if needed
@@ -1832,11 +1912,13 @@ class TermsView(QWidget):
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(cluster_ids)} clusters")
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to bulk update noise status: {e}")
 
     def _run_bulk_update_worker(self, cluster_ids: list, source_rows: list, is_noise: bool):
         """Background worker for large datasets (> 1000 rows) with progress dialog."""
         from PyQt6.QtWidgets import QProgressDialog
+
         from app.ui.workers import BulkNoiseUpdateWorker
 
         # Create progress dialog
@@ -1846,7 +1928,7 @@ class TermsView(QWidget):
             "Cancel",
             0,
             len(cluster_ids),
-            self
+            self,
         )
         self.bulk_progress_dialog.setWindowTitle("Bulk Update")
         self.bulk_progress_dialog.setModal(True)
@@ -1860,9 +1942,7 @@ class TermsView(QWidget):
 
         # Create and start worker
         self.bulk_worker = BulkNoiseUpdateWorker(
-            model_class="TermCluster",
-            item_ids=cluster_ids,
-            is_noise=is_noise
+            model_class="TermCluster", item_ids=cluster_ids, is_noise=is_noise
         )
 
         # Connect signals
@@ -1876,7 +1956,7 @@ class TermsView(QWidget):
 
     def _on_bulk_progress(self, current: int, total: int):
         """Update bulk progress dialog."""
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.setValue(current)
             self.bulk_progress_dialog.setLabelText(
                 f"Updated {current:,} of {total:,} term clusters..."
@@ -1885,7 +1965,7 @@ class TermsView(QWidget):
     def _on_bulk_complete(self, count: int):
         """Handle bulk update completion."""
         # Close progress dialog
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.close()
             self.bulk_progress_dialog = None
 
@@ -1902,13 +1982,16 @@ class TermsView(QWidget):
                 )
                 session.commit()
         except Exception as e:
-            logger.warning("Failed to sync term noise to User Dictionaries after bulk update: %s", e)
+            logger.warning(
+                "Failed to sync term noise to User Dictionaries after bulk update: %s", e
+            )
 
         status = "noise" if self._pending_is_noise else "valid"
         logger.info(f"Bulk update completed: {count} clusters marked as {status}")
 
         # Show success message
         from app.ui.dialogs import show_info
+
         show_info(self, "Success", f"Marked {count:,} term clusters as {status}")
 
         # Reload to apply filter if needed
@@ -1918,18 +2001,19 @@ class TermsView(QWidget):
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""
         # Close progress dialog
-        if hasattr(self, 'bulk_progress_dialog') and self.bulk_progress_dialog:
+        if hasattr(self, "bulk_progress_dialog") and self.bulk_progress_dialog:
             self.bulk_progress_dialog.close()
             self.bulk_progress_dialog = None
 
         logger.error(f"Bulk noise update failed: {error_msg}")
 
         from app.ui.dialogs import show_error
+
         show_error(self, "Error", f"Bulk update failed:\n{error_msg}")
 
     def _on_bulk_cancel(self):
         """Handle bulk update cancellation."""
-        if hasattr(self, 'bulk_worker') and self.bulk_worker and self.bulk_worker.isRunning():
+        if hasattr(self, "bulk_worker") and self.bulk_worker and self.bulk_worker.isRunning():
             self.bulk_worker.cancel()
             logger.info("User cancelled bulk noise update")
 
@@ -1945,10 +2029,11 @@ class TermsView(QWidget):
     def on_batch_translate(self):
         """Task 15: Handle batch translate with scope support."""
         from PyQt6.QtWidgets import QMessageBox
-        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
-        from app.ui.workers import TranslateAllFilteredWorker
+
         from app.services.db_service import DBService
         from app.services.term_extraction_service import TermExtractionService
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.workers import TranslateAllFilteredWorker
 
         selected_indexes = self.terms_table.selectionModel().selectedRows()
         if not selected_indexes:
@@ -1988,7 +2073,7 @@ class TermsView(QWidget):
                     f"This action cannot be undone.\n\n"
                     f"Do you want to continue?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    QMessageBox.StandardButton.No,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
@@ -2014,8 +2099,8 @@ class TermsView(QWidget):
                 filters=self.build_filters(),
                 provider_mode=provider_mode,
                 write_mode=write_mode,
-                id_fetch_chunk=200,      # Fetch 200 IDs from DB per iteration
-                translation_chunk=1,      # Translate 1 item per commit (per-row semantics)
+                id_fetch_chunk=200,  # Fetch 200 IDs from DB per iteration
+                translation_chunk=1,  # Translate 1 item per commit (per-row semantics)
                 src_lang="he",
                 tgt_lang="ru",
             )
@@ -2025,8 +2110,12 @@ class TermsView(QWidget):
             worker.stats_updated.connect(progress_dialog.update_counts)  # Direct connection
             worker.row_translated.connect(progress_dialog.add_recent_item)  # Direct connection
             worker.stage_updated.connect(progress_dialog.set_stage)  # PATCH-16-02: Stage updates
-            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
-            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            worker.finished.connect(
+                lambda result: self.on_batch_translate_finished(result, progress_dialog)
+            )
+            worker.error.connect(
+                lambda error: self.on_batch_translate_error(error, progress_dialog)
+            )
             progress_dialog.cancel_requested.connect(worker.cancel)
             progress_dialog.pause_requested.connect(worker.pause)
             progress_dialog.resume_requested.connect(worker.resume)
@@ -2042,21 +2131,25 @@ class TermsView(QWidget):
 
         else:  # scope == "current_page" (original behavior)
             # Map proxy rows to source rows
-            source_rows = [self.proxy_model.map_to_source_row(idx.row()) for idx in selected_indexes]
+            source_rows = [
+                self.proxy_model.map_to_source_row(idx.row()) for idx in selected_indexes
+            ]
 
             # Build items list
             items = []
             for source_row in source_rows:
                 cluster = self.terms_model.clusters[source_row]
-                items.append(BatchTranslateItem(
-                    entity_type="term_cluster",
-                    entity_id=cluster.representative_he,
-                    source_text=cluster.representative_he,
-                    src_lang="he",
-                    tgt_lang="ru",
-                    current_translation=cluster.translation,
-                    project_id=self.project_id,
-                ))
+                items.append(
+                    BatchTranslateItem(
+                        entity_type="term_cluster",
+                        entity_id=cluster.representative_he,
+                        source_text=cluster.representative_he,
+                        src_lang="he",
+                        tgt_lang="ru",
+                        current_translation=cluster.translation,
+                        project_id=self.project_id,
+                    )
+                )
 
             # Build options
             options = BatchTranslateOptions(
@@ -2071,9 +2164,7 @@ class TermsView(QWidget):
 
             # Create worker
             self.batch_translate_worker = BatchTranslateWorker(
-                items=items,
-                options=options,
-                tab_type="terms"
+                items=items, options=options, tab_type="terms"
             )
 
             # Connect signals
@@ -2162,8 +2253,9 @@ class TermsView(QWidget):
 
             # Format timestamp
             from datetime import datetime
+
             try:
-                extract_dt = datetime.fromisoformat(project.last_extract_at.replace('Z', '+00:00'))
+                extract_dt = datetime.fromisoformat(project.last_extract_at.replace("Z", "+00:00"))
                 time_str = extract_dt.strftime("%Y-%m-%d %H:%M")
             except:
                 time_str = project.last_extract_at[:19]  # Fallback to first 19 chars
@@ -2180,11 +2272,7 @@ class TermsView(QWidget):
         if snapshot_rows_used <= 0 and reparsed_sentences <= 0:
             return ""
 
-        reuse_text = (
-            f"{float(reuse_pct):.2f}%"
-            if reuse_pct is not None
-            else "n/a"
-        )
+        reuse_text = f"{float(reuse_pct):.2f}%" if reuse_pct is not None else "n/a"
         return (
             "Last extraction source mix: "
             f"Snapshots used: {snapshot_rows_used:,} | "
@@ -2203,6 +2291,7 @@ class TermsView(QWidget):
         """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.terms_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
+
             if isinstance(event, QKeyEvent):
                 key = event.key()
                 modifiers = event.modifiers()
@@ -2226,7 +2315,9 @@ class TermsView(QWidget):
                         # Get Translation column (12) in source model
                         translation_source_index = self.terms_model.index(source_index.row(), 12)
                         # Map back to proxy
-                        translation_proxy_index = self.proxy_model.mapFromSource(translation_source_index)
+                        translation_proxy_index = self.proxy_model.mapFromSource(
+                            translation_source_index
+                        )
                         # Set current and edit
                         self.terms_table.setCurrentIndex(translation_proxy_index)
                         self.terms_table.edit(translation_proxy_index)

@@ -118,8 +118,14 @@ def test_playlists_create_add_queue_selected_and_load(panel, monkeypatch, tmp_pa
     audio_file.write_bytes(b"RIFF")
     _seed_queue_row(player, audio_file)
 
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QInputDialog.getText", lambda *_a, **_k: ("Lesson A", True))
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", lambda *_a, **_k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QInputDialog.getText",
+        lambda *_a, **_k: ("Lesson A", True),
+    )
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QMessageBox.information",
+        lambda *_a, **_k: QMessageBox.StandardButton.Ok,
+    )
     monkeypatch.setattr(
         "app.ui.widgets.audio_player_panel.QMessageBox.question",
         lambda *_a, **_k: QMessageBox.StandardButton.Yes,
@@ -178,7 +184,10 @@ def test_playlists_rename_and_delete(panel, monkeypatch):
     widget._refresh_playlists(select_playlist_id=playlist_id)
     assert widget.playlists_list.count() >= 1
 
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QInputDialog.getText", lambda *_a, **_k: ("Renamed", True))
+    monkeypatch.setattr(
+        "app.ui.widgets.audio_player_panel.QInputDialog.getText",
+        lambda *_a, **_k: ("Renamed", True),
+    )
     widget._on_rename_playlist_clicked()
     assert "Renamed" in widget.playlists_list.currentItem().text()
 
@@ -187,7 +196,10 @@ def test_playlists_rename_and_delete(panel, monkeypatch):
         lambda *_a, **_k: QMessageBox.StandardButton.Yes,
     )
     widget._on_delete_playlist_clicked()
-    assert all("Renamed" not in widget.playlists_list.item(i).text() for i in range(widget.playlists_list.count()))
+    assert all(
+        "Renamed" not in widget.playlists_list.item(i).text()
+        for i in range(widget.playlists_list.count())
+    )
 
 
 def test_playlists_reorder_and_remove_entries(panel):

@@ -344,6 +344,7 @@ class TestBaseProviderContract:
 
         class IncompleteProvider(BaseProvider):
             """Incomplete provider (missing abstract methods)."""
+
             pass
 
         with pytest.raises(TypeError):

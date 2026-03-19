@@ -24,7 +24,9 @@ try:
     import ctranslate2
     from transformers import NllbTokenizer
 
-    model_path = Path(r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2")
+    model_path = Path(
+        r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"
+    )
 
     if not model_path.exists():
         print(f"  [ERROR] Model not found: {model_path}")
@@ -44,7 +46,9 @@ try:
     # Load tokenizer
     print("  Loading tokenizer...")
     start = time.time()
-    tokenizer = NllbTokenizer.from_pretrained("facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn")
+    tokenizer = NllbTokenizer.from_pretrained(
+        "facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn"
+    )
     tok_time = time.time() - start
     print(f"  [OK] Tokenizer loaded in {tok_time:.1f}s")
 
@@ -58,7 +62,7 @@ try:
         [input_ids],
         target_prefix=[tokenizer.lang_code_to_id["rus_Cyrl"]],
         beam_size=1,
-        max_decoding_length=512
+        max_decoding_length=512,
     )
 
     output_ids = results[0].hypotheses[0]
@@ -70,6 +74,7 @@ try:
 except Exception as e:
     print(f"\n  [TEST 1 FAILED] {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 
@@ -87,11 +92,7 @@ try:
             root_logger.removeHandler(handler)
 
         # Configure fresh logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format="[Worker] %(message)s",
-            force=True
-        )
+        logging.basicConfig(level=logging.INFO, format="[Worker] %(message)s", force=True)
 
         try:
             import ctranslate2
@@ -105,7 +106,9 @@ try:
 
             logging.info(f"Model loaded in {load_time:.1f}s")
 
-            tokenizer = NllbTokenizer.from_pretrained("facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn")
+            tokenizer = NllbTokenizer.from_pretrained(
+                "facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn"
+            )
 
             # Send success
             conn.send({"ok": True, "load_time": load_time})
@@ -113,6 +116,7 @@ try:
         except Exception as e:
             logging.error(f"Worker error: {e}")
             import traceback
+
             traceback.print_exc()
             conn.send({"ok": False, "error": str(e)})
 
@@ -120,7 +124,11 @@ try:
     ctx = multiprocessing.get_context("spawn")
     parent_conn, child_conn = multiprocessing.Pipe()
 
-    model_path = str(Path(r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"))
+    model_path = str(
+        Path(
+            r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"
+        )
+    )
 
     process = ctx.Process(target=worker_func, args=(child_conn, model_path))
     process.start()
@@ -148,6 +156,7 @@ try:
 except Exception as e:
     print(f"\n  [TEST 2 FAILED] {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 

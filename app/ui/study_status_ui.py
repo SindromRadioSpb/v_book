@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PyQt6.QtGui import QBrush, QColor
-
 
 ORIGIN_TOKENS = {
     "project": ("PRJ", "Project"),
@@ -83,17 +80,17 @@ def _brush(hex_color: str) -> QBrush:
     return QBrush(QColor(hex_color))
 
 
-def origin_marker(origin_kind: Optional[str]) -> str:
+def origin_marker(origin_kind: str | None) -> str:
     token, label = ORIGIN_TOKENS.get((origin_kind or "manual").lower(), ORIGIN_TOKENS["manual"])
     return f"{token} {label}"
 
 
-def study_chip(study_state: Optional[str]) -> str:
+def study_chip(study_state: str | None) -> str:
     token, label = STUDY_TOKENS.get((study_state or "new").lower(), STUDY_TOKENS["new"])
     return f"{token} {label}"
 
 
-def translation_tier_icon(translation_tier: Optional[str]) -> str:
+def translation_tier_icon(translation_tier: str | None) -> str:
     token, _ = TRANSLATION_TIER_TOKENS.get(
         (translation_tier or "missing").lower(),
         TRANSLATION_TIER_TOKENS["missing"],
@@ -101,7 +98,7 @@ def translation_tier_icon(translation_tier: Optional[str]) -> str:
     return token
 
 
-def audio_icon(audio_status: Optional[str]) -> str:
+def audio_icon(audio_status: str | None) -> str:
     token, _ = AUDIO_TOKENS.get((audio_status or "missing").lower(), AUDIO_TOKENS["missing"])
     return token
 
@@ -112,8 +109,8 @@ def noise_icon(is_noise: int) -> str:
 
 def compose_status_icons(
     *,
-    translation_tier: Optional[str],
-    audio_status: Optional[str],
+    translation_tier: str | None,
+    audio_status: str | None,
     is_noise: int,
 ) -> str:
     return f"{translation_tier_icon(translation_tier)} {audio_icon(audio_status)} {noise_icon(is_noise)}"
@@ -125,7 +122,7 @@ def saved_indicator_text(base_text: str, in_user_dictionary_count: int) -> str:
     return base_text
 
 
-def ud_indicator_text(in_user_dictionary_count: int, study_state: Optional[str]) -> str:
+def ud_indicator_text(in_user_dictionary_count: int, study_state: str | None) -> str:
     """Compact cross-view marker: '*' for saved, '*!' for saved+due."""
     if int(in_user_dictionary_count or 0) <= 0:
         return ""
@@ -134,17 +131,17 @@ def ud_indicator_text(in_user_dictionary_count: int, study_state: Optional[str])
     return "*"
 
 
-def ud_indicator_brush(in_user_dictionary_count: int, study_state: Optional[str]) -> Optional[QBrush]:
+def ud_indicator_brush(in_user_dictionary_count: int, study_state: str | None) -> QBrush | None:
     if int(in_user_dictionary_count or 0) <= 0:
         return None
     return _brush(STUDY_COLORS.get((study_state or "").strip().lower(), "#1976D2"))
 
 
-def study_brush(study_state: Optional[str]) -> QBrush:
+def study_brush(study_state: str | None) -> QBrush:
     return _brush(STUDY_COLORS.get((study_state or "new").lower(), STUDY_COLORS["new"]))
 
 
-def translation_tier_brush(translation_tier: Optional[str]) -> QBrush:
+def translation_tier_brush(translation_tier: str | None) -> QBrush:
     return _brush(
         TRANSLATION_TIER_COLORS.get(
             (translation_tier or "missing").lower(),
@@ -153,11 +150,11 @@ def translation_tier_brush(translation_tier: Optional[str]) -> QBrush:
     )
 
 
-def audio_status_brush(audio_status: Optional[str]) -> QBrush:
+def audio_status_brush(audio_status: str | None) -> QBrush:
     return _brush(AUDIO_COLORS.get((audio_status or "missing").lower(), AUDIO_COLORS["missing"]))
 
 
-def origin_brush(origin_kind: Optional[str]) -> QBrush:
+def origin_brush(origin_kind: str | None) -> QBrush:
     return _brush(ORIGIN_COLORS.get((origin_kind or "manual").lower(), ORIGIN_COLORS["manual"]))
 
 
@@ -165,7 +162,7 @@ def noise_brush(is_noise: int) -> QBrush:
     return _brush(NOISE_COLORS[1 if int(is_noise or 0) == 1 else 0])
 
 
-def normalize_last_grade(last_grade: Optional[str], review_count: int = 0) -> str:
+def normalize_last_grade(last_grade: str | None, review_count: int = 0) -> str:
     del review_count  # last_grade is authoritative for "Last Review" semantics.
     key = (last_grade or "").strip().lower()
     if key in ("again", "hard", "good", "easy"):
@@ -173,7 +170,7 @@ def normalize_last_grade(last_grade: Optional[str], review_count: int = 0) -> st
     return "added"
 
 
-def last_review_label(last_grade: Optional[str], review_count: int = 0) -> str:
+def last_review_label(last_grade: str | None, review_count: int = 0) -> str:
     key = normalize_last_grade(last_grade, review_count)
     return {
         "added": "Added",
@@ -185,8 +182,8 @@ def last_review_label(last_grade: Optional[str], review_count: int = 0) -> str:
 
 
 def get_last_grade_cell_brush(
-    last_grade: Optional[str],
-    theme_context: Optional[object] = None,
+    last_grade: str | None,
+    theme_context: object | None = None,
     review_count: int = 0,
 ) -> QBrush:
     del theme_context  # Reserved for future palette-aware adaptation.
@@ -197,9 +194,9 @@ def get_last_grade_cell_brush(
 def get_last_grade_row_brush(
     *,
     in_user_dictionary_count: int,
-    last_grade: Optional[str],
+    last_grade: str | None,
     review_count: int = 0,
-) -> Optional[QBrush]:
+) -> QBrush | None:
     """Cross-view row highlight brush (only for items present in User Dictionaries)."""
     if int(in_user_dictionary_count or 0) <= 0:
         return None

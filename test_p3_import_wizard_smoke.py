@@ -6,10 +6,10 @@ Headless smoke test for ImportWizard:
 - No runtime errors
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
@@ -30,7 +30,7 @@ class TestImportWizardSmoke(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.close()
@@ -39,7 +39,7 @@ class TestImportWizardSmoke(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -123,6 +123,7 @@ class TestImportWizardSmoke(unittest.TestCase):
         # Clean up
         wizard.close()
         wizard.deleteLater()
+
 
 if __name__ == "__main__":
     unittest.main()

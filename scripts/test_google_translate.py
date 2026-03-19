@@ -1,6 +1,6 @@
 """Test Google Translate provider."""
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("=== Google Translate Provider Test ===\n")
 
     # Import provider

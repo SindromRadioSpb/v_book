@@ -15,4 +15,3 @@ RUN go build .
 EXPOSE 8000
 
 ENTRYPOINT ["/yap/src/yap/yap", "api"]
-

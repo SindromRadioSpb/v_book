@@ -99,7 +99,9 @@ def test_dictionary_pos_multiselect_filter(dictionary_engine):
         library = Library(name="L2")
         session.add(library)
         session.flush()
-        project = DictProject(library_id=library.library_id, name="P2", src_lang="he", tgt_lang="ru")
+        project = DictProject(
+            library_id=library.library_id, name="P2", src_lang="he", tgt_lang="ru"
+        )
         session.add(project)
         session.flush()
 
@@ -156,7 +158,9 @@ def test_dictionary_request_id_ignores_stale(monkeypatch, qtbot):
     qtbot.addWidget(view)
 
     rendered = []
-    monkeypatch.setattr(view.lemma_model, "update_lemmas", lambda lemmas: rendered.append(list(lemmas)))
+    monkeypatch.setattr(
+        view.lemma_model, "update_lemmas", lambda lemmas: rendered.append(list(lemmas))
+    )
     monkeypatch.setattr(view, "start_translation_worker", lambda lemmas: None)
 
     row = (

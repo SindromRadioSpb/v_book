@@ -102,15 +102,24 @@ def test_remove_document_stats_cleans_doc_and_project_stats():
             assert svc.remove_document_stats(session, int(doc.doc_id)) is True
             session.commit()
 
-            assert session.execute(
-                select(LemmaDocStat).where(LemmaDocStat.doc_id == int(doc.doc_id))
-            ).scalars().all() == []
-            assert session.execute(
-                select(LemmaProjectStat).where(LemmaProjectStat.project_id == project_id)
-            ).scalars().all() == []
-            assert session.execute(
-                select(Lemma).where(Lemma.project_id == project_id)
-            ).scalars().all() == []
+            assert (
+                session.execute(select(LemmaDocStat).where(LemmaDocStat.doc_id == int(doc.doc_id)))
+                .scalars()
+                .all()
+                == []
+            )
+            assert (
+                session.execute(
+                    select(LemmaProjectStat).where(LemmaProjectStat.project_id == project_id)
+                )
+                .scalars()
+                .all()
+                == []
+            )
+            assert (
+                session.execute(select(Lemma).where(Lemma.project_id == project_id)).scalars().all()
+                == []
+            )
     finally:
         DBService.shutdown()
         DBService._instance = None
@@ -228,15 +237,21 @@ def test_remove_document_stats_cleans_only_document_orphans_and_keeps_shared_lem
             assert svc.remove_document_stats(session, int(doc_a.doc_id)) is True
             session.commit()
 
-            remaining_doc_stats = session.execute(
-                select(LemmaDocStat).order_by(LemmaDocStat.doc_id, LemmaDocStat.lemma_id)
-            ).scalars().all()
-            remaining_proj_stats = session.execute(
-                select(LemmaProjectStat).order_by(LemmaProjectStat.lemma_id)
-            ).scalars().all()
-            remaining_lemmas = session.execute(
-                select(Lemma).order_by(Lemma.lemma_id)
-            ).scalars().all()
+            remaining_doc_stats = (
+                session.execute(
+                    select(LemmaDocStat).order_by(LemmaDocStat.doc_id, LemmaDocStat.lemma_id)
+                )
+                .scalars()
+                .all()
+            )
+            remaining_proj_stats = (
+                session.execute(select(LemmaProjectStat).order_by(LemmaProjectStat.lemma_id))
+                .scalars()
+                .all()
+            )
+            remaining_lemmas = (
+                session.execute(select(Lemma).order_by(Lemma.lemma_id)).scalars().all()
+            )
 
             assert {(row.doc_id, row.lemma_id) for row in remaining_doc_stats} == {
                 (int(doc_b.doc_id), int(lemma_shared.lemma_id)),
@@ -336,18 +351,32 @@ def test_delete_document_cleans_processed_sentence_references():
 
             assert session.get(SourceDocument, int(doc.doc_id)) is None
             assert session.get(DocumentText, int(doc.doc_id)) is None
-            assert session.execute(
-                select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
-            ).scalars().all() == []
-            assert session.execute(
-                select(LemmaDocStat).where(LemmaDocStat.doc_id == int(doc.doc_id))
-            ).scalars().all() == []
-            assert session.execute(
-                select(LemmaProjectStat).where(LemmaProjectStat.project_id == project_id)
-            ).scalars().all() == []
-            assert session.execute(
-                select(Lemma).where(Lemma.project_id == project_id)
-            ).scalars().all() == []
+            assert (
+                session.execute(
+                    select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
+                )
+                .scalars()
+                .all()
+                == []
+            )
+            assert (
+                session.execute(select(LemmaDocStat).where(LemmaDocStat.doc_id == int(doc.doc_id)))
+                .scalars()
+                .all()
+                == []
+            )
+            assert (
+                session.execute(
+                    select(LemmaProjectStat).where(LemmaProjectStat.project_id == project_id)
+                )
+                .scalars()
+                .all()
+                == []
+            )
+            assert (
+                session.execute(select(Lemma).where(Lemma.project_id == project_id)).scalars().all()
+                == []
+            )
     finally:
         DBService.shutdown()
         DBService._instance = None
@@ -446,9 +475,13 @@ def test_reprocess_document_clears_old_sentences_before_rebuild():
             svc = ProcessService()
 
             def _fake_process(self, session, doc_id, use_gpu=False, use_mock=False):
-                remaining = session.execute(
-                    select(DocumentSentence).where(DocumentSentence.doc_id == int(doc_id))
-                ).scalars().all()
+                remaining = (
+                    session.execute(
+                        select(DocumentSentence).where(DocumentSentence.doc_id == int(doc_id))
+                    )
+                    .scalars()
+                    .all()
+                )
                 assert remaining == []
                 session.expunge_all()
                 rebuilt = DocumentSentence(
@@ -467,9 +500,13 @@ def test_reprocess_document_clears_old_sentences_before_rebuild():
             assert svc.reprocess_document(session, int(doc.doc_id), use_mock=True) is True
             session.commit()
 
-            rows = session.execute(
-                select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
+                )
+                .scalars()
+                .all()
+            )
             assert len(rows) == 1
             assert rows[0].text == "new sentence"
             assert session.execute(select(SentencePronunciation)).scalars().all() == []
@@ -533,9 +570,13 @@ def test_process_document_populates_sentence_corpus_id_for_sentences_workspace()
             assert svc.process_document(session, int(doc.doc_id), use_mock=True) is True
             session.commit()
 
-            rows = session.execute(
-                select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(DocumentSentence).where(DocumentSentence.doc_id == int(doc.doc_id))
+                )
+                .scalars()
+                .all()
+            )
             assert len(rows) == 3
             assert {row.corpus_id for row in rows} == {corpus_id}
 

@@ -6,7 +6,7 @@ Mark project 1 as reference, pointing to an external DB:
     python scripts/mark_reference_project.py \\
         --db-path hdle_premium.db \\
         --project-id 1 \\
-        --ref-db-path "J:/Project_Vibe/hewiki_gpu_processing.db"
+        --ref-db-path "E:/projects/Project_Vibe/V_book/ref_corpora/HDLE_Processing_hewiki_gpu_processing.db/hewiki_gpu_processing.db"
 
 Unmark project 1 (back to normal writable project):
     python scripts/mark_reference_project.py \\
@@ -19,6 +19,7 @@ List all reference projects in the DB:
         --db-path hdle_premium.db \\
         --list
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,8 +49,7 @@ def cmd_mark(conn: sqlite3.Connection, project_id: int, ref_db_path: str) -> Non
         sys.exit(1)
 
     conn.execute(
-        "UPDATE dict_project SET is_reference = 1, ref_db_path = ? "
-        "WHERE project_id = ?",
+        "UPDATE dict_project SET is_reference = 1, ref_db_path = ? " "WHERE project_id = ?",
         (str(ref_path), project_id),
     )
     conn.commit()
@@ -67,8 +67,7 @@ def cmd_unmark(conn: sqlite3.Connection, project_id: int) -> None:
         sys.exit(1)
 
     conn.execute(
-        "UPDATE dict_project SET is_reference = 0, ref_db_path = NULL "
-        "WHERE project_id = ?",
+        "UPDATE dict_project SET is_reference = 0, ref_db_path = NULL " "WHERE project_id = ?",
         (project_id,),
     )
     conn.commit()

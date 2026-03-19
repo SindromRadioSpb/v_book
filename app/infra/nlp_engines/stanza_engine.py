@@ -1,6 +1,6 @@
 """Stanza Hebrew NLP engine."""
+
 import logging
-from typing import List, Optional
 
 from app.infra.nlp_engines.base import NLPEngine, Sentence, Token
 
@@ -46,8 +46,8 @@ class StanzaEngine(NLPEngine):
             # Initialize pipeline
             # processors: tokenize, pos, lemma
             self._pipeline = stanza.Pipeline(
-                lang='he',
-                processors='tokenize,pos,lemma',
+                lang="he",
+                processors="tokenize,pos,lemma",
                 use_gpu=use_gpu,
                 verbose=False,
                 download_method=None,  # Don't auto-download
@@ -73,7 +73,7 @@ class StanzaEngine(NLPEngine):
         except Exception:
             return "unknown"
 
-    def process(self, text: str) -> List[Sentence]:
+    def process(self, text: str) -> list[Sentence]:
         """
         Process text with Stanza.
 
@@ -102,8 +102,8 @@ class StanzaEngine(NLPEngine):
                     token = Token(
                         text=word.text,
                         lemma=word.lemma if word.lemma else word.text,
-                        pos=word.upos if word.upos else 'X',  # Universal POS tag
-                        morph=self._format_feats(word.feats) if word.feats else '',
+                        pos=word.upos if word.upos else "X",  # Universal POS tag
+                        morph=self._format_feats(word.feats) if word.feats else "",
                     )
                     tokens.append(token)
 
@@ -114,14 +114,16 @@ class StanzaEngine(NLPEngine):
                 )
                 sentences.append(sentence)
 
-            logger.debug(f"Processed {len(sentences)} sentences, {sum(len(s.tokens) for s in sentences)} tokens")
+            logger.debug(
+                f"Processed {len(sentences)} sentences, {sum(len(s.tokens) for s in sentences)} tokens"
+            )
             return sentences
 
         except Exception as e:
             logger.exception(f"Stanza processing failed: {e}")
             raise RuntimeError(f"NLP processing failed: {e}")
 
-    def _format_feats(self, feats: Optional[str]) -> str:
+    def _format_feats(self, feats: str | None) -> str:
         """
         Format morphological features.
 

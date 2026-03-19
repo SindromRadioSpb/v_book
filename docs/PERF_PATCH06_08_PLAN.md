@@ -79,4 +79,3 @@ Add correctness harness so performance changes cannot silently break semantics.
 - Rollback command pattern:
   - `git revert --no-edit <PATCH_COMMIT_SHA>`
   - `git push origin main`
-

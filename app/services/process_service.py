@@ -1,43 +1,45 @@
 """Document processing service."""
-from dataclasses import asdict
-import inspect
-import logging
-import json
+
 import hashlib
+import inspect
+import json
+import logging
 import math
 import sqlite3
 import time
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from dataclasses import asdict
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy.orm import Session
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
 
-from app.infra.sa_models import (
-    SourceDocument,
-    DocumentText,
-    DocumentSentence,
-    SentenceNLPSnapshot,
-    SentenceNLPSnapshotStage,
-    Lemma,
-    LemmaDocStat,
-    LemmaProjectStat,
-    ProcessorRun,
-    RunError,
-    DictProject,
-)
 from app.domain.dto import NLPProcessRunState
+from app.domain.preprocessing import preprocess_text
+from app.domain.sentence_splitter import split_into_sentences
 from app.infra.nlp_engines.base import NLPEngine
+from app.infra.nlp_engines.stanza_engine import create_stanza_engine
 from app.infra.nlp_snapshot_codec import (
     build_sentence_text_hash,
     count_snapshot_tokens,
     serialize_nlp_sentences,
 )
-from app.infra.nlp_engines.stanza_engine import create_stanza_engine
-from app.domain.preprocessing import preprocess_text
-from app.domain.sentence_splitter import split_into_sentences
+from app.infra.sa_models import (
+    DictProject,
+    DocumentSentence,
+    DocumentText,
+    Lemma,
+    LemmaDocStat,
+    LemmaProjectStat,
+    ProcessorRun,
+    RunError,
+    SentenceNLPSnapshot,
+    SentenceNLPSnapshotStage,
+    SourceDocument,
+)
 from app.services.db_service import DBService
 from app.services.entity_classifier import classify_text
 from app.services.snapshot_doc_stats_service import SnapshotDocStatsService
@@ -52,7 +54,7 @@ class ProcessService:
 
     def __init__(self):
         self.db_service = DBService.get_instance()
-        self._engine: Optional[NLPEngine] = None
+        self._engine: NLPEngine | None = None
         self.snapshot_doc_stats_service = SnapshotDocStatsService()
         logger.info("ProcessService initialized")
 
@@ -74,6 +76,7 @@ class ProcessService:
             if use_mock:
                 logger.info("Creating Mock NLP engine (rule-based)...")
                 from app.infra.nlp_engines.mock_engine import create_mock_engine
+
                 self._engine = create_mock_engine()
             else:
                 logger.info("Creating Stanza NLP engine...")
@@ -83,9 +86,12 @@ class ProcessService:
                     logger.warning(f"Stanza not available: {e}")
                     logger.info("Falling back to Mock engine")
                     from app.infra.nlp_engines.mock_engine import create_mock_engine
+
                     self._engine = create_mock_engine()
 
-            logger.info(f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}")
+            logger.info(
+                f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}"
+            )
         return self._engine
 
     def _build_run_params_hash(
@@ -109,7 +115,7 @@ class ProcessService:
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
-    def _build_doc_ids_hash(doc_ids: List[int]) -> str:
+    def _build_doc_ids_hash(doc_ids: list[int]) -> str:
         encoded = json.dumps([int(doc_id) for doc_id in doc_ids], separators=(",", ":")).encode(
             "utf-8"
         )
@@ -117,15 +123,15 @@ class ProcessService:
 
     @staticmethod
     def _utc_now() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def _build_run_state_payload(
         self,
         run: ProcessorRun,
         *,
         phase: str,
-        message: Optional[str] = None,
-        doc_name: Optional[str] = None,
+        message: str | None = None,
+        doc_name: str | None = None,
     ) -> dict[str, Any]:
         payload = asdict(
             NLPProcessRunState(
@@ -152,12 +158,12 @@ class ProcessService:
 
     def _emit_run_state(
         self,
-        state_callback: Optional[Callable[[dict[str, Any]], None]],
+        state_callback: Callable[[dict[str, Any]], None] | None,
         run: ProcessorRun,
         *,
         phase: str,
-        message: Optional[str] = None,
-        doc_name: Optional[str] = None,
+        message: str | None = None,
+        doc_name: str | None = None,
     ) -> None:
         if state_callback is None:
             return
@@ -173,11 +179,11 @@ class ProcessService:
     @staticmethod
     def _build_batch_run_note(
         *,
-        doc_ids: List[int],
+        doc_ids: list[int],
         chunk_size: int,
         source_label: str,
         is_reprocess: bool,
-        extra_note: Optional[dict[str, Any]] = None,
+        extra_note: dict[str, Any] | None = None,
     ) -> str:
         note = {
             "kind": "batch_nlp",
@@ -194,7 +200,7 @@ class ProcessService:
         return json.dumps(note, sort_keys=True, separators=(",", ":"))
 
     @staticmethod
-    def _parse_batch_run_note(note: Optional[str]) -> dict[str, Any]:
+    def _parse_batch_run_note(note: str | None) -> dict[str, Any]:
         if not note:
             return {}
         try:
@@ -209,10 +215,10 @@ class ProcessService:
         *,
         project_id: int,
         params_hash: str,
-        doc_ids: List[int],
+        doc_ids: list[int],
         source_label: str,
         is_reprocess: bool,
-    ) -> Optional[ProcessorRun]:
+    ) -> ProcessorRun | None:
         candidates = (
             session.query(ProcessorRun)
             .filter(
@@ -245,11 +251,11 @@ class ProcessService:
         *,
         project_id: int,
         params_hash: str,
-        doc_ids: List[int],
+        doc_ids: list[int],
         source_label: str,
         is_reprocess: bool,
         require_incomplete: bool,
-    ) -> tuple[bool, Optional[str], dict[str, Any]]:
+    ) -> tuple[bool, str | None, dict[str, Any]]:
         note = self._parse_batch_run_note(run.note)
         if note.get("kind") != "batch_nlp":
             return False, "Run note is not a batch NLP contract", note
@@ -285,14 +291,14 @@ class ProcessService:
     def verify_batch_run_contract(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
         *,
         is_reprocess: bool = False,
         source_label: str = "batch",
         resume_latest: bool = False,
-        resume_run_id: Optional[int] = None,
+        resume_run_id: int | None = None,
         contract: str = "process_document_v2",
     ) -> dict[str, Any]:
         """Validate a batch NLP run contract without mutating the DB."""
@@ -381,7 +387,7 @@ class ProcessService:
         report["ok"] = bool(ok)
         return report
 
-    def _resolve_project_id_for_docs(self, session: Session, doc_ids: List[int]) -> int:
+    def _resolve_project_id_for_docs(self, session: Session, doc_ids: list[int]) -> int:
         doc = session.get(SourceDocument, int(doc_ids[0]))
         if doc is None:
             raise ValueError(f"Document {doc_ids[0]} not found")
@@ -410,7 +416,7 @@ class ProcessService:
         *,
         sentence_row: DocumentSentence,
         engine: NLPEngine,
-        nlp_sentences: List[Any],
+        nlp_sentences: list[Any],
     ) -> dict[str, Any]:
         now = self._utc_now()
         return {
@@ -430,7 +436,7 @@ class ProcessService:
         *,
         sentence_row: DocumentSentence,
         engine: NLPEngine,
-        nlp_sentences: List[Any],
+        nlp_sentences: list[Any],
     ) -> int:
         values = self._build_sentence_nlp_snapshot_values(
             sentence_row=sentence_row,
@@ -453,8 +459,8 @@ class ProcessService:
         self,
         session: Session,
         *,
-        run_id: Optional[int],
-        doc_id: Optional[int],
+        run_id: int | None,
+        doc_id: int | None,
         stage: str,
         message: str,
     ) -> None:
@@ -493,7 +499,7 @@ class ProcessService:
         session: Session,
         *,
         run_id: int,
-        rows: List[dict[str, Any]],
+        rows: list[dict[str, Any]],
         insert_batch_size: int = 200,
     ) -> int:
         if not rows:
@@ -502,7 +508,7 @@ class ProcessService:
         inserted = 0
         for start in range(0, len(rows), int(insert_batch_size)):
             chunk = []
-            for row in rows[start:start + int(insert_batch_size)]:
+            for row in rows[start : start + int(insert_batch_size)]:
                 chunk.append(
                     {
                         "run_id": int(run_id),
@@ -562,7 +568,9 @@ class ProcessService:
                     .where(SentenceNLPSnapshotStage.run_id == int(run_id))
                     .order_by(SentenceNLPSnapshotStage.sentence_id.asc())
                     .limit(batch_size)
-                ).mappings().all()
+                )
+                .mappings()
+                .all()
             ]
             if not rows:
                 return merged
@@ -611,7 +619,7 @@ class ProcessService:
             "snapshot_probe_error": None,
             "error": None,
         }
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         started = time.perf_counter()
 
         def _progress_handler() -> int:
@@ -625,7 +633,9 @@ class ProcessService:
             conn.execute("PRAGMA busy_timeout=15000")
             conn.set_progress_handler(_progress_handler, 10_000)
             try:
-                quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+                quick_rows = [
+                    str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()
+                ]
             except sqlite3.OperationalError as exc:
                 if "interrupted" in str(exc).lower() and quick_check_timeout_sec > 0:
                     summary["quick_check_timed_out"] = True
@@ -675,7 +685,7 @@ class ProcessService:
             "snapshot_probe_error": None,
             "error": None,
         }
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(str(db_path), timeout=30)
             conn.execute("PRAGMA busy_timeout=15000")
@@ -720,9 +730,9 @@ class ProcessService:
         success: int,
         errors: int,
         integrity_checkpoint_mode: str = "none",
-        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        state_callback: Callable[[dict[str, Any]], None] | None = None,
         completion_message: str,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         run.stage = "integrity_check"
         session.commit()
         session.refresh(run)
@@ -773,9 +783,7 @@ class ProcessService:
         run.finished_at = self._utc_now()
         run.chunks_completed = int(run.chunks_total or 0)
         run.error_message = (
-            f"{errors} document(s) failed during sentence snapshot backfill"
-            if errors > 0
-            else None
+            f"{errors} document(s) failed during sentence snapshot backfill" if errors > 0 else None
         )
         session.commit()
         session.refresh(run)
@@ -836,7 +844,7 @@ class ProcessService:
         use_mock: bool = False,
         is_reprocess: bool = False,
         track_run: bool = True,
-        batch_run_id: Optional[int] = None,
+        batch_run_id: int | None = None,
     ) -> bool:
         """
         Process a document with NLP pipeline.
@@ -873,6 +881,7 @@ class ProcessService:
 
         # Get project
         from app.infra.sa_models import SourceCorpus
+
         corpus = session.get(SourceCorpus, doc.corpus_id)
         project_id = corpus.project_id
 
@@ -904,7 +913,7 @@ class ProcessService:
 
         try:
             # Update status
-            doc.status = 'processing'
+            doc.status = "processing"
             session.commit()
 
             # Get raw text
@@ -940,13 +949,15 @@ class ProcessService:
             # NLP processing
             logger.debug("Running NLP pipeline...")
             lemma_counter: Counter = Counter()
-            lemma_pos_map: Dict[str, str] = {}  # lemma_text -> most common POS
-            lemma_sample_sentences: Dict[str, int] = {}  # lemma_text -> sentence_id
+            lemma_pos_map: dict[str, str] = {}  # lemma_text -> most common POS
+            lemma_sample_sentences: dict[str, int] = {}  # lemma_text -> sentence_id
 
             # Get all sentences back with IDs
-            stmt = select(DocumentSentence).where(
-                DocumentSentence.doc_id == doc_id
-            ).order_by(DocumentSentence.sent_index)
+            stmt = (
+                select(DocumentSentence)
+                .where(DocumentSentence.doc_id == doc_id)
+                .order_by(DocumentSentence.sent_index)
+            )
             sentences = session.execute(stmt).scalars().all()
 
             total_tokens = 0
@@ -1006,8 +1017,8 @@ class ProcessService:
             )
 
             # Update document status and metrics (Migration 003)
-            doc.status = 'processed'
-            doc.processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            doc.status = "processed"
+            doc.processed_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             doc.sentence_count = len(sentences)
             doc.token_count = total_tokens
             self.snapshot_doc_stats_service.set_document_valid(
@@ -1018,8 +1029,8 @@ class ProcessService:
 
             # Update run
             if run is not None:
-                run.status = 'ok'
-                run.stage = 'completed'
+                run.status = "ok"
+                run.stage = "completed"
                 run.finished_at = self._utc_now()
                 run.last_doc_id = doc_id
                 run.docs_processed = 1
@@ -1046,7 +1057,7 @@ class ProcessService:
                 error = RunError(
                     run_id=run_id,  # Use saved ID, not lazy-loaded run.run_id
                     doc_id=doc_id,
-                    stage='processing',
+                    stage="processing",
                     message=error_msg,
                 )
                 session.add(error)
@@ -1054,8 +1065,8 @@ class ProcessService:
                 # Re-fetch objects in clean state
                 run_obj = session.get(ProcessorRun, run_id) if run_id is not None else None
                 if run is not None and run_obj:
-                    run_obj.status = 'failed'
-                    run_obj.stage = 'failed'
+                    run_obj.status = "failed"
+                    run_obj.stage = "failed"
                     run_obj.finished_at = self._utc_now()
                     run_obj.last_doc_id = doc_id
                     run_obj.docs_failed = 1
@@ -1063,7 +1074,7 @@ class ProcessService:
 
                 doc_obj = session.get(SourceDocument, doc_id)
                 if doc_obj:
-                    doc_obj.status = 'failed'
+                    doc_obj.status = "failed"
                     doc_obj.error_message = error_msg
 
                 session.commit()
@@ -1078,8 +1089,8 @@ class ProcessService:
         session: Session,
         project_id: int,
         lemma_counter: Counter,
-        lemma_pos_map: Dict[str, str],
-    ) -> Dict[str, int]:
+        lemma_pos_map: dict[str, str],
+    ) -> dict[str, int]:
         """
         Create or get existing lemmas.
 
@@ -1093,7 +1104,7 @@ class ProcessService:
             Dictionary mapping lemma_text to lemma_id
         """
         lemma_id_map = {}
-        stats = {'new': 0, 'existing': 0, 'noise': 0, 'classes': Counter()}
+        stats = {"new": 0, "existing": 0, "noise": 0, "classes": Counter()}
 
         for lemma_text in lemma_counter:
             # Try to find existing lemma
@@ -1108,7 +1119,7 @@ class ProcessService:
                 classification = classify_text(lemma_text)
 
                 # Create new lemma with classification
-                pos = lemma_pos_map.get(lemma_text, 'X')
+                pos = lemma_pos_map.get(lemma_text, "X")
                 lemma = Lemma(
                     project_id=project_id,
                     lemma_text=lemma_text,
@@ -1121,19 +1132,21 @@ class ProcessService:
                 session.add(lemma)
                 session.flush()
 
-                stats['new'] += 1
-                stats['classes'][classification.entity_class] += 1
+                stats["new"] += 1
+                stats["classes"][classification.entity_class] += 1
                 if classification.is_noise:
-                    stats['noise'] += 1
+                    stats["noise"] += 1
 
-                logger.debug(f"Created lemma: {lemma_text} ({pos}) -> {classification.entity_class}")
+                logger.debug(
+                    f"Created lemma: {lemma_text} ({pos}) -> {classification.entity_class}"
+                )
             else:
-                stats['existing'] += 1
+                stats["existing"] += 1
 
             lemma_id_map[lemma_text] = lemma.lemma_id
 
         # Log classification summary
-        if stats['new'] > 0:
+        if stats["new"] > 0:
             logger.info(
                 f"Created {stats['new']} new lemmas ({stats['noise']} noise, "
                 f"{stats['new'] - stats['noise']} valid). "
@@ -1148,8 +1161,8 @@ class ProcessService:
         project_id: int,
         doc_id: int,
         lemma_counter: Counter,
-        lemma_id_map: Dict[str, int],
-        lemma_sample_sentences: Dict[str, int],
+        lemma_id_map: dict[str, int],
+        lemma_sample_sentences: dict[str, int],
     ) -> None:
         """
         Update lemma statistics (doc + project level).
@@ -1187,7 +1200,7 @@ class ProcessService:
                 # Update existing
                 proj_stat.freq_abs += freq
                 proj_stat.doc_freq += 1
-                proj_stat.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                proj_stat.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 # Create new
                 proj_stat = LemmaProjectStat(
@@ -1203,7 +1216,7 @@ class ProcessService:
         logger.debug(f"Updated statistics for {len(lemma_counter)} lemmas")
 
     @staticmethod
-    def _chunk_int_ids(values: List[int], chunk_size: int = 500) -> List[List[int]]:
+    def _chunk_int_ids(values: list[int], chunk_size: int = 500) -> list[list[int]]:
         ordered = [int(v) for v in values]
         size = max(1, int(chunk_size or 500))
         return [ordered[idx : idx + size] for idx in range(0, len(ordered), size)]
@@ -1214,7 +1227,7 @@ class ProcessService:
         *,
         project_id: int,
         doc_id: int,
-    ) -> List[int]:
+    ) -> list[int]:
         rows = session.execute(
             text(
                 "SELECT lemma_id FROM lemma_doc_stat "
@@ -1229,7 +1242,7 @@ class ProcessService:
         self,
         session: Session,
         project_id: int,
-        lemma_ids: List[int],
+        lemma_ids: list[int],
     ) -> int:
         """Delete lemma rows that became orphaned after removing one document's stats.
 
@@ -1267,10 +1280,7 @@ class ProcessService:
             params = {"pid": int(project_id)}
             params.update({name: int(lemma_id) for name, lemma_id in zip(param_names, chunk)})
             session.execute(
-                text(
-                    "DELETE FROM lemma "
-                    f"WHERE project_id = :pid AND lemma_id IN ({in_clause})"
-                ),
+                text("DELETE FROM lemma " f"WHERE project_id = :pid AND lemma_id IN ({in_clause})"),
                 params,
             )
             deleted += len(chunk)
@@ -1288,7 +1298,7 @@ class ProcessService:
         doc_id: int,
         *,
         engine: NLPEngine,
-        batch_run_id: Optional[int] = None,
+        batch_run_id: int | None = None,
     ) -> tuple[bool, str, int]:
         """Stage missing sentence snapshots for one already-processed document."""
         logger.info("Backfilling sentence snapshots for document %s...", doc_id)
@@ -1341,10 +1351,11 @@ class ProcessService:
                 rows=stage_rows,
             )
             session.commit()
-            return True, (
-                f"Staged {missing_count} sentence snapshot(s)"
-                f" ({token_total} token(s))"
-            ), missing_count
+            return (
+                True,
+                (f"Staged {missing_count} sentence snapshot(s)" f" ({token_total} token(s))"),
+                missing_count,
+            )
         except Exception as exc:
             logger.exception("Failed to backfill sentence snapshots for document %s", doc_id)
             session.rollback()
@@ -1364,23 +1375,23 @@ class ProcessService:
     def backfill_sentence_snapshots_batch(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
         *,
         chunk_size: int = 50,
         chunk_sleep: float = 0.0,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        pause_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        state_callback: Callable[[dict[str, Any]], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        pause_check: Callable[[], bool] | None = None,
         resume_latest: bool = False,
-        resume_run_id: Optional[int] = None,
+        resume_run_id: int | None = None,
         source_label: str = "snapshot_backfill",
         integrity_checkpoint_mode: str = "none",
         merge_batch_size: int = 1000,
         segment_quick_check_timeout: float = 0.5,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Backfill missing sentence snapshots for a deterministic processed-doc slice.
 
         Storage-level durability is handled through:
@@ -1415,7 +1426,7 @@ class ProcessService:
         bounded_validation = len(ordered_ids) >= SNAPSHOT_BOUNDED_VALIDATION_MIN_DOCS
 
         run = None
-        verification: Optional[dict[str, Any]] = None
+        verification: dict[str, Any] | None = None
         if resume_run_id is not None:
             verification = self.verify_batch_run_contract(
                 session,
@@ -1685,7 +1696,7 @@ class ProcessService:
             if chunk_sleep > 0 and docs_done < int(run.docs_total or 0):
                 time.sleep(chunk_sleep)
 
-        def _cancel_current_run(message: str) -> Tuple[int, int]:
+        def _cancel_current_run(message: str) -> tuple[int, int]:
             staged_rows = self._clear_sentence_nlp_snapshot_stage(
                 session,
                 run_id=int(run.run_id),
@@ -1818,21 +1829,21 @@ class ProcessService:
     def process_documents_batch(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
         *,
         is_reprocess: bool = False,
         chunk_size: int = 50,
         chunk_sleep: float = 0.0,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        state_callback: Optional[Callable[[dict[str, Any]], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        pause_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        state_callback: Callable[[dict[str, Any]], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        pause_check: Callable[[], bool] | None = None,
         resume_latest: bool = False,
-        resume_run_id: Optional[int] = None,
+        resume_run_id: int | None = None,
         source_label: str = "batch",
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Process multiple documents through a batch-level resumable run.
 
@@ -1877,7 +1888,7 @@ class ProcessService:
         run_note: dict[str, Any] = {}
 
         run = None
-        verification: Optional[dict[str, Any]] = None
+        verification: dict[str, Any] | None = None
         if resume_run_id is not None:
             verification = self.verify_batch_run_contract(
                 session,
@@ -1983,7 +1994,7 @@ class ProcessService:
         success = 0
         errors = 0
 
-        def _cancel_current_run(message: str) -> Tuple[int, int]:
+        def _cancel_current_run(message: str) -> tuple[int, int]:
             run.status = "cancelled"
             run.stage = "cancelled"
             run.finished_at = self._utc_now()
@@ -2120,9 +2131,7 @@ class ProcessService:
         run.finished_at = self._utc_now()
         run.chunks_completed = int(run.chunks_total or 0)
         run.error_message = (
-            f"{errors} document(s) failed during batch processing"
-            if errors > 0
-            else None
+            f"{errors} document(s) failed during batch processing" if errors > 0 else None
         )
         session.commit()
         session.refresh(run)
@@ -2168,6 +2177,7 @@ class ProcessService:
 
             # Get corpus to find project_id
             from app.infra.sa_models import SourceCorpus
+
             corpus = session.get(SourceCorpus, doc.corpus_id)
             if not corpus:
                 logger.warning(f"Corpus {doc.corpus_id} not found")
@@ -2187,7 +2197,7 @@ class ProcessService:
                 logger.info("No statistics to remove")
                 return True
 
-            updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             params = {
                 "pid": int(project_id),
                 "doc_id": int(doc_id),
@@ -2215,10 +2225,7 @@ class ProcessService:
                 params,
             )
             session.execute(
-                text(
-                    "DELETE FROM lemma_doc_stat "
-                    "WHERE project_id = :pid AND doc_id = :doc_id"
-                ),
+                text("DELETE FROM lemma_doc_stat " "WHERE project_id = :pid AND doc_id = :doc_id"),
                 params,
             )
             session.execute(
@@ -2235,12 +2242,14 @@ class ProcessService:
             logger.info(f"Removed statistics for {doc_stats_count} lemmas")
             return True
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Failed to remove document stats for {doc_id}")
             try:
                 session.rollback()
             except Exception:
-                logger.debug("Rollback after remove_document_stats failure also failed", exc_info=True)
+                logger.debug(
+                    "Rollback after remove_document_stats failure also failed", exc_info=True
+                )
             return False
 
     def _cleanup_orphaned_lemmas(self, session: Session, project_id: int) -> int:
@@ -2289,9 +2298,7 @@ class ProcessService:
         """Delete old sentences for reprocess without ORM row-by-row deletes."""
         sentence_count = int(
             session.execute(
-                text(
-                    "SELECT COUNT(*) FROM document_sentence WHERE doc_id = :doc_id"
-                ),
+                text("SELECT COUNT(*) FROM document_sentence WHERE doc_id = :doc_id"),
                 {"doc_id": int(doc_id)},
             ).scalar()
             or 0
@@ -2300,9 +2307,7 @@ class ProcessService:
             return 0
 
         params = {"doc_id": int(doc_id)}
-        sentence_ids_sql = (
-            "SELECT sentence_id FROM document_sentence WHERE doc_id = :doc_id"
-        )
+        sentence_ids_sql = "SELECT sentence_id FROM document_sentence WHERE doc_id = :doc_id"
 
         # Clear surviving sentence references once before deleting sentence rows.
         session.execute(
@@ -2342,8 +2347,7 @@ class ProcessService:
         )
         session.execute(
             text(
-                f"DELETE FROM sentence_pronunciation "
-                f"WHERE sentence_id IN ({sentence_ids_sql})"
+                f"DELETE FROM sentence_pronunciation " f"WHERE sentence_id IN ({sentence_ids_sql})"
             ),
             params,
         )
@@ -2361,7 +2365,7 @@ class ProcessService:
         use_gpu: bool = False,
         use_mock: bool = False,
         track_run: bool = True,
-        batch_run_id: Optional[int] = None,
+        batch_run_id: int | None = None,
     ) -> bool:
         """
         Re-process a document with automatic delta statistics update.
@@ -2392,14 +2396,14 @@ class ProcessService:
                 logger.error(f"Document {doc_id} not found")
                 return False
 
-            if doc.status not in ('processed', 'failed'):
+            if doc.status not in ("processed", "failed"):
                 logger.warning(f"Document {doc_id} is not processed (status: {doc.status})")
                 # Allow reprocessing anyway (for failed docs)
 
             logger.info(f"Re-processing document {doc_id}: {doc.file_name}")
 
             # Step 1: Set status to 'processing'
-            doc.status = 'processing'
+            doc.status = "processing"
             session.flush()
 
             # Step 2: Remove old statistics
@@ -2407,7 +2411,7 @@ class ProcessService:
                 logger.error(f"Failed to remove old stats for document {doc_id}")
                 session.rollback()
                 doc = session.get(SourceDocument, int(doc_id))
-                doc.status = 'failed'
+                doc.status = "failed"
                 doc.error_message = "Failed to remove old statistics"
                 session.commit()
                 return False
@@ -2419,7 +2423,7 @@ class ProcessService:
             # Step 4: Run NLP processing
             # Note: process_document will handle the rest
             # We need to temporarily reset status to 'imported' so process_document works
-            doc.status = 'imported'
+            doc.status = "imported"
             doc.processed_at = None
             doc.snapshot_sentence_count = 0
             doc.snapshot_stats_state = "unknown"
@@ -2456,7 +2460,7 @@ class ProcessService:
             # Set status to failed
             doc = session.get(SourceDocument, doc_id)
             if doc:
-                doc.status = 'failed'
+                doc.status = "failed"
                 doc.error_message = f"Re-processing error: {str(e)}"
                 session.commit()
             return False
@@ -2464,10 +2468,10 @@ class ProcessService:
     def bulk_reprocess(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Re-process multiple documents with delta statistics.
 

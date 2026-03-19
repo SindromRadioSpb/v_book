@@ -5,6 +5,7 @@ Tests ProjectService reference corpus behavior:
 - create_project() auto-assign reference
 - delete_project() guard against reference corpus deletion
 """
+
 import pytest
 import tempfile
 import sqlite3
@@ -83,9 +84,7 @@ def library(session):
 # ============================================================================
 
 
-def test_get_default_reference_project_prefers_is_general_corpus(
-    project_service, session, library
-):
+def test_get_default_reference_project_prefers_is_general_corpus(project_service, session, library):
     """get_default_reference_project() prefers is_general_corpus=1."""
     # Create projects: one with is_general_corpus=1, one by name
     ref_corpus = DictProject(
@@ -108,9 +107,7 @@ def test_get_default_reference_project_prefers_is_general_corpus(
     assert result == ref_corpus.project_id
 
 
-def test_get_default_reference_project_fallback_by_name(
-    project_service, session, library
-):
+def test_get_default_reference_project_fallback_by_name(project_service, session, library):
     """get_default_reference_project() falls back to 'Hebrew Wikipedia Baseline' by name."""
     # Create projects: no is_general_corpus=1, but one named HEWiki
     proj_a = DictProject(
@@ -132,9 +129,7 @@ def test_get_default_reference_project_fallback_by_name(
     assert result == hewiki.project_id
 
 
-def test_get_default_reference_project_deterministic_lowest_id(
-    project_service, session, library
-):
+def test_get_default_reference_project_deterministic_lowest_id(project_service, session, library):
     """get_default_reference_project() returns lowest project_id when multiple is_general_corpus=1."""
     # Create multiple reference corpora
     ref1 = DictProject(
@@ -158,9 +153,7 @@ def test_get_default_reference_project_deterministic_lowest_id(
     assert result == expected
 
 
-def test_get_default_reference_project_returns_none_if_not_found(
-    project_service, session, library
-):
+def test_get_default_reference_project_returns_none_if_not_found(project_service, session, library):
     """get_default_reference_project() returns None if no reference corpus exists."""
     # Create project without is_general_corpus=1 or HEWiki name
     proj = DictProject(
@@ -181,9 +174,7 @@ def test_get_default_reference_project_returns_none_if_not_found(
 # ============================================================================
 
 
-def test_create_project_auto_assign_reference_by_default(
-    project_service, session, library
-):
+def test_create_project_auto_assign_reference_by_default(project_service, session, library):
     """create_project() auto-assigns reference corpus by default."""
     # Create reference corpus
     ref = DictProject(
@@ -207,9 +198,7 @@ def test_create_project_auto_assign_reference_by_default(
     assert new_proj.general_corpus_id == ref.project_id
 
 
-def test_create_project_can_disable_auto_assign_reference(
-    project_service, session, library
-):
+def test_create_project_can_disable_auto_assign_reference(project_service, session, library):
     """create_project() respects auto_assign_reference=False."""
     # Create reference corpus
     ref = DictProject(
@@ -238,9 +227,7 @@ def test_create_project_can_disable_auto_assign_reference(
 # ============================================================================
 
 
-def test_delete_project_blocks_reference_corpus_deletion(
-    project_service, session, library
-):
+def test_delete_project_blocks_reference_corpus_deletion(project_service, session, library):
     """delete_project() raises error when attempting to delete reference corpus."""
     # Create reference corpus
     ref = DictProject(
@@ -264,9 +251,7 @@ def test_delete_project_blocks_reference_corpus_deletion(
     assert session.get(DictProject, ref.project_id) is not None
 
 
-def test_delete_project_allows_normal_project_deletion(
-    project_service, session, library
-):
+def test_delete_project_allows_normal_project_deletion(project_service, session, library):
     """delete_project() allows deletion of normal projects."""
     # Create normal project
     proj = DictProject(

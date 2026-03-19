@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -24,8 +23,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.infra.settings import SettingsService
 from app.infra.resource_paths import ResourcePaths
+from app.infra.settings import SettingsService
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.workers import PhonikudHealthCheckWorker, PronunciationBootstrapWorker
 
@@ -33,7 +32,7 @@ from app.ui.workers import PhonikudHealthCheckWorker, PronunciationBootstrapWork
 class PronunciationBootstrapDialog(QDialog):
     """Premium UI gate for offline pronunciation bootstrap."""
 
-    def __init__(self, parent=None, *, selected_items: Optional[List[Dict[str, str]]] = None):
+    def __init__(self, parent=None, *, selected_items: list[dict[str, str]] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Pronunciation Bootstrap (Phonikud)")
         self.setMinimumWidth(760)
@@ -47,8 +46,10 @@ class PronunciationBootstrapDialog(QDialog):
         self._load_settings()
 
     @staticmethod
-    def _normalize_selected_items(selected_items: Optional[List[Dict[str, str]]]) -> List[Dict[str, str]]:
-        normalized: List[Dict[str, str]] = []
+    def _normalize_selected_items(
+        selected_items: list[dict[str, str]] | None
+    ) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
         for raw in selected_items or []:
             src_norm = str(raw.get("src_norm") or "").strip()
             src_text = str(raw.get("src_text") or "").strip()
@@ -224,19 +225,33 @@ class PronunciationBootstrapDialog(QDialog):
             self.model_path_edit.setText(directory)
 
     def _load_settings(self) -> None:
-        self.enabled_checkbox.setChecked(self.settings.get_bool("pronunciation/phonikud/enabled", True))
-        self.model_path_edit.setText(self.settings.get_string("pronunciation/phonikud/model_path", ""))
+        self.enabled_checkbox.setChecked(
+            self.settings.get_bool("pronunciation/phonikud/enabled", True)
+        )
+        self.model_path_edit.setText(
+            self.settings.get_string("pronunciation/phonikud/model_path", "")
+        )
 
-        mode = (self.settings.get_string("pronunciation/phonikud/last_health_mode", "") or "").strip()
-        status = (self.settings.get_string("pronunciation/phonikud/last_health_status", "") or "").strip()
-        details = (self.settings.get_string("pronunciation/phonikud/last_health_details", "") or "").strip()
+        mode = (
+            self.settings.get_string("pronunciation/phonikud/last_health_mode", "") or ""
+        ).strip()
+        status = (
+            self.settings.get_string("pronunciation/phonikud/last_health_status", "") or ""
+        ).strip()
+        details = (
+            self.settings.get_string("pronunciation/phonikud/last_health_details", "") or ""
+        ).strip()
         if mode:
-            self._render_health({"mode": mode, "status": status or "error", "details": details, "samples": []})
+            self._render_health(
+                {"mode": mode, "status": status or "error", "details": details, "samples": []}
+            )
 
     def _save_settings(self) -> None:
         model_path = self._sanitize_model_path(self.model_path_edit.text())
         self.model_path_edit.setText(model_path)
-        self.settings.set_value("pronunciation/phonikud/enabled", bool(self.enabled_checkbox.isChecked()))
+        self.settings.set_value(
+            "pronunciation/phonikud/enabled", bool(self.enabled_checkbox.isChecked())
+        )
         self.settings.set_value("pronunciation/phonikud/model_path", model_path)
         self.settings.sync()
 
@@ -286,10 +301,16 @@ class PronunciationBootstrapDialog(QDialog):
 
     def _on_health_finished(self, report: dict) -> None:
         self._render_health(report)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        self.settings.set_value("pronunciation/phonikud/last_health_status", str(report.get("status") or "error"))
-        self.settings.set_value("pronunciation/phonikud/last_health_mode", str(report.get("mode") or "error"))
-        self.settings.set_value("pronunciation/phonikud/last_health_details", str(report.get("details") or ""))
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_status", str(report.get("status") or "error")
+        )
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_mode", str(report.get("mode") or "error")
+        )
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_details", str(report.get("details") or "")
+        )
         self.settings.set_value("pronunciation/phonikud/last_health_checked_at", now)
         self.settings.set_json("pronunciation/phonikud/last_health_report", report)
         self.settings.sync()
@@ -320,7 +341,8 @@ class PronunciationBootstrapDialog(QDialog):
 
         if samples:
             rendered = " | ".join(
-                f"{str(item.get('input') or '')} -> {str(item.get('output') or '')}" for item in samples[:2]
+                f"{str(item.get('input') or '')} -> {str(item.get('output') or '')}"
+                for item in samples[:2]
             )
             self.health_samples_label.setText(rendered)
         else:
@@ -336,11 +358,15 @@ class PronunciationBootstrapDialog(QDialog):
             or self.include_ud_cb.isChecked()
             or self.include_sentences_cb.isChecked()
         ):
-            QMessageBox.warning(self, "Pronunciation Bootstrap", "Select at least one source group.")
+            QMessageBox.warning(
+                self, "Pronunciation Bootstrap", "Select at least one source group."
+            )
             return
 
         self._save_settings()
-        health_status = (self.settings.get_string("pronunciation/phonikud/last_health_status", "") or "").strip()
+        health_status = (
+            self.settings.get_string("pronunciation/phonikud/last_health_status", "") or ""
+        ).strip()
         if health_status == "fallback":
             answer = QMessageBox.question(
                 self,
@@ -435,13 +461,15 @@ class PronunciationBootstrapDialog(QDialog):
 
     def _on_bootstrap_error(self, error_msg: str, progress_dialog: BatchProgressDialogV3) -> None:
         progress_dialog.reject()
-        QMessageBox.warning(self, "Bootstrap Failed", f"Pronunciation bootstrap failed:\n{error_msg}")
+        QMessageBox.warning(
+            self, "Bootstrap Failed", f"Pronunciation bootstrap failed:\n{error_msg}"
+        )
 
 
 def show_pronunciation_bootstrap_dialog(
     *,
     parent=None,
-    selected_items: Optional[List[Dict[str, str]]] = None,
+    selected_items: list[dict[str, str]] | None = None,
 ) -> bool:
     dialog = PronunciationBootstrapDialog(parent=parent, selected_items=selected_items)
     dialog.exec()

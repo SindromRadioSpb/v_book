@@ -1,52 +1,52 @@
 ﻿"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
+
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional, Dict
 
+from PyQt6.QtCore import QItemSelectionModel, QMimeData, QModelIndex, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QApplication,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QTableView,
-    QLabel,
-    QFileDialog,
     QCheckBox,
-    QProgressBar,
-    QLineEdit,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QProgressDialog,
+    QPushButton,
     QSpinBox,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import QItemSelectionModel, QModelIndex, Qt, pyqtSignal, QMimeData, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 
-from app.services.db_service import DBService
-from app.services.project_service import ProjectService
-from app.services.ingest_service import IngestService
-from app.services.document_service import DocumentService, validate_link_url, VALID_LEVELS
 from app.infra.settings import SettingsService
+from app.services.db_service import DBService
+from app.services.document_service import DocumentService
+from app.services.ingest_service import IngestService
+from app.services.project_service import ProjectService
+from app.ui.dialogs import show_error, show_info, show_warning
+from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
 from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
+from app.ui.widgets.snapshot_readiness_panel import SnapshotReadinessPanel
 from app.ui.workers import (
-    IngestWorker,
-    ProcessWorker,
-    DocumentsPageWorker,
     DocumentDeleteWorker,
+    DocumentsPageWorker,
+    IngestWorker,
     NLPEngineReadinessWorker,
+    ProcessWorker,
     SnapshotReadinessWorker,
 )
-from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
-from app.ui.dialogs import show_error, show_info, show_warning
-from app.ui.widgets.snapshot_readiness_panel import SnapshotReadinessPanel
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class EditMetadataDialog(QDialog):
 class DeleteDocumentsConfirmDialog(QDialog):
     """Scrollable confirmation dialog for destructive document deletion."""
 
-    def __init__(self, doc_names: List[str], parent=None):
+    def __init__(self, doc_names: list[str], parent=None):
         super().__init__(parent)
         self.doc_names = list(doc_names)
         self.setWindowTitle("Confirm Delete")
@@ -132,7 +132,9 @@ class DeleteDocumentsConfirmDialog(QDialog):
         warning.setWordWrap(True)
         layout.addWidget(warning)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.Cancel
+        )
         yes_button = buttons.button(QDialogButtonBox.StandardButton.Yes)
         if yes_button is not None:
             yes_button.setText("Delete")
@@ -216,16 +218,16 @@ class DocumentsView(QWidget):
 
         self.current_worker = None
         self.process_worker = None
-        self.process_progress_dialog: Optional[NLPProcessProgressDialog] = None
+        self.process_progress_dialog: NLPProcessProgressDialog | None = None
         self._process_worker_active = False
-        self.documents_worker: Optional[DocumentsPageWorker] = None
-        self.delete_worker: Optional[DocumentDeleteWorker] = None
-        self.delete_progress: Optional[QProgressDialog] = None
-        self.nlp_engine_check_worker: Optional[NLPEngineReadinessWorker] = None
-        self.snapshot_readiness_worker: Optional[SnapshotReadinessWorker] = None
-        self.snapshot_readiness_panel: Optional[SnapshotReadinessPanel] = None
-        self.nlp_engine_status_label: Optional[QLabel] = None
-        self.gpu_checkbox: Optional[QCheckBox] = None
+        self.documents_worker: DocumentsPageWorker | None = None
+        self.delete_worker: DocumentDeleteWorker | None = None
+        self.delete_progress: QProgressDialog | None = None
+        self.nlp_engine_check_worker: NLPEngineReadinessWorker | None = None
+        self.snapshot_readiness_worker: SnapshotReadinessWorker | None = None
+        self.snapshot_readiness_panel: SnapshotReadinessPanel | None = None
+        self.nlp_engine_status_label: QLabel | None = None
+        self.gpu_checkbox: QCheckBox | None = None
 
         self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
@@ -237,7 +239,7 @@ class DocumentsView(QWidget):
         self._active_snapshot_request_id = 0
         self._snapshot_refresh_pending = False
         self._snapshot_refresh_started_at = 0.0
-        self._snapshot_summary_cache: Dict[int, object] = {}
+        self._snapshot_summary_cache: dict[int, object] = {}
 
         # Pagination + sorting state (server-side).
         self.current_page = 1
@@ -262,7 +264,7 @@ class DocumentsView(QWidget):
             self.sort_column = "imported_at"
         if self.sort_direction not in ("asc", "desc"):
             self.sort_direction = "desc"
-        self.current_filters: Dict[str, Optional[str]] = {}
+        self.current_filters: dict[str, str | None] = {}
 
         # Debounce timer for search/filter
         self._filter_timer = QTimer()
@@ -360,7 +362,9 @@ class DocumentsView(QWidget):
         self.gpu_checkbox.setChecked(True)
         self.gpu_checkbox.setVisible(False)
         self.gpu_checkbox.setEnabled(False)
-        self.gpu_checkbox.setToolTip("GPU option appears after NLP engine readiness check completes.")
+        self.gpu_checkbox.setToolTip(
+            "GPU option appears after NLP engine readiness check completes."
+        )
         nlp_layout.addWidget(self.gpu_checkbox)
 
         nlp_layout.addStretch()
@@ -412,18 +416,18 @@ class DocumentsView(QWidget):
             table_id="documents_view",
             table=self.docs_table,
             default_widths={
-                0: 60,   # ID
+                0: 60,  # ID
                 1: 220,  # File Name
-                2: 90,   # Size
+                2: 90,  # Size
                 3: 110,  # Status
-                4: 90,   # Sentences
-                5: 90,   # Tokens
+                4: 90,  # Sentences
+                5: 90,  # Tokens
                 6: 130,  # Imported
                 7: 260,  # Path
                 8: 120,  # Tag
                 9: 180,  # Link
                 10: 80,  # Level
-                11: 160, # Topic
+                11: 160,  # Topic
             },
         )
         self.table_layout_controller.install()
@@ -599,7 +603,11 @@ class DocumentsView(QWidget):
         self.process_btn.setToolTip(self._process_tooltip_for_current_engine())
         self.reprocess_btn.setToolTip(self._reprocess_tooltip_for_current_engine())
 
-        if self.is_reference_corpus or self._process_worker_active or self._nlp_engine_check_pending:
+        if (
+            self.is_reference_corpus
+            or self._process_worker_active
+            or self._nlp_engine_check_pending
+        ):
             self.process_btn.setEnabled(False)
             self.reprocess_btn.setEnabled(False)
             return
@@ -654,14 +662,15 @@ class DocumentsView(QWidget):
                 project = self.project_service.get_project(session, self.project_id)
                 if project:
                     self.is_reference_corpus = bool(
-                        project.is_general_corpus
-                        or getattr(project, "is_reference", 0)
+                        project.is_general_corpus or getattr(project, "is_reference", 0)
                     )
 
                 corpus = self.project_service.get_default_corpus(session, self.project_id)
                 if corpus:
                     self.corpus_id = corpus.corpus_id
-                    logger.info(f"Loaded corpus: {corpus.name} (ID: {corpus.corpus_id}, Reference: {self.is_reference_corpus})")
+                    logger.info(
+                        f"Loaded corpus: {corpus.name} (ID: {corpus.corpus_id}, Reference: {self.is_reference_corpus})"
+                    )
                 else:
                     logger.error(f"No corpus found for project {self.project_id}")
 
@@ -711,7 +720,9 @@ class DocumentsView(QWidget):
         worker.status.connect(self.on_snapshot_readiness_status)
         worker.summary_ready.connect(self.on_snapshot_readiness_loaded)
         worker.error.connect(self.on_snapshot_readiness_error)
-        worker.finished.connect(lambda current=worker: self._on_snapshot_readiness_worker_finished(current))
+        worker.finished.connect(
+            lambda current=worker: self._on_snapshot_readiness_worker_finished(current)
+        )
         worker.start()
 
     def on_snapshot_readiness_status(self, request_id: int, status_text: str) -> None:
@@ -768,7 +779,11 @@ class DocumentsView(QWidget):
         self.status_label.setText("Coverage CLI copied to clipboard.")
 
     def _open_snapshot_runbook(self) -> None:
-        docs_path = Path(__file__).resolve().parents[1].parent / "docs" / "NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md"
+        docs_path = (
+            Path(__file__).resolve().parents[1].parent
+            / "docs"
+            / "NLP_SNAPSHOT_BACKFILL_DECISION_GATE.md"
+        )
         if not docs_path.exists():
             show_info(self, "Runbook", f"Open manually:\n{docs_path}")
             return
@@ -826,7 +841,7 @@ class DocumentsView(QWidget):
         self.tag_filter_edit.blockSignals(False)
         self.reload_documents(reset_page=True)
 
-    def build_filters(self) -> Dict[str, Optional[str]]:
+    def build_filters(self) -> dict[str, str | None]:
         """Build global SQL filters from current controls."""
         title_search = self.title_search_edit.text().strip() or None
         tag_filter = self.tag_filter_edit.text().strip() or None
@@ -1016,6 +1031,7 @@ class DocumentsView(QWidget):
         # Safety: re-validate scheme before opening
         try:
             from urllib.parse import urlparse
+
             parsed = urlparse(url)
             if parsed.scheme not in ("http", "https"):
                 show_error(self, "Unsafe Link", f"Link scheme '{parsed.scheme}' is not allowed.")
@@ -1023,8 +1039,9 @@ class DocumentsView(QWidget):
         except Exception:
             show_error(self, "Invalid Link", "Could not parse link URL.")
             return
-        from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
         QDesktopServices.openUrl(QUrl(url))
 
     def _configure_reference_corpus_ui(self):
@@ -1075,15 +1092,12 @@ class DocumentsView(QWidget):
                 "Reference Corpus",
                 "Cannot add documents to reference corpus.\n\n"
                 "Reference corpora are read-only for document operations.\n"
-                "You can still browse documents and manage translations."
+                "You can still browse documents and manage translations.",
             )
             return
 
         file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Files",
-            "",
-            "Supported Files (*.txt *.docx *.pptx *.pdf);;All Files (*.*)"
+            self, "Select Files", "", "Supported Files (*.txt *.docx *.pptx *.pdf);;All Files (*.*)"
         )
 
         if file_paths:
@@ -1098,28 +1112,25 @@ class DocumentsView(QWidget):
                 "Reference Corpus",
                 "Cannot add documents to reference corpus.\n\n"
                 "Reference corpora are read-only for document operations.\n"
-                "You can still browse documents and manage translations."
+                "You can still browse documents and manage translations.",
             )
             return
 
-        folder_path = QFileDialog.getExistingDirectory(
-            self,
-            "Select Folder"
-        )
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Folder")
 
         if folder_path:
             folder = Path(folder_path)
             # Find all supported files
             files = []
-            for ext in ['.txt', '.docx', '.pptx', '.pdf']:
-                files.extend(folder.rglob(f'*{ext}'))
+            for ext in [".txt", ".docx", ".pptx", ".pdf"]:
+                files.extend(folder.rglob(f"*{ext}"))
 
             if files:
                 self.import_files(files)
             else:
                 show_info(self, "Info", "No supported files found in folder")
 
-    def import_files(self, file_paths: List[Path]):
+    def import_files(self, file_paths: list[Path]):
         """Import files using background worker."""
         if not self.corpus_id:
             show_error(self, "Error", "No corpus available")
@@ -1133,17 +1144,14 @@ class DocumentsView(QWidget):
 
         # PERF-SCALE PATCH-K: throttle check — block concurrent heavy ingest.
         from app.services.pipeline_throttler import PipelineThrottler
+
         if not PipelineThrottler.instance().check_and_warn(
             "ingest", parent=self, operation_label=f"Import ({len(file_paths)} files)"
         ):
             return
 
         # Create worker
-        self.current_worker = IngestWorker(
-            self.corpus_id,
-            file_paths,
-            use_ocr
-        )
+        self.current_worker = IngestWorker(self.corpus_id, file_paths, use_ocr)
         self.current_worker.progress.connect(self.on_import_progress)
         self.current_worker.finished.connect(self.on_import_finished)
         self.current_worker.error.connect(self.on_import_error)
@@ -1180,7 +1188,7 @@ class DocumentsView(QWidget):
             show_error(
                 self,
                 "Import Errors",
-                f"{error_count} files failed to import:\n\n" + "\n".join(errors[:5])
+                f"{error_count} files failed to import:\n\n" + "\n".join(errors[:5]),
             )
 
     def on_import_error(self, error_msg: str):
@@ -1204,7 +1212,7 @@ class DocumentsView(QWidget):
                 dto = self._docs_model.get_dto(idx.row())
                 if dto is None:
                     continue
-                if dto.status in ('processed', 'failed'):
+                if dto.status in ("processed", "failed"):
                     has_processed = True
                 else:
                     has_unprocessed = True
@@ -1234,7 +1242,7 @@ class DocumentsView(QWidget):
             doc_names.append(str(dto.file_name))
         return doc_ids, doc_names
 
-    def _confirm_delete_documents(self, doc_names: List[str]) -> bool:
+    def _confirm_delete_documents(self, doc_names: list[str]) -> bool:
         """Show destructive confirmation dialog with the full File Name list."""
         if not doc_names:
             return False
@@ -1250,14 +1258,16 @@ class DocumentsView(QWidget):
             self.delete_worker.deleteLater()
             self.delete_worker = None
 
-    def _start_delete_documents(self, doc_ids: List[int], doc_names: List[str]) -> None:
+    def _start_delete_documents(self, doc_ids: list[int], doc_names: list[str]) -> None:
         """Run document deletion in background and refresh once on completion."""
         if self.delete_worker and self.delete_worker.isRunning():
             show_warning(self, "Delete In Progress", "Document deletion is already running.")
             return
 
         self.delete_btn.setEnabled(False)
-        self.delete_progress = QProgressDialog("Deleting documents...", "", 0, max(1, len(doc_ids)), self)
+        self.delete_progress = QProgressDialog(
+            "Deleting documents...", "", 0, max(1, len(doc_ids)), self
+        )
         self.delete_progress.setWindowTitle("Delete Documents")
         self.delete_progress.setCancelButton(None)
         self.delete_progress.setMinimumDuration(0)
@@ -1278,7 +1288,7 @@ class DocumentsView(QWidget):
         self.delete_progress.setValue(int(current))
         self.delete_progress.setLabelText(f"Deleting {file_name} ({current}/{total})")
 
-    def _on_delete_finished(self, result: dict, doc_names: List[str]) -> None:
+    def _on_delete_finished(self, result: dict, doc_names: list[str]) -> None:
         self._cleanup_delete_worker()
         deleted = int(result.get("deleted", 0) or 0)
         failed = int(result.get("failed", 0) or 0)
@@ -1312,7 +1322,8 @@ class DocumentsView(QWidget):
             return
         selection_model.select(
             index,
-            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect
+            | QItemSelectionModel.SelectionFlag.Rows,
         )
         self.docs_table.setCurrentIndex(index)
 
@@ -1321,6 +1332,7 @@ class DocumentsView(QWidget):
         # PERF-SCALE PATCH-J: hard block for reference corpus — CLI only.
         if self.is_reference_corpus:
             from app.ui.helpers import show_warning
+
             show_warning(
                 self,
                 "Reference Corpus — CLI Only",
@@ -1351,7 +1363,7 @@ class DocumentsView(QWidget):
             dto = self._docs_model.get_dto(row)
             if dto is None:
                 continue
-            if dto.status in ('processed', 'failed'):
+            if dto.status in ("processed", "failed"):
                 processed_docs.append(dto.file_name)
             else:
                 doc_ids.append(dto.doc_id)
@@ -1359,9 +1371,9 @@ class DocumentsView(QWidget):
         # Warn if trying to process already-processed documents
         if processed_docs:
             from PyQt6.QtWidgets import QMessageBox
-            msg = (
-                f"{len(processed_docs)} document(s) already processed:\n\n" +
-                "\n".join(f"вЂў {name}" for name in processed_docs[:5])
+
+            msg = f"{len(processed_docs)} document(s) already processed:\n\n" + "\n".join(
+                f"вЂў {name}" for name in processed_docs[:5]
             )
             if len(processed_docs) > 5:
                 msg += f"\n... and {len(processed_docs) - 5} more"
@@ -1369,10 +1381,7 @@ class DocumentsView(QWidget):
             msg += "\n\nUse 'Re-process' button instead to re-process these documents."
 
             reply = QMessageBox.warning(
-                self,
-                "Documents Already Processed",
-                msg,
-                QMessageBox.StandardButton.Ok
+                self, "Documents Already Processed", msg, QMessageBox.StandardButton.Ok
             )
             return
 
@@ -1392,8 +1401,11 @@ class DocumentsView(QWidget):
 
         # Build confirmation message
         from PyQt6.QtWidgets import QMessageBox
+
         if use_mock:
-            engine_info = "Note: Using Mock engine (rule-based).\nFor production accuracy, install Stanza."
+            engine_info = (
+                "Note: Using Mock engine (rule-based).\nFor production accuracy, install Stanza."
+            )
         else:
             engine_info = f"Using Stanza engine (GPU: {'Yes' if use_gpu else 'No'}).\nThis will provide accurate lemmatization and POS tagging."
 
@@ -1401,15 +1413,15 @@ class DocumentsView(QWidget):
             self,
             "Confirm Processing",
             f"Process {len(doc_ids)} document(s) with NLP?\n\n{engine_info}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             # PERF-SCALE PATCH-K: throttle check — block concurrent NLP runs.
             from app.services.pipeline_throttler import PipelineThrottler
+
             if not PipelineThrottler.instance().check_and_warn(
-                "nlp_process", parent=self,
-                operation_label=f"NLP Process ({len(doc_ids)} docs)"
+                "nlp_process", parent=self, operation_label=f"NLP Process ({len(doc_ids)} docs)"
             ):
                 return
 
@@ -1548,7 +1560,7 @@ class DocumentsView(QWidget):
             show_warning(
                 self,
                 f"{operation_label} Warnings",
-                f"{error_count} document(s) failed to process. Check logs for details."
+                f"{error_count} document(s) failed to process. Check logs for details.",
             )
 
         self._cleanup_process_worker()
@@ -1582,6 +1594,7 @@ class DocumentsView(QWidget):
         # PERF-SCALE PATCH-J: hard block for reference corpus — CLI only.
         if self.is_reference_corpus:
             from app.ui.helpers import show_warning
+
             show_warning(
                 self,
                 "Reference Corpus — CLI Only",
@@ -1622,7 +1635,7 @@ class DocumentsView(QWidget):
             use_gpu = True
 
         # Build confirmation message
-        from PyQt6.QtWidgets import QMessageBox
+
         if use_mock:
             engine_info = "Note: Using Mock engine (rule-based)."
         else:
@@ -1637,15 +1650,15 @@ class DocumentsView(QWidget):
             f"- Remove old statistics\n"
             f"- Re-run NLP analysis\n"
             f"- Update Dictionary with new results",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             # PERF-SCALE PATCH-K: throttle check — block concurrent NLP runs.
             from app.services.pipeline_throttler import PipelineThrottler
+
             if not PipelineThrottler.instance().check_and_warn(
-                "nlp_process", parent=self,
-                operation_label=f"NLP Re-process ({len(doc_ids)} docs)"
+                "nlp_process", parent=self, operation_label=f"NLP Re-process ({len(doc_ids)} docs)"
             ):
                 return
 
@@ -1673,6 +1686,7 @@ class DocumentsView(QWidget):
                 text = self.ingest_service.get_document_text(session, doc_id)
                 if text:
                     from app.ui.dialogs import TextViewDialog
+
                     dialog = TextViewDialog(text, self)
                     dialog.exec()
                 else:
@@ -1684,7 +1698,11 @@ class DocumentsView(QWidget):
     def on_delete(self):
         """Delete selected document(s) via background worker."""
         if self.process_worker and self.process_worker.isRunning():
-            show_error(self, "Processing In Progress", "Cannot delete documents while NLP processing is running.")
+            show_error(
+                self,
+                "Processing In Progress",
+                "Cannot delete documents while NLP processing is running.",
+            )
             return
 
         if self.is_reference_corpus:
@@ -1761,6 +1779,7 @@ class DocumentsView(QWidget):
 
         try:
             from app.services.document_service import validate_link_url
+
             # Validate link_url before saving
             validate_link_url(new_link)
             with self.db_service.get_session() as session:
@@ -1817,7 +1836,7 @@ class DocumentsView(QWidget):
                 "Reference Corpus",
                 "Cannot add documents to reference corpus.\n\n"
                 "Reference corpora are read-only for document operations.\n"
-                "You can still browse documents and manage translations."
+                "You can still browse documents and manage translations.",
             )
             event.ignore()
             return
@@ -1863,6 +1882,7 @@ class DocumentsView(QWidget):
                             highlight_text = None
                             if sentence_id:
                                 from app.infra.sa_models import DocumentSentence
+
                                 sentence = session.get(DocumentSentence, sentence_id)
                                 if sentence:
                                     highlight_text = sentence.text
@@ -1870,11 +1890,12 @@ class DocumentsView(QWidget):
 
                             # Open text viewer dialog
                             from app.ui.dialogs import TextViewDialog
+
                             dialog = TextViewDialog(text, self, highlight_text=highlight_text)
                             dialog.exec()
                         else:
                             logger.warning(f"No text available for document {doc_id}")
-                except Exception as e:
+                except Exception:
                     logger.exception(f"Failed to open text viewer for document {doc_id}")
 
                 break
@@ -1927,4 +1948,3 @@ class DocumentsView(QWidget):
                 return
 
         self._cleanup_process_worker()
-

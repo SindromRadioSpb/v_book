@@ -259,6 +259,7 @@ class TestFileSizeDoS:
         try:
             with pytest.raises(ValidationError) as exc_info:
                 from app.infra.security import MAX_DOCUMENT_SIZE
+
                 validate_file_size(temp_path, MAX_DOCUMENT_SIZE)
 
             assert "too large" in str(exc_info.value).lower()
@@ -274,6 +275,7 @@ class TestFileSizeDoS:
         try:
             # Should not raise
             from app.infra.security import MAX_DOCUMENT_SIZE
+
             validate_file_size(temp_path, MAX_DOCUMENT_SIZE)
         finally:
             temp_path.unlink()

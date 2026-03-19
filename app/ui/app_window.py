@@ -1,13 +1,13 @@
 """Main application window."""
+
 import logging
 import subprocess
 from pathlib import Path
 from time import monotonic
-from typing import Dict, List, Optional, Set
 
-from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStackedWidget, QMenuBar, QLabel
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QShortcut, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
+from PyQt6.QtWidgets import QApplication, QDockWidget, QLabel, QMainWindow
 
 from app.infra.db_path_resolver import (
     STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
@@ -16,21 +16,21 @@ from app.infra.db_path_resolver import (
 from app.infra.settings import SettingsService
 from app.services.audio_player_service import AudioPlayerService
 from app.services.db_service import DBService
-from app.ui.workspace_manager import WorkspaceManager
-from app.ui.command_palette import ActionsRegistry, ActionSpec, CommandPaletteDialog
-from app.ui.project_dashboard import ProjectDashboard
-from app.ui.project_view import ProjectView
-from app.ui.verification_panel import VerificationPanel
-from app.ui.translation_management_panel import TranslationManagementPanel
-from app.ui.user_dictionaries_view import UserDictionariesView
+from app.services.project_service import ProjectService
+from app.ui.command_palette import ActionSpec, ActionsRegistry, CommandPaletteDialog
 from app.ui.coverage_panel import CoveragePanel
 from app.ui.import_wizard import ImportWizard
+from app.ui.project_dashboard import ProjectDashboard
+from app.ui.project_view import ProjectView
+from app.ui.translation_management_panel import TranslationManagementPanel
+from app.ui.user_dictionaries_view import UserDictionariesView
+from app.ui.verification_panel import VerificationPanel
 from app.ui.widgets.audio_player_panel import AudioPlayerPanel
-from app.services.project_service import ProjectService
+from app.ui.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 
-_HEBREW_SHORTCUT_KEY_MAP: Dict[str, str] = {
+_HEBREW_SHORTCUT_KEY_MAP: dict[str, str] = {
     "A": "ש",
     "B": "נ",
     "C": "ב",
@@ -49,7 +49,7 @@ _HEBREW_SHORTCUT_KEY_MAP: Dict[str, str] = {
 class AppWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self, *, startup_actions: Optional[List[str]] = None):
+    def __init__(self, *, startup_actions: list[str] | None = None):
         super().__init__()
         self.setWindowTitle("HDLE Premium - Hebraic Dynamic Lexicon Engine")
         self.setMinimumSize(1200, 800)
@@ -59,17 +59,19 @@ class AppWindow(QMainWindow):
         self.project_service = ProjectService()
 
         # Workspace identity/lifecycle registry.
-        self._workspace_instances: Dict[str, object] = {}
-        self._project_instances: Dict[int, ProjectView] = {}
+        self._workspace_instances: dict[str, object] = {}
+        self._project_instances: dict[int, ProjectView] = {}
 
         # Current project source-of-truth.
-        self.current_project_id: Optional[int] = None
+        self.current_project_id: int | None = None
         self.current_project_name: str = ""
-        self._recent_project_ids: List[int] = []
-        self._pending_project_tab: Optional[str] = None
-        self._workspace_history: List[str] = []
+        self._recent_project_ids: list[int] = []
+        self._pending_project_tab: str | None = None
+        self._workspace_history: list[str] = []
         self._badge_error_logged_at_ms: int = 0
-        self._startup_actions = [str(v or "").strip().lower() for v in (startup_actions or []) if str(v or "").strip()]
+        self._startup_actions = [
+            str(v or "").strip().lower() for v in (startup_actions or []) if str(v or "").strip()
+        ]
         self._health_check_worker = None
 
         self.init_ui()
@@ -84,7 +86,7 @@ class AppWindow(QMainWindow):
             return
         self.statusBar().showMessage(text, timeout_ms)
 
-    def _expand_layout_shortcuts(self, primary_sequence: str) -> List[QKeySequence]:
+    def _expand_layout_shortcuts(self, primary_sequence: str) -> list[QKeySequence]:
         """Return shortcut list for EN + Hebrew layouts when applicable."""
         primary = str(primary_sequence or "").strip()
         if not primary:
@@ -108,8 +110,8 @@ class AppWindow(QMainWindow):
             return
         action.setShortcuts(seqs)
 
-    def _create_layout_shortcuts(self, primary_sequence: str, callback) -> List[QShortcut]:
-        shortcuts: List[QShortcut] = []
+    def _create_layout_shortcuts(self, primary_sequence: str, callback) -> list[QShortcut]:
+        shortcuts: list[QShortcut] = []
         for seq in self._expand_layout_shortcuts(primary_sequence):
             sc = QShortcut(seq, self)
             sc.activated.connect(callback)
@@ -124,7 +126,7 @@ class AppWindow(QMainWindow):
                 return True
         return False
 
-    def _normalize_optional_project_id(self, project_id: Optional[int]) -> Optional[int]:
+    def _normalize_optional_project_id(self, project_id: int | None) -> int | None:
         if isinstance(project_id, bool):
             return None
         if project_id is None:
@@ -192,7 +194,7 @@ class AppWindow(QMainWindow):
         except Exception:
             pass
 
-    def _is_valid_project_id(self, project_id: Optional[int]) -> bool:
+    def _is_valid_project_id(self, project_id: int | None) -> bool:
         if project_id is None:
             return False
         try:
@@ -205,11 +207,11 @@ class AppWindow(QMainWindow):
         except Exception:
             return False
 
-    def _lookup_project_name(self, project_id: Optional[int]) -> str:
+    def _lookup_project_name(self, project_id: int | None) -> str:
         name, _created_at = self._lookup_project_identity(project_id)
         return name
 
-    def _lookup_project_identity(self, project_id: Optional[int]) -> tuple[str, str]:
+    def _lookup_project_identity(self, project_id: int | None) -> tuple[str, str]:
         if project_id is None:
             return "", ""
         try:
@@ -235,7 +237,9 @@ class AppWindow(QMainWindow):
         self.settings.set_value("workspace/current_project_id", int(self.current_project_id))
         self.settings.set_value("workspace/current_project_name", self.current_project_name)
 
-    def _set_current_project_context(self, project_id: Optional[int], project_name: Optional[str] = None) -> None:
+    def _set_current_project_context(
+        self, project_id: int | None, project_name: str | None = None
+    ) -> None:
         if project_id is not None and not self._is_valid_project_id(project_id):
             project_id = None
             project_name = ""
@@ -248,7 +252,9 @@ class AppWindow(QMainWindow):
             return
 
         self.current_project_id = int(project_id)
-        resolved_name = str(project_name or "").strip() or self._lookup_project_name(self.current_project_id)
+        resolved_name = str(project_name or "").strip() or self._lookup_project_name(
+            self.current_project_id
+        )
         self.current_project_name = resolved_name
         self.workspace.sidebar.set_current_project(
             self.current_project_id,
@@ -268,8 +274,8 @@ class AppWindow(QMainWindow):
         if not isinstance(saved, list):
             self._recent_project_ids = []
         else:
-            parsed: List[int] = []
-            seen: Set[int] = set()
+            parsed: list[int] = []
+            seen: set[int] = set()
             for value in saved:
                 try:
                     pid = int(value)
@@ -313,7 +319,7 @@ class AppWindow(QMainWindow):
 
     def _drop_project_bound_widgets(self, project_id: int) -> bool:
         pid = int(project_id)
-        widgets_to_remove: List[object] = []
+        widgets_to_remove: list[object] = []
         for i in range(self.stack.count()):
             widget = self.stack.widget(i)
             if widget is None:
@@ -342,7 +348,9 @@ class AppWindow(QMainWindow):
         current_widget_pid = getattr(current_widget, "project_id", None)
         current_matches_deleted = False
         try:
-            current_matches_deleted = current_widget_pid is not None and int(current_widget_pid) == pid
+            current_matches_deleted = (
+                current_widget_pid is not None and int(current_widget_pid) == pid
+            )
         except (TypeError, ValueError):
             current_matches_deleted = False
 
@@ -405,7 +413,7 @@ class AppWindow(QMainWindow):
         prefix = "workspace.open_project:"
         if not action_id.startswith(prefix):
             return False
-        raw = action_id[len(prefix):]
+        raw = action_id[len(prefix) :]
         try:
             project_id = int(raw)
         except (TypeError, ValueError):
@@ -430,8 +438,8 @@ class AppWindow(QMainWindow):
         self.stack = self.workspace.stack
 
         # Debounced cross-view refresh queue (used for Audio Player edit/generate actions).
-        self._pending_refresh_fields: Set[str] = set()
-        self._pending_refresh_project_ids: Set[int] = set()
+        self._pending_refresh_fields: set[str] = set()
+        self._pending_refresh_project_ids: set[int] = set()
         self._pending_refresh_all_projects: bool = False
         self._cross_refresh_timer = QTimer(self)
         self._cross_refresh_timer.setSingleShot(True)
@@ -444,6 +452,7 @@ class AppWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self._db_indicator)
         # PERF-SCALE PATCH-B: operations status widget (shows active heavy ops)
         from app.ui.widgets.operations_status_widget import OperationsStatusWidget
+
         self._ops_status = OperationsStatusWidget()
         self.statusBar().addPermanentWidget(self._ops_status)
 
@@ -515,8 +524,12 @@ class AppWindow(QMainWindow):
         self.audio_player_dock.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.audio_player_panel = AudioPlayerPanel(player=self.audio_player, parent=self.audio_player_dock)
-        self.audio_player_panel.go_to_source_requested.connect(self._on_audio_go_to_source_requested)
+        self.audio_player_panel = AudioPlayerPanel(
+            player=self.audio_player, parent=self.audio_player_dock
+        )
+        self.audio_player_panel.go_to_source_requested.connect(
+            self._on_audio_go_to_source_requested
+        )
         self.audio_player_panel.data_changed.connect(self._on_audio_player_data_changed)
         self.audio_player_dock.setWidget(self.audio_player_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.audio_player_dock)
@@ -565,7 +578,9 @@ class AppWindow(QMainWindow):
     def _restore_active_workspace(self) -> None:
         """Restore active workspace widget/focus from persisted state."""
         self._workspace_history.clear()
-        active_workspace = self.settings.get_string("workspace/active_workspace", "workspace.projects")
+        active_workspace = self.settings.get_string(
+            "workspace/active_workspace", "workspace.projects"
+        )
         key = str(active_workspace or "workspace.projects")
         if key == "workspace.ud":
             key = "workspace.user_dictionaries"
@@ -646,13 +661,18 @@ class AppWindow(QMainWindow):
 
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return
-        deferred_path = str(self.settings.get_string("app/deferred_startup_db_path", "") or "").strip()
+        deferred_path = str(
+            self.settings.get_string("app/deferred_startup_db_path", "") or ""
+        ).strip()
         if not deferred_path:
             return
-        deferred_reason = str(self.settings.get_string("app/deferred_startup_db_reason", "") or "").strip()
+        deferred_reason = str(
+            self.settings.get_string("app/deferred_startup_db_reason", "") or ""
+        ).strip()
+
+        from PyQt6.QtWidgets import QMessageBox
 
         from app.infra.db_path_resolver import discover_baseline_db_path, inspect_db_path
-        from PyQt6.QtWidgets import QMessageBox
 
         deferred = Path(deferred_path).expanduser().resolve()
         info = inspect_db_path(deferred)
@@ -684,7 +704,7 @@ class AppWindow(QMainWindow):
         deferred: Path,
         info,
         deferred_reason: str,
-        baseline: Optional[Path],
+        baseline: Path | None,
         inspect_db_info,
     ) -> str:
         lines = [
@@ -721,7 +741,11 @@ class AppWindow(QMainWindow):
                 "Recommended path: choose one migrated DB, switch once, and let the restart complete before making another DB change.",
             ]
         )
-        if info.exists and info.schema_version is not None and info.schema_version < info.supported_schema_version:
+        if (
+            info.exists
+            and info.schema_version is not None
+            and info.schema_version < info.supported_schema_version
+        ):
             lines.append(
                 "Because the deferred DB is still older than the app schema, expect one longer restart while backup and migration finish."
             )
@@ -731,8 +755,8 @@ class AppWindow(QMainWindow):
             )
         return "\n".join(lines)
 
-    def _collect_shortcut_conflicts(self) -> Dict[str, List[str]]:
-        by_shortcut: Dict[str, List[str]] = {}
+    def _collect_shortcut_conflicts(self) -> dict[str, list[str]]:
+        by_shortcut: dict[str, list[str]] = {}
 
         def _add(shortcut_text: str, source: str) -> None:
             key = str(shortcut_text or "").strip().upper()
@@ -765,7 +789,9 @@ class AppWindow(QMainWindow):
             logger.info("Shortcut conflict check: no duplicates found")
             return
         for shortcut_text, sources in conflicts.items():
-            logger.warning("Shortcut conflict detected: %s used by %s", shortcut_text, ", ".join(sources))
+            logger.warning(
+                "Shortcut conflict detected: %s used by %s", shortcut_text, ", ".join(sources)
+            )
 
     def _log_badge_refresh_warning(self, area: str, exc: Exception) -> None:
         now_stamp = int(monotonic() * 1000)
@@ -921,16 +947,18 @@ class AppWindow(QMainWindow):
         self.stack.addWidget(import_wizard)
         self.stack.setCurrentWidget(import_wizard)
 
-    def _get_active_project_id(self) -> Optional[int]:
+    def _get_active_project_id(self) -> int | None:
         """Single source-of-truth current project context for workspace-level panels."""
         return self.current_project_id
 
-    def open_translation_management(self, project_id: Optional[int] = None, push_history: bool = True):
+    def open_translation_management(self, project_id: int | None = None, push_history: bool = True):
         """Open translation management panel."""
         logger.info("Opening translation management panel")
 
         normalized_pid = self._normalize_optional_project_id(project_id)
-        context_project_id = normalized_pid if normalized_pid is not None else self._get_active_project_id()
+        context_project_id = (
+            normalized_pid if normalized_pid is not None else self._get_active_project_id()
+        )
         key = "workspace.tm"
         existing = self._resolve_workspace_instance(key)
         if isinstance(existing, TranslationManagementPanel):
@@ -960,12 +988,14 @@ class AppWindow(QMainWindow):
         self._refresh_workspace_badges()
         self._show_nav_status("Translation Management opened.")
 
-    def open_user_dictionaries(self, project_id: Optional[int] = None, push_history: bool = True):
+    def open_user_dictionaries(self, project_id: int | None = None, push_history: bool = True):
         """Open User Dictionaries workspace."""
         logger.info("Opening user dictionaries workspace")
 
         normalized_pid = self._normalize_optional_project_id(project_id)
-        context_project_id = normalized_pid if normalized_pid is not None else self._get_active_project_id()
+        context_project_id = (
+            normalized_pid if normalized_pid is not None else self._get_active_project_id()
+        )
         key = "workspace.user_dictionaries"
         existing = self._resolve_workspace_instance(key)
         if isinstance(existing, UserDictionariesView):
@@ -1002,7 +1032,7 @@ class AppWindow(QMainWindow):
         current_widget = self.stack.currentWidget()
         project_id = None
 
-        if hasattr(current_widget, 'project_id'):
+        if hasattr(current_widget, "project_id"):
             project_id = current_widget.project_id
 
         if project_id is None:
@@ -1010,7 +1040,7 @@ class AppWindow(QMainWindow):
                 self,
                 "Project Required",
                 "QA/Coverage requires a project context.\n\n"
-                "Please open a project first, then access Premium → QA/Coverage."
+                "Please open a project first, then access Premium → QA/Coverage.",
             )
             return
 
@@ -1047,7 +1077,9 @@ class AppWindow(QMainWindow):
 
     def open_pronunciation_bootstrap(self):
         """Open pronunciation bootstrap dialog."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         logger.info("Opening pronunciation bootstrap dialog")
         show_pronunciation_bootstrap_dialog(parent=self)
@@ -1091,8 +1123,9 @@ class AppWindow(QMainWindow):
 
     def open_system_health_check(self):
         """Run unified health checks and show report."""
-        from app.ui.workers import UnifiedHealthCheckWorker
         from PyQt6.QtWidgets import QMessageBox
+
+        from app.ui.workers import UnifiedHealthCheckWorker
 
         if self._health_check_worker is not None:
             self._show_nav_status("Health check is already running.")
@@ -1198,7 +1231,9 @@ class AppWindow(QMainWindow):
                 pending_tab = self._pending_project_tab
                 self._pending_project_tab = None
                 if pending_tab and project_view.focus_tab(pending_tab):
-                    self._show_nav_status(f"Project #{pid} focused. Routed to {pending_tab.replace('_', ' ').title()}.")
+                    self._show_nav_status(
+                        f"Project #{pid} focused. Routed to {pending_tab.replace('_', ' ').title()}."
+                    )
                 else:
                     self._show_nav_status(f"Project #{pid} focused.")
                 return
@@ -1223,23 +1258,28 @@ class AppWindow(QMainWindow):
         pending_tab = self._pending_project_tab
         self._pending_project_tab = None
         if pending_tab and project_view.focus_tab(pending_tab):
-            self._show_nav_status(f"Project #{pid} opened. Routed to {pending_tab.replace('_', ' ').title()}.")
+            self._show_nav_status(
+                f"Project #{pid} opened. Routed to {pending_tab.replace('_', ' ').title()}."
+            )
         else:
             self._show_nav_status(f"Project #{pid} opened.")
 
-    def _find_project_view(self, project_id: int) -> Optional[ProjectView]:
+    def _find_project_view(self, project_id: int) -> ProjectView | None:
         cached = self._project_instances.get(project_id)
         if cached is not None and self._is_widget_in_stack(cached):
             return cached
         for i in range(self.stack.count()):
             widget = self.stack.widget(i)
-            if isinstance(widget, ProjectView) and getattr(widget, "project_id", None) == project_id:
+            if (
+                isinstance(widget, ProjectView)
+                and getattr(widget, "project_id", None) == project_id
+            ):
                 self._project_instances[project_id] = widget
                 return widget
         self._project_instances.pop(project_id, None)
         return None
 
-    def _open_or_focus_project(self, project_id: int) -> Optional[ProjectView]:
+    def _open_or_focus_project(self, project_id: int) -> ProjectView | None:
         project_view = self._find_project_view(project_id)
         if project_view is None:
             self.open_project(project_id)
@@ -1252,7 +1292,9 @@ class AppWindow(QMainWindow):
         self._push_recent_project(project_id)
         return project_view
 
-    def _focus_project_source_row(self, project_view: ProjectView, kind: str, source_id: int) -> bool:
+    def _focus_project_source_row(
+        self, project_view: ProjectView, kind: str, source_id: int
+    ) -> bool:
         kind_norm = (kind or "").strip().lower()
         if kind_norm in {"term_cluster", "term"}:
             project_view.tabs.setCurrentWidget(project_view.terms_view)
@@ -1265,7 +1307,7 @@ class AppWindow(QMainWindow):
             return bool(project_view.sentences_view.focus_sentence_by_id(source_id))
         return False
 
-    def _resolve_sentence_source_id(self, project_id: int, source_text: str) -> Optional[int]:
+    def _resolve_sentence_source_id(self, project_id: int, source_text: str) -> int | None:
         text = (source_text or "").strip()
         if not text:
             return None
@@ -1313,7 +1355,7 @@ class AppWindow(QMainWindow):
             self.statusBar().showMessage("Go to Source payload is invalid", 4000)
             return
 
-        source_id_int: Optional[int] = None
+        source_id_int: int | None = None
         if source_id is not None:
             try:
                 source_id_int = int(source_id)
@@ -1360,7 +1402,7 @@ class AppWindow(QMainWindow):
             value = str(field or "").strip().lower()
             if value:
                 self._pending_refresh_fields.add(value)
-        parsed_project_ids: Set[int] = set()
+        parsed_project_ids: set[int] = set()
         for pid in project_ids:
             try:
                 parsed_project_ids.add(int(pid))
@@ -1375,7 +1417,7 @@ class AppWindow(QMainWindow):
 
     def _flush_cross_view_refresh(self) -> None:
         """Apply one debounced refresh pass to relevant open views."""
-        project_filter: Optional[Set[int]]
+        project_filter: set[int] | None
         if self._pending_refresh_all_projects:
             project_filter = None
         else:
@@ -1385,7 +1427,7 @@ class AppWindow(QMainWindow):
         self._pending_refresh_all_projects = False
         self._refresh_open_views(project_filter=project_filter)
 
-    def _refresh_open_views(self, *, project_filter: Optional[Set[int]]) -> None:
+    def _refresh_open_views(self, *, project_filter: set[int] | None) -> None:
         """Refresh open views for affected projects (or all when project_filter is None)."""
         for i in range(self.stack.count()):
             widget = self.stack.widget(i)
@@ -1403,9 +1445,15 @@ class AppWindow(QMainWindow):
                         widget.sentences_view._reload()
                     if hasattr(widget, "term_card_view") and widget.term_card_view is not None:
                         widget.term_card_view.load_review_queue()
-                    if hasattr(widget, "user_dictionaries_view") and widget.user_dictionaries_view is not None:
+                    if (
+                        hasattr(widget, "user_dictionaries_view")
+                        and widget.user_dictionaries_view is not None
+                    ):
                         widget.user_dictionaries_view.load_items()
-                        if getattr(widget.user_dictionaries_view, "_view_mode", "browse") == "review":
+                        if (
+                            getattr(widget.user_dictionaries_view, "_view_mode", "browse")
+                            == "review"
+                        ):
                             widget.user_dictionaries_view.load_review_queue(reset_index=False)
                     continue
 
@@ -1439,152 +1487,184 @@ class AppWindow(QMainWindow):
         registry = ActionsRegistry.get_instance()
 
         # Tools category
-        registry.register(ActionSpec(
-            action_id="tools.verification",
-            title="Run P1 Verification",
-            keywords=["verify", "p1", "test", "check"],
-            shortcut="Ctrl+Shift+V",
-            callback=self.open_verification,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.verification",
+                title="Run P1 Verification",
+                keywords=["verify", "p1", "test", "check"],
+                shortcut="Ctrl+Shift+V",
+                callback=self.open_verification,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.import_dictionary",
-            title="Import Dictionary",
-            keywords=["import", "dict", "csv", "load"],
-            shortcut="Ctrl+Shift+I",
-            callback=self.open_import_wizard,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.import_dictionary",
+                title="Import Dictionary",
+                keywords=["import", "dict", "csv", "load"],
+                shortcut="Ctrl+Shift+I",
+                callback=self.open_import_wizard,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.resources_manager",
-            title="Resources Manager",
-            keywords=["resources", "models", "datasets", "baseline", "install"],
-            shortcut="Ctrl+Alt+R",
-            callback=self.open_resources_manager,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.resources_manager",
+                title="Resources Manager",
+                keywords=["resources", "models", "datasets", "baseline", "install"],
+                shortcut="Ctrl+Alt+R",
+                callback=self.open_resources_manager,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.switch_database",
-            title="Switch Database",
-            keywords=["database", "db", "profile", "restart", "baseline"],
-            shortcut="Ctrl+Alt+D",
-            callback=self.open_database_switch_dialog,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.switch_database",
+                title="Switch Database",
+                keywords=["database", "db", "profile", "restart", "baseline"],
+                shortcut="Ctrl+Alt+D",
+                callback=self.open_database_switch_dialog,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.health_check",
-            title="Run Health Check",
-            keywords=["health", "check", "diagnostics", "bootstrap", "resources"],
-            shortcut="",
-            callback=self.open_system_health_check,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.health_check",
+                title="Run Health Check",
+                keywords=["health", "check", "diagnostics", "bootstrap", "resources"],
+                shortcut="",
+                callback=self.open_system_health_check,
+                category="Tools",
+            )
+        )
 
         # Premium category
-        registry.register(ActionSpec(
-            action_id="premium.tm",
-            title="Translation Management",
-            keywords=["tm", "translation", "memory", "manage"],
-            shortcut="Ctrl+Shift+T",
-            callback=self.open_translation_management,
-            category="Premium"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="premium.tm",
+                title="Translation Management",
+                keywords=["tm", "translation", "memory", "manage"],
+                shortcut="Ctrl+Shift+T",
+                callback=self.open_translation_management,
+                category="Premium",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="premium.user_dictionaries",
-            title="User Dictionaries",
-            keywords=["dictionary", "user", "deck", "study", "vocabulary"],
-            shortcut="Ctrl+Shift+U",
-            callback=self.open_user_dictionaries,
-            category="Premium"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="premium.user_dictionaries",
+                title="User Dictionaries",
+                keywords=["dictionary", "user", "deck", "study", "vocabulary"],
+                shortcut="Ctrl+Shift+U",
+                callback=self.open_user_dictionaries,
+                category="Premium",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.audio_provider_settings",
-            title="Audio Provider Settings",
-            keywords=["audio", "tts", "provider", "mms", "speech"],
-            shortcut="Ctrl+Alt+A",
-            callback=self.open_audio_provider_settings,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.audio_provider_settings",
+                title="Audio Provider Settings",
+                keywords=["audio", "tts", "provider", "mms", "speech"],
+                shortcut="Ctrl+Alt+A",
+                callback=self.open_audio_provider_settings,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="tools.pronunciation_bootstrap",
-            title="Pronunciation Bootstrap",
-            keywords=["pronunciation", "phonikud", "niqqud", "bootstrap", "offline"],
-            shortcut="Ctrl+Alt+O",
-            callback=self.open_pronunciation_bootstrap,
-            category="Tools"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="tools.pronunciation_bootstrap",
+                title="Pronunciation Bootstrap",
+                keywords=["pronunciation", "phonikud", "niqqud", "bootstrap", "offline"],
+                shortcut="Ctrl+Alt+O",
+                callback=self.open_pronunciation_bootstrap,
+                category="Tools",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="help.center",
-            title="Help Center",
-            keywords=["help", "guide", "shortcuts", "manual", "docs"],
-            shortcut="F1",
-            callback=self.open_help_center,
-            category="Help"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="help.center",
+                title="Help Center",
+                keywords=["help", "guide", "shortcuts", "manual", "docs"],
+                shortcut="F1",
+                callback=self.open_help_center,
+                category="Help",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="help.about",
-            title="About HDLE Premium",
-            keywords=["about", "version", "build", "commit", "sha"],
-            shortcut="",
-            callback=self.open_about_dialog,
-            category="Help"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="help.about",
+                title="About HDLE Premium",
+                keywords=["about", "version", "build", "commit", "sha"],
+                shortcut="",
+                callback=self.open_about_dialog,
+                category="Help",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="premium.audio_player",
-            title="Toggle Audio Player",
-            keywords=["audio", "playback", "now playing", "queue", "dock"],
-            shortcut="Ctrl+Alt+L",
-            callback=self.open_audio_workspace,
-            category="Premium"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="premium.audio_player",
+                title="Toggle Audio Player",
+                keywords=["audio", "playback", "now playing", "queue", "dock"],
+                shortcut="Ctrl+Alt+L",
+                callback=self.open_audio_workspace,
+                category="Premium",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="premium.coverage",
-            title="QA / Coverage",
-            keywords=["qa", "coverage", "quality", "test"],
-            shortcut="Ctrl+Shift+C",
-            callback=self.open_coverage,
-            category="Premium"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="premium.coverage",
+                title="QA / Coverage",
+                keywords=["qa", "coverage", "quality", "test"],
+                shortcut="Ctrl+Shift+C",
+                callback=self.open_coverage,
+                category="Premium",
+            )
+        )
 
         # View category
-        registry.register(ActionSpec(
-            action_id="view.toggle_sidebar",
-            title="Toggle Sidebar",
-            keywords=["sidebar", "panel", "show", "hide"],
-            shortcut="Ctrl+B",
-            callback=self.workspace.toggle_sidebar,
-            category="View"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="view.toggle_sidebar",
+                title="Toggle Sidebar",
+                keywords=["sidebar", "panel", "show", "hide"],
+                shortcut="Ctrl+B",
+                callback=self.workspace.toggle_sidebar,
+                category="View",
+            )
+        )
 
-        registry.register(ActionSpec(
-            action_id="view.reset_layout",
-            title="Reset Layout to Default",
-            keywords=["reset", "layout", "default", "restore"],
-            shortcut="Ctrl+Shift+R",
-            callback=self.workspace.reset_to_default,
-            category="View"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="view.reset_layout",
+                title="Reset Layout to Default",
+                keywords=["reset", "layout", "default", "restore"],
+                shortcut="Ctrl+Shift+R",
+                callback=self.workspace.reset_to_default,
+                category="View",
+            )
+        )
 
         # Navigate category
-        registry.register(ActionSpec(
-            action_id="navigate.dashboard",
-            title="Projects",
-            keywords=["dashboard", "home", "projects"],
-            shortcut="",
-            callback=self.back_to_dashboard,
-            category="Navigate"
-        ))
+        registry.register(
+            ActionSpec(
+                action_id="navigate.dashboard",
+                title="Projects",
+                keywords=["dashboard", "home", "projects"],
+                shortcut="",
+                callback=self.back_to_dashboard,
+                category="Navigate",
+            )
+        )
 
         logger.info(f"Registered {len(registry.get_all())} actions")
 
@@ -1610,7 +1690,7 @@ class AppWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to save workspace layout: {e}")
 
-    def _save_sidebar_sections_state(self, state: Dict[str, bool]) -> None:
+    def _save_sidebar_sections_state(self, state: dict[str, bool]) -> None:
         try:
             self.settings.set_json("workspace/sidebar_sections", state)
         except Exception as exc:
@@ -1655,9 +1735,13 @@ class AppWindow(QMainWindow):
             "workspace.current_project.open": self._open_current_project,
             "workspace.project_tab.documents": lambda: self._open_current_project_tab("documents"),
             "workspace.project_tab.sentences": lambda: self._open_current_project_tab("sentences"),
-            "workspace.project_tab.dictionary": lambda: self._open_current_project_tab("dictionary"),
+            "workspace.project_tab.dictionary": lambda: self._open_current_project_tab(
+                "dictionary"
+            ),
             "workspace.project_tab.terms": lambda: self._open_current_project_tab("terms"),
-            "workspace.project_tab.term_cards": lambda: self._open_current_project_tab("term_cards"),
+            "workspace.project_tab.term_cards": lambda: self._open_current_project_tab(
+                "term_cards"
+            ),
             "workspace.project_tab.export": lambda: self._open_current_project_tab("export"),
             "workspace.refresh_badges": self._refresh_workspace_badges,
             "navigate.dashboard": self.back_to_dashboard,
@@ -1680,19 +1764,19 @@ class AppWindow(QMainWindow):
 
     def export_project_bundle(self):
         """Export current project as .hdleproj bundle."""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
         from pathlib import Path
-        from app.services.project_exchange.worker import ProjectExportWorker
+
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
         from app.services.project_exchange.dto import ExportOptions
+        from app.services.project_exchange.worker import ProjectExportWorker
         from app.ui.dialogs.project_exchange_dialogs import ExportProgressDialog
 
         # Get current project_id from active view
         current = self.stack.currentWidget()
         if not hasattr(current, "project_id") or current.project_id is None:
             QMessageBox.information(
-                self,
-                "Project Required",
-                "Please open a project first to export it as a bundle."
+                self, "Project Required", "Please open a project first to export it as a bundle."
             )
             return
 
@@ -1700,10 +1784,7 @@ class AppWindow(QMainWindow):
 
         # File dialog
         path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Project Bundle",
-            "",
-            "HDLE Project Bundle (*.hdleproj)"
+            self, "Export Project Bundle", "", "HDLE Project Bundle (*.hdleproj)"
         )
 
         if not path:
@@ -1736,7 +1817,6 @@ class AppWindow(QMainWindow):
 
     def _on_export_error(self, error: str, dialog):
         """Handle export error."""
-        from PyQt6.QtWidgets import QMessageBox
         from app.services.project_exchange.dto import ExportReport
 
         fake_report = ExportReport(success=False, error_message=error)
@@ -1744,11 +1824,13 @@ class AppWindow(QMainWindow):
 
     def import_project_bundle(self):
         """Import .hdleproj bundle."""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
         from pathlib import Path
+
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        from app.services.project_exchange.dto import ImportOptions
         from app.services.project_exchange.import_engine import ProjectImportEngine
         from app.services.project_exchange.worker import ProjectImportWorker
-        from app.services.project_exchange.dto import ImportOptions
         from app.ui.dialogs.project_exchange_dialogs import (
             ImportPreviewDialog,
             ImportProgressDialog,
@@ -1756,10 +1838,7 @@ class AppWindow(QMainWindow):
 
         # File dialog
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Project Bundle",
-            "",
-            "HDLE Project Bundle (*.hdleproj)"
+            self, "Import Project Bundle", "", "HDLE Project Bundle (*.hdleproj)"
         )
 
         if not path:
@@ -1774,9 +1853,7 @@ class AppWindow(QMainWindow):
             preflight = ProjectImportEngine().preflight_import(bundle_path, options)
         except Exception as e:
             QMessageBox.critical(
-                self,
-                "Import Preflight Failed",
-                f"Failed to validate bundle for import:\n\n{e}"
+                self, "Import Preflight Failed", f"Failed to validate bundle for import:\n\n{e}"
             )
             return
 
@@ -1791,7 +1868,7 @@ class AppWindow(QMainWindow):
         # Create worker
         options = ImportOptions(
             rename_if_conflict=True,
-            custom_name=custom_name if custom_name != preflight.manifest.project_name else None
+            custom_name=custom_name if custom_name != preflight.manifest.project_name else None,
         )
         worker = ProjectImportWorker(bundle_path, options)
 
@@ -1817,7 +1894,9 @@ class AppWindow(QMainWindow):
         dialog.set_completed(report)
 
         # Refresh dashboard (if visible)
-        if hasattr(self, "dashboard") and isinstance(self.stack.currentWidget(), type(self.dashboard)):
+        if hasattr(self, "dashboard") and isinstance(
+            self.stack.currentWidget(), type(self.dashboard)
+        ):
             self.dashboard.load_projects()
 
     def _maybe_open_imported_project(self, dialog) -> None:

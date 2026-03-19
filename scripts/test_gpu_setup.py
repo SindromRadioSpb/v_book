@@ -6,17 +6,19 @@ from pathlib import Path
 
 # Force UTF-8 output
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-print("="*80)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+print("=" * 80)
 print("GPU Setup Test")
-print("="*80)
+print("=" * 80)
 print()
 
 # Test 1: PyTorch CUDA
 print("[1/5] Testing PyTorch CUDA...")
 try:
     import torch
+
     cuda_available = torch.cuda.is_available()
     if cuda_available:
         gpu_name = torch.cuda.get_device_name(0)
@@ -37,11 +39,12 @@ print()
 print("[2/5] Testing Stanza...")
 try:
     import stanza
+
     print(f"  [OK] Stanza imported")
 
     # Try to load Hebrew model
     print("  Loading Hebrew model (this may take a moment)...")
-    nlp = stanza.Pipeline('he', use_gpu=True, verbose=False)
+    nlp = stanza.Pipeline("he", use_gpu=True, verbose=False)
     print(f"  [OK] Hebrew model loaded")
 
     # Check if using GPU (skip check, just note)
@@ -87,7 +90,7 @@ try:
             select(func.count(SourceDocument.doc_id))
             .join(SourceCorpus)
             .where(SourceCorpus.project_id == project.project_id)
-            .where(SourceDocument.status == 'processed')
+            .where(SourceDocument.status == "processed")
         ).scalar()
 
         print(f"  [OK] Database accessible")
@@ -101,6 +104,7 @@ try:
 except Exception as e:
     print(f"  [FAIL] Database test failed: {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 
@@ -122,7 +126,7 @@ try:
             select(SourceDocument)
             .join(SourceCorpus)
             .where(SourceCorpus.project_id == project.project_id)
-            .where(SourceDocument.status != 'processed')
+            .where(SourceDocument.status != "processed")
             .limit(1)
         ).scalar_one_or_none()
 
@@ -132,6 +136,7 @@ try:
             print(f"  Testing with document ID: {doc.doc_id}")
 
             import time
+
             start = time.time()
 
             process_service.process_document(session, doc.doc_id, use_gpu=True)
@@ -150,6 +155,7 @@ try:
 except Exception as e:
     print(f"  [FAIL] Processing test failed: {e}")
     import traceback
+
     traceback.print_exc()
     sys.exit(1)
 
@@ -177,9 +183,9 @@ except Exception as e:
     print(f"  [FAIL] Disk space check failed: {e}")
 
 print()
-print("="*80)
+print("=" * 80)
 print("[OK] All tests passed! Ready for GPU processing.")
-print("="*80)
+print("=" * 80)
 print()
 print("Next step: Run NLP processing")
 print("  .\\scripts\\run_gpu_processing.ps1")

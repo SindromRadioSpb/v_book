@@ -11,26 +11,28 @@ All operations are transactional.
 """
 
 import logging
-from typing import List, Optional, Dict, Any, Callable
-from datetime import datetime
-from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_, and_, update, case, text
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from app.infra.sa_models import (
-    AudioAsset,
-    PronunciationEntry,
-    TMEntry,
-    TMEntryHistory,
-    Lemma,
-    DictProject,
-    TermCluster,
-    Ngram,
-    StudyProgress,
-    UserDictionaryItem,
-)
+from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy.orm import Session
+
 from app.domain.dto import TMEntryDTO, TMHistoryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.db_retry import with_retry_on_locked
+from app.infra.sa_models import (
+    AudioAsset,
+    DictProject,
+    Lemma,
+    Ngram,
+    PronunciationEntry,
+    StudyProgress,
+    TermCluster,
+    TMEntry,
+    TMEntryHistory,
+    UserDictionaryItem,
+)
 from app.infra.write_gate import serialized_db_write
 from app.services.tm_global_service import TMGlobalService
 from app.services.user_dictionary_service import UserDictionaryService
@@ -95,7 +97,7 @@ class TranslationAdminService:
     def _deferred_tm_global_sync(
         self,
         session: Session,
-        entries: List[TMEntry],
+        entries: list[TMEntry],
         *,
         force_global_update: bool = False,
     ) -> None:
@@ -191,13 +193,25 @@ class TranslationAdminService:
                 func.coalesce(
                     func.nullif(
                         func.trim(
-                            func.replace(func.replace(func.coalesce(PronunciationEntry.niqqud_text, ""), "_", " "), "|", " ")
+                            func.replace(
+                                func.replace(
+                                    func.coalesce(PronunciationEntry.niqqud_text, ""), "_", " "
+                                ),
+                                "|",
+                                " ",
+                            )
                         ),
                         "",
                     ),
                     func.nullif(
                         func.trim(
-                            func.replace(func.replace(func.coalesce(PronunciationEntry.reading_text, ""), "_", " "), "|", " ")
+                            func.replace(
+                                func.replace(
+                                    func.coalesce(PronunciationEntry.reading_text, ""), "_", " "
+                                ),
+                                "|",
+                                " ",
+                            )
                         ),
                         "",
                     ),
@@ -230,12 +244,12 @@ class TranslationAdminService:
     def search_tm_entries(
         self,
         session: Session,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         limit: int = 100,
         offset: int = 0,
         sort_column: str = "updated_at",
         sort_direction: str = "desc",
-    ) -> List[TMEntryDTO]:
+    ) -> list[TMEntryDTO]:
         """Search TM entries with filters.
 
         Args:
@@ -346,7 +360,7 @@ class TranslationAdminService:
     def count_tm_entries(
         self,
         session: Session,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
     ) -> int:
         """Count TM entries matching filters.
 
@@ -451,8 +465,8 @@ class TranslationAdminService:
         chunk_size: int = 10000,
         source_ref: str = "lemma_materialize_full",
         dry_run: bool = False,
-        progress_cb: Optional[Callable[[Dict[str, int]], None]] = None,
-    ) -> Dict[str, int]:
+        progress_cb: Callable[[dict[str, int]], None] | None = None,
+    ) -> dict[str, int]:
         """Create missing lemma-scoped tm_entry rows for the given project.
 
         This creates one tm_entry anchor per lemma (where missing by lemma_id)
@@ -502,7 +516,7 @@ class TranslationAdminService:
             or 0
         )
 
-        stats: Dict[str, int] = {
+        stats: dict[str, int] = {
             "project_id": int(project_id),
             "total_lemmas": total_lemmas,
             "initial_tm_lemmas": initial_tm_lemmas,
@@ -516,8 +530,6 @@ class TranslationAdminService:
         if dry_run or initial_missing <= 0:
             return stats
 
-        from datetime import timezone
-
         last_lemma_id = 0
         while True:
             chunk_rows = session.execute(
@@ -526,8 +538,11 @@ class TranslationAdminService:
                     Lemma.lemma_text,
                     Lemma.is_noise,
                     Lemma.noise_reason,
-                    func.coalesce(func.nullif(func.trim(Lemma.norm_text), ""), Lemma.lemma_text).label("src_norm"),
-                ).where(
+                    func.coalesce(
+                        func.nullif(func.trim(Lemma.norm_text), ""), Lemma.lemma_text
+                    ).label("src_norm"),
+                )
+                .where(
                     Lemma.project_id == project_id,
                     Lemma.lemma_id > last_lemma_id,
                     ~select(TMEntry.tm_id)
@@ -545,7 +560,7 @@ class TranslationAdminService:
             if not chunk_rows:
                 break
 
-            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             payload = []
             for lemma_id, lemma_text, is_noise, noise_reason, src_norm in chunk_rows:
                 payload.append(
@@ -633,7 +648,7 @@ class TranslationAdminService:
     def count_tm_ids_for_translation(
         self,
         session: Session,
-        filters: Optional[Dict[str, Any]],
+        filters: dict[str, Any] | None,
         write_mode: str,
     ) -> int:
         """Count TM entry IDs eligible for batch translation.
@@ -717,11 +732,11 @@ class TranslationAdminService:
     def fetch_tm_ids_for_translation(
         self,
         session: Session,
-        filters: Optional[Dict[str, Any]],
+        filters: dict[str, Any] | None,
         write_mode: str,
         limit: int,
         offset: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """Fetch TM entry IDs for batch translation in deterministic order."""
         filters = filters or {}
 
@@ -795,7 +810,7 @@ class TranslationAdminService:
         stmt = stmt.order_by(TMEntry.tm_id.asc()).limit(limit).offset(offset)
         return list(session.execute(stmt).scalars().all())
 
-    def get_entry(self, session: Session, tm_id: int) -> Optional[TMEntryDTO]:
+    def get_entry(self, session: Session, tm_id: int) -> TMEntryDTO | None:
         """Get single TM entry by ID.
 
         Args:
@@ -818,7 +833,7 @@ class TranslationAdminService:
         session: Session,
         tm_id: int,
         status: str,
-        approved_by: Optional[str] = None,
+        approved_by: str | None = None,
     ) -> None:
         """Set status for a TM entry.
 
@@ -875,9 +890,9 @@ class TranslationAdminService:
     def bulk_set_status(
         self,
         session: Session,
-        tm_ids: List[int],
+        tm_ids: list[int],
         status: str,
-        approved_by: Optional[str] = None,
+        approved_by: str | None = None,
     ) -> int:
         """Set status for multiple TM entries in a single transaction.
 
@@ -936,7 +951,7 @@ class TranslationAdminService:
         logger.info("Bulk set status %s for %s entries", status, count)
         return count
 
-    def get_history(self, session: Session, tm_id: int) -> List[TMHistoryDTO]:
+    def get_history(self, session: Session, tm_id: int) -> list[TMHistoryDTO]:
         """Get history entries for a TM entry.
 
         Args:
@@ -960,7 +975,7 @@ class TranslationAdminService:
         session: Session,
         tm_id: int,
         version: int,
-        approved_by: Optional[str] = None,
+        approved_by: str | None = None,
     ) -> None:
         """Revert TM entry to a previous version.
 
@@ -1024,7 +1039,7 @@ class TranslationAdminService:
         session: Session,
         tm_id: int,
         translation: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> None:
         """Update translation for a TM entry.
 
@@ -1069,9 +1084,9 @@ class TranslationAdminService:
     def set_noise_status_bulk(
         self,
         session: Session,
-        tm_ids: List[int],
+        tm_ids: list[int],
         is_noise: bool,
-        noise_reason: Optional[str] = None,
+        noise_reason: str | None = None,
     ) -> int:
         """Set noise status for multiple TM entries.
 
@@ -1174,7 +1189,7 @@ class TranslationAdminService:
         )
 
     @staticmethod
-    def _resolve_tm_raw_norms(session: Session, entries: List[TMEntryDTO]) -> Dict[int, str]:
+    def _resolve_tm_raw_norms(session: Session, entries: list[TMEntryDTO]) -> dict[int, str]:
         """Resolve legacy/raw source norms from linked lexical entities."""
         if not entries:
             return {}
@@ -1183,9 +1198,9 @@ class TranslationAdminService:
         cluster_ids = sorted({int(entry.cluster_id) for entry in entries if entry.cluster_id})
         ngram_ids = sorted({int(entry.ngram_id) for entry in entries if entry.ngram_id})
 
-        lemma_norm_by_id: Dict[int, str] = {}
-        cluster_norm_by_id: Dict[int, str] = {}
-        ngram_norm_by_id: Dict[int, str] = {}
+        lemma_norm_by_id: dict[int, str] = {}
+        cluster_norm_by_id: dict[int, str] = {}
+        ngram_norm_by_id: dict[int, str] = {}
 
         if lemma_ids:
             for lemma_id, norm_text in session.execute(
@@ -1195,7 +1210,9 @@ class TranslationAdminService:
 
         if cluster_ids:
             for cluster_id, norm_text in session.execute(
-                select(TermCluster.cluster_id, TermCluster.norm_text).where(TermCluster.cluster_id.in_(cluster_ids))
+                select(TermCluster.cluster_id, TermCluster.norm_text).where(
+                    TermCluster.cluster_id.in_(cluster_ids)
+                )
             ).all():
                 cluster_norm_by_id[int(cluster_id)] = (norm_text or "").strip()
 
@@ -1205,7 +1222,7 @@ class TranslationAdminService:
             ).all():
                 ngram_norm_by_id[int(ngram_id)] = (he_canonical or "").strip()
 
-        resolved: Dict[int, str] = {}
+        resolved: dict[int, str] = {}
         for entry in entries:
             raw_norm = normalize_for_tm(entry.src_lang, entry.src_text, "surface").norm
             raw_norm = (raw_norm or "").strip()
@@ -1224,7 +1241,7 @@ class TranslationAdminService:
             resolved[int(entry.tm_id)] = raw_norm
         return resolved
 
-    def _apply_study_overlays(self, session: Session, entries: List[TMEntryDTO]) -> None:
+    def _apply_study_overlays(self, session: Session, entries: list[TMEntryDTO]) -> None:
         """Attach non-intrusive study tooltip metadata for TM panel rows."""
         if not entries:
             return
@@ -1232,7 +1249,7 @@ class TranslationAdminService:
         user_dict_service = UserDictionaryService()
         raw_norms_by_tm_id = self._resolve_tm_raw_norms(session, entries)
         payloads = []
-        overlay_hash_by_tm_id: Dict[int, str] = {}
+        overlay_hash_by_tm_id: dict[int, str] = {}
         for entry in entries:
             raw_src_norm = (raw_norms_by_tm_id.get(int(entry.tm_id)) or "").strip()
             canonical_norm = user_dict_service._canonical_src_norm(
@@ -1273,7 +1290,9 @@ class TranslationAdminService:
             canonical_norm = (entry.src_norm or "").strip()
             if canonical_norm:
                 pronunciation_pairs.append((entry.src_lang, canonical_norm))
-        pronunciation_map = user_dict_service._resolve_pronunciation_overlay(session, pronunciation_pairs)
+        pronunciation_map = user_dict_service._resolve_pronunciation_overlay(
+            session, pronunciation_pairs
+        )
 
         for entry in entries:
             canonical_hash = overlay_hash_by_tm_id.get(int(entry.tm_id))
@@ -1335,10 +1354,7 @@ class TranslationAdminService:
             change_kind: Type of change (edit|approve|reject|deprecate|revert)
         """
         # Get current max version
-        stmt = (
-            select(func.max(TMEntryHistory.version))
-            .where(TMEntryHistory.tm_id == entry.tm_id)
-        )
+        stmt = select(func.max(TMEntryHistory.version)).where(TMEntryHistory.tm_id == entry.tm_id)
         max_version = session.execute(stmt).scalar()
         next_version = (max_version or 0) + 1
 
@@ -1355,4 +1371,3 @@ class TranslationAdminService:
         )
         session.add(history)
         session.flush()
-

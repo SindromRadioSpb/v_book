@@ -44,7 +44,7 @@ def main():
     # Get current state
     cursor.execute(
         "SELECT lemma_id, is_noise FROM lemma WHERE project_id=? AND lemma_text=?",
-        (project_id, lemma_text)
+        (project_id, lemma_text),
     )
     lemma = cursor.fetchone()
 
@@ -58,10 +58,7 @@ def main():
     print(f"  lemma.is_noise: {current_is_noise} ({'NOISE' if current_is_noise == 1 else 'VALID'})")
 
     # Check linked TMEntry
-    cursor.execute(
-        "SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?",
-        (lemma_id,)
-    )
+    cursor.execute("SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,))
     tm_entries = cursor.fetchall()
 
     print(f"\nLinked TMEntry records: {len(tm_entries)}")
@@ -72,31 +69,19 @@ def main():
     new_is_noise = 0 if current_is_noise == 1 else 1
     print(f"\nToggling lemma.is_noise: {current_is_noise} -> {new_is_noise}")
 
-    cursor.execute(
-        "UPDATE lemma SET is_noise=? WHERE lemma_id=?",
-        (new_is_noise, lemma_id)
-    )
+    cursor.execute("UPDATE lemma SET is_noise=? WHERE lemma_id=?", (new_is_noise, lemma_id))
 
     # Simulate BulkNoiseUpdateWorker sync
     print("Simulating BulkNoiseUpdateWorker sync...")
-    cursor.execute(
-        "UPDATE tm_entry SET is_noise=? WHERE lemma_id=?",
-        (new_is_noise, lemma_id)
-    )
+    cursor.execute("UPDATE tm_entry SET is_noise=? WHERE lemma_id=?", (new_is_noise, lemma_id))
 
     conn.commit()
 
     # Verify sync
-    cursor.execute(
-        "SELECT is_noise FROM lemma WHERE lemma_id=?",
-        (lemma_id,)
-    )
+    cursor.execute("SELECT is_noise FROM lemma WHERE lemma_id=?", (lemma_id,))
     lemma_is_noise = cursor.fetchone()[0]
 
-    cursor.execute(
-        "SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?",
-        (lemma_id,)
-    )
+    cursor.execute("SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,))
     tm_entries = cursor.fetchall()
 
     print(f"\nAfter sync:")
@@ -109,14 +94,8 @@ def main():
 
     # Restore original state
     print(f"\nRestoring original state: {current_is_noise}")
-    cursor.execute(
-        "UPDATE lemma SET is_noise=? WHERE lemma_id=?",
-        (current_is_noise, lemma_id)
-    )
-    cursor.execute(
-        "UPDATE tm_entry SET is_noise=? WHERE lemma_id=?",
-        (current_is_noise, lemma_id)
-    )
+    cursor.execute("UPDATE lemma SET is_noise=? WHERE lemma_id=?", (current_is_noise, lemma_id))
+    cursor.execute("UPDATE tm_entry SET is_noise=? WHERE lemma_id=?", (current_is_noise, lemma_id))
     conn.commit()
 
     print("\n" + "=" * 70)

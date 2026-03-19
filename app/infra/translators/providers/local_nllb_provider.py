@@ -16,26 +16,25 @@ Architecture:
 5. Reassemble translated segments
 6. Return result with metadata
 """
+
 import logging
 import time
-from pathlib import Path
-from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
+from app.infra.local_mt import LocalMTWorker, WorkerError, WorkerRequest, start_worker
 from app.infra.translators.base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
-)
-from app.infra.local_mt import start_worker, WorkerRequest, WorkerError, LocalMTWorker
-from app.services.local_mt import (
-    segment_text,
-    reassemble_text,
-    apply_glossary,
 )
 from app.services.local_models import ModelResourceManager
+from app.services.local_mt import (
+    apply_glossary,
+    reassemble_text,
+    segment_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +117,7 @@ ISO_TO_NLLB = {
 }
 
 
-def map_iso_to_nllb(iso_code: str) -> Optional[str]:
+def map_iso_to_nllb(iso_code: str) -> str | None:
     """
     Map ISO 639-1 code to NLLB language code.
 
@@ -158,8 +157,8 @@ class LocalNLLBProvider(BaseProvider):
         self,
         model_id: str = "facebook/nllb-200-distilled-1.3B",
         backend: str = "ctranslate2",
-        db_session: Optional[Session] = None,
-        project_id: Optional[int] = None,
+        db_session: Session | None = None,
+        project_id: int | None = None,
         timeout: float = 30.0,
     ):
         """
@@ -178,7 +177,7 @@ class LocalNLLBProvider(BaseProvider):
         self.project_id = project_id
         self.timeout = timeout
 
-        self.worker: Optional[LocalMTWorker] = None
+        self.worker: LocalMTWorker | None = None
         self._model_manager = ModelResourceManager()
 
         # Initialize worker
@@ -190,9 +189,7 @@ class LocalNLLBProvider(BaseProvider):
         is_installed, reason = self._model_manager.is_installed(self.model_id, self.backend)
 
         if not is_installed:
-            logger.error(
-                f"Model not installed: {self.model_id} ({self.backend}). Reason: {reason}"
-            )
+            logger.error(f"Model not installed: {self.model_id} ({self.backend}). Reason: {reason}")
             raise RuntimeError(
                 f"Model not installed: {self.model_id}. "
                 f"Install with: python scripts/install_local_mt_model.py --model nllb-200-distilled-1.3B"
@@ -290,9 +287,7 @@ class LocalNLLBProvider(BaseProvider):
         tgt_nllb = map_iso_to_nllb(request.target_lang)
 
         if not src_nllb or not tgt_nllb:
-            unsupported_lang = (
-                request.source_lang if not src_nllb else request.target_lang
-            )
+            unsupported_lang = request.source_lang if not src_nllb else request.target_lang
             return TranslationResult(
                 provider_id=self.provider_id,
                 error_kind=TranslationErrorKind.UNSUPPORTED,
@@ -445,7 +440,7 @@ class LocalNLLBProvider(BaseProvider):
         if self.worker:
             try:
                 self.worker.shutdown()
-                logger.info(f"LocalNLLBProvider worker shut down")
+                logger.info("LocalNLLBProvider worker shut down")
             except Exception as e:
                 logger.warning(f"Error shutting down worker: {e}")
             finally:
@@ -454,7 +449,7 @@ class LocalNLLBProvider(BaseProvider):
     def __del__(self):
         """Cleanup on deletion."""
         try:
-            if hasattr(self, 'worker') and self.worker:
+            if hasattr(self, "worker") and self.worker:
                 self.shutdown()
         except:
             pass

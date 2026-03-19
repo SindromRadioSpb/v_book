@@ -8,6 +8,7 @@ Tests verify:
 - Cache hit/miss behavior
 - Feature-safe: cache errors don't break translation
 """
+
 import pytest
 import hashlib
 from unittest.mock import Mock, MagicMock, patch
@@ -47,7 +48,9 @@ def db_session():
 
     # Create minimal schema (mt_cache table)
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE mt_cache (
                 cache_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NULL,
@@ -66,7 +69,9 @@ def db_session():
                 last_hit_at TEXT NULL,
                 UNIQUE (provider, src_lang, tgt_lang, request_key)
             )
-        """))
+        """
+            )
+        )
         conn.commit()
 
     SessionLocal = sessionmaker(bind=engine)
@@ -152,7 +157,9 @@ def test_build_cache_key_includes_all_params(translation_service):
     assert key5 != base_key
 
     # Change provider_id
-    key6 = translation_service._build_cache_key(base_request, "deepl", "model_v1")  # Different provider
+    key6 = translation_service._build_cache_key(
+        base_request, "deepl", "model_v1"
+    )  # Different provider
     assert key6 != base_key
 
 
@@ -290,8 +297,12 @@ def test_local_nllb_provider_model_version_includes_backend():
     from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
 
     # Mock dependencies
-    with patch("app.infra.translators.providers.local_nllb_provider.ModelResourceManager") as MockManager:
-        with patch("app.infra.translators.providers.local_nllb_provider.start_worker") as mock_worker:
+    with patch(
+        "app.infra.translators.providers.local_nllb_provider.ModelResourceManager"
+    ) as MockManager:
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.start_worker"
+        ) as mock_worker:
             mock_manager = MockManager.return_value
             mock_manager.is_installed = Mock(return_value=(True, None))
             mock_manager.model_dir = Mock(return_value="/fake/path")

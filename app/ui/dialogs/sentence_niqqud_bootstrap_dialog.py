@@ -3,11 +3,11 @@
 Separate from lexical PronunciationBootstrapDialog.
 See docs/SENTENCES_NIQQUD.md for contract.
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -27,8 +27,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.infra.settings import SettingsService
 from app.infra.resource_paths import ResourcePaths
+from app.infra.settings import SettingsService
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.workers import PhonikudHealthCheckWorker
 
@@ -46,9 +46,9 @@ class SentenceNiqqudBootstrapDialog(QDialog):
         self,
         parent=None,
         *,
-        selected_ids: Optional[List[int]] = None,
-        page_ids: Optional[List[int]] = None,
-        all_ids: Optional[List[int]] = None,
+        selected_ids: list[int] | None = None,
+        page_ids: list[int] | None = None,
+        all_ids: list[int] | None = None,
         lang: str = "he",
     ):
         super().__init__(parent)
@@ -193,13 +193,13 @@ class SentenceNiqqudBootstrapDialog(QDialog):
 
         # (grid_key, left_label, right_key, right_label)
         _stat_rows = [
-            ("total",      "Total:",        "mode",        "Mode:"),
-            ("processed",  "Processed:",    "elapsed",     "Elapsed:"),
-            ("inserted",   "Inserted:",     "failed",      "Failed:"),
-            ("updated",    "Updated:",      "partial_qc",  "QC partial:"),
-            ("skipped",    "Skipped:",      "rejected_qc", "QC rejected:"),
-            ("same_hash",  "  same_hash:",  "too_short",   "  too_short:"),
-            ("override",   "  has_override:", "non_hebrew", "  non_hebrew:"),
+            ("total", "Total:", "mode", "Mode:"),
+            ("processed", "Processed:", "elapsed", "Elapsed:"),
+            ("inserted", "Inserted:", "failed", "Failed:"),
+            ("updated", "Updated:", "partial_qc", "QC partial:"),
+            ("skipped", "Skipped:", "rejected_qc", "QC rejected:"),
+            ("same_hash", "  same_hash:", "too_short", "  too_short:"),
+            ("override", "  has_override:", "non_hebrew", "  non_hebrew:"),
         ]
         self._sv: dict = {}  # stat value labels
         for row_idx, (k1, lbl1, k2, lbl2) in enumerate(_stat_rows):
@@ -236,16 +236,26 @@ class SentenceNiqqudBootstrapDialog(QDialog):
             self.settings.get_string("pronunciation/phonikud/model_path", "")
         )
         # Restore last health-check result from cache
-        mode = (self.settings.get_string("pronunciation/phonikud/last_health_mode", "") or "").strip()
-        status = (self.settings.get_string("pronunciation/phonikud/last_health_status", "") or "").strip()
-        details = (self.settings.get_string("pronunciation/phonikud/last_health_details", "") or "").strip()
+        mode = (
+            self.settings.get_string("pronunciation/phonikud/last_health_mode", "") or ""
+        ).strip()
+        status = (
+            self.settings.get_string("pronunciation/phonikud/last_health_status", "") or ""
+        ).strip()
+        details = (
+            self.settings.get_string("pronunciation/phonikud/last_health_details", "") or ""
+        ).strip()
         if mode:
-            self._render_health({"mode": mode, "status": status or "error", "details": details, "samples": []})
+            self._render_health(
+                {"mode": mode, "status": status or "error", "details": details, "samples": []}
+            )
 
     def _save_settings(self) -> None:
         model_path = (self._model_path_edit.text() or "").strip().strip("\"'").rstrip(" .")
         self._model_path_edit.setText(model_path)
-        self.settings.set_value("pronunciation/phonikud/enabled", bool(self._enabled_checkbox.isChecked()))
+        self.settings.set_value(
+            "pronunciation/phonikud/enabled", bool(self._enabled_checkbox.isChecked())
+        )
         self.settings.set_value("pronunciation/phonikud/model_path", model_path)
         self.settings.sync()
 
@@ -302,10 +312,16 @@ class SentenceNiqqudBootstrapDialog(QDialog):
 
     def _on_health_finished(self, report: dict) -> None:
         self._render_health(report)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        self.settings.set_value("pronunciation/phonikud/last_health_status", str(report.get("status") or "error"))
-        self.settings.set_value("pronunciation/phonikud/last_health_mode", str(report.get("mode") or "error"))
-        self.settings.set_value("pronunciation/phonikud/last_health_details", str(report.get("details") or ""))
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_status", str(report.get("status") or "error")
+        )
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_mode", str(report.get("mode") or "error")
+        )
+        self.settings.set_value(
+            "pronunciation/phonikud/last_health_details", str(report.get("details") or "")
+        )
         self.settings.set_value("pronunciation/phonikud/last_health_checked_at", now)
         self.settings.sync()
 
@@ -344,7 +360,7 @@ class SentenceNiqqudBootstrapDialog(QDialog):
 
     # ── Scope resolution ──────────────────────────────────────────────────────
 
-    def _resolved_ids(self) -> List[int]:
+    def _resolved_ids(self) -> list[int]:
         if self._rb_selected.isChecked():
             return self._selected_ids
         if self._rb_page.isChecked():
@@ -376,6 +392,7 @@ class SentenceNiqqudBootstrapDialog(QDialog):
         enabled = self._enabled_checkbox.isChecked()
 
         from app.ui.workers import SentenceNiqqudBootstrapWorker
+
         self._worker = SentenceNiqqudBootstrapWorker(
             sentence_ids=ids,
             lang=self._lang,
@@ -423,22 +440,22 @@ class SentenceNiqqudBootstrapDialog(QDialog):
             self._should_refresh = True
 
         # ── Populate 2-column stats grid ──────────────────────────────────────
-        total     = int(result.get("total_candidates", 0))
-        inserted  = int(result.get("inserted", 0))
-        updated   = int(result.get("updated", 0))
-        failed    = int(result.get("failed", 0))
-        partial   = int(result.get("partial_qc", 0))
-        rejected  = int(result.get("rejected_qc", 0))
+        total = int(result.get("total_candidates", 0))
+        inserted = int(result.get("inserted", 0))
+        updated = int(result.get("updated", 0))
+        failed = int(result.get("failed", 0))
+        partial = int(result.get("partial_qc", 0))
+        rejected = int(result.get("rejected_qc", 0))
         same_hash = int(result.get("skipped_same_hash", 0))
-        override  = int(result.get("skipped_has_override", 0))
+        override = int(result.get("skipped_has_override", 0))
         too_short = int(result.get("skipped_too_short", 0))
-        non_heb   = int(result.get("skipped_non_hebrew_ratio", 0))
-        too_long  = int(result.get("skipped_too_long", 0))
-        qc_skip   = int(result.get("skipped_invalid_after_qc", 0))
-        skipped   = same_hash + override + too_short + too_long + non_heb + qc_skip
+        non_heb = int(result.get("skipped_non_hebrew_ratio", 0))
+        too_long = int(result.get("skipped_too_long", 0))
+        qc_skip = int(result.get("skipped_invalid_after_qc", 0))
+        skipped = same_hash + override + too_short + too_long + non_heb + qc_skip
         processed = total - failed
-        mode_str  = str(result.get("generator_mode", "?"))
-        elapsed   = float(result.get("elapsed_seconds", 0.0))
+        mode_str = str(result.get("generator_mode", "?"))
+        elapsed = float(result.get("elapsed_seconds", 0.0))
 
         self._sv["total"].setText(str(total))
         self._sv["mode"].setText(mode_str)
@@ -469,9 +486,9 @@ class SentenceNiqqudBootstrapDialog(QDialog):
 
         # ── Summary popup (matches PronunciationBootstrapDialog pattern) ──────
         title = (
-            "Sentence Niqqud — Dry Run Complete" if dry_run
-            else "Sentence Niqqud — Cancelled" if cancelled
-            else "Sentence Niqqud — Complete"
+            "Sentence Niqqud — Dry Run Complete"
+            if dry_run
+            else "Sentence Niqqud — Cancelled" if cancelled else "Sentence Niqqud — Complete"
         )
         msg = (
             f"Mode:        {mode_str}\n"
@@ -510,9 +527,9 @@ class SentenceNiqqudBootstrapDialog(QDialog):
 def show_sentence_niqqud_bootstrap_dialog(
     parent=None,
     *,
-    selected_ids: Optional[List[int]] = None,
-    page_ids: Optional[List[int]] = None,
-    all_ids: Optional[List[int]] = None,
+    selected_ids: list[int] | None = None,
+    page_ids: list[int] | None = None,
+    all_ids: list[int] | None = None,
     lang: str = "he",
 ) -> bool:
     """Show the dialog and return True if a refresh is needed."""

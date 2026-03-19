@@ -1,0 +1,63 @@
+# Глобальные исключения:
+# - yap/ yapproj/ — внешние Python 2 утилиты (YAP parser)
+# - app/ui/       — f-string backslash syntax (Python 3.12+, pre-existing in models_qt.py)
+# - scripts/      — standalone diagnostic/repair scripts, не часть основного пакета
+exclude: '^(yap[/\\]|yapproj[/\\]|app[/\\]ui[/\\]|scripts[/\\]|scripts$)'
+
+repos:
+  # ── Formatting ────────────────────────────────────────────────────────────
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3.11
+        # line-length читается из pyproject.toml [tool.black]
+        exclude: |
+          (?x)^(
+            yap/|
+            yapproj/|
+            app/ui/models_qt\.py   # f-string backslash (Python 3.12 syntax, pre-existing)
+          )
+
+  # ── Linting + import sort ─────────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^app/   # только основной пакет, root-level debug-скрипты исключены
+
+  # ── Static type checking ──────────────────────────────────────────────────
+  # language: system — использует mypy из окружения проекта (.venv)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false   # явно передаём пакеты в args, не staged файлы
+        # domain/infra/services не импортируют app/ui — models_qt.py не достигается
+        args:
+          - app/domain/
+          - app/infra/
+          - app/services/
+          - --ignore-missing-imports
+          - --python-version=3.11
+          - --no-error-summary
+
+  # ── General file hygiene ──────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(yap/|yapproj/)
+      - id: end-of-file-fixer
+        exclude: ^(yap/|yapproj/)
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: debug-statements
+        exclude: ^(yap/|yapproj/|app/ui/models_qt\.py)

@@ -1,4 +1,5 @@
 """Tests: sentence niqqud guards (min_len, max_len, min_hebrew_ratio)."""
+
 from __future__ import annotations
 
 import pytest
@@ -41,9 +42,7 @@ class TestShouldProcess:
 
     def test_mixed_hebrew_passes_threshold(self, svc):
         # 50% Hebrew letters → above 0.10
-        ok, reason = svc.should_process(
-            "שלום hello", guard=GuardParams(min_he_ratio=0.10)
-        )
+        ok, reason = svc.should_process("שלום hello", guard=GuardParams(min_he_ratio=0.10))
         assert ok
         assert reason == ""
 

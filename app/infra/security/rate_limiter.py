@@ -3,13 +3,12 @@
 Implements token bucket algorithm for rate limiting import/export operations.
 """
 
-import time
 import threading
-from typing import Optional
+import time
 from contextlib import contextmanager
 
-from .policy import MAX_IMPORTS_PER_MINUTE, MAX_EXPORTS_PER_MINUTE
 from .errors import ValidationError
+from .policy import MAX_EXPORTS_PER_MINUTE, MAX_IMPORTS_PER_MINUTE
 
 
 class RateLimiter:
@@ -77,7 +76,7 @@ class RateLimiter:
 
             return False
 
-    def wait_if_needed(self, tokens: int = 1, timeout: Optional[float] = None) -> bool:
+    def wait_if_needed(self, tokens: int = 1, timeout: float | None = None) -> bool:
         """
         Wait until operation is allowed (blocking with timeout).
 
@@ -144,8 +143,8 @@ class RateLimiter:
 
 
 # Global rate limiters for import/export operations
-_import_limiter: Optional[RateLimiter] = None
-_export_limiter: Optional[RateLimiter] = None
+_import_limiter: RateLimiter | None = None
+_export_limiter: RateLimiter | None = None
 
 
 def get_import_limiter() -> RateLimiter:

@@ -1,14 +1,15 @@
 """Test M6: Concordance/KWIC search."""
-import sys
+
 import io
 import logging
-import time
 import shutil
+import sys
+import time
 from pathlib import Path
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,15 +27,15 @@ def test_concordance_search():
     5. Project filtering works (results only from selected project)
     6. Performance is acceptable (<1s for medium projects)
     """
+    from app.services.concordance_service import ConcordanceService
     from app.services.db_service import DBService
-    from app.services.project_service import ProjectService
     from app.services.ingest_service import IngestService
     from app.services.process_service import ProcessService
-    from app.services.concordance_service import ConcordanceService
+    from app.services.project_service import ProjectService
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST M6: Concordance/KWIC Search")
-    print("="*60)
+    print("=" * 60)
 
     # Initialize
     test_db_path = Path("test_m6.db")
@@ -59,9 +60,7 @@ def test_concordance_search():
             print("\n🔍 Creating test project...")
 
             project = project_service.create_project(
-                session,
-                "M6 Test Project",
-                "Test concordance search"
+                session, "M6 Test Project", "Test concordance search"
             )
             corpus = project_service.get_default_corpus(session, project.project_id)
             print(f"✅ Created project: {project.name}")
@@ -75,7 +74,7 @@ def test_concordance_search():
                 "ילדים לומדים בבית ספר. "  # School (with prefix)
                 "מורה מלמדת בבית הספר. "  # School (prefix + article)
                 "הספר החדש יצא לאור. ",  # Book
-                encoding='utf-8'
+                encoding="utf-8",
             )
 
             doc = ingest_service.import_document(session, corpus.corpus_id, test_file)
@@ -85,19 +84,20 @@ def test_concordance_search():
             # ================================================================
             # 2. Test FTS index exists and is queryable
             # ================================================================
-            print(f"\n🔍 Testing FTS index...")
+            print("\n🔍 Testing FTS index...")
 
             # Check that sentence_fts exists
             from sqlalchemy import text
-            result = session.execute(text(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='sentence_fts'"
-            ))
+
+            result = session.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='sentence_fts'")
+            )
             fts_exists = result.scalar() is not None
 
             if fts_exists:
-                print(f"✅ sentence_fts table exists")
+                print("✅ sentence_fts table exists")
             else:
-                print(f"❌ FAILED: sentence_fts table not found")
+                print("❌ FAILED: sentence_fts table not found")
                 return False
 
             # Check that sentences were indexed
@@ -107,20 +107,17 @@ def test_concordance_search():
             if fts_count > 0:
                 print(f"✅ sentence_fts has {fts_count} indexed sentences")
             else:
-                print(f"❌ FAILED: sentence_fts is empty")
+                print("❌ FAILED: sentence_fts is empty")
                 return False
 
             # ================================================================
             # 3. Test basic word search
             # ================================================================
-            print(f"\n🔍 Testing word search for 'ספר'...")
+            print("\n🔍 Testing word search for 'ספר'...")
 
             start_time = time.time()
             results = concordance_service.search_concordance(
-                session,
-                project.project_id,
-                "ספר",
-                limit=100
+                session, project.project_id, "ספר", limit=100
             )
             search_time = time.time() - start_time
 
@@ -137,31 +134,27 @@ def test_concordance_search():
                 if first.match and first.match.strip():
                     print(f"✅ KWIC split works: match='{first.match}'")
                 else:
-                    print(f"❌ FAILED: Empty match in KWIC split")
+                    print("❌ FAILED: Empty match in KWIC split")
                     return False
 
                 # Display first result
-                print(f"\n   Example result:")
+                print("\n   Example result:")
                 print(f"   Left:  '{first.left_context}'")
                 print(f"   Match: '{first.match}'")
                 print(f"   Right: '{first.right_context}'")
                 print(f"   Doc:   {first.doc_name}")
 
             else:
-                print(f"❌ FAILED: No results found for 'ספר'")
+                print("❌ FAILED: No results found for 'ספר'")
                 return False
 
             # ================================================================
             # 4. Test phrase search
             # ================================================================
-            print(f"\n🔍 Testing phrase search for 'בית ספר'...")
+            print("\n🔍 Testing phrase search for 'בית ספר'...")
 
             results_phrase = concordance_service.search_concordance(
-                session,
-                project.project_id,
-                "בית ספר",
-                limit=100,
-                is_phrase=True
+                session, project.project_id, "בית ספר", limit=100, is_phrase=True
             )
 
             if results_phrase:
@@ -172,12 +165,12 @@ def test_concordance_search():
                     print(f"   - '{r.left_context} <<{r.match}>> {r.right_context}'")
 
             else:
-                print(f"⚠️  Phrase search found no results (may be due to Mock engine tokenization)")
+                print("⚠️  Phrase search found no results (may be due to Mock engine tokenization)")
 
             # ================================================================
             # 5. Test article normalization
             # ================================================================
-            print(f"\n🔍 Testing article normalization...")
+            print("\n🔍 Testing article normalization...")
 
             # Search for "בית הספר" should also find "בית ספר"
             results_normalized = concordance_service.search_concordance(
@@ -185,70 +178,60 @@ def test_concordance_search():
                 project.project_id,
                 "בית הספר",  # With article
                 limit=100,
-                normalize=True  # Enable normalization
+                normalize=True,  # Enable normalization
             )
 
             if results_normalized:
                 print(f"✅ Normalized search found {len(results_normalized)} results")
 
                 # Check if we found both variants
-                has_with_article = any('הספר' in r.match for r in results_normalized)
-                has_without_article = any('ספר' in r.match and 'הספר' not in r.match for r in results_normalized)
+                has_with_article = any("הספר" in r.match for r in results_normalized)
+                has_without_article = any(
+                    "ספר" in r.match and "הספר" not in r.match for r in results_normalized
+                )
 
                 if has_with_article or has_without_article:
-                    print(f"✅ Found article variants in results")
+                    print("✅ Found article variants in results")
                 else:
-                    print(f"⚠️  Article variants not found (may be due to Mock engine)")
+                    print("⚠️  Article variants not found (may be due to Mock engine)")
 
             else:
-                print(f"⚠️  Normalized search found no results")
+                print("⚠️  Normalized search found no results")
 
             # ================================================================
             # 6. Test project filtering
             # ================================================================
-            print(f"\n🔍 Testing project filtering...")
+            print("\n🔍 Testing project filtering...")
 
             # Create second project
             project2 = project_service.create_project(
-                session,
-                "M6 Test Project 2",
-                "Second project for filter test"
+                session, "M6 Test Project 2", "Second project for filter test"
             )
             corpus2 = project_service.get_default_corpus(session, project2.project_id)
 
             # Add different document to project2
             test_file2 = test_dir / "other_text.txt"
-            test_file2.write_text(
-                "מחשב חדש קנינו. "
-                "המחשב עובד טוב. ",
-                encoding='utf-8'
-            )
+            test_file2.write_text("מחשב חדש קנינו. " "המחשב עובד טוב. ", encoding="utf-8")
 
             doc2 = ingest_service.import_document(session, corpus2.corpus_id, test_file2)
             process_service.process_document(session, doc2.doc_id, use_mock=True)
 
             # Search in project1 - should find "ספר"
             results_proj1 = concordance_service.search_concordance(
-                session,
-                project.project_id,
-                "ספר",
-                limit=100
+                session, project.project_id, "ספר", limit=100
             )
 
             # Search in project2 - should NOT find "ספר"
             results_proj2 = concordance_service.search_concordance(
-                session,
-                project2.project_id,
-                "ספר",
-                limit=100
+                session, project2.project_id, "ספר", limit=100
             )
 
             if len(results_proj1) > 0 and len(results_proj2) == 0:
-                print(f"✅ Project filtering works:")
+                print("✅ Project filtering works:")
                 print(f"   Project 1: {len(results_proj1)} results")
                 print(f"   Project 2: {len(results_proj2)} results")
             else:
-                print(f"❌ FAILED: Project filtering incorrect")
+                print("❌ FAILED: Project filtering incorrect")
                 print(f"   Project 1: {len(results_proj1)} results (expected > 0)")
                 print(f"   Project 2: {len(results_proj2)} results (expected = 0)")
                 return False
@@ -256,32 +239,29 @@ def test_concordance_search():
             # ================================================================
             # 7. Test schema version
             # ================================================================
-            print(f"\n🔍 Checking schema version...")
+            print("\n🔍 Checking schema version...")
 
-            result = session.execute(text(
-                "SELECT value FROM schema_meta WHERE key = 'schema_version'"
-            ))
+            result = session.execute(
+                text("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+            )
             schema_version = result.scalar()
 
-            if schema_version == '4':
-                print(f"✅ Schema version is 4 (Migration 004 applied)")
+            if schema_version == "4":
+                print("✅ Schema version is 4 (Migration 004 applied)")
             else:
                 print(f"⚠️  WARNING: Schema version is {schema_version} (expected 4)")
-                print(f"   Migration 004 may not have been applied yet")
+                print("   Migration 004 may not have been applied yet")
 
             # ================================================================
             # 8. Performance check
             # ================================================================
-            print(f"\n🔍 Performance check (3 searches)...")
+            print("\n🔍 Performance check (3 searches)...")
 
             times = []
             for i in range(3):
                 start = time.time()
                 concordance_service.search_concordance(
-                    session,
-                    project.project_id,
-                    "ספר",
-                    limit=100
+                    session, project.project_id, "ספר", limit=100
                 )
                 times.append((time.time() - start) * 1000)
 
@@ -290,13 +270,13 @@ def test_concordance_search():
             print(f"   Average: {avg_time:.1f}ms")
 
             if avg_time < 1000:
-                print(f"✅ Performance acceptable (<1s average)")
+                print("✅ Performance acceptable (<1s average)")
             else:
                 print(f"⚠️  Performance slower than expected ({avg_time:.0f}ms avg)")
-                print(f"   Note: This is OK for small test DB, target is <300ms for medium projects")
+                print("   Note: This is OK for small test DB, target is <300ms for medium projects")
 
             print(f"\n{'='*60}")
-            print(f"✅ M6 TEST PASSED: Concordance search works!")
+            print("✅ M6 TEST PASSED: Concordance search works!")
             print(f"{'='*60}")
             return True
 
@@ -304,6 +284,7 @@ def test_concordance_search():
         logger.exception("Test failed")
         print(f"\n❌ M6 TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -324,17 +305,17 @@ def test_concordance_search():
 
 
 if __name__ == "__main__":
-    print("="*60)
+    print("=" * 60)
     print("M6 TEST SUITE: Concordance/KWIC Search")
-    print("="*60)
+    print("=" * 60)
 
     test_pass = test_concordance_search()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     if test_pass:
         print("✅ M6 TEST PASSED")
     else:
         print("❌ M6 TEST FAILED")
-    print("="*60)
+    print("=" * 60)
 
     sys.exit(0 if test_pass else 1)

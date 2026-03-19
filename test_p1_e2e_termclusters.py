@@ -8,9 +8,8 @@ Tests P1 verification with a real term extraction pipeline to ensure:
 4. At least one term_cluster item is tested
 """
 
-import unittest
-import os
 import logging
+import unittest
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +32,7 @@ class TestP1E2ETermClusters(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up fixture DB."""
-        if hasattr(cls, 'db_path'):
+        if hasattr(cls, "db_path"):
             # Keep fixture for inspection - delete parent directory
             fixture_dir = Path(cls.db_path).parent
             # Don't auto-delete - keep for debugging
@@ -41,16 +40,19 @@ class TestP1E2ETermClusters(unittest.TestCase):
 
     def test_01_fixture_has_term_clusters(self):
         """Verify fixture has term clusters."""
-        from app.services.db_service import DBService
+        from sqlalchemy import func, select
+
         from app.infra.sa_models import TermCluster
-        from sqlalchemy import select, func
+        from app.services.db_service import DBService
 
         DBService.initialize(self.db_path)
         db_service = DBService.get_instance()
 
         with db_service.get_session() as session:
-            stmt = select(func.count()).select_from(TermCluster).where(
-                TermCluster.project_id == self.project_id
+            stmt = (
+                select(func.count())
+                .select_from(TermCluster)
+                .where(TermCluster.project_id == self.project_id)
             )
             count = session.execute(stmt).scalar()
 
@@ -61,8 +63,8 @@ class TestP1E2ETermClusters(unittest.TestCase):
 
     def setUp(self):
         """Clean up TM entries before each test."""
-        from app.services.db_service import DBService
         from app.infra.sa_models import TMEntry
+        from app.services.db_service import DBService
 
         DBService.initialize(self.db_path)
         db_service = DBService.get_instance()
@@ -76,9 +78,10 @@ class TestP1E2ETermClusters(unittest.TestCase):
 
     def test_02_p1_verification_not_skipped(self):
         """Test P1 verification runs successfully (not SKIPPED)."""
-        from app.services.p1_verification_service import P1VerificationService
-        from app.services.db_service import DBService
         from pathlib import Path
+
+        from app.services.db_service import DBService
+        from app.services.p1_verification_service import P1VerificationService
 
         service = P1VerificationService()
 
@@ -112,16 +115,22 @@ class TestP1E2ETermClusters(unittest.TestCase):
 
             # Verify pre-extraction
             phase_pre = service.verify_resolve(session, seeded_tm, self.project_id)
-            self.assertEqual(phase_pre.items_passed, phase_pre.items_checked,
-                           "Pre-extraction phase should PASS all items")
+            self.assertEqual(
+                phase_pre.items_passed,
+                phase_pre.items_checked,
+                "Pre-extraction phase should PASS all items",
+            )
 
         # Verify post-restart
         session_restart = service.simulate_restart(snapshot_info.snapshot_path)
         phase_restart = service.verify_resolve(session_restart, seeded_tm, self.project_id)
         session_restart.close()
 
-        self.assertEqual(phase_restart.items_passed, phase_restart.items_checked,
-                       "Post-restart phase should PASS all items")
+        self.assertEqual(
+            phase_restart.items_passed,
+            phase_restart.items_checked,
+            "Post-restart phase should PASS all items",
+        )
 
         DBService.shutdown()
 
@@ -129,10 +138,11 @@ class TestP1E2ETermClusters(unittest.TestCase):
 
     def test_03_full_verification_report(self):
         """Run full P1 verification and generate report."""
-        from app.services.p1_verification_service import P1VerificationService, P1VerificationReport
-        from app.services.db_service import DBService
-        from pathlib import Path
         import time
+        from pathlib import Path
+
+        from app.services.db_service import DBService
+        from app.services.p1_verification_service import P1VerificationReport, P1VerificationService
 
         service = P1VerificationService()
         start_time = time.time()
@@ -171,10 +181,7 @@ class TestP1E2ETermClusters(unittest.TestCase):
         session_restart.close()
 
         # Determine status
-        all_pass = all(
-            p.items_failed == 0
-            for p in [phase_pre, phase_post, phase_restart]
-        )
+        all_pass = all(p.items_failed == 0 for p in [phase_pre, phase_post, phase_restart])
         status = "PASS" if all_pass else "PARTIAL"
 
         # Generate report
@@ -199,6 +206,7 @@ class TestP1E2ETermClusters(unittest.TestCase):
         json_path = out_dir / "P1_SCENARIO_7_E2E_REPORT.json"
 
         import json
+
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
 

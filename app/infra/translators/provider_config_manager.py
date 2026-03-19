@@ -26,30 +26,28 @@ Usage:
 """
 
 import logging
-from typing import Optional
 
-from app.infra.settings import SettingsService
 from app.infra.security import CredentialStore
+from app.infra.settings import SettingsService
 
 from .provider_config import (
-    ProviderConfig,
     ProviderAuthConfig,
     ProviderAuthMode,
+    ProviderConfig,
     ProviderLimitsConfig,
     ProviderRetryPolicy,
-    ProviderUiMeta,
+    get_api_key_credential_id_key,
     # Settings key helpers
     get_auth_mode_key,
-    get_api_key_credential_id_key,
-    get_service_account_credential_id_key,
-    get_service_account_path_key,
-    get_max_chars_per_request_key,
-    get_max_requests_per_minute_key,
+    get_enabled_key,
+    get_fail_closed_key,
     get_max_chars_per_day_key,
     get_max_chars_per_month_key,
-    get_fail_closed_key,
-    get_enabled_key,
+    get_max_chars_per_request_key,
+    get_max_requests_per_minute_key,
     get_rate_limit_key,
+    get_service_account_credential_id_key,
+    get_service_account_path_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +59,7 @@ class ProviderConfigManager:
     def __init__(
         self,
         settings: SettingsService,
-        cred_store: Optional[CredentialStore] = None,
+        cred_store: CredentialStore | None = None,
     ):
         """Initialize config manager.
 
@@ -119,9 +117,7 @@ class ProviderConfigManager:
             auth_mode = ProviderAuthMode.NONE
 
         # Load credential IDs
-        api_key_cred_id = self.settings.get_string(
-            get_api_key_credential_id_key(provider_id), ""
-        )
+        api_key_cred_id = self.settings.get_string(get_api_key_credential_id_key(provider_id), "")
         service_account_cred_id = self.settings.get_string(
             get_service_account_credential_id_key(provider_id), ""
         )
@@ -156,16 +152,12 @@ class ProviderConfigManager:
                 get_max_chars_per_request_key(provider_id), 10000
             ),
             max_requests_per_minute=max_requests_per_minute,
-            max_chars_per_day=self._get_optional_int(
-                get_max_chars_per_day_key(provider_id)
-            ),
-            max_chars_per_month=self._get_optional_int(
-                get_max_chars_per_month_key(provider_id)
-            ),
+            max_chars_per_day=self._get_optional_int(get_max_chars_per_day_key(provider_id)),
+            max_chars_per_month=self._get_optional_int(get_max_chars_per_month_key(provider_id)),
             fail_closed=self.settings.get_bool(get_fail_closed_key(provider_id), True),
         )
 
-    def _get_optional_int(self, key: str) -> Optional[int]:
+    def _get_optional_int(self, key: str) -> int | None:
         """Get optional integer from settings (0 = None)."""
         value = self.settings.get_int(key, 0)
         return value if value > 0 else None
@@ -233,7 +225,7 @@ class ProviderConfigManager:
         # Sync to disk
         self.settings.sync()
 
-    def get_credential(self, credential_id: str) -> Optional[str]:
+    def get_credential(self, credential_id: str) -> str | None:
         """
         Get credential value from CredentialStore.
 

@@ -7,20 +7,19 @@ Usage:
 """
 
 import argparse
-import sys
 import io
 import logging
+import sys
 from pathlib import Path
 
 # Fix Windows console encoding
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 logger = logging.getLogger(__name__)
@@ -49,10 +48,11 @@ def main():
     print("=" * 70)
 
     try:
-        from app.services.p1_verification_service import P1VerificationService
-        from app.services.db_service import DBService
-        import time
         import json
+        import time
+
+        from app.services.db_service import DBService
+        from app.services.p1_verification_service import P1VerificationService
 
         service = P1VerificationService()
         start_time = time.time()
@@ -105,10 +105,7 @@ def main():
         session_restart.close()
 
         # Determine status
-        all_pass = all(
-            p.items_failed == 0
-            for p in [phase_pre, phase_post, phase_restart]
-        )
+        all_pass = all(p.items_failed == 0 for p in [phase_pre, phase_post, phase_restart])
         status = "PASS" if all_pass else "PARTIAL"
 
         # Save reports

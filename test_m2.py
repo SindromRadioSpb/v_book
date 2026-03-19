@@ -1,20 +1,21 @@
 """Test script for M2 - Document Ingestion (no GUI required)."""
-import sys
+
 import io
+import sys
 from pathlib import Path
 
 # Fix Windows console encoding
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
-from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
+from app.services.project_service import ProjectService
 
 
 def create_sample_files(test_dir: Path) -> list[Path]:
@@ -34,17 +35,14 @@ def create_sample_files(test_dir: Path) -> list[Path]:
         "Hello World\n"
         "This is a sample text file.\n"
         "It contains Hebrew text.",
-        encoding='utf-8'
+        encoding="utf-8",
     )
     files.append(txt_file)
 
     # Create sample TXT file 2
     txt_file2 = samples_dir / "sample_text2.txt"
     txt_file2.write_text(
-        "בית ספר\n"
-        "ילדים לומדים בבית הספר.\n"
-        "המורה מלמדת עברית.",
-        encoding='utf-8'
+        "בית ספר\n" "ילדים לומדים בבית הספר.\n" "המורה מלמדת עברית.", encoding="utf-8"
     )
     files.append(txt_file2)
 
@@ -84,9 +82,7 @@ def test_m2():
 
     with project_service.db_service.get_session() as session:
         project = project_service.create_project(
-            session,
-            name="M2 Test Project",
-            description="Testing document ingestion"
+            session, name="M2 Test Project", description="Testing document ingestion"
         )
         print(f"   [+] Created project: {project.name} (ID: {project.project_id})")
 
@@ -109,10 +105,7 @@ def test_m2():
 
             # Import document
             doc = ingest_service.import_document(
-                session,
-                corpus_id=corpus.corpus_id,
-                file_path=file_path,
-                use_ocr=False
+                session, corpus_id=corpus.corpus_id, file_path=file_path, use_ocr=False
             )
 
             print(f"   [+] Document imported (ID: {doc.doc_id})")
@@ -124,7 +117,7 @@ def test_m2():
             # Get text
             text = ingest_service.get_document_text(session, doc.doc_id)
             if text:
-                preview = text[:100].replace('\n', ' ')
+                preview = text[:100].replace("\n", " ")
                 print(f"       - Text preview: {preview}...")
                 print(f"       - Text length: {len(text)} chars")
 
@@ -136,10 +129,7 @@ def test_m2():
         print(f"   Trying to re-import: {file_path.name}")
 
         doc = ingest_service.import_document(
-            session,
-            corpus_id=corpus.corpus_id,
-            file_path=file_path,
-            use_ocr=False
+            session, corpus_id=corpus.corpus_id, file_path=file_path, use_ocr=False
         )
 
         print(f"   [+] Duplicate detected - returned existing doc (ID: {doc.doc_id})")
@@ -148,11 +138,10 @@ def test_m2():
     print("\n6. Verifying documents in database...")
     with ingest_service.db_service.get_session() as session:
         from sqlalchemy import select
+
         from app.infra.sa_models import SourceDocument
 
-        stmt = select(SourceDocument).where(
-            SourceDocument.corpus_id == corpus.corpus_id
-        )
+        stmt = select(SourceDocument).where(SourceDocument.corpus_id == corpus.corpus_id)
         docs = session.execute(stmt).scalars().all()
 
         print(f"   [+] Total documents in corpus: {len(docs)}")
@@ -166,6 +155,7 @@ def test_m2():
     # Test DOCX (if file exists)
     try:
         from app.infra.extractors import docx_extractor
+
         print("   [+] DOCX extractor: available (python-docx installed)")
     except ImportError:
         print("   [-] DOCX extractor: not available (python-docx not installed)")
@@ -173,6 +163,7 @@ def test_m2():
     # Test PDF
     try:
         from app.infra.extractors import pdf_extractor
+
         print("   [+] PDF extractor: available (PyPDF2 installed)")
     except ImportError:
         print("   [-] PDF extractor: not available (PyPDF2 not installed)")
@@ -180,6 +171,7 @@ def test_m2():
     # Test OCR
     try:
         from app.infra.extractors.pdf_ocr_extractor import is_ocr_available
+
         if is_ocr_available():
             print("   [+] OCR extractor: available (pytesseract + pdf2image installed)")
         else:
@@ -213,5 +205,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n[X] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -75,4 +75,3 @@ Due queue must:
 - include only due cards
 - exclude suspended items
 - keep deterministic order
-

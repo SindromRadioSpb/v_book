@@ -10,12 +10,18 @@ Enhanced progress dialog with:
 
 import time
 from collections import deque
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QGroupBox, QTextEdit
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
 
 
 class BatchProgressDialogV3(QDialog):
@@ -68,9 +74,7 @@ class BatchProgressDialogV3(QDialog):
 
         # Disable close button (only Cancel/Pause buttons work)
         self.setWindowFlags(
-            Qt.WindowType.Dialog |
-            Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.WindowTitleHint
+            Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint
         )
 
         layout = QVBoxLayout()
@@ -103,7 +107,8 @@ class BatchProgressDialogV3(QDialog):
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("%v / %m (%p%)")
-        self.progress_bar.setStyleSheet("""
+        self.progress_bar.setStyleSheet(
+            """
             QProgressBar {
                 border: 2px solid #ddd;
                 border-radius: 5px;
@@ -114,7 +119,8 @@ class BatchProgressDialogV3(QDialog):
                 background-color: #4caf50;
                 border-radius: 3px;
             }
-        """)
+        """
+        )
         layout.addWidget(self.progress_bar)
 
         # === Metrics row ===
@@ -168,14 +174,16 @@ class BatchProgressDialogV3(QDialog):
         self.activity_log = QTextEdit()
         self.activity_log.setReadOnly(True)
         self.activity_log.setMaximumHeight(100)
-        self.activity_log.setStyleSheet("""
+        self.activity_log.setStyleSheet(
+            """
             QTextEdit {
                 background-color: #f5f5f5;
                 font-family: Consolas, monospace;
                 font-size: 11px;
                 border: 1px solid #ddd;
             }
-        """)
+        """
+        )
         activity_layout.addWidget(self.activity_log)
 
         activity_group.setLayout(activity_layout)
@@ -269,7 +277,11 @@ class BatchProgressDialogV3(QDialog):
         else:
             # PATCH-17-04: Distinguish SKIP vs FAIL
             translation_lower = translation.lower()
-            if "already" in translation_lower or "skip" in translation_lower or "translated" in translation_lower:
+            if (
+                "already" in translation_lower
+                or "skip" in translation_lower
+                or "translated" in translation_lower
+            ):
                 # SKIP event: already translated
                 icon = "[~]"
                 color = "#ff9800"  # Orange for skip
@@ -306,7 +318,7 @@ class BatchProgressDialogV3(QDialog):
         # Calculate elapsed time (excluding paused time)
         elapsed = time.time() - self.start_time - self.paused_time
         if self.pause_start:
-            elapsed -= (time.time() - self.pause_start)
+            elapsed -= time.time() - self.pause_start
 
         # Update elapsed label
         if elapsed < 60:
@@ -352,7 +364,7 @@ class BatchProgressDialogV3(QDialog):
 
             # Track paused time
             if self.pause_start:
-                self.paused_time += (time.time() - self.pause_start)
+                self.paused_time += time.time() - self.pause_start
                 self.pause_start = None
 
             self.resume_requested.emit()
@@ -399,7 +411,7 @@ class BatchProgressDialogV3(QDialog):
         if not self.is_paused:
             elapsed = time.time() - self.start_time - self.paused_time
             if self.pause_start:
-                elapsed -= (time.time() - self.pause_start)
+                elapsed -= time.time() - self.pause_start
 
             if elapsed < 60:
                 self.elapsed_label.setText(f"Time: {int(elapsed)}s elapsed")

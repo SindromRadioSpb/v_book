@@ -7,41 +7,40 @@ Provides:
 - Persistent filter/sort/pagination state via SettingsService.
 - No UI freeze: all DB reads happen in workers; main thread only updates model.
 """
-import logging
-from typing import List, Optional, Dict, Any
 
-from sqlalchemy import select
+import logging
+from typing import Any
+
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
-    QPushButton,
-    QTableView,
+    QInputDialog,
     QLabel,
     QLineEdit,
-    QComboBox,
-    QSpinBox,
-    QSizePolicy,
-    QAbstractItemView,
     QMenu,
-    QInputDialog,
     QMessageBox,
     QProgressDialog,
+    QPushButton,
+    QSpinBox,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
-from PyQt6.QtGui import QAction
+from sqlalchemy import select
 
+from app.domain.dto import SentenceDTO
+from app.infra.sa_models import SourceCorpus, SourceDocument
+from app.infra.settings import SettingsService
+from app.services.audio_playback_service import AudioPlaybackService
 from app.services.db_service import DBService
 from app.services.sentences_workspace_service import SentencesWorkspaceService
-from app.services.audio_playback_service import AudioPlaybackService
-from app.infra.sa_models import SourceCorpus, SourceDocument
-from app.ui.dialogs.document_picker_dialog import DocumentPickerDialog
-from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
 from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
-from app.infra.settings import SettingsService
-from app.domain.dto import SentenceDTO
 from app.ui.dialogs import show_error, show_info, show_warning
+from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
+from app.ui.dialogs.document_picker_dialog import DocumentPickerDialog
 from app.ui.models_qt import SentencesTableModel
 from app.ui.workers import UserDictionaryBulkAddWorker
 
@@ -72,14 +71,20 @@ class _SentencesLoadWorker(QThread):
       backward compatibility with existing tests.
     """
 
-    page_ready = pyqtSignal(int, list)      # request_id, dtos  (stage 1 - fast)
-    count_ready = pyqtSignal(int, int)      # request_id, total (stage 2)
-    finished = pyqtSignal(int, list, int)   # request_id, dtos, total (legacy compat)
-    error = pyqtSignal(int, str)            # request_id, message
+    page_ready = pyqtSignal(int, list)  # request_id, dtos  (stage 1 - fast)
+    count_ready = pyqtSignal(int, int)  # request_id, total (stage 2)
+    finished = pyqtSignal(int, list, int)  # request_id, dtos, total (legacy compat)
+    error = pyqtSignal(int, str)  # request_id, message
 
-    def __init__(self, request_id: int, project_id: int, page: int,
-                 page_size: int, doc_filter: Optional[int],
-                 text_search: Optional[str]):
+    def __init__(
+        self,
+        request_id: int,
+        project_id: int,
+        page: int,
+        page_size: int,
+        doc_filter: int | None,
+        text_search: str | None,
+    ):
         super().__init__()
         self.request_id = int(request_id)
         self.project_id = project_id
@@ -90,8 +95,9 @@ class _SentencesLoadWorker(QThread):
 
     def run(self):
         try:
-            from app.services.sentences_workspace_service import SentencesWorkspaceService
             from app.services.db_service import DBService
+            from app.services.sentences_workspace_service import SentencesWorkspaceService
+
             db = DBService.get_instance()
             svc = SentencesWorkspaceService()
 
@@ -135,9 +141,9 @@ class SentencesView(QWidget):
         self.current_page = 1
         self.page_size = self.settings.get_int("sentences_view/page_size", 100)
         self.total_count = 0
-        self._doc_filter: Optional[int] = None
-        self._text_search: Optional[str] = None
-        self._load_worker: Optional[_SentencesLoadWorker] = None
+        self._doc_filter: int | None = None
+        self._text_search: str | None = None
+        self._load_worker: _SentencesLoadWorker | None = None
         self._request_seq: int = 0
         self._active_request_id: int = 0
 
@@ -145,7 +151,7 @@ class SentencesView(QWidget):
         self._batch_translate_worker = None
         self._batch_audio_worker = None
         self._user_dict_add_worker = None
-        self._user_dict_target_dictionary_id: Optional[int] = None
+        self._user_dict_target_dictionary_id: int | None = None
 
         # Debounce timer for search
         self._filter_timer = QTimer()
@@ -154,7 +160,7 @@ class SentencesView(QWidget):
         self._filter_timer.timeout.connect(self._reload)
 
         # Current DTOs for selection lookup
-        self._current_dtos: List[SentenceDTO] = []
+        self._current_dtos: list[SentenceDTO] = []
 
         self._init_ui()
         self._restore_view_state()
@@ -188,7 +194,7 @@ class SentencesView(QWidget):
         self,
         saved_doc_id: str,
         saved_doc_name: str,
-    ) -> tuple[Optional[int], str, bool]:
+    ) -> tuple[int | None, str, bool]:
         try:
             parsed_doc_id = int(saved_doc_id) if saved_doc_id else None
         except ValueError:
@@ -324,7 +330,9 @@ class SentencesView(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
-        self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_selection_changed())
+        self.table.selectionModel().selectionChanged.connect(
+            lambda *_: self._on_selection_changed()
+        )
 
         # Column widths
         self.table.setColumnWidth(COL_ID, 70)
@@ -428,7 +436,7 @@ class SentencesView(QWidget):
         self._load_worker.error.connect(self._on_load_error)
         self._load_worker.start()
 
-    def _on_page_ready(self, request_id: int, dtos: List[SentenceDTO]):
+    def _on_page_ready(self, request_id: int, dtos: list[SentenceDTO]):
         """Stage 1: show row data immediately; pagination shows 'counting...'."""
         if request_id != self._active_request_id:
             return
@@ -444,7 +452,7 @@ class SentencesView(QWidget):
         self._update_pagination(total)
         self.status_label.setText(f"Showing {len(self._current_dtos)} of {total} sentences")
 
-    def _on_load_finished(self, request_id: int, dtos: List[SentenceDTO], total: int):
+    def _on_load_finished(self, request_id: int, dtos: list[SentenceDTO], total: int):
         """Legacy compat: only fires after both stages complete — no-op if stages handled it."""
         pass
 
@@ -455,9 +463,10 @@ class SentencesView(QWidget):
         logger.error(f"Sentences load error: {msg}")
 
     @staticmethod
-    def _qc_badge_static(qc_status: Optional[str]):
+    def _qc_badge_static(qc_status: str | None):
         """Return (badge_text, QColor_or_None) for a QC status."""
         from PyQt6.QtGui import QColor
+
         _MAP = {
             "ok": ("✓", QColor("darkGreen")),
             "auto_fixed": ("~", QColor("olive")),
@@ -470,7 +479,7 @@ class SentencesView(QWidget):
             return "—", None
         return _MAP.get(qc_status, (qc_status[:2], None))
 
-    def _populate_table(self, dtos: List[SentenceDTO]):
+    def _populate_table(self, dtos: list[SentenceDTO]):
         """Push DTOs into the model (PATCH-G: replaces setItem loops)."""
         self._sentences_model.update_rows(dtos)
 
@@ -490,9 +499,15 @@ class SentencesView(QWidget):
         self.next_btn.setEnabled(self.current_page < page_count)
         self.last_btn.setEnabled(self.current_page < page_count)
 
-    def _on_first_page(self): self._go_to_page(1)
-    def _on_prev_page(self): self._go_to_page(self.current_page - 1)
-    def _on_next_page(self): self._go_to_page(self.current_page + 1)
+    def _on_first_page(self):
+        self._go_to_page(1)
+
+    def _on_prev_page(self):
+        self._go_to_page(self.current_page - 1)
+
+    def _on_next_page(self):
+        self._go_to_page(self.current_page + 1)
+
     def _on_last_page(self):
         page_count = max(1, (self.total_count + self.page_size - 1) // self.page_size)
         self._go_to_page(page_count)
@@ -573,7 +588,7 @@ class SentencesView(QWidget):
         self.niqqud_sel_btn.setEnabled(has_sel)
         self.add_user_dict_btn.setEnabled(has_sel)
 
-    def _get_selected_dtos(self) -> List[SentenceDTO]:
+    def _get_selected_dtos(self) -> list[SentenceDTO]:
         rows = {idx.row() for idx in self.table.selectionModel().selectedRows()}
         return [self._current_dtos[r] for r in sorted(rows) if r < len(self._current_dtos)]
 
@@ -643,13 +658,13 @@ class SentencesView(QWidget):
         if not selected:
             return
 
-        from app.ui.dialogs import show_batch_translate_dialog
-        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
-        from app.ui.workers import BatchTranslateWorker
         from app.services.batch_mt_translate_service import (
             BatchTranslateItem,
             BatchTranslateOptions,
         )
+        from app.ui.dialogs import show_batch_translate_dialog
+        from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
+        from app.ui.workers import BatchTranslateWorker
 
         accepted, provider_mode, write_mode, _scope = show_batch_translate_dialog(
             parent=self,
@@ -662,6 +677,7 @@ class SentencesView(QWidget):
         # Get project src/tgt lang
         try:
             from app.services.project_service import ProjectService
+
             with self.db_service.get_session() as session:
                 proj = ProjectService().get_project(session, self.project_id)
                 src_lang = proj.src_lang if proj else "he"
@@ -718,6 +734,7 @@ class SentencesView(QWidget):
 
         try:
             from app.services.project_service import ProjectService
+
             with self.db_service.get_session() as session:
                 proj = ProjectService().get_project(session, self.project_id)
                 src_lang = proj.src_lang if proj else "he"
@@ -732,6 +749,7 @@ class SentencesView(QWidget):
 
         # Build items for audio worker (src_text, src_lang, src_norm)
         from app.services.sentences_workspace_service import SentencesWorkspaceService
+
         svc = SentencesWorkspaceService()
         items = [
             {
@@ -814,7 +832,9 @@ class SentencesView(QWidget):
                     self._upsert_sentence_translation(session, dto=dto, translation="")
                 session.commit()
             self._reload()
-            show_info(self, "Clear Translation", f"Cleared translation for {len(selected)} sentence(s).")
+            show_info(
+                self, "Clear Translation", f"Cleared translation for {len(selected)} sentence(s)."
+            )
         except Exception as e:
             logger.error("Failed to clear sentence translation: %s", e, exc_info=True)
             show_error(self, "Save Error", f"Failed to clear translation:\n{e}")
@@ -886,7 +906,10 @@ class SentencesView(QWidget):
 
     def on_pronunciation_bootstrap(self):
         """Run pronunciation bootstrap for selected (or all) sentences."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
+
         selected = self._get_selected_dtos()
         if selected:
             src_lang = self._get_src_lang()
@@ -908,6 +931,7 @@ class SentencesView(QWidget):
     def on_edit_pronunciation_selected(self):
         """Open Edit Pronunciation dialog for the first selected sentence row (lexical bootstrap)."""
         from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
+
         selected = self._get_selected_dtos()
         if not selected:
             return
@@ -931,19 +955,24 @@ class SentencesView(QWidget):
             all_ids = []
             with self.db_service.get_session() as session:
                 all_ids = self.sentences_service.get_all_filtered_sentence_ids(
-                    session, self.project_id,
+                    session,
+                    self.project_id,
                     doc_id_filter=self._doc_filter,
                     text_search=self._text_search,
                 )
         except Exception as e:
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to fetch sentence IDs: {e}")
             return
 
         page_ids = [dto.sentence_id for dto in self._current_dtos]
         selected_ids = [dto.sentence_id for dto in self._get_selected_dtos()]
 
-        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import (
+            show_sentence_niqqud_bootstrap_dialog,
+        )
+
         changed = show_sentence_niqqud_bootstrap_dialog(
             self,
             selected_ids=selected_ids,
@@ -962,7 +991,10 @@ class SentencesView(QWidget):
         selected_ids = [dto.sentence_id for dto in selected]
         src_lang = self._get_src_lang()
 
-        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import (
+            show_sentence_niqqud_bootstrap_dialog,
+        )
+
         changed = show_sentence_niqqud_bootstrap_dialog(
             self,
             selected_ids=selected_ids,
@@ -980,6 +1012,7 @@ class SentencesView(QWidget):
             return
         dto = selected[0]
         from app.ui.dialogs.edit_sentence_niqqud_dialog import show_edit_sentence_niqqud_dialog
+
         changed = show_edit_sentence_niqqud_dialog(
             self,
             sentence_id=dto.sentence_id,
@@ -995,6 +1028,7 @@ class SentencesView(QWidget):
         if not selected:
             return
         from PyQt6.QtWidgets import QMessageBox
+
         resp = QMessageBox.question(
             self,
             "Clear Niqqud",
@@ -1006,6 +1040,7 @@ class SentencesView(QWidget):
             return
         try:
             from app.services.sentence_pronunciation_service import SentencePronunciationService
+
             svc = SentencePronunciationService()
             cleared = 0
             with self.db_service.get_session() as session:
@@ -1015,9 +1050,11 @@ class SentencesView(QWidget):
                 session.commit()
             self._reload()
             from app.ui.dialogs import show_info
+
             show_info(self, "Clear Niqqud", f"Cleared niqqud for {cleared} sentence(s).")
         except Exception as e:
             from app.ui.dialogs import show_error
+
             show_error(self, "Error", f"Failed to clear niqqud: {e}")
 
     def on_play_audio(self):
@@ -1046,7 +1083,7 @@ class SentencesView(QWidget):
 
         src_lang = self._get_src_lang()
         tgt_lang = self._get_tgt_lang()
-        payloads: List[Dict[str, Any]] = []
+        payloads: list[dict[str, Any]] = []
         for dto in selected:
             src_text = (dto.text or "").strip()
             if not src_text:
@@ -1098,7 +1135,9 @@ class SentencesView(QWidget):
                 row["origin_source_ref"] = None
             prepared.append(row)
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -1194,6 +1233,7 @@ class SentencesView(QWidget):
         """Return project source language, defaulting to 'he'."""
         try:
             from app.services.project_service import ProjectService
+
             with self.db_service.get_session() as session:
                 proj = ProjectService().get_project(session, self.project_id)
                 return proj.src_lang if proj else "he"
@@ -1204,6 +1244,7 @@ class SentencesView(QWidget):
         """Return project target language, defaulting to 'ru'."""
         try:
             from app.services.project_service import ProjectService
+
             with self.db_service.get_session() as session:
                 proj = ProjectService().get_project(session, self.project_id)
                 return proj.tgt_lang if proj else "ru"
@@ -1231,24 +1272,22 @@ class SentencesView(QWidget):
             for dto in selected
         ]
 
-    def _play_audio_items(self, items: list, *, play_mode: str, start_immediately: bool = False) -> None:
+    def _play_audio_items(
+        self, items: list, *, play_mode: str, start_immediately: bool = False
+    ) -> None:
         """Resolve and play audio files for given items (same pattern as all other views)."""
         try:
             with self.db_service.get_session() as session:
-                ready_items = self.audio_playback_service.resolve_ready_paths(
-                    session, items=items
-                )
+                ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
             if not ready_items:
                 QMessageBox.information(
-                    self, "Audio Missing",
-                    "No ready audio found for selected rows.\nUse 'Generate Audio...' first."
+                    self,
+                    "Audio Missing",
+                    "No ready audio found for selected rows.\nUse 'Generate Audio...' first.",
                 )
                 return
             paths = [row[0] for row in ready_items]
-            labels = [
-                str((row[1] or {}).get("src_text") or row[0].stem)
-                for row in ready_items
-            ]
+            labels = [str((row[1] or {}).get("src_text") or row[0].stem) for row in ready_items]
             contexts = []
             for _, item in ready_items:
                 payload = item or {}
@@ -1262,9 +1301,7 @@ class SentencesView(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")

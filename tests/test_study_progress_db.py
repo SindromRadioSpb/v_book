@@ -52,7 +52,9 @@ def test_ensure_progress_idempotent_unique_hash():
             session.commit()
 
             assert p1 == p2
-            rows = session.execute(select(StudyProgress).where(StudyProgress.canonical_hash == "hash-unique")).all()
+            rows = session.execute(
+                select(StudyProgress).where(StudyProgress.canonical_hash == "hash-unique")
+            ).all()
             assert len(rows) == 1
     finally:
         engine.dispose()
@@ -92,7 +94,9 @@ def test_due_queue_excludes_suspended_items():
                         tgt_lang="ru",
                         src_text="alpha",
                         src_norm="alpha",
-                        canonical_hash=user_dict_service.build_canonical_hash("he", "ru", "lemma", "alpha"),
+                        canonical_hash=user_dict_service.build_canonical_hash(
+                            "he", "ru", "lemma", "alpha"
+                        ),
                         study_progress_id=p_keep,
                         is_noise=0,
                         is_suspended=0,
@@ -106,7 +110,9 @@ def test_due_queue_excludes_suspended_items():
                         tgt_lang="ru",
                         src_text="beta",
                         src_norm="beta",
-                        canonical_hash=user_dict_service.build_canonical_hash("he", "ru", "lemma", "beta"),
+                        canonical_hash=user_dict_service.build_canonical_hash(
+                            "he", "ru", "lemma", "beta"
+                        ),
                         study_progress_id=p_skip,
                         is_noise=0,
                         is_suspended=1,
@@ -162,7 +168,9 @@ def test_due_queue_returns_due_first():
                         tgt_lang="ru",
                         src_text="older",
                         src_norm="older",
-                        canonical_hash=user_dict_service.build_canonical_hash("he", "ru", "lemma", "older"),
+                        canonical_hash=user_dict_service.build_canonical_hash(
+                            "he", "ru", "lemma", "older"
+                        ),
                         study_progress_id=p_old,
                         is_noise=0,
                         is_suspended=0,
@@ -176,7 +184,9 @@ def test_due_queue_returns_due_first():
                         tgt_lang="ru",
                         src_text="newer",
                         src_norm="newer",
-                        canonical_hash=user_dict_service.build_canonical_hash("he", "ru", "lemma", "newer"),
+                        canonical_hash=user_dict_service.build_canonical_hash(
+                            "he", "ru", "lemma", "newer"
+                        ),
                         study_progress_id=p_new,
                         is_noise=0,
                         is_suspended=0,

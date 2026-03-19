@@ -1,6 +1,6 @@
 """N-gram extraction from processed sentences (M5 Base)."""
+
 import logging
-from typing import List, Dict, Set, Tuple
 from collections import Counter
 
 from app.domain.hebrew_utils import merge_standalone_articles
@@ -10,20 +10,19 @@ logger = logging.getLogger(__name__)
 # POS pattern filters for Hebrew
 VALID_POS_PATTERNS = {
     # Bigrams
-    ('NOUN', 'NOUN'),   # Construct chains (smikhut): בית ספר
-    ('NOUN', 'ADJ'),    # Noun + Adjective
-    ('ADJ', 'NOUN'),    # Adjective + Noun
-    ('PROPN', 'PROPN'), # Proper noun chains
-    ('NUM', 'NOUN'),    # Number + Noun
-
+    ("NOUN", "NOUN"),  # Construct chains (smikhut): בית ספר
+    ("NOUN", "ADJ"),  # Noun + Adjective
+    ("ADJ", "NOUN"),  # Adjective + Noun
+    ("PROPN", "PROPN"),  # Proper noun chains
+    ("NUM", "NOUN"),  # Number + Noun
     # Trigrams
-    ('NOUN', 'NOUN', 'NOUN'),
-    ('NOUN', 'ADJ', 'NOUN'),
-    ('ADJ', 'ADJ', 'NOUN'),
+    ("NOUN", "NOUN", "NOUN"),
+    ("NOUN", "ADJ", "NOUN"),
+    ("ADJ", "ADJ", "NOUN"),
 }
 
 
-def is_valid_pos_pattern(pos_tags: Tuple[str, ...]) -> bool:
+def is_valid_pos_pattern(pos_tags: tuple[str, ...]) -> bool:
     """
     Check if POS pattern is valid for term extraction.
 
@@ -36,10 +35,7 @@ def is_valid_pos_pattern(pos_tags: Tuple[str, ...]) -> bool:
     return pos_tags in VALID_POS_PATTERNS
 
 
-def extract_ngrams_from_sentence(
-    tokens: List[Dict],
-    n_values: List[int] = [2, 3]
-) -> List[Dict]:
+def extract_ngrams_from_sentence(tokens: list[dict], n_values: list[int] = [2, 3]) -> list[dict]:
     """
     Extract n-grams from a single sentence.
 
@@ -62,41 +58,42 @@ def extract_ngrams_from_sentence(
             continue
 
         for i in range(len(tokens) - n + 1):
-            window = tokens[i:i+n]
+            window = tokens[i : i + n]
 
             # Merge standalone articles (e.g., "ה" + "ספר" → "הספר")
             # Fixes tokenization artifacts where definite article is separated
             window = merge_standalone_articles(window)
 
             # Extract POS pattern
-            pos_pattern = tuple(tok['pos'] for tok in window)
+            pos_pattern = tuple(tok["pos"] for tok in window)
 
             # Filter by POS pattern
             if not is_valid_pos_pattern(pos_pattern):
                 continue
 
             # Build surface and lemma forms
-            surface_tokens = [tok['text'] for tok in window]
-            lemma_tokens = [tok['lemma'] for tok in window]
+            surface_tokens = [tok["text"] for tok in window]
+            lemma_tokens = [tok["lemma"] for tok in window]
 
-            surface_text = ' '.join(surface_tokens)
-            lemma_phrase = ' '.join(lemma_tokens)
+            surface_text = " ".join(surface_tokens)
+            lemma_phrase = " ".join(lemma_tokens)
 
-            ngrams.append({
-                'n': n,
-                'surface_text': surface_text,
-                'lemma_phrase': lemma_phrase,
-                'pos_pattern': '|'.join(pos_pattern),
-                'token_ids': list(range(i, i+n)),
-            })
+            ngrams.append(
+                {
+                    "n": n,
+                    "surface_text": surface_text,
+                    "lemma_phrase": lemma_phrase,
+                    "pos_pattern": "|".join(pos_pattern),
+                    "token_ids": list(range(i, i + n)),
+                }
+            )
 
     return ngrams
 
 
 def extract_ngrams_from_documents(
-    documents_sentences: Dict[int, List[List[Dict]]],
-    n_values: List[int] = [2, 3]
-) -> Tuple[Dict, Dict]:
+    documents_sentences: dict[int, list[list[dict]]], n_values: list[int] = [2, 3]
+) -> tuple[dict, dict]:
     """
     Extract n-grams from multiple documents.
 
@@ -118,7 +115,7 @@ def extract_ngrams_from_documents(
             ngrams = extract_ngrams_from_sentence(sentence, n_values)
 
             for ng in ngrams:
-                key = (ng['surface_text'], ng['n'], ng['pos_pattern'])
+                key = (ng["surface_text"], ng["n"], ng["pos_pattern"])
 
                 # Count frequency
                 ngram_counts[key] += 1

@@ -1,4 +1,5 @@
 """Translation Memory (M7)."""
+
 import logging
 
 logger = logging.getLogger(__name__)

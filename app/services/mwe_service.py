@@ -1,4 +1,5 @@
 """MWE extraction service (M5)."""
+
 import logging
 
 logger = logging.getLogger(__name__)

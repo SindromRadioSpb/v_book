@@ -6,14 +6,13 @@ with lightweight fuzzy search (no external dependencies).
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Optional
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QLabel
-)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +31,13 @@ class ActionSpec:
         enabled_check: Optional function to check if action is enabled (None = always enabled)
         category: Category for grouping (e.g., "Tools", "Premium", "Navigate")
     """
+
     action_id: str
     title: str
-    keywords: List[str]
+    keywords: list[str]
     shortcut: str
     callback: Callable
-    enabled_check: Optional[Callable[[], bool]] = None
+    enabled_check: Callable[[], bool] | None = None
     category: str = "General"
     _search_text: str = field(init=False, repr=False)
 
@@ -47,7 +47,7 @@ class ActionSpec:
             self.title.lower(),
             " ".join(self.keywords).lower(),
             self.shortcut.lower(),
-            self.category.lower()
+            self.category.lower(),
         ]
         self._search_text = " ".join(parts)
 
@@ -69,13 +69,13 @@ class ActionsRegistry:
     Manages action registration, search, and execution.
     """
 
-    _instance: Optional['ActionsRegistry'] = None
+    _instance: Optional["ActionsRegistry"] = None
 
     def __init__(self):
         self._actions: dict[str, ActionSpec] = {}
 
     @classmethod
-    def get_instance(cls) -> 'ActionsRegistry':
+    def get_instance(cls) -> "ActionsRegistry":
         """Get or create singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
@@ -97,11 +97,11 @@ class ActionsRegistry:
             del self._actions[action_id]
             logger.debug(f"Unregistered action: {action_id}")
 
-    def get_all(self) -> List[ActionSpec]:
+    def get_all(self) -> list[ActionSpec]:
         """Get all registered actions."""
         return list(self._actions.values())
 
-    def get_enabled(self) -> List[ActionSpec]:
+    def get_enabled(self) -> list[ActionSpec]:
         """Get all currently enabled actions."""
         return [spec for spec in self._actions.values() if spec.is_enabled()]
 
@@ -129,7 +129,7 @@ class ActionsRegistry:
             logger.error(f"Error executing action '{action_id}': {e}")
             return False
 
-    def search(self, query: str) -> List[Tuple[ActionSpec, int]]:
+    def search(self, query: str) -> list[tuple[ActionSpec, int]]:
         """
         Search actions with lightweight scoring.
 
@@ -156,7 +156,7 @@ class ActionsRegistry:
         results.sort(key=lambda x: x[1], reverse=True)
         return results
 
-    def _score_action(self, spec: ActionSpec, query_lower: str, query_words: List[str]) -> int:
+    def _score_action(self, spec: ActionSpec, query_lower: str, query_words: list[str]) -> int:
         """
         Score an action against a query.
 
@@ -222,7 +222,9 @@ class CommandPaletteDialog(QDialog):
 
         # Search input
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search actions... (type to filter, ↑↓ to navigate, Enter to execute)")
+        self.search_input.setPlaceholderText(
+            "Search actions... (type to filter, ↑↓ to navigate, Enter to execute)"
+        )
         self.search_input.textChanged.connect(self._on_search_changed)
         layout.addWidget(self.search_input)
 

@@ -313,11 +313,13 @@ def import_jsonl_files(
                             report.skipped_empty += 1
                         elif status.startswith("error:"):
                             report.errors += 1
-                            report.error_details.append({
-                                "file": str(jsonl_file),
-                                "line": line_num,
-                                "error": status[6:],  # Remove "error:" prefix
-                            })
+                            report.error_details.append(
+                                {
+                                    "file": str(jsonl_file),
+                                    "line": line_num,
+                                    "error": status[6:],  # Remove "error:" prefix
+                                }
+                            )
 
                         # Commit periodically
                         if not dry_run and pending_commits >= commit_every:
@@ -332,11 +334,13 @@ def import_jsonl_files(
                     except json.JSONDecodeError as e:
                         logger.warning(f"Invalid JSON at {jsonl_file.name}:{line_num}: {e}")
                         report.errors += 1
-                        report.error_details.append({
-                            "file": str(jsonl_file),
-                            "line": line_num,
-                            "error": f"JSON parse error: {e}",
-                        })
+                        report.error_details.append(
+                            {
+                                "file": str(jsonl_file),
+                                "line": line_num,
+                                "error": f"JSON parse error: {e}",
+                            }
+                        )
 
         except Exception as e:
             logger.exception(f"Error processing file: {jsonl_file}")
@@ -448,7 +452,7 @@ Examples:
         else:
             # Try glob expansion
             path_obj = Path(pattern)
-            if path_obj.is_absolute() and '*' in pattern:
+            if path_obj.is_absolute() and "*" in pattern:
                 # Absolute path with wildcard - extract parent and pattern
                 parent = path_obj.parent
                 pattern_name = path_obj.name

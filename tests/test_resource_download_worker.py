@@ -80,4 +80,3 @@ def test_resources_manager_download_checksum_mismatch(monkeypatch, tmp_path):
     assert not finished
     assert errors
     assert not target.exists()
-

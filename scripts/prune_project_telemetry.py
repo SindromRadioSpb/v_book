@@ -25,7 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--db-path", required=True, help="Path to SQLite database")
-    parser.add_argument("--project-id", required=True, type=int, help="Project ID to inspect or prune")
+    parser.add_argument(
+        "--project-id", required=True, type=int, help="Project ID to inspect or prune"
+    )
     parser.add_argument(
         "--keep-latest-ok",
         type=int,
@@ -66,7 +68,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--keep-latest-ok must be >= 0")
     if bool(args.preflight_only) and bool(args.apply):
         parser.error("--preflight-only and --apply are mutually exclusive")
-    if (bool(args.preflight_only) or bool(args.apply)) and not str(args.backup_db_path or "").strip():
+    if (bool(args.preflight_only) or bool(args.apply)) and not str(
+        args.backup_db_path or ""
+    ).strip():
         parser.error("--backup-db-path is required for --preflight-only or --apply")
     if bool(args.apply) and int(args.confirm_project_id or -1) != int(args.project_id):
         parser.error("--apply requires --confirm-project-id matching --project-id")
@@ -208,15 +212,13 @@ def _run_telemetry_retention_apply_preflight(
     report["backup_probe"] = backup_probe
 
     if not target_probe.get("ok"):
-        report["error"] = (
-            "Target DB failed preflight health probe: "
-            + str(target_probe.get("error") or "unknown error")
+        report["error"] = "Target DB failed preflight health probe: " + str(
+            target_probe.get("error") or "unknown error"
         )
         return report
     if not backup_probe.get("ok"):
-        report["error"] = (
-            "Backup DB failed preflight health probe: "
-            + str(backup_probe.get("error") or "unknown error")
+        report["error"] = "Backup DB failed preflight health probe: " + str(
+            backup_probe.get("error") or "unknown error"
         )
         return report
 
@@ -261,7 +263,9 @@ def main() -> int:
     _validate_args(parser, args)
 
     db_path = Path(args.db_path).expanduser().resolve()
-    backup_db_path = Path(args.backup_db_path).expanduser().resolve() if args.backup_db_path else None
+    backup_db_path = (
+        Path(args.backup_db_path).expanduser().resolve() if args.backup_db_path else None
+    )
     preflight_report: dict[str, Any] | None = None
 
     if bool(args.preflight_only) or bool(args.apply):
@@ -272,7 +276,9 @@ def main() -> int:
             allow_protected_db_telemetry_apply=bool(args.allow_protected_db_telemetry_apply),
         )
         if not preflight_report.get("ok"):
-            parser.error(str(preflight_report.get("error") or "telemetry retention preflight failed"))
+            parser.error(
+                str(preflight_report.get("error") or "telemetry retention preflight failed")
+            )
 
     DBService.shutdown()
     DBService.initialize(db_path)
@@ -296,7 +302,11 @@ def main() -> int:
                     keep_latest_ok=int(args.keep_latest_ok),
                 )
 
-        operation_mode = "apply" if bool(args.apply) else "preflight_only" if bool(args.preflight_only) else "dry_run"
+        operation_mode = (
+            "apply"
+            if bool(args.apply)
+            else "preflight_only" if bool(args.preflight_only) else "dry_run"
+        )
         print(
             json.dumps(
                 _to_dict(summary, operation_mode=operation_mode, preflight=preflight_report),

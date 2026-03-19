@@ -9,13 +9,14 @@ Design principles:
 - Source references: (kind, source_id, project_id) + snapshot columns for
   display without extra joins.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import UTC
+from typing import Any
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import (
@@ -38,14 +39,14 @@ class AudioItemSpec:
     Callers (views) populate whichever snapshot fields they have available.
     """
 
-    kind: str = "sentence"          # sentence | lemma | term | custom_text
-    source_id: Optional[int] = None
-    project_id: Optional[int] = None
-    snapshot_hebrew: Optional[str] = None
-    snapshot_niqqud: Optional[str] = None
-    snapshot_translation: Optional[str] = None
-    snapshot_source_label: Optional[str] = None
-    audio_asset_id: Optional[int] = None
+    kind: str = "sentence"  # sentence | lemma | term | custom_text
+    source_id: int | None = None
+    project_id: int | None = None
+    snapshot_hebrew: str | None = None
+    snapshot_niqqud: str | None = None
+    snapshot_translation: str | None = None
+    snapshot_source_label: str | None = None
+    audio_asset_id: int | None = None
     audio_status: str = "unknown"
 
 
@@ -56,17 +57,17 @@ class AudioQueueItemDTO:
     item_id: int
     position: int
     kind: str
-    source_id: Optional[int]
-    project_id: Optional[int]
-    snapshot_hebrew: Optional[str]
-    snapshot_niqqud: Optional[str]
-    snapshot_translation: Optional[str]
-    snapshot_source_label: Optional[str]
-    audio_asset_id: Optional[int]
+    source_id: int | None
+    project_id: int | None
+    snapshot_hebrew: str | None
+    snapshot_niqqud: str | None
+    snapshot_translation: str | None
+    snapshot_source_label: str | None
+    audio_asset_id: int | None
     audio_status: str
     is_stale: bool
     play_count: int
-    last_played_at: Optional[str]
+    last_played_at: str | None
 
 
 @dataclass
@@ -88,13 +89,13 @@ class AudioPlaylistEntryDTO:
     playlist_id: int
     position: int
     kind: str
-    source_id: Optional[int]
-    project_id: Optional[int]
-    snapshot_hebrew: Optional[str]
-    snapshot_niqqud: Optional[str]
-    snapshot_translation: Optional[str]
-    snapshot_source_label: Optional[str]
-    audio_asset_id: Optional[int]
+    source_id: int | None
+    project_id: int | None
+    snapshot_hebrew: str | None
+    snapshot_niqqud: str | None
+    snapshot_translation: str | None
+    snapshot_source_label: str | None
+    audio_asset_id: int | None
     audio_status: str
 
 
@@ -104,9 +105,9 @@ class AudioHistoryDTO:
 
     history_id: int
     kind: str
-    source_id: Optional[int]
-    project_id: Optional[int]
-    snapshot_hebrew: Optional[str]
+    source_id: int | None
+    project_id: int | None
+    snapshot_hebrew: str | None
     rate_used: float
     played_at: str
 
@@ -115,10 +116,10 @@ class AudioHistoryDTO:
 class SourceLink:
     """Deep-link payload returned by resolve_source_link()."""
 
-    view_name: str          # "sentences" | "dictionary" | "terms"
-    row_id: Optional[int]   # sentence_id / lemma entry_id / term entry_id
-    project_id: Optional[int]
-    extra: Dict[str, Any] = field(default_factory=dict)
+    view_name: str  # "sentences" | "dictionary" | "terms"
+    row_id: int | None  # sentence_id / lemma entry_id / term entry_id
+    project_id: int | None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
@@ -133,23 +134,19 @@ class AudioQueueService:
 
     # ── Queue ─────────────────────────────────────────────────────────────────
 
-    def get_queue(self, session: Session) -> List[AudioQueueItemDTO]:
+    def get_queue(self, session: Session) -> list[AudioQueueItemDTO]:
         """Return all queue items ordered by position."""
-        rows = (
-            session.query(AudioQueueItem)
-            .order_by(AudioQueueItem.position)
-            .all()
-        )
+        rows = session.query(AudioQueueItem).order_by(AudioQueueItem.position).all()
         return [self._row_to_queue_dto(r) for r in rows]
 
     def add_to_queue(
         self,
         session: Session,
-        specs: List[AudioItemSpec],
+        specs: list[AudioItemSpec],
         *,
         mode: str = "append",  # "append" | "prepend" | "after_current"
         current_position: int = 0,
-    ) -> List[int]:
+    ) -> list[int]:
         """Insert specs into the queue and return new item_ids.
 
         ``mode``:
@@ -180,7 +177,7 @@ class AudioQueueService:
                 if row.position > insert_after:
                     row.position += shift_amount
 
-        item_ids: List[int] = []
+        item_ids: list[int] = []
         for i, spec in enumerate(specs):
             item = AudioQueueItem(
                 position=insert_after + 1 + i,
@@ -200,7 +197,7 @@ class AudioQueueService:
 
         return item_ids
 
-    def remove_from_queue(self, session: Session, item_ids: List[int]) -> int:
+    def remove_from_queue(self, session: Session, item_ids: list[int]) -> int:
         """Delete queue items by ID.  Returns count deleted."""
         if not item_ids:
             return 0
@@ -216,25 +213,22 @@ class AudioQueueService:
         """Remove all items from the queue."""
         session.query(AudioQueueItem).delete()
 
-    def reorder_queue(self, session: Session, ordered_item_ids: List[int]) -> None:
+    def reorder_queue(self, session: Session, ordered_item_ids: list[int]) -> None:
         """Re-assign positions according to the supplied order.
 
         ``ordered_item_ids`` must contain every item_id currently in the queue
         (extra IDs are silently ignored; missing IDs keep their old position).
         """
-        id_to_row = {
-            r.item_id: r
-            for r in session.query(AudioQueueItem).all()
-        }
+        id_to_row = {r.item_id: r for r in session.query(AudioQueueItem).all()}
         for new_pos, item_id in enumerate(ordered_item_ids):
             if item_id in id_to_row:
                 id_to_row[item_id].position = new_pos
 
     def mark_played(self, session: Session, item_id: int, rate_used: float = 1.0) -> None:
         """Increment play_count, update last_played_at, and append a history row."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         item = session.get(AudioQueueItem, item_id)
         if item is None:
@@ -254,7 +248,7 @@ class AudioQueueService:
         )
         session.add(history)
 
-    def mark_stale(self, session: Session, item_ids: List[int]) -> int:
+    def mark_stale(self, session: Session, item_ids: list[int]) -> int:
         """Set is_stale=1 on the given items.  Returns count updated."""
         if not item_ids:
             return 0
@@ -264,7 +258,7 @@ class AudioQueueService:
             .update({"is_stale": 1}, synchronize_session="fetch")
         )
 
-    def mark_fresh(self, session: Session, item_ids: List[int]) -> int:
+    def mark_fresh(self, session: Session, item_ids: list[int]) -> int:
         """Clear is_stale on the given items.  Returns count updated."""
         if not item_ids:
             return 0
@@ -279,12 +273,12 @@ class AudioQueueService:
         session: Session,
         item_id: int,
         *,
-        snapshot_hebrew: Optional[str] = None,
-        snapshot_niqqud: Optional[str] = None,
-        snapshot_translation: Optional[str] = None,
-        audio_asset_id: Optional[int] = None,
-        audio_status: Optional[str] = None,
-        is_stale: Optional[bool] = None,
+        snapshot_hebrew: str | None = None,
+        snapshot_niqqud: str | None = None,
+        snapshot_translation: str | None = None,
+        audio_asset_id: int | None = None,
+        audio_status: str | None = None,
+        is_stale: bool | None = None,
     ) -> None:
         """Patch snapshot / status fields on a queue item."""
         item = session.get(AudioQueueItem, item_id)
@@ -308,8 +302,8 @@ class AudioQueueService:
         session: Session,
         kind: str,
         source_id: int,
-        project_id: Optional[int] = None,
-    ) -> List[int]:
+        project_id: int | None = None,
+    ) -> list[int]:
         """Return item_ids matching (kind, source_id[, project_id]) so callers
         can mark them stale after editing pronunciation/niqqud."""
         q = session.query(AudioQueueItem.item_id).filter(
@@ -326,7 +320,7 @@ class AudioQueueService:
         *,
         kind: str,
         source_id: int,
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
     ) -> int:
         """Mark all queue rows for a source as stale.
 
@@ -342,7 +336,7 @@ class AudioQueueService:
 
     # ── Playlists ─────────────────────────────────────────────────────────────
 
-    def get_playlists(self, session: Session) -> List[AudioPlaylistDTO]:
+    def get_playlists(self, session: Session) -> list[AudioPlaylistDTO]:
         """Return all playlists ordered by name, with entry counts."""
         playlists = session.query(AudioPlaylist).order_by(AudioPlaylist.name).all()
         result = []
@@ -352,13 +346,15 @@ class AudioQueueService:
                 .filter(AudioPlaylistEntry.playlist_id == pl.playlist_id)
                 .count()
             )
-            result.append(AudioPlaylistDTO(
-                playlist_id=pl.playlist_id,
-                name=pl.name,
-                entry_count=count,
-                created_at=pl.created_at,
-                updated_at=pl.updated_at,
-            ))
+            result.append(
+                AudioPlaylistDTO(
+                    playlist_id=pl.playlist_id,
+                    name=pl.name,
+                    entry_count=count,
+                    created_at=pl.created_at,
+                    updated_at=pl.updated_at,
+                )
+            )
         return result
 
     def create_playlist(self, session: Session, name: str) -> int:
@@ -369,11 +365,12 @@ class AudioQueueService:
         return pl.playlist_id
 
     def rename_playlist(self, session: Session, playlist_id: int, new_name: str) -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         pl = session.get(AudioPlaylist, playlist_id)
         if pl:
             pl.name = new_name
-            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            pl.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def delete_playlist(self, session: Session, playlist_id: int) -> None:
         pl = session.get(AudioPlaylist, playlist_id)
@@ -382,7 +379,7 @@ class AudioQueueService:
 
     def get_playlist_entries(
         self, session: Session, playlist_id: int
-    ) -> List[AudioPlaylistEntryDTO]:
+    ) -> list[AudioPlaylistEntryDTO]:
         rows = (
             session.query(AudioPlaylistEntry)
             .filter(AudioPlaylistEntry.playlist_id == playlist_id)
@@ -395,8 +392,8 @@ class AudioQueueService:
         self,
         session: Session,
         playlist_id: int,
-        specs: List[AudioItemSpec],
-    ) -> List[int]:
+        specs: list[AudioItemSpec],
+    ) -> list[int]:
         """Append specs to a playlist.  Returns new entry_ids."""
         if not specs:
             return []
@@ -405,7 +402,7 @@ class AudioQueueService:
             .filter(AudioPlaylistEntry.playlist_id == playlist_id)
             .count()
         )
-        entry_ids: List[int] = []
+        entry_ids: list[int] = []
         for i, spec in enumerate(specs):
             entry = AudioPlaylistEntry(
                 playlist_id=playlist_id,
@@ -425,10 +422,11 @@ class AudioQueueService:
             entry_ids.append(entry.entry_id)
 
         # bump playlist updated_at
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         pl = session.get(AudioPlaylist, playlist_id)
         if pl:
-            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            pl.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         return entry_ids
 
@@ -436,12 +434,12 @@ class AudioQueueService:
         self,
         session: Session,
         playlist_id: int,
-        specs: List[AudioItemSpec],
+        specs: list[AudioItemSpec],
         *,
-        add_mode: str = "append",   # append | prepend | after_selected
-        after_entry_id: Optional[int] = None,
+        add_mode: str = "append",  # append | prepend | after_selected
+        after_entry_id: int | None = None,
         dedup_by_source: bool = True,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Insert specs into playlist with optional dedup and positional mode.
 
         Returns ``(added_count, skipped_duplicates_count)``.
@@ -449,7 +447,7 @@ class AudioQueueService:
         if not specs:
             return (0, 0)
 
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         existing_rows = (
             session.query(AudioPlaylistEntry)
@@ -458,14 +456,14 @@ class AudioQueueService:
             .all()
         )
 
-        existing_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
+        existing_keys: set[tuple[int | None, str, int | None]] = set()
         if dedup_by_source:
             for row in existing_rows:
                 if row.source_id is not None:
                     existing_keys.add((row.project_id, row.kind, row.source_id))
 
-        filtered_specs: List[AudioItemSpec] = []
-        seen_new_keys: set[Tuple[Optional[int], str, Optional[int]]] = set()
+        filtered_specs: list[AudioItemSpec] = []
+        seen_new_keys: set[tuple[int | None, str, int | None]] = set()
         skipped = 0
         for spec in specs:
             key = (spec.project_id, spec.kind, spec.source_id)
@@ -516,12 +514,10 @@ class AudioQueueService:
 
         pl = session.get(AudioPlaylist, playlist_id)
         if pl:
-            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            pl.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         return (len(filtered_specs), skipped)
 
-    def remove_from_playlist(
-        self, session: Session, playlist_id: int, entry_ids: List[int]
-    ) -> int:
+    def remove_from_playlist(self, session: Session, playlist_id: int, entry_ids: list[int]) -> int:
         if not entry_ids:
             return 0
         count = (
@@ -539,7 +535,7 @@ class AudioQueueService:
         self,
         session: Session,
         playlist_id: int,
-        ordered_entry_ids: List[int],
+        ordered_entry_ids: list[int],
     ) -> None:
         """Reassign playlist entry positions based on the supplied order.
 
@@ -557,7 +553,7 @@ class AudioQueueService:
 
         row_by_id = {row.entry_id: row for row in rows}
         seen: set[int] = set()
-        ordered_rows: List[AudioPlaylistEntry] = []
+        ordered_rows: list[AudioPlaylistEntry] = []
         for entry_id in ordered_entry_ids:
             row = row_by_id.get(entry_id)
             if row is None or entry_id in seen:
@@ -572,24 +568,20 @@ class AudioQueueService:
         for position, row in enumerate(ordered_rows):
             row.position = position
 
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         pl = session.get(AudioPlaylist, playlist_id)
         if pl:
-            pl.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            pl.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def move_queue_to_playlist(
         self,
         session: Session,
-        item_ids: List[int],
+        item_ids: list[int],
         playlist_id: int,
     ) -> None:
         """Copy queue items into a playlist (items stay in the queue)."""
-        items = (
-            session.query(AudioQueueItem)
-            .filter(AudioQueueItem.item_id.in_(item_ids))
-            .all()
-        )
+        items = session.query(AudioQueueItem).filter(AudioQueueItem.item_id.in_(item_ids)).all()
         specs = [
             AudioItemSpec(
                 kind=item.kind,
@@ -629,7 +621,7 @@ class AudioQueueService:
         playlist_id: int,
         mode: str = "append",
         current_position: int = 0,
-    ) -> List[int]:
+    ) -> list[int]:
         """Copy playlist entries to queue and return inserted queue item_ids."""
         entries = self.get_playlist_entries(session, playlist_id)
         specs = [
@@ -655,7 +647,7 @@ class AudioQueueService:
         session: Session,
         limit: int = 200,
         offset: int = 0,
-    ) -> List[AudioHistoryDTO]:
+    ) -> list[AudioHistoryDTO]:
         rows = (
             session.query(AudioHistory)
             .order_by(AudioHistory.played_at.desc())
@@ -678,9 +670,7 @@ class AudioQueueService:
 
     # ── Source deep-links ─────────────────────────────────────────────────────
 
-    def resolve_source_link(
-        self, item: AudioQueueItemDTO
-    ) -> Optional[SourceLink]:
+    def resolve_source_link(self, item: AudioQueueItemDTO) -> SourceLink | None:
         """Map (kind, source_id, project_id) → SourceLink for "Go to source"."""
         if item.source_id is None:
             return None

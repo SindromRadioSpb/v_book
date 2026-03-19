@@ -263,7 +263,9 @@ def test_import_table_in_gate_batches_aligns_lemma_read_chunks_to_cap_boundaries
             assert max(batch_sizes) == 1500
             assert all(size == 1500 for size in batch_sizes[:-1])
 
-            host_ids = [row[0] for row in host_conn.execute("SELECT lemma_id FROM lemma ORDER BY lemma_id")]
+            host_ids = [
+                row[0] for row in host_conn.execute("SELECT lemma_id FROM lemma ORDER BY lemma_id")
+            ]
             assert host_ids == list(range(1, 3501))
         finally:
             host_conn.close()

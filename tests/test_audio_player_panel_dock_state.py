@@ -85,4 +85,3 @@ def test_audio_player_panel_updates_queue_and_dock_visibility(qtbot, tmp_path):
     assert dock.isVisible() is True
 
     player.stop(clear_queue=True)
-

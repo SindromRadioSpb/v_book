@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction
@@ -20,8 +19,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
-    QStackedWidget,
     QSplitter,
+    QStackedWidget,
     QTableView,
     QToolButton,
     QVBoxLayout,
@@ -31,24 +30,24 @@ from PyQt6.QtWidgets import (
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
 from app.services.audio_asset_service import AudioAssetService
-from app.services.db_service import DBService
 from app.services.audio_playback_service import AudioPlaybackService
+from app.services.db_service import DBService
 from app.services.study_service import StudyService
 from app.services.user_dictionary_service import UserDictionaryService
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.batch_audio_dialog import show_batch_audio_dialog
 from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
 from app.ui.dialogs.batch_translate_dialog import show_batch_translate_dialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
-from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
-from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.models_qt import UserDictionaryItemsTableModel, UserDictionaryListModel
 from app.ui.table_layout_controller import TableLayoutController
 from app.ui.workers import (
-    UserDictItemsPageWorker,
+    UserDictGenerateAudioWorker,
     UserDictionaryBulkAddWorker,
     UserDictionaryBulkRemoveWorker,
-    UserDictGenerateAudioWorker,
+    UserDictItemsPageWorker,
     UserDictTranslateWorker,
 )
 
@@ -97,7 +96,9 @@ class ManualUserDictionaryItemDialog(QDialog):
         self.error_label.setStyleSheet("color: #d32f2f;")
         layout.addWidget(self.error_label)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok_btn.setText("Add")
         ok_btn.setDefault(True)
@@ -114,7 +115,7 @@ class ManualUserDictionaryItemDialog(QDialog):
             return
         self.accept()
 
-    def payload(self) -> Dict[str, object]:
+    def payload(self) -> dict[str, object]:
         return {
             "kind": self.kind_combo.currentText(),
             "src_lang": self.src_lang_edit.text().strip(),
@@ -132,7 +133,7 @@ class UserDictionariesView(QWidget):
     back_requested = pyqtSignal()
     open_translation_management_requested = pyqtSignal()
 
-    def __init__(self, project_id: Optional[int] = None, show_back_button: bool = False):
+    def __init__(self, project_id: int | None = None, show_back_button: bool = False):
         super().__init__()
         self.project_id = project_id
         self.show_back_button = show_back_button
@@ -143,10 +144,14 @@ class UserDictionariesView(QWidget):
         self.study_service = StudyService()
         self.settings = SettingsService.get_instance()
         self._scope_setting_key = (
-            "user_dict/scope_mode_project" if self.project_id is not None else "user_dict/scope_mode_global"
+            "user_dict/scope_mode_project"
+            if self.project_id is not None
+            else "user_dict/scope_mode_global"
         )
 
-        self.current_dictionary_id: Optional[int] = self.settings.get_int("user_dict/current_dictionary_id", 0) or None
+        self.current_dictionary_id: int | None = (
+            self.settings.get_int("user_dict/current_dictionary_id", 0) or None
+        )
         self.current_page = 1
         self.page_size = self.settings.get_int("user_dict/page_size", 50)
         self.total_count = 0
@@ -169,7 +174,7 @@ class UserDictionariesView(QWidget):
         # PATCH-H: async items loader — request_id anti-stale
         self._items_request_seq: int = 0
         self._active_items_request_id: int = 0
-        self._items_worker: Optional[UserDictItemsPageWorker] = None
+        self._items_worker: UserDictItemsPageWorker | None = None
 
         self.dictionary_model = UserDictionaryListModel()
         self.items_model = UserDictionaryItemsTableModel()
@@ -186,7 +191,7 @@ class UserDictionariesView(QWidget):
             10: "pronunciation",
         }
         self._visible_columns_key = "user_dict/columns_visible"
-        self._column_actions: List[QAction] = []
+        self._column_actions: list[QAction] = []
 
         self._init_ui()
         self.load_dictionaries()
@@ -220,7 +225,9 @@ class UserDictionariesView(QWidget):
         header_layout.addWidget(self.back_btn)
         layout.addLayout(header_layout)
 
-        self.dictionary_summary_label = QLabel("Words: 0 | Added: 0 | Again: 0 | Hard: 0 | Good: 0 | Easy: 0")
+        self.dictionary_summary_label = QLabel(
+            "Words: 0 | Added: 0 | Again: 0 | Hard: 0 | Good: 0 | Easy: 0"
+        )
         self.dictionary_summary_label.setStyleSheet("color: #444; font-size: 11px;")
         layout.addWidget(self.dictionary_summary_label)
 
@@ -323,7 +330,9 @@ class UserDictionariesView(QWidget):
 
         filters_row.addWidget(QLabel("Tier:"))
         self.translation_tier_combo = QComboBox()
-        self.translation_tier_combo.addItems(["All", "Missing", "MT", "User", "Approved", "Deprecated"])
+        self.translation_tier_combo.addItems(
+            ["All", "Missing", "MT", "User", "Approved", "Deprecated"]
+        )
         self.translation_tier_combo.currentTextChanged.connect(self.on_filter_changed)
         filters_row.addWidget(self.translation_tier_combo)
 
@@ -698,7 +707,9 @@ class UserDictionariesView(QWidget):
             f"Due queue: {len(self._review_cards)} (card {self._review_index + 1}/{len(self._review_cards)})"
         )
         self.review_source_label.setText(f"Source: {card.src_text} ({card.kind})")
-        self.review_translation_label.setText(f"Current translation: {(card.translation or '').strip() or '-'}")
+        self.review_translation_label.setText(
+            f"Current translation: {(card.translation or '').strip() or '-'}"
+        )
         self.review_translation_edit.setText((card.translation or "").strip())
         self.review_meta_label.setText(
             f"Study: {card.study_state}, due: {card.due_human or 'n/a'}, "
@@ -709,7 +720,9 @@ class UserDictionariesView(QWidget):
 
     def load_review_queue(self, reset_index: bool = False):
         """Load due queue for review mode."""
-        scope_origin_project_id = self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        scope_origin_project_id = (
+            self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        )
         try:
             with self.db_service.get_session() as session:
                 cards = self.study_service.get_due_queue(
@@ -803,8 +816,8 @@ class UserDictionariesView(QWidget):
             start_immediately=True,
         )
 
-    def build_filters(self) -> Dict[str, object]:
-        filters: Dict[str, object] = {"hide_noise": self.hide_noise_checkbox.isChecked()}
+    def build_filters(self) -> dict[str, object]:
+        filters: dict[str, object] = {"hide_noise": self.hide_noise_checkbox.isChecked()}
         if self.kind_combo.currentText() != "All":
             filters["kind"] = self.kind_combo.currentText()
         if self.study_combo.currentText() != "All":
@@ -866,7 +879,9 @@ class UserDictionariesView(QWidget):
             selected = self.dictionary_model.get_dictionary(selected_row)
             if selected:
                 self.current_dictionary_id = selected.dictionary_id
-                self.settings.set_value("user_dict/current_dictionary_id", self.current_dictionary_id)
+                self.settings.set_value(
+                    "user_dict/current_dictionary_id", self.current_dictionary_id
+                )
 
             self.load_items()
         except Exception as e:
@@ -982,7 +997,9 @@ class UserDictionariesView(QWidget):
             )
             return
 
-        scope_origin_project_id = self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        scope_origin_project_id = (
+            self.project_id if self.scope_mode == "current_project" and self.project_id else None
+        )
         try:
             with self.db_service.get_session() as session:
                 counters = self.user_dict_service.get_dictionary_review_summary(
@@ -1001,7 +1018,9 @@ class UserDictionariesView(QWidget):
             )
         except Exception as e:
             logger.warning("Failed to load dictionary study summary: %s", e)
-            self.dictionary_summary_label.setText("Words: n/a | Added: n/a | Again: n/a | Hard: n/a | Good: n/a | Easy: n/a")
+            self.dictionary_summary_label.setText(
+                "Words: n/a | Added: n/a | Again: n/a | Hard: n/a | Good: n/a | Easy: n/a"
+            )
 
     def on_context_menu(self, pos):
         selected_rows = self.items_table.selectionModel().selectedRows()
@@ -1081,10 +1100,10 @@ class UserDictionariesView(QWidget):
         if changed:
             self.load_items()
 
-    def _selected_pronunciation_items(self) -> List[Dict[str, str]]:
+    def _selected_pronunciation_items(self) -> list[dict[str, str]]:
         """Build pronunciation payloads from selected lexical rows only (lemma/term)."""
         selected_rows = self.items_table.selectionModel().selectedRows()
-        payloads: List[Dict[str, str]] = []
+        payloads: list[dict[str, str]] = []
         for index in sorted(selected_rows, key=lambda idx: idx.row()):
             item = self.items_model.get_item(index.row())
             if not item:
@@ -1112,10 +1131,10 @@ class UserDictionariesView(QWidget):
             )
         return payloads
 
-    def _selected_sentence_ids_for_niqqud(self) -> tuple[List[int], str]:
+    def _selected_sentence_ids_for_niqqud(self) -> tuple[list[int], str]:
         """Return (sentence_ids, lang) from selected rows that originate from Sentences."""
         selected_rows = self.items_table.selectionModel().selectedRows()
-        sentence_ids: List[int] = []
+        sentence_ids: list[int] = []
         lang = "he"
         for index in sorted(selected_rows, key=lambda idx: idx.row()):
             item = self.items_model.get_item(index.row())
@@ -1138,7 +1157,9 @@ class UserDictionariesView(QWidget):
 
     def on_pronunciation_bootstrap_selected(self):
         """Open lexical pronunciation bootstrap (lemmas/terms only)."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         selected_items = self._selected_pronunciation_items()
         if not selected_items:
@@ -1161,12 +1182,13 @@ class UserDictionariesView(QWidget):
             QMessageBox.information(
                 self,
                 "Sentence Niqqud Bootstrap",
-                "No sentence-origin rows selected.\n"
-                "Select rows added from Sentences first.",
+                "No sentence-origin rows selected.\n" "Select rows added from Sentences first.",
             )
             return
 
-        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import show_sentence_niqqud_bootstrap_dialog
+        from app.ui.dialogs.sentence_niqqud_bootstrap_dialog import (
+            show_sentence_niqqud_bootstrap_dialog,
+        )
 
         changed = show_sentence_niqqud_bootstrap_dialog(
             self,
@@ -1329,7 +1351,14 @@ class UserDictionariesView(QWidget):
         if not self.current_dictionary_id:
             return
 
-        current = next((d for d in self.dictionary_model.dictionaries if d.dictionary_id == self.current_dictionary_id), None)
+        current = next(
+            (
+                d
+                for d in self.dictionary_model.dictionaries
+                if d.dictionary_id == self.current_dictionary_id
+            ),
+            None,
+        )
         old_name = current.name if current else ""
         new_name, ok = QInputDialog.getText(self, "Rename Dictionary", "New name:", text=old_name)
         if not ok or not (new_name or "").strip():
@@ -1337,7 +1366,9 @@ class UserDictionariesView(QWidget):
 
         try:
             with self.db_service.get_session() as session:
-                self.user_dict_service.rename_dictionary(session, self.current_dictionary_id, new_name.strip())
+                self.user_dict_service.rename_dictionary(
+                    session, self.current_dictionary_id, new_name.strip()
+                )
                 session.commit()
             self.load_dictionaries()
         except Exception as e:
@@ -1368,7 +1399,9 @@ class UserDictionariesView(QWidget):
 
     def on_add_manual(self):
         if not self.current_dictionary_id:
-            QMessageBox.information(self, "Dictionary Required", "Create or select a dictionary first.")
+            QMessageBox.information(
+                self, "Dictionary Required", "Create or select a dictionary first."
+            )
             return
 
         dialog = ManualUserDictionaryItemDialog(self)
@@ -1396,7 +1429,7 @@ class UserDictionariesView(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Add Failed", str(e))
 
-    def _selected_item_ids(self) -> List[int]:
+    def _selected_item_ids(self) -> list[int]:
         selected_rows = self.items_table.selectionModel().selectedRows()
         ids = []
         for idx in selected_rows:
@@ -1405,9 +1438,9 @@ class UserDictionariesView(QWidget):
                 ids.append(item.item_id)
         return sorted(set(ids))
 
-    def _selected_audio_items(self) -> List[Dict[str, str]]:
+    def _selected_audio_items(self) -> list[dict[str, str]]:
         selected_rows = self.items_table.selectionModel().selectedRows()
-        items: List[Dict[str, str]] = []
+        items: list[dict[str, str]] = []
         for idx in selected_rows:
             item = self.items_model.get_item(idx.row())
             if not item:
@@ -1603,7 +1636,9 @@ class UserDictionariesView(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self._on_generate_audio_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -1651,7 +1686,9 @@ class UserDictionariesView(QWidget):
             play_mode="enqueue",
         )
 
-    def _play_audio_items(self, items: List[Dict[str, str]], *, play_mode: str, start_immediately: bool = False):
+    def _play_audio_items(
+        self, items: list[dict[str, str]], *, play_mode: str, start_immediately: bool = False
+    ):
         try:
             with self.db_service.get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -1679,9 +1716,7 @@ class UserDictionariesView(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")
@@ -1704,7 +1739,7 @@ class UserDictionariesView(QWidget):
             logger.error("Failed to play audio in User Dictionaries: %s", e, exc_info=True)
             QMessageBox.warning(self, "Playback Error", f"Failed to play audio:\n{e}")
 
-    def _on_generate_audio_finished(self, result: Dict[str, int], progress_dialog):
+    def _on_generate_audio_finished(self, result: dict[str, int], progress_dialog):
         progress_dialog.set_completed()
         progress_dialog.update_counts(
             int(result.get("succeeded", 0)),
@@ -1843,7 +1878,7 @@ class UserDictionariesView(QWidget):
             end = min(self.current_offset + self.page_size, self.total_count)
             self.range_label.setText(f"Showing {start}-{end} of {self.total_count}")
 
-    def open_add_to_dictionary_dialog_for_payloads(self, payloads: List[Dict[str, object]]):
+    def open_add_to_dictionary_dialog_for_payloads(self, payloads: list[dict[str, object]]):
         """Utility entrypoint used by other views to add prepared payloads."""
         if not payloads:
             return
@@ -1872,7 +1907,9 @@ class UserDictionariesView(QWidget):
                 row["origin_source_ref"] = None
             prepared.append(row)
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -1887,7 +1924,9 @@ class UserDictionariesView(QWidget):
         )
         self._bulk_worker = worker
         worker.progress.connect(lambda done, total: progress.setValue(done))
-        worker.finished.connect(lambda result: self._on_add_finished(result, progress, dictionary_id))
+        worker.finished.connect(
+            lambda result: self._on_add_finished(result, progress, dictionary_id)
+        )
         worker.error.connect(lambda err: self._on_add_error(err, progress))
         progress.canceled.connect(worker.cancel)
         worker.start()

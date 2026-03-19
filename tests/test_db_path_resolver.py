@@ -85,7 +85,9 @@ def test_resolve_db_path_falls_back_to_settings_when_env_missing(tmp_path):
 
 
 def test_resolve_db_path_uses_default_when_settings_missing(tmp_path):
-    settings = _SettingsStub({resolver.SETTINGS_KEY_ACTIVE_DB_PATH: str(tmp_path / "missing_settings.db")})
+    settings = _SettingsStub(
+        {resolver.SETTINGS_KEY_ACTIVE_DB_PATH: str(tmp_path / "missing_settings.db")}
+    )
     _ResourcePathsStub._root = tmp_path / "appdata"
 
     resolved = resolver.resolve_db_path(

@@ -2,10 +2,10 @@
 
 ## Goal
 
-Execute a disciplined repository-wide audit and implementation-planning iteration for a **professional premium desktop application**.  
+Execute a disciplined repository-wide audit and implementation-planning iteration for a **professional premium desktop application**.
 Before proposing any patch plan or touching code, you must fully understand the current architecture, operational constraints, performance bottlenecks, and regression risks.
 
-This iteration is **not allowed** to be superficial.  
+This iteration is **not allowed** to be superficial.
 You must first study the repository documentation and code entry points in depth, verify prerequisites, identify blind spots, and reduce ambiguity before planning or implementation.
 
 The outcome must be a **traceable, reproducible, evidence-based technical plan** with logs, timings, risk analysis, and concrete recommendations for both incremental optimization and more radical architectural options for very large databases and projects.
@@ -218,7 +218,7 @@ You must work in the following disciplined order:
 
 Do not jump directly to code changes.
 
-If something important is unclear, do not hand-wave it.  
+If something important is unclear, do not hand-wave it.
 Investigate it in the repository and state clearly what is confirmed, what is inferred, and what remains unresolved.
 
 ---
@@ -452,5 +452,5 @@ The final output must be good enough that it can be used as:
 - a patch-planning document
 - an implementation handoff for disciplined engineering work
 
-Do not provide a casual answer.  
+Do not provide a casual answer.
 Provide a production-grade engineering artifact.

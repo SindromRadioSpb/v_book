@@ -3,14 +3,21 @@
 Tests that ProjectDashboard loads REAL metrics (not hardcoded zeros)
 for reference corpus and regular projects.
 """
+
 import pytest
 import tempfile
 import sqlite3
 from pathlib import Path
 
 from app.infra.sa_models import (
-    Library, DictProject, SourceCorpus, SourceDocument,
-    Lemma, LemmaProjectStat, Ngram, NgramProjectStat
+    Library,
+    DictProject,
+    SourceCorpus,
+    SourceDocument,
+    Lemma,
+    LemmaProjectStat,
+    Ngram,
+    NgramProjectStat,
 )
 from app.services.project_service import ProjectService
 from app.services.db_service import DBService

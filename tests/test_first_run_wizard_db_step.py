@@ -126,7 +126,9 @@ def test_first_run_wizard_db_step_mentions_restart_for_existing_db(monkeypatch, 
     assert "Restart is required to switch." in text
 
 
-def test_first_run_wizard_db_step_mentions_default_local_first_guidance(monkeypatch, qtbot, tmp_path):
+def test_first_run_wizard_db_step_mentions_default_local_first_guidance(
+    monkeypatch, qtbot, tmp_path
+):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()
@@ -150,7 +152,9 @@ def test_first_run_wizard_db_step_mentions_default_local_first_guidance(monkeypa
     assert "Tools -> Switch Database" in text
 
 
-def test_first_run_wizard_db_step_mentions_heavy_baseline_restart_guidance(monkeypatch, qtbot, tmp_path):
+def test_first_run_wizard_db_step_mentions_heavy_baseline_restart_guidance(
+    monkeypatch, qtbot, tmp_path
+):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()

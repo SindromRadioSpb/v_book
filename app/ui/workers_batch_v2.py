@@ -11,7 +11,6 @@ Key improvements:
 """
 
 import logging
-from typing import List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -19,7 +18,6 @@ from app.services.batch_translate_engine_v2 import (
     BatchTranslateEngineV2,
     BatchTranslateItem,
     BatchTranslateOptions,
-    BatchResult,
 )
 from app.services.db_service import DBService
 
@@ -37,7 +35,7 @@ class BatchTranslateWorkerV2(QThread):
 
     def __init__(
         self,
-        items: List[BatchTranslateItem],
+        items: list[BatchTranslateItem],
         options: BatchTranslateOptions,
         tab_type: str,
     ):

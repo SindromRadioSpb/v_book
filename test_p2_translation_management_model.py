@@ -10,8 +10,9 @@ Headless Qt tests (no GUI rendering).
 """
 
 import unittest
-from PyQt6.QtWidgets import QApplication
+
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
 
 # Ensure single QApplication instance
 app = QApplication.instance()
@@ -101,8 +102,15 @@ class TestTranslationManagementTableModel(unittest.TestCase):
         model = TranslationManagementTableModel(self.sample_entries)
 
         expected_headers = [
-            "ID", "Kind", "Source", "Translation", "Status",
-            "Scope", "Origin", "Source Ref", "Updated"
+            "ID",
+            "Kind",
+            "Source",
+            "Translation",
+            "Status",
+            "Scope",
+            "Origin",
+            "Source Ref",
+            "Updated",
         ]
 
         for col, expected in enumerate(expected_headers):
@@ -247,8 +255,8 @@ class TestTranslationManagementTableModel(unittest.TestCase):
 
     def test_update_entries_resets_model(self):
         """Test that update_entries resets the model correctly."""
-        from app.ui.models_qt import TranslationManagementTableModel
         from app.domain.dto import TMEntryDTO
+        from app.ui.models_qt import TranslationManagementTableModel
 
         model = TranslationManagementTableModel(self.sample_entries)
         self.assertEqual(model.rowCount(), 2)

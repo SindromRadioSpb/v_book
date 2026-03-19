@@ -121,7 +121,9 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=5, help="Measured runs")
     parser.add_argument("--warmup", type=int, default=1, help="Warm-up runs")
     parser.add_argument("--search-term", type=str, default="wiki", help="Picker search term")
-    parser.add_argument("--out", type=Path, default=Path("perf_results.json"), help="JSON output path")
+    parser.add_argument(
+        "--out", type=Path, default=Path("perf_results.json"), help="JSON output path"
+    )
     args = parser.parse_args()
 
     if args.runs <= 0:

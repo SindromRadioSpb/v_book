@@ -1,47 +1,47 @@
 """Term Extraction Service (M5 Base + M5.1 Clustering)."""
-from dataclasses import asdict
+
 import json
 import logging
 import time
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 from collections import Counter
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable
+from dataclasses import asdict
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func, and_, or_, text, bindparam
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, bindparam, func, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
 
-from app.infra.sa_models import (
-    DictProject,
-    Ngram,
-    NgramProjectStat,
-    NgramComponent,
-    DocumentSentence,
-    SentenceNLPSnapshot,
-    Lemma,
-    LemmaProjectStat,
-    SourceDocument,
-    SourceCorpus,
-    TermExtractAccumulator,
-    TermExtractRun,
-    TermCluster,
-    TermClusterMember,
-    TMEntry,
-)
-from app.domain.dto import ExtractReport, ClusterStats, TermExtractionRunState
+from app.domain.dto import ClusterStats, ExtractReport, TermExtractionRunState
+from app.domain.term_extraction.association_measures import compute_all_measures
+from app.domain.term_extraction.canonicalizer import choose_representative_term, get_cluster_key
 from app.domain.term_extraction.ngram_extractor import extract_ngrams_from_sentence
 from app.domain.term_extraction.np_extractor import extract_np_chunks_from_sentence
-from app.domain.term_extraction.association_measures import compute_all_measures
-from app.domain.term_extraction.canonicalizer import get_cluster_key, choose_representative_term
-from app.infra.nlp_snapshot_codec import build_sentence_text_hash, deserialize_nlp_sentences
-from app.services.db_service import DBService
 from app.infra.nlp_engines.base import NLPEngine
+from app.infra.nlp_snapshot_codec import build_sentence_text_hash, deserialize_nlp_sentences
+from app.infra.sa_models import (
+    DictProject,
+    DocumentSentence,
+    Lemma,
+    LemmaProjectStat,
+    Ngram,
+    NgramProjectStat,
+    SentenceNLPSnapshot,
+    SourceCorpus,
+    SourceDocument,
+    TermCluster,
+    TermClusterMember,
+    TermExtractAccumulator,
+    TermExtractRun,
+    TMEntry,
+)
+from app.services.db_service import DBService
 from app.services.entity_classifier import classify_phrase
 
 logger = logging.getLogger(__name__)
 
 
-def normalize_search_query(query: str) -> List[str]:
+def normalize_search_query(query: str) -> list[str]:
     """
     Normalize search query and generate search variants for Hebrew term matching.
 
@@ -60,7 +60,7 @@ def normalize_search_query(query: str) -> List[str]:
         "בית הספר" → ["בית הספר", "בית ספר", "בית_הספר", "בית_ספר"]
         "הספר" → ["הספר", "ספר", "הספר", "ספר"]
     """
-    from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+    from app.domain.hebrew_utils import normalize_whitespace, strip_cantillation, strip_nikud
 
     if not query or not query.strip():
         return []
@@ -77,31 +77,31 @@ def normalize_search_query(query: str) -> List[str]:
     variants.add(normalized)
 
     # Underscore version (for canonical_key matching)
-    underscore_version = normalized.replace(' ', '_')
+    underscore_version = normalized.replace(" ", "_")
     variants.add(underscore_version)
 
     # Article-stripped variants
     # Remove standalone "ה" tokens
     tokens = normalized.split()
-    filtered_tokens = [t for t in tokens if t != 'ה']
+    filtered_tokens = [t for t in tokens if t != "ה"]
     if filtered_tokens != tokens:
-        article_stripped = ' '.join(filtered_tokens)
+        article_stripped = " ".join(filtered_tokens)
         variants.add(article_stripped)
-        variants.add(article_stripped.replace(' ', '_'))
+        variants.add(article_stripped.replace(" ", "_"))
 
     # Also strip attached articles (הX → X) for each token
     article_stripped_tokens = []
     for token in tokens:
-        if token.startswith('ה') and len(token) > 1:
+        if token.startswith("ה") and len(token) > 1:
             # Strip leading ה
             article_stripped_tokens.append(token[1:])
         else:
             article_stripped_tokens.append(token)
 
     if article_stripped_tokens != tokens:
-        article_stripped_2 = ' '.join(article_stripped_tokens)
+        article_stripped_2 = " ".join(article_stripped_tokens)
         variants.add(article_stripped_2)
-        variants.add(article_stripped_2.replace(' ', '_'))
+        variants.add(article_stripped_2.replace(" ", "_"))
 
     return list(variants)
 
@@ -111,7 +111,7 @@ class TermExtractionService:
 
     def __init__(self):
         self.db_service = DBService.get_instance()
-        self._engine: Optional[NLPEngine] = None
+        self._engine: NLPEngine | None = None
 
     def get_nlp_engine(self, use_gpu: bool = False, use_mock: bool = False) -> NLPEngine:
         """
@@ -128,33 +128,38 @@ class TermExtractionService:
             if use_mock:
                 logger.info("Creating Mock NLP engine for term extraction...")
                 from app.infra.nlp_engines.mock_engine import create_mock_engine
+
                 self._engine = create_mock_engine()
             else:
                 logger.info("Creating Stanza NLP engine for term extraction...")
                 try:
                     from app.infra.nlp_engines.stanza_engine import create_stanza_engine
+
                     self._engine = create_stanza_engine(use_gpu=use_gpu)
                 except (ImportError, RuntimeError) as e:
                     logger.warning(f"Stanza not available: {e}")
                     logger.info("Falling back to Mock engine")
                     from app.infra.nlp_engines.mock_engine import create_mock_engine
+
                     self._engine = create_mock_engine()
 
-            logger.info(f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}")
+            logger.info(
+                f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}"
+            )
         return self._engine
 
     def _build_run_state_payload(
         self,
-        run: Optional[TermExtractRun],
+        run: TermExtractRun | None,
         *,
         project_id: int,
         phase: str,
-        message: Optional[str] = None,
+        message: str | None = None,
         docs_processed: int = 0,
         docs_total: int = 0,
         chunks_completed: int = 0,
         chunks_total: int = 0,
-        last_doc_id: Optional[int] = None,
+        last_doc_id: int | None = None,
     ) -> dict:
         payload = asdict(
             TermExtractionRunState(
@@ -171,7 +176,7 @@ class TermExtractionService:
                     int(last_doc_id)
                     if last_doc_id is not None
                     else (
-                        int(getattr(run, "last_doc_id"))
+                        int(run.last_doc_id)
                         if run is not None and getattr(run, "last_doc_id", None) is not None
                         else None
                     )
@@ -185,7 +190,7 @@ class TermExtractionService:
         return payload
 
     @staticmethod
-    def _snapshot_reuse_pct(snapshot_rows_used: int, reparsed_sentences: int) -> Optional[float]:
+    def _snapshot_reuse_pct(snapshot_rows_used: int, reparsed_sentences: int) -> float | None:
         total = int(snapshot_rows_used or 0) + int(reparsed_sentences or 0)
         if total <= 0:
             return None
@@ -199,14 +204,14 @@ class TermExtractionService:
         enable_ngrams: bool = True,
         include_np: bool = False,
         min_freq: int = 2,
-        ngram_ns: Tuple[int, ...] = (2, 3),
+        ngram_ns: tuple[int, ...] = (2, 3),
         np_max_len: int = 5,
         overwrite: bool = True,
         batch_size: int = 200,
-        progress_callback: Optional[Callable[[str], None]] = None,
-        state_callback: Optional[Callable[[dict], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        pause_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Callable[[str], None] | None = None,
+        state_callback: Callable[[dict], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        pause_check: Callable[[], bool] | None = None,
         resume_latest: bool = True,
     ) -> ExtractReport:
         """
@@ -271,7 +276,7 @@ class TermExtractionService:
         enable_ngrams: bool,
         include_np: bool,
         min_freq: int,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
     ) -> ExtractReport:
@@ -288,7 +293,7 @@ class TermExtractionService:
             snapshot_usage = {"snapshot_rows_used": 0, "reparsed_sentences": 0}
             ngram_counts = Counter()
             ngram_doc_freq = Counter()
-            ngram_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
+            ngram_meta: dict[tuple[str, int], dict[str, str]] = {}
             ngrams_extracted = 0
             if enable_ngrams:
                 ngram_counts, ngram_doc_freq, ngram_meta = self._collect_ngrams(
@@ -297,7 +302,7 @@ class TermExtractionService:
 
             np_counts = Counter()
             np_doc_freq = Counter()
-            np_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
+            np_meta: dict[tuple[str, int], dict[str, str]] = {}
             np_chunks_extracted = 0
             if include_np:
                 np_counts, np_doc_freq, np_meta = self._collect_np_chunks(
@@ -333,12 +338,13 @@ class TermExtractionService:
             clusters_created = self._cluster_terms(session, project_id)
 
             # Migration 011: Save extraction parameters for UX feedback
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             project.last_extract_np_max_len = np_max_len
             project.last_extract_min_freq = min_freq
             project.last_extract_include_np = 1 if include_np else 0
-            project.last_extract_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            project.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            project.last_extract_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            project.updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
             session.commit()
 
@@ -384,34 +390,34 @@ class TermExtractionService:
         enable_ngrams: bool,
         include_np: bool,
         min_freq: int,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
         batch_size: int,
-        progress_callback: Optional[Callable[[str], None]],
-        state_callback: Optional[Callable[[dict], None]],
-        cancel_check: Optional[Callable[[], bool]],
-        pause_check: Optional[Callable[[], bool]],
+        progress_callback: Callable[[str], None] | None,
+        state_callback: Callable[[dict], None] | None,
+        cancel_check: Callable[[], bool] | None,
+        pause_check: Callable[[], bool] | None,
         resume_latest: bool,
     ) -> ExtractReport:
         """Chunked staged extractor for large projects."""
 
-        run_id: Optional[int] = None
+        run_id: int | None = None
         total_docs = 0
         docs_processed = 0
-        run: Optional[TermExtractRun] = None
+        run: TermExtractRun | None = None
         snapshot_usage = {"snapshot_rows_used": 0, "reparsed_sentences": 0}
 
         def _emit(
             message: str,
             *,
-            stage: Optional[str] = None,
-            phase: Optional[str] = None,
-            docs_done: Optional[int] = None,
-            docs_hint: Optional[int] = None,
-            chunks_done: Optional[int] = None,
-            chunks_hint: Optional[int] = None,
-            last_doc_id: Optional[int] = None,
+            stage: str | None = None,
+            phase: str | None = None,
+            docs_done: int | None = None,
+            docs_hint: int | None = None,
+            chunks_done: int | None = None,
+            chunks_hint: int | None = None,
+            last_doc_id: int | None = None,
         ) -> None:
             logger.info(message)
             if progress_callback:
@@ -430,7 +436,8 @@ class TermExtractionService:
                             if docs_done is not None
                             else (
                                 int(getattr(run, "docs_processed", 0) or 0)
-                                if run is not None else docs_processed
+                                if run is not None
+                                else docs_processed
                             )
                         ),
                         docs_total=int(
@@ -438,7 +445,8 @@ class TermExtractionService:
                             if docs_hint is not None
                             else (
                                 int(getattr(run, "docs_total", 0) or 0)
-                                if run is not None else total_docs
+                                if run is not None
+                                else total_docs
                             )
                         ),
                         chunks_completed=int(
@@ -527,10 +535,7 @@ class TermExtractionService:
                     docs_hint=int(run.docs_total or 0),
                     chunks_done=int(run.chunks_completed or 0),
                     chunks_hint=int(run.chunks_total or 0),
-                    last_doc_id=(
-                        int(run.last_doc_id)
-                        if run.last_doc_id is not None else None
-                    ),
+                    last_doc_id=(int(run.last_doc_id) if run.last_doc_id is not None else None),
                 )
 
             run_id = int(run.run_id)
@@ -572,14 +577,19 @@ class TermExtractionService:
                     snapshot_reuse_pct=None,
                 )
 
-            use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
+            use_mock = (
+                project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False
+            )
             engine = self.get_nlp_engine(use_mock=use_mock)
             run.engine = engine.get_name()
             run.engine_version = engine.get_version()
             run.updated_at = self._utc_now()
             session.commit()
 
-            if run.status not in ("staged", "finalizing") and int(run.docs_processed or 0) < total_docs:
+            if (
+                run.status not in ("staged", "finalizing")
+                and int(run.docs_processed or 0) < total_docs
+            ):
                 _emit(
                     f"Collecting staged counters for run {run_id}: "
                     f"{docs_processed}/{total_docs} docs complete",
@@ -589,10 +599,7 @@ class TermExtractionService:
                     docs_hint=total_docs,
                     chunks_done=int(run.chunks_completed or 0),
                     chunks_hint=int(run.chunks_total or 0),
-                    last_doc_id=(
-                        int(run.last_doc_id)
-                        if run.last_doc_id is not None else None
-                    ),
+                    last_doc_id=(int(run.last_doc_id) if run.last_doc_id is not None else None),
                 )
                 while True:
                     resume_stage = "Collecting staged counters"
@@ -612,8 +619,7 @@ class TermExtractionService:
                             chunks_done=int(run.chunks_completed or 0),
                             chunks_hint=int(run.chunks_total or 0),
                             last_doc_id=(
-                                int(run.last_doc_id)
-                                if run.last_doc_id is not None else None
+                                int(run.last_doc_id) if run.last_doc_id is not None else None
                             ),
                         )
 
@@ -632,8 +638,7 @@ class TermExtractionService:
                             chunks_done=int(run.chunks_completed or 0),
                             chunks_hint=int(run.chunks_total or 0),
                             last_doc_id=(
-                                int(run.last_doc_id)
-                                if run.last_doc_id is not None else None
+                                int(run.last_doc_id) if run.last_doc_id is not None else None
                             ),
                         )
 
@@ -652,8 +657,7 @@ class TermExtractionService:
                             chunks_done=int(run.chunks_completed or 0),
                             chunks_hint=int(run.chunks_total or 0),
                             last_doc_id=(
-                                int(run.last_doc_id)
-                                if run.last_doc_id is not None else None
+                                int(run.last_doc_id) if run.last_doc_id is not None else None
                             ),
                         )
                         return self._cancel_term_extract_run(
@@ -802,40 +806,48 @@ class TermExtractionService:
 
             self._clear_existing_terms(session, project_id)
             total_tokens = self._get_total_tokens(session, project_id)
-            ngrams_extracted = self._store_staged_ngrams(
-                session,
-                project_id,
-                run_id=run_id,
-                min_freq=min_freq,
-                total_tokens=total_tokens,
-                progress_callback=lambda message: _emit(
-                    message,
-                    stage="Storing staged n-grams",
-                    phase="finalize",
-                    docs_done=total_docs,
-                    docs_hint=total_docs,
-                    chunks_done=int(run.chunks_completed or 0),
-                    chunks_hint=int(run.chunks_total or 0),
-                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
-                ),
-            ) if enable_ngrams else 0
+            ngrams_extracted = (
+                self._store_staged_ngrams(
+                    session,
+                    project_id,
+                    run_id=run_id,
+                    min_freq=min_freq,
+                    total_tokens=total_tokens,
+                    progress_callback=lambda message: _emit(
+                        message,
+                        stage="Storing staged n-grams",
+                        phase="finalize",
+                        docs_done=total_docs,
+                        docs_hint=total_docs,
+                        chunks_done=int(run.chunks_completed or 0),
+                        chunks_hint=int(run.chunks_total or 0),
+                        last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                    ),
+                )
+                if enable_ngrams
+                else 0
+            )
 
-            np_chunks_extracted = self._store_staged_np_chunks(
-                session,
-                project_id,
-                run_id=run_id,
-                min_freq=min_freq,
-                progress_callback=lambda message: _emit(
-                    message,
-                    stage="Storing staged NP chunks",
-                    phase="finalize",
-                    docs_done=total_docs,
-                    docs_hint=total_docs,
-                    chunks_done=int(run.chunks_completed or 0),
-                    chunks_hint=int(run.chunks_total or 0),
-                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
-                ),
-            ) if include_np else 0
+            np_chunks_extracted = (
+                self._store_staged_np_chunks(
+                    session,
+                    project_id,
+                    run_id=run_id,
+                    min_freq=min_freq,
+                    progress_callback=lambda message: _emit(
+                        message,
+                        stage="Storing staged NP chunks",
+                        phase="finalize",
+                        docs_done=total_docs,
+                        docs_hint=total_docs,
+                        chunks_done=int(run.chunks_completed or 0),
+                        chunks_hint=int(run.chunks_total or 0),
+                        last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                    ),
+                )
+                if include_np
+                else 0
+            )
 
             _emit(
                 "Clustering staged terms...",
@@ -927,26 +939,18 @@ class TermExtractionService:
     def _clear_existing_terms(self, session: Session, project_id: int) -> None:
         """Clear existing ngrams and clusters for project."""
         # Delete clusters (CASCADE handles members)
-        session.execute(
-            TermCluster.__table__.delete().where(
-                TermCluster.project_id == project_id
-            )
-        )
+        session.execute(TermCluster.__table__.delete().where(TermCluster.project_id == project_id))
 
         # Delete ngrams (CASCADE handles stats and components)
-        session.execute(
-            Ngram.__table__.delete().where(
-                Ngram.project_id == project_id
-            )
-        )
+        session.execute(Ngram.__table__.delete().where(Ngram.project_id == project_id))
 
         session.flush()
         logger.info(f"Cleared existing terms for project {project_id}")
 
     def _utc_now(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
-    def _serialize_ngram_ns(self, ngram_ns: Tuple[int, ...]) -> str:
+    def _serialize_ngram_ns(self, ngram_ns: tuple[int, ...]) -> str:
         return json.dumps([int(value) for value in ngram_ns], separators=(",", ":"))
 
     def _count_processed_docs(self, session: Session, project_id: int) -> int:
@@ -976,10 +980,10 @@ class TermExtractionService:
         enable_ngrams: bool,
         include_np: bool,
         min_freq: int,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
-    ) -> Optional[TermExtractRun]:
+    ) -> TermExtractRun | None:
         stmt = (
             select(TermExtractRun)
             .where(
@@ -991,7 +995,9 @@ class TermExtractionService:
                     TermExtractRun.min_freq == int(min_freq),
                     TermExtractRun.ngram_ns_json == self._serialize_ngram_ns(ngram_ns),
                     TermExtractRun.np_max_len == int(np_max_len),
-                    TermExtractRun.status.in_(("running", "staged", "finalizing", "failed", "cancelled")),
+                    TermExtractRun.status.in_(
+                        ("running", "staged", "finalizing", "failed", "cancelled")
+                    ),
                 )
             )
             .order_by(TermExtractRun.run_id.desc())
@@ -1006,7 +1012,7 @@ class TermExtractionService:
         enable_ngrams: bool,
         include_np: bool,
         min_freq: int,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
         docs_total: int,
@@ -1092,10 +1098,10 @@ class TermExtractionService:
     def _wait_if_paused(
         self,
         *,
-        pause_check: Optional[Callable[[], bool]],
-        cancel_check: Optional[Callable[[], bool]],
-        on_paused: Optional[Callable[[], None]] = None,
-        on_resumed: Optional[Callable[[], None]] = None,
+        pause_check: Callable[[], bool] | None,
+        cancel_check: Callable[[], bool] | None,
+        on_paused: Callable[[], None] | None = None,
+        on_resumed: Callable[[], None] | None = None,
     ) -> bool:
         was_paused = False
         while pause_check and pause_check():
@@ -1129,9 +1135,9 @@ class TermExtractionService:
         session: Session,
         project_id: int,
         *,
-        last_doc_id: Optional[int],
+        last_doc_id: int | None,
         limit: int,
-    ) -> List[int]:
+    ) -> list[int]:
         stmt = (
             select(SourceDocument.doc_id)
             .join(SourceCorpus)
@@ -1154,10 +1160,7 @@ class TermExtractionService:
             select(SourceDocument.doc_id)
             .join(SourceCorpus)
             .where(
-                and_(
-                    SourceCorpus.project_id == project_id,
-                    SourceDocument.status == 'processed'
-                )
+                and_(SourceCorpus.project_id == project_id, SourceDocument.status == "processed")
             )
             .order_by(SourceDocument.doc_id.asc())
         )
@@ -1175,8 +1178,8 @@ class TermExtractionService:
     def _iter_sentence_rows_for_doc_ids(
         self,
         session: Session,
-        doc_ids: List[int],
-    ) -> Iterable[tuple[int, int, str, Optional[str], Optional[str]]]:
+        doc_ids: list[int],
+    ) -> Iterable[tuple[int, int, str, str | None, str | None]]:
         if not doc_ids:
             return []
         stmt = (
@@ -1201,8 +1204,8 @@ class TermExtractionService:
         *,
         sentence_id: int,
         sent_text: str,
-        snapshot_payload_json: Optional[str],
-        snapshot_text_hash: Optional[str],
+        snapshot_payload_json: str | None,
+        snapshot_text_hash: str | None,
         engine: NLPEngine,
     ) -> tuple[list, str]:
         expected_hash = build_sentence_text_hash(sent_text)
@@ -1226,16 +1229,16 @@ class TermExtractionService:
         self,
         session: Session,
         project_id: int,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         min_freq: int,
-        summary: Optional[dict[str, int]] = None,
-    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        summary: dict[str, int] | None = None,
+    ) -> tuple[Counter, Counter, dict[tuple[str, int], dict[str, str]]]:
         """Collect n-gram counts from processed documents without writing."""
         logger.info(f"Extracting n-grams (sizes: {ngram_ns})")
 
         # Get project to check which engine was used
         project = session.get(DictProject, project_id)
-        use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
+        use_mock = project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False
 
         # Get NLP engine for re-parsing sentences
         engine = self.get_nlp_engine(use_mock=use_mock)
@@ -1250,26 +1253,32 @@ class TermExtractionService:
     def _collect_ngrams_for_doc_ids(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         *,
-        ngram_ns: Tuple[int, ...],
+        ngram_ns: tuple[int, ...],
         engine: NLPEngine,
-        summary: Optional[dict[str, int]] = None,
-    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        summary: dict[str, int] | None = None,
+    ) -> tuple[Counter, Counter, dict[tuple[str, int], dict[str, str]]]:
         """Collect n-gram counts for a bounded list of docs."""
         ngram_counts = Counter()
         ngram_doc_freq = Counter()
-        ngram_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
+        ngram_meta: dict[tuple[str, int], dict[str, str]] = {}
 
         if not doc_ids:
             return Counter(), Counter(), {}
 
-        current_doc_id: Optional[int] = None
-        doc_ngrams_seen: Set[Tuple[str, int]] = set()
+        current_doc_id: int | None = None
+        doc_ngrams_seen: set[tuple[str, int]] = set()
         snapshot_rows_used = 0
         fallback_rows_used = 0
 
-        for doc_id, sentence_id, sent_text, payload_json, snapshot_text_hash in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+        for (
+            doc_id,
+            sentence_id,
+            sent_text,
+            payload_json,
+            snapshot_text_hash,
+        ) in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
             int_doc_id = int(doc_id)
             if current_doc_id != int_doc_id:
                 current_doc_id = int_doc_id
@@ -1318,16 +1327,20 @@ class TermExtractionService:
             fallback_rows_used,
         )
         if summary is not None:
-            summary["snapshot_rows_used"] = int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
-            summary["reparsed_sentences"] = int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
+            summary["snapshot_rows_used"] = (
+                int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
+            )
+            summary["reparsed_sentences"] = (
+                int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
+            )
         return ngram_counts, ngram_doc_freq, ngram_meta
 
     def _build_lemma_freq_map(
         self,
         session: Session,
         project_id: int,
-        lemma_texts: Set[str],
-    ) -> Dict[str, int]:
+        lemma_texts: set[str],
+    ) -> dict[str, int]:
         """Fetch required lemma frequencies once to avoid per-row lookups."""
         if not lemma_texts:
             return {}
@@ -1358,21 +1371,21 @@ class TermExtractionService:
         *,
         ngram_counts: Counter,
         ngram_doc_freq: Counter,
-        ngram_meta: Dict[Tuple[str, int], Dict[str, str]],
+        ngram_meta: dict[tuple[str, int], dict[str, str]],
         min_freq: int,
     ) -> int:
         """Store precomputed n-gram counters in one bounded write phase."""
         if not ngram_counts:
             return 0
 
-        bigram_lemma_texts: Set[str] = set()
+        bigram_lemma_texts: set[str] = set()
         for (surface_text, n), freq in ngram_counts.items():
             if freq < min_freq:
                 continue
             meta = ngram_meta.get((surface_text, n)) or {}
             if n != 2:
                 continue
-            lemmas = str(meta.get('lemma_phrase') or "").split()
+            lemmas = str(meta.get("lemma_phrase") or "").split()
             if len(lemmas) == 2:
                 bigram_lemma_texts.update(lemmas)
 
@@ -1387,7 +1400,7 @@ class TermExtractionService:
             meta = ngram_meta[(surface_text, n)]
 
             # Get canonical key
-            canonical_key = get_cluster_key(surface_text, meta['lemma_phrase'])
+            canonical_key = get_cluster_key(surface_text, meta["lemma_phrase"])
 
             # Create Ngram
             ngram = Ngram(
@@ -1395,9 +1408,9 @@ class TermExtractionService:
                 n=n,
                 surface_text=surface_text,
                 he_canonical=canonical_key,
-                lemma_phrase=meta['lemma_phrase'],
-                source_kind='ngram',
-                pos_pattern=meta['pos_pattern'],
+                lemma_phrase=meta["lemma_phrase"],
+                source_kind="ngram",
+                pos_pattern=meta["pos_pattern"],
             )
             session.add(ngram)
             session.flush()  # Get ngram_id
@@ -1408,7 +1421,7 @@ class TermExtractionService:
             # Compute association measures (for bigrams)
             if n == 2:
                 # Get component lemma counts
-                lemmas = meta['lemma_phrase'].split()
+                lemmas = meta["lemma_phrase"].split()
                 if len(lemmas) == 2:
                     l1, l2 = lemmas
                     c_x = lemma_freq_map.get(l1, 1)
@@ -1416,20 +1429,20 @@ class TermExtractionService:
 
                     measures = compute_all_measures(freq, c_x, c_y, total_tokens)
                 else:
-                    measures = {'pmi': None, 'tscore': None, 'llr': None, 'dice': None}
+                    measures = {"pmi": None, "tscore": None, "llr": None, "dice": None}
             else:
                 # Trigrams: compute simplified measures
-                measures = {'pmi': None, 'tscore': None, 'llr': None, 'dice': None}
+                measures = {"pmi": None, "tscore": None, "llr": None, "dice": None}
 
             stat = NgramProjectStat(
                 project_id=project_id,
                 ngram_id=ngram.ngram_id,
                 freq_abs=freq,
                 doc_freq=doc_freq,
-                pmi_cache=measures['pmi'],
-                tscore_cache=measures['tscore'],
-                llr_cache=measures['llr'],
-                dice_cache=measures['dice'],
+                pmi_cache=measures["pmi"],
+                tscore_cache=measures["tscore"],
+                llr_cache=measures["llr"],
+                dice_cache=measures["dice"],
             )
             session.add(stat)
 
@@ -1440,11 +1453,7 @@ class TermExtractionService:
         return ngrams_stored
 
     def _extract_ngrams(
-        self,
-        session: Session,
-        project_id: int,
-        ngram_ns: Tuple[int, ...],
-        min_freq: int
+        self, session: Session, project_id: int, ngram_ns: tuple[int, ...], min_freq: int
     ) -> int:
         """Compatibility wrapper for tests/older callers."""
         ngram_counts, ngram_doc_freq, ngram_meta = self._collect_ngrams(
@@ -1465,14 +1474,14 @@ class TermExtractionService:
         project_id: int,
         np_max_len: int,
         min_freq: int,
-        summary: Optional[dict[str, int]] = None,
-    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        summary: dict[str, int] | None = None,
+    ) -> tuple[Counter, Counter, dict[tuple[str, int], dict[str, str]]]:
         """Collect NP chunks from processed documents without writing."""
         logger.info(f"Extracting NP chunks (max_len={np_max_len})")
 
         # Get project to check which engine was used
         project = session.get(DictProject, project_id)
-        use_mock = (project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False)
+        use_mock = project.nlp_engine.lower() == "mock" if project and project.nlp_engine else False
 
         # Get NLP engine for re-parsing sentences
         engine = self.get_nlp_engine(use_mock=use_mock)
@@ -1487,26 +1496,32 @@ class TermExtractionService:
     def _collect_np_chunks_for_doc_ids(
         self,
         session: Session,
-        doc_ids: List[int],
+        doc_ids: list[int],
         *,
         np_max_len: int,
         engine: NLPEngine,
-        summary: Optional[dict[str, int]] = None,
-    ) -> Tuple[Counter, Counter, Dict[Tuple[str, int], Dict[str, str]]]:
+        summary: dict[str, int] | None = None,
+    ) -> tuple[Counter, Counter, dict[tuple[str, int], dict[str, str]]]:
         """Collect NP chunk counts for a bounded list of docs."""
         np_counts = Counter()
         np_doc_freq = Counter()
-        np_meta: Dict[Tuple[str, int], Dict[str, str]] = {}
+        np_meta: dict[tuple[str, int], dict[str, str]] = {}
 
         if not doc_ids:
             return Counter(), Counter(), {}
 
-        current_doc_id: Optional[int] = None
-        doc_nps_seen: Set[Tuple[str, int]] = set()
+        current_doc_id: int | None = None
+        doc_nps_seen: set[tuple[str, int]] = set()
         snapshot_rows_used = 0
         fallback_rows_used = 0
 
-        for doc_id, sentence_id, sent_text, payload_json, snapshot_text_hash in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
+        for (
+            doc_id,
+            sentence_id,
+            sent_text,
+            payload_json,
+            snapshot_text_hash,
+        ) in self._iter_sentence_rows_for_doc_ids(session, doc_ids):
             int_doc_id = int(doc_id)
             if current_doc_id != int_doc_id:
                 current_doc_id = int_doc_id
@@ -1555,8 +1570,12 @@ class TermExtractionService:
             fallback_rows_used,
         )
         if summary is not None:
-            summary["snapshot_rows_used"] = int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
-            summary["reparsed_sentences"] = int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
+            summary["snapshot_rows_used"] = (
+                int(summary.get("snapshot_rows_used", 0)) + snapshot_rows_used
+            )
+            summary["reparsed_sentences"] = (
+                int(summary.get("reparsed_sentences", 0)) + fallback_rows_used
+            )
         return np_counts, np_doc_freq, np_meta
 
     def _store_np_chunks(
@@ -1566,7 +1585,7 @@ class TermExtractionService:
         *,
         np_counts: Counter,
         np_doc_freq: Counter,
-        np_meta: Dict[Tuple[str, int], Dict[str, str]],
+        np_meta: dict[tuple[str, int], dict[str, str]],
         min_freq: int,
     ) -> int:
         """Store precomputed NP counters in one bounded write phase."""
@@ -1581,7 +1600,7 @@ class TermExtractionService:
             meta = np_meta[(surface_text, n)]
 
             # Get canonical key
-            canonical_key = get_cluster_key(surface_text, meta['lemma_phrase'])
+            canonical_key = get_cluster_key(surface_text, meta["lemma_phrase"])
 
             # Create Ngram with source_kind='np'
             ngram = Ngram(
@@ -1589,9 +1608,9 @@ class TermExtractionService:
                 n=n,
                 surface_text=surface_text,
                 he_canonical=canonical_key,
-                lemma_phrase=meta['lemma_phrase'],
-                source_kind='np',
-                pos_pattern=meta['pos_pattern'],
+                lemma_phrase=meta["lemma_phrase"],
+                source_kind="np",
+                pos_pattern=meta["pos_pattern"],
             )
             session.add(ngram)
             session.flush()  # Get ngram_id
@@ -1618,11 +1637,7 @@ class TermExtractionService:
         return nps_stored
 
     def _extract_np_chunks(
-        self,
-        session: Session,
-        project_id: int,
-        np_max_len: int,
-        min_freq: int
+        self, session: Session, project_id: int, np_max_len: int, min_freq: int
     ) -> int:
         """Compatibility wrapper for tests/older callers."""
         np_counts, np_doc_freq, np_meta = self._collect_np_chunks(
@@ -1645,7 +1660,7 @@ class TermExtractionService:
         source_kind: str,
         counts: Counter,
         doc_freq: Counter,
-        meta: Dict[Tuple[str, int], Dict[str, str]],
+        meta: dict[tuple[str, int], dict[str, str]],
         insert_batch_size: int = 200,
     ) -> int:
         """Upsert staged term counters for one collected batch."""
@@ -1671,7 +1686,7 @@ class TermExtractionService:
 
         inserted = 0
         for start in range(0, len(rows), insert_batch_size):
-            chunk = rows[start:start + insert_batch_size]
+            chunk = rows[start : start + insert_batch_size]
             stmt = sqlite_insert(TermExtractAccumulator.__table__).values(chunk)
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
@@ -1709,10 +1724,10 @@ class TermExtractionService:
         source_kind: str,
         min_freq: int,
         batch_size: int = 500,
-    ) -> Iterable[List[dict]]:
+    ) -> Iterable[list[dict]]:
         """Yield staged accumulator rows in deterministic bounded batches."""
-        last_n: Optional[int] = None
-        last_surface: Optional[str] = None
+        last_n: int | None = None
+        last_surface: str | None = None
 
         while True:
             stmt = (
@@ -1761,7 +1776,7 @@ class TermExtractionService:
         run_id: int,
         min_freq: int,
         total_tokens: int,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Store staged ngram accumulators into final term tables."""
         ngrams_stored = 0
@@ -1773,7 +1788,7 @@ class TermExtractionService:
             min_freq=min_freq,
         ):
             batch_no += 1
-            bigram_lemma_texts: Set[str] = set()
+            bigram_lemma_texts: set[str] = set()
             for row in rows:
                 if int(row["n"]) != 2:
                     continue
@@ -1846,7 +1861,7 @@ class TermExtractionService:
         *,
         run_id: int,
         min_freq: int,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Store staged NP accumulators into final term tables."""
         nps_stored = 0
@@ -1934,9 +1949,9 @@ class TermExtractionService:
         project_id: int,
         *,
         batch_size: int = 500,
-    ) -> Iterable[List[str]]:
+    ) -> Iterable[list[str]]:
         """Yield canonical keys in deterministic batches for bounded clustering."""
-        last_key: Optional[str] = None
+        last_key: str | None = None
         while True:
             stmt = (
                 select(Ngram.he_canonical)
@@ -1966,7 +1981,7 @@ class TermExtractionService:
         session: Session,
         project_id: int,
         canonical_key: str,
-        members: List[dict],
+        members: list[dict],
         classification_stats: dict,
     ) -> int:
         """Insert one cluster and its members from pre-fetched member rows."""
@@ -1979,7 +1994,9 @@ class TermExtractionService:
         pmis = [member["pmi_cache"] for member in members if member["pmi_cache"] is not None]
         llrs = [member["llr_cache"] for member in members if member["llr_cache"] is not None]
         dices = [member["dice_cache"] for member in members if member["dice_cache"] is not None]
-        tscores = [member["tscore_cache"] for member in members if member["tscore_cache"] is not None]
+        tscores = [
+            member["tscore_cache"] for member in members if member["tscore_cache"] is not None
+        ]
 
         terms_for_rep = [
             {"surface_text": str(member["surface_text"]), "freq_abs": int(member["freq_abs"] or 0)}
@@ -1991,11 +2008,7 @@ class TermExtractionService:
             None,
         )
         source_kinds = sorted(
-            {
-                str(member["source_kind"])
-                for member in members
-                if member["source_kind"]
-            }
+            {str(member["source_kind"]) for member in members if member["source_kind"]}
         )
 
         classification = classify_phrase(representative_he)
@@ -2085,8 +2098,8 @@ class TermExtractionService:
             )
             rows = [dict(row) for row in session.execute(stmt).mappings()]
 
-            current_key: Optional[str] = None
-            current_members: List[dict] = []
+            current_key: str | None = None
+            current_members: list[dict] = []
             for row in rows:
                 canonical_key = str(row["he_canonical"])
                 if current_key is None:
@@ -2127,11 +2140,10 @@ class TermExtractionService:
         """Get total frequency of a lemma."""
         from app.infra.sa_models import Lemma, LemmaProjectStat
 
-        stmt = select(LemmaProjectStat.freq_abs).join(Lemma).where(
-            and_(
-                Lemma.project_id == project_id,
-                Lemma.lemma_text == lemma_text
-            )
+        stmt = (
+            select(LemmaProjectStat.freq_abs)
+            .join(Lemma)
+            .where(and_(Lemma.project_id == project_id, Lemma.lemma_text == lemma_text))
         )
         result = session.execute(stmt).scalar()
         return result or 1  # Avoid division by zero
@@ -2152,13 +2164,13 @@ class TermExtractionService:
         project_id: int,
         *,
         top_n: int = 500,
-        search: Optional[str] = None,
-        preset: str = 'freq',
-        min_freq: Optional[int] = None,
-        source_filter: Optional[str] = None,
+        search: str | None = None,
+        preset: str = "freq",
+        min_freq: int | None = None,
+        source_filter: str | None = None,
         hide_noise: bool = True,
         offset: int = 0,
-    ) -> List[ClusterStats]:
+    ) -> list[ClusterStats]:
         """
         List term clusters with filtering and ranking.
 
@@ -2176,7 +2188,7 @@ class TermExtractionService:
             List of ClusterStats
         """
         # M5.4: Termhood preset requires reference corpus
-        if preset == 'termhood':
+        if preset == "termhood":
             reference_project_id = self.get_reference_project(session, project_id)
             if reference_project_id:
                 return self._list_clusters_with_termhood(
@@ -2186,20 +2198,25 @@ class TermExtractionService:
                     top_n=top_n,
                     search=search,
                     min_freq=min_freq,
-                    source_filter=source_filter
+                    source_filter=source_filter,
                 )
             else:
                 # No reference set - fall back to freq preset
-                logger.warning(f"Termhood preset requested but no reference project set for {project_id}")
-                preset = 'freq'
+                logger.warning(
+                    f"Termhood preset requested but no reference project set for {project_id}"
+                )
+                preset = "freq"
         stmt = select(TermCluster).where(TermCluster.project_id == project_id)
 
         # Filter by source kind if specified (M5.3)
         if source_filter:
             # Join with members to filter by source_kind
-            stmt = stmt.join(TermClusterMember).join(Ngram).where(
-                Ngram.source_kind == source_filter
-            ).distinct()
+            stmt = (
+                stmt.join(TermClusterMember)
+                .join(Ngram)
+                .where(Ngram.source_kind == source_filter)
+                .distinct()
+            )
 
         # Apply filters
         if min_freq:
@@ -2236,24 +2253,23 @@ class TermExtractionService:
                 stmt = stmt.where(TermCluster.representative_he.contains(search))
 
         # Apply ranking preset
-        if preset == 'freq':
+        if preset == "freq":
             stmt = stmt.order_by(
                 TermCluster.freq_abs.desc(),
                 TermCluster.doc_freq.desc(),
-                TermCluster.best_pmi.desc()
+                TermCluster.best_pmi.desc(),
             )
-        elif preset == 'strong':
+        elif preset == "strong":
             stmt = stmt.where(TermCluster.freq_abs >= 2).order_by(
-                TermCluster.best_llr.desc(),
-                TermCluster.best_pmi.desc()
+                TermCluster.best_llr.desc(), TermCluster.best_pmi.desc()
             )
-        elif preset == 'balanced':
+        elif preset == "balanced":
             # M5.2: Balanced ranking using multiple signals
             stmt = stmt.order_by(
                 TermCluster.best_llr.desc(),
                 TermCluster.best_dice.desc(),
                 TermCluster.doc_freq.desc(),
-                TermCluster.freq_abs.desc()
+                TermCluster.freq_abs.desc(),
             )
 
         stmt = stmt.limit(top_n).offset(offset)
@@ -2263,23 +2279,25 @@ class TermExtractionService:
         # Convert to DTOs
         results = []
         for c in clusters:
-            results.append(ClusterStats(
-                cluster_id=c.cluster_id,
-                canonical_key=c.canonical_key,
-                representative_he=c.representative_he,
-                representative_lemma=c.representative_lemma,
-                freq_abs=c.freq_abs,
-                doc_freq=c.doc_freq,
-                members_count=c.members_count,
-                best_pmi=c.best_pmi,
-                best_llr=c.best_llr,
-                best_dice=c.best_dice,
-                best_tscore=c.best_tscore,
-                entity_class=c.entity_class,
-                is_noise=c.is_noise,
-                noise_reason=c.noise_reason,
-                norm_text=c.norm_text,
-            ))
+            results.append(
+                ClusterStats(
+                    cluster_id=c.cluster_id,
+                    canonical_key=c.canonical_key,
+                    representative_he=c.representative_he,
+                    representative_lemma=c.representative_lemma,
+                    freq_abs=c.freq_abs,
+                    doc_freq=c.doc_freq,
+                    members_count=c.members_count,
+                    best_pmi=c.best_pmi,
+                    best_llr=c.best_llr,
+                    best_dice=c.best_dice,
+                    best_tscore=c.best_tscore,
+                    entity_class=c.entity_class,
+                    is_noise=c.is_noise,
+                    noise_reason=c.noise_reason,
+                    norm_text=c.norm_text,
+                )
+            )
 
         return results
 
@@ -2288,9 +2306,9 @@ class TermExtractionService:
         session: Session,
         project_id: int,
         *,
-        search: Optional[str] = None,
-        min_freq: Optional[int] = None,
-        source_filter: Optional[str] = None,
+        search: str | None = None,
+        min_freq: int | None = None,
+        source_filter: str | None = None,
         hide_noise: bool = True,
     ) -> int:
         """
@@ -2307,16 +2325,21 @@ class TermExtractionService:
         Returns:
             Total count of matching clusters
         """
-        stmt = select(func.count()).select_from(TermCluster).where(
-            TermCluster.project_id == project_id
+        stmt = (
+            select(func.count())
+            .select_from(TermCluster)
+            .where(TermCluster.project_id == project_id)
         )
 
         # Apply same filters as list_term_clusters (but no limit/offset)
         # Source filter
         if source_filter:
-            stmt = stmt.join(TermClusterMember).join(Ngram).where(
-                Ngram.source_kind == source_filter
-            ).distinct()
+            stmt = (
+                stmt.join(TermClusterMember)
+                .join(Ngram)
+                .where(Ngram.source_kind == source_filter)
+                .distinct()
+            )
 
         # Min freq filter
         if min_freq:
@@ -2359,16 +2382,21 @@ class TermExtractionService:
         Returns:
             Total count of clusters to translate
         """
-        stmt = select(func.count(TermCluster.cluster_id.distinct())).select_from(TermCluster).where(
-            TermCluster.project_id == project_id
+        stmt = (
+            select(func.count(TermCluster.cluster_id.distinct()))
+            .select_from(TermCluster)
+            .where(TermCluster.project_id == project_id)
         )
 
         # Apply filters (mirror list_term_clusters logic)
         source_filter = filters.get("source_filter")
         if source_filter:
-            stmt = stmt.join(TermClusterMember).join(Ngram).where(
-                Ngram.source_kind == source_filter
-            ).distinct()
+            stmt = (
+                stmt.join(TermClusterMember)
+                .join(Ngram)
+                .where(Ngram.source_kind == source_filter)
+                .distinct()
+            )
 
         min_freq = filters.get("min_freq")
         if min_freq:
@@ -2395,14 +2423,14 @@ class TermExtractionService:
         if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
             stmt = stmt.outerjoin(
                 TMEntry,
-                (TMEntry.cluster_id == TermCluster.cluster_id) &
-                (TMEntry.kind == "term_cluster") &
-                (TMEntry.project_id == project_id)
+                (TMEntry.cluster_id == TermCluster.cluster_id)
+                & (TMEntry.kind == "term_cluster")
+                & (TMEntry.project_id == project_id),
             ).where(
                 or_(
                     TMEntry.tm_id.is_(None),
                     TMEntry.translation.is_(None),
-                    TMEntry.translation == ""
+                    TMEntry.translation == "",
                 )
             )
 
@@ -2417,7 +2445,7 @@ class TermExtractionService:
         write_mode: str,
         limit: int,
         offset: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """Fetch term cluster IDs matching filters for translation (paginated).
 
         Args:
@@ -2431,16 +2459,17 @@ class TermExtractionService:
         Returns:
             List of cluster_id integers
         """
-        stmt = select(TermCluster.cluster_id).where(
-            TermCluster.project_id == project_id
-        )
+        stmt = select(TermCluster.cluster_id).where(TermCluster.project_id == project_id)
 
         # Apply filters (mirror list_term_clusters logic)
         source_filter = filters.get("source_filter")
         if source_filter:
-            stmt = stmt.join(TermClusterMember).join(Ngram).where(
-                Ngram.source_kind == source_filter
-            ).distinct()
+            stmt = (
+                stmt.join(TermClusterMember)
+                .join(Ngram)
+                .where(Ngram.source_kind == source_filter)
+                .distinct()
+            )
 
         min_freq = filters.get("min_freq")
         if min_freq:
@@ -2467,14 +2496,14 @@ class TermExtractionService:
         if write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY"):
             stmt = stmt.outerjoin(
                 TMEntry,
-                (TMEntry.cluster_id == TermCluster.cluster_id) &
-                (TMEntry.kind == "term_cluster") &
-                (TMEntry.project_id == project_id)
+                (TMEntry.cluster_id == TermCluster.cluster_id)
+                & (TMEntry.kind == "term_cluster")
+                & (TMEntry.project_id == project_id),
             ).where(
                 or_(
                     TMEntry.tm_id.is_(None),
                     TMEntry.translation.is_(None),
-                    TMEntry.translation == ""
+                    TMEntry.translation == "",
                 )
             )
 
@@ -2487,35 +2516,40 @@ class TermExtractionService:
         results = session.execute(stmt).scalars().all()
         return list(results)
 
-    def get_cluster_members(self, session: Session, cluster_id: int) -> List[dict]:
+    def get_cluster_members(self, session: Session, cluster_id: int) -> list[dict]:
         """
         Get cluster members (surface variants).
 
         Returns:
             List of dicts with ngram details
         """
-        stmt = select(Ngram, NgramProjectStat, TermClusterMember).join(
-            TermClusterMember, Ngram.ngram_id == TermClusterMember.ngram_id
-        ).join(
-            NgramProjectStat,
-            and_(
-                NgramProjectStat.ngram_id == Ngram.ngram_id,
-                NgramProjectStat.project_id == Ngram.project_id
+        stmt = (
+            select(Ngram, NgramProjectStat, TermClusterMember)
+            .join(TermClusterMember, Ngram.ngram_id == TermClusterMember.ngram_id)
+            .join(
+                NgramProjectStat,
+                and_(
+                    NgramProjectStat.ngram_id == Ngram.ngram_id,
+                    NgramProjectStat.project_id == Ngram.project_id,
+                ),
             )
-        ).where(TermClusterMember.cluster_id == cluster_id)
+            .where(TermClusterMember.cluster_id == cluster_id)
+        )
 
         results = session.execute(stmt).all()
 
         members = []
         for ngram, stat, member in results:
-            members.append({
-                'surface_text': ngram.surface_text,
-                'lemma_phrase': ngram.lemma_phrase,
-                'freq_abs': stat.freq_abs,
-                'doc_freq': stat.doc_freq,
-                'pmi': stat.pmi_cache,
-                'llr': stat.llr_cache,
-            })
+            members.append(
+                {
+                    "surface_text": ngram.surface_text,
+                    "lemma_phrase": ngram.lemma_phrase,
+                    "freq_abs": stat.freq_abs,
+                    "doc_freq": stat.doc_freq,
+                    "pmi": stat.pmi_cache,
+                    "llr": stat.llr_cache,
+                }
+            )
 
         return members
 
@@ -2524,10 +2558,7 @@ class TermExtractionService:
     # ===================================================================
 
     def set_reference_project(
-        self,
-        session: Session,
-        project_id: int,
-        reference_project_id: Optional[int]
+        self, session: Session, project_id: int, reference_project_id: int | None
     ) -> None:
         """
         Set the reference (general) corpus for termhood comparison.
@@ -2551,7 +2582,7 @@ class TermExtractionService:
         )
         logger.info(f"Set reference project for {project_id}: {reference_project_id}")
 
-    def get_reference_project(self, session: Session, project_id: int) -> Optional[int]:
+    def get_reference_project(self, session: Session, project_id: int) -> int | None:
         """
         Get the reference (general) corpus ID for a project.
 
@@ -2568,7 +2599,7 @@ class TermExtractionService:
 
         return project.general_corpus_id
 
-    def _get_default_reference_corpus_id(self, session: Session) -> Optional[int]:
+    def _get_default_reference_corpus_id(self, session: Session) -> int | None:
         """
         Get the default reference corpus ID (is_general_corpus=1).
 
@@ -2582,7 +2613,7 @@ class TermExtractionService:
         result = session.execute(stmt).scalar_one_or_none()
         return result
 
-    def list_projects(self, session: Session) -> List[Tuple[int, str]]:
+    def list_projects(self, session: Session) -> list[tuple[int, str]]:
         """
         List all projects for reference selection.
 
@@ -2592,9 +2623,7 @@ class TermExtractionService:
         Returns:
             List of (project_id, name) tuples
         """
-        stmt = select(DictProject.project_id, DictProject.name).order_by(
-            DictProject.name
-        )
+        stmt = select(DictProject.project_id, DictProject.name).order_by(DictProject.name)
         results = session.execute(stmt).all()
         return [(r[0], r[1]) for r in results]
 
@@ -2611,19 +2640,11 @@ class TermExtractionService:
         Returns:
             Total cluster token count
         """
-        stmt = select(func.sum(TermCluster.freq_abs)).where(
-            TermCluster.project_id == project_id
-        )
+        stmt = select(func.sum(TermCluster.freq_abs)).where(TermCluster.project_id == project_id)
         result = session.execute(stmt).scalar()
         return result or 0
 
-    def _compute_weirdness(
-        self,
-        f_d: int,
-        N_d: int,
-        f_r: int,
-        N_r: int
-    ) -> float:
+    def _compute_weirdness(self, f_d: int, N_d: int, f_r: int, N_r: int) -> float:
         """
         Compute weirdness ratio with smoothing.
 
@@ -2649,13 +2670,7 @@ class TermExtractionService:
         weirdness = (f_d_s / N_d_s) / (f_r_s / N_r_s)
         return weirdness
 
-    def _compute_keyness_llr(
-        self,
-        f_d: int,
-        N_d: int,
-        f_r: int,
-        N_r: int
-    ) -> float:
+    def _compute_keyness_llr(self, f_d: int, N_d: int, f_r: int, N_r: int) -> float:
         """
         Compute keyness using log-likelihood ratio (2x2 contingency table).
 
@@ -2710,20 +2725,15 @@ class TermExtractionService:
             return obs * math.log(obs / exp)
 
         llr = 2 * (
-            safe_log_term(a, e_a) +
-            safe_log_term(b, e_b) +
-            safe_log_term(c, e_c) +
-            safe_log_term(d, e_d)
+            safe_log_term(a, e_a)
+            + safe_log_term(b, e_b)
+            + safe_log_term(c, e_c)
+            + safe_log_term(d, e_d)
         )
 
         return llr
 
-    def _compute_termhood_score(
-        self,
-        weirdness: float,
-        keyness_llr: float,
-        freq: int
-    ) -> float:
+    def _compute_termhood_score(self, weirdness: float, keyness_llr: float, freq: int) -> float:
         """
         Compute composite termhood score for ranking.
 
@@ -2744,11 +2754,7 @@ class TermExtractionService:
         """
         import math
 
-        score = (
-            math.log1p(max(0, keyness_llr)) *
-            math.log1p(max(0, weirdness)) *
-            math.log1p(freq)
-        )
+        score = math.log1p(max(0, keyness_llr)) * math.log1p(max(0, weirdness)) * math.log1p(freq)
 
         return score
 
@@ -2759,10 +2765,10 @@ class TermExtractionService:
         reference_project_id: int,
         *,
         top_n: int = 500,
-        search: Optional[str] = None,
-        min_freq: Optional[int] = None,
-        source_filter: Optional[str] = None,
-    ) -> List[ClusterStats]:
+        search: str | None = None,
+        min_freq: int | None = None,
+        source_filter: str | None = None,
+    ) -> list[ClusterStats]:
         """
         List clusters with termhood metrics vs reference corpus.
 
@@ -2793,16 +2799,19 @@ class TermExtractionService:
             N_r = 1  # Avoid division by zero, treat as very small reference
 
         # Alias for reference clusters
-        RefCluster = alias(TermCluster.__table__, name='ref_cluster')
+        RefCluster = alias(TermCluster.__table__, name="ref_cluster")
 
         # Query domain clusters
         stmt = select(TermCluster).where(TermCluster.project_id == project_id)
 
         # Filter by source kind if specified
         if source_filter:
-            stmt = stmt.join(TermClusterMember).join(Ngram).where(
-                Ngram.source_kind == source_filter
-            ).distinct()
+            stmt = (
+                stmt.join(TermClusterMember)
+                .join(Ngram)
+                .where(Ngram.source_kind == source_filter)
+                .distinct()
+            )
 
         # Apply filters
         if min_freq:
@@ -2834,7 +2843,7 @@ class TermExtractionService:
             ref_stmt = select(TermCluster).where(
                 and_(
                     TermCluster.project_id == reference_project_id,
-                    TermCluster.canonical_key == d_cluster.canonical_key
+                    TermCluster.canonical_key == d_cluster.canonical_key,
                 )
             )
             r_cluster = session.execute(ref_stmt).scalar_one_or_none()
@@ -2847,26 +2856,28 @@ class TermExtractionService:
             keyness_llr = self._compute_keyness_llr(f_d, N_d, f_r, N_r)
             termhood_score = self._compute_termhood_score(weirdness, keyness_llr, f_d)
 
-            results.append(ClusterStats(
-                cluster_id=d_cluster.cluster_id,
-                canonical_key=d_cluster.canonical_key,
-                representative_he=d_cluster.representative_he,
-                representative_lemma=d_cluster.representative_lemma,
-                freq_abs=d_cluster.freq_abs,
-                doc_freq=d_cluster.doc_freq,
-                members_count=d_cluster.members_count,
-                best_pmi=d_cluster.best_pmi,
-                best_llr=d_cluster.best_llr,
-                best_dice=d_cluster.best_dice,
-                best_tscore=d_cluster.best_tscore,
-                weirdness=weirdness,
-                keyness_llr=keyness_llr,
-                termhood_score=termhood_score,
-                entity_class=d_cluster.entity_class,
-                is_noise=d_cluster.is_noise,
-                noise_reason=d_cluster.noise_reason,
-                norm_text=d_cluster.norm_text,
-            ))
+            results.append(
+                ClusterStats(
+                    cluster_id=d_cluster.cluster_id,
+                    canonical_key=d_cluster.canonical_key,
+                    representative_he=d_cluster.representative_he,
+                    representative_lemma=d_cluster.representative_lemma,
+                    freq_abs=d_cluster.freq_abs,
+                    doc_freq=d_cluster.doc_freq,
+                    members_count=d_cluster.members_count,
+                    best_pmi=d_cluster.best_pmi,
+                    best_llr=d_cluster.best_llr,
+                    best_dice=d_cluster.best_dice,
+                    best_tscore=d_cluster.best_tscore,
+                    weirdness=weirdness,
+                    keyness_llr=keyness_llr,
+                    termhood_score=termhood_score,
+                    entity_class=d_cluster.entity_class,
+                    is_noise=d_cluster.is_noise,
+                    noise_reason=d_cluster.noise_reason,
+                    norm_text=d_cluster.norm_text,
+                )
+            )
 
         # Sort by termhood score (deterministic)
         results.sort(
@@ -2876,7 +2887,7 @@ class TermExtractionService:
                 -c.weirdness if c.weirdness else 0,
                 -c.doc_freq,
                 -c.freq_abs,
-                c.canonical_key  # Stable tiebreaker
+                c.canonical_key,  # Stable tiebreaker
             )
         )
 

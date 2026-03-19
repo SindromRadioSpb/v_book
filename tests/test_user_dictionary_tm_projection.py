@@ -69,7 +69,9 @@ def test_bulk_add_materializes_project_tm_entry_and_is_visible_in_tm():
             session.add(lemma)
             session.flush()
 
-            dictionary_id = user_dict_service.create_dictionary(session, "Deck Projection").dictionary_id
+            dictionary_id = user_dict_service.create_dictionary(
+                session, "Deck Projection"
+            ).dictionary_id
             result = user_dict_service.bulk_add_items(
                 session,
                 dictionary_id=dictionary_id,
@@ -179,15 +181,19 @@ def test_bulk_add_reuses_existing_project_tm_anchor():
             ).scalar_one()
             assert item.origin_tm_entry_id == existing.tm_id
 
-            matches = session.execute(
-                select(TMEntry).where(
-                    TMEntry.project_id == project.project_id,
-                    TMEntry.kind == "lemma",
-                    TMEntry.src_lang == "he",
-                    TMEntry.tgt_lang == "ru",
-                    TMEntry.src_norm == "beta",
+            matches = (
+                session.execute(
+                    select(TMEntry).where(
+                        TMEntry.project_id == project.project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.src_lang == "he",
+                        TMEntry.tgt_lang == "ru",
+                        TMEntry.src_norm == "beta",
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(matches) == 1
     finally:
         engine.dispose()
@@ -202,7 +208,9 @@ def test_bulk_add_materializes_global_tm_anchor_without_project():
         admin_service = TranslationAdminService()
 
         with Session(engine) as session:
-            dictionary_id = user_dict_service.create_dictionary(session, "Deck Global").dictionary_id
+            dictionary_id = user_dict_service.create_dictionary(
+                session, "Deck Global"
+            ).dictionary_id
             result = user_dict_service.bulk_add_items(
                 session,
                 dictionary_id=dictionary_id,
@@ -264,7 +272,9 @@ def test_sync_noise_from_lemmas_updates_user_dictionary_items():
             session.add(lemma)
             session.flush()
 
-            dictionary_id = user_dict_service.create_dictionary(session, "Noise Sync Lemmas").dictionary_id
+            dictionary_id = user_dict_service.create_dictionary(
+                session, "Noise Sync Lemmas"
+            ).dictionary_id
             user_dict_service.bulk_add_items(
                 session,
                 dictionary_id=dictionary_id,
@@ -326,7 +336,9 @@ def test_sync_noise_from_term_clusters_updates_user_dictionary_items():
             session.add(cluster)
             session.flush()
 
-            dictionary_id = user_dict_service.create_dictionary(session, "Noise Sync Terms").dictionary_id
+            dictionary_id = user_dict_service.create_dictionary(
+                session, "Noise Sync Terms"
+            ).dictionary_id
             user_dict_service.bulk_add_items(
                 session,
                 dictionary_id=dictionary_id,

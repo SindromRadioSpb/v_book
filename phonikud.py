@@ -14,14 +14,13 @@ It also exposes runtime diagnostics used by the premium UI gate:
 from __future__ import annotations
 
 import importlib
-from functools import lru_cache
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from typing import Optional, Tuple
+from functools import lru_cache
+from pathlib import Path
 
 MODE_REAL = "real_inference"
 MODE_FALLBACK = "fallback"
@@ -55,7 +54,9 @@ def _ensure_hf_home() -> None:
         configured_path = Path(configured)
         try:
             configured_path.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=str(configured_path), prefix="hf_write_test_", delete=True):
+            with tempfile.NamedTemporaryFile(
+                dir=str(configured_path), prefix="hf_write_test_", delete=True
+            ):
                 pass
             return
         except Exception:
@@ -71,7 +72,9 @@ def _ensure_hf_home() -> None:
     for candidate in candidates:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=str(candidate), prefix="hf_write_test_", delete=True):
+            with tempfile.NamedTemporaryFile(
+                dir=str(candidate), prefix="hf_write_test_", delete=True
+            ):
                 pass
             os.environ["HF_HOME"] = str(candidate)
             os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -134,7 +137,7 @@ def _is_frozen_windows_runtime() -> bool:
     return os.name == "nt" and bool(getattr(sys, "frozen", False))
 
 
-def _resolve_frozen_onnx_probe_executable() -> Optional[Path]:
+def _resolve_frozen_onnx_probe_executable() -> Path | None:
     if not _is_frozen_windows_runtime():
         return None
     try:
@@ -269,7 +272,7 @@ def _activate_onnx_subprocess_backend(
     target_path: Path,
     *,
     reason: str = "",
-) -> Optional[Tuple[str, object, Optional[object]]]:
+) -> tuple[str, object, object | None] | None:
     global _runtime_mode, _runtime_details
     try:
         probe_inputs = ["\u05e9\u05dc\u05d5\u05dd"]
@@ -284,9 +287,7 @@ def _activate_onnx_subprocess_backend(
             _runtime_details = f"ONNX subprocess backend active{reason_suffix}: {target_path.name}"
         else:
             _runtime_mode = MODE_FALLBACK
-            _runtime_details = (
-                f"ONNX subprocess probe returned identity output: {target_path.name}"
-            )
+            _runtime_details = f"ONNX subprocess probe returned identity output: {target_path.name}"
         return "onnx_subprocess", str(target_path), None
     except Exception as sub_exc:
         _runtime_mode = MODE_ERROR
@@ -294,7 +295,7 @@ def _activate_onnx_subprocess_backend(
         return None
 
 
-def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
+def _resolve_model_target() -> tuple[str | None, Path | None]:
     """Resolve configured model target as ('onnx'|'torch', path) or (None, None)."""
     raw = _sanitize_model_path(os.getenv("PHONIKUD_MODEL_PATH") or "")
     if not raw:
@@ -337,7 +338,7 @@ def _resolve_model_target() -> tuple[Optional[str], Optional[Path]]:
 
 
 @lru_cache(maxsize=1)
-def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
+def _load_model_bundle() -> tuple[str, object, object | None] | None:
     global _runtime_mode, _runtime_details
 
     target_kind, target_path = _resolve_model_target()
@@ -370,8 +371,8 @@ def _load_model_bundle() -> Optional[Tuple[str, object, Optional[object]]]:
             return None
 
     try:
-        from transformers import AutoTokenizer
         from src.model.phonikud_model import PhoNikudModel
+        from transformers import AutoTokenizer
 
         model = PhoNikudModel.from_pretrained(str(target_path), trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(str(target_path))
@@ -422,6 +423,7 @@ def batch_add_niqqud(texts: list[str]) -> list[str]:
             return [value.strip() or source for source, value in zip(normalized, rendered)]
 
         from src.model.phonikud_model import NIKUD_HASER
+
         result = model.predict(normalized, tokenizer, mark_matres_lectionis=NIKUD_HASER)
         if not result:
             return normalized

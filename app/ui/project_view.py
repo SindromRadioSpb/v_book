@@ -1,24 +1,26 @@
 """Project view - main workspace for a project."""
-import logging
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTabWidget,
-    QPushButton,
-    QLabel,
-)
-from PyQt6.QtCore import pyqtSignal
 
-from app.ui.documents_view import DocumentsView
-from app.ui.dictionary_view import DictionaryView
-from app.ui.terms_view import TermsView
+import logging
+
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.services.project_service import ProjectService
 from app.ui.concordance_view import ConcordanceView
-from app.ui.term_card_view import TermCardView
-from app.ui.user_dictionaries_view import UserDictionariesView
+from app.ui.dictionary_view import DictionaryView
+from app.ui.documents_view import DocumentsView
 from app.ui.export_view import ExportView
 from app.ui.sentences_view import SentencesView
-from app.services.project_service import ProjectService
+from app.ui.term_card_view import TermCardView
+from app.ui.terms_view import TermsView
+from app.ui.user_dictionaries_view import UserDictionariesView
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +126,7 @@ class ProjectView(QWidget):
                     self.project_name = ""
                     self.project_created_at = ""
                     self.project_title.setText("Project not found")
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load project")
             self.project_name = ""
             self.project_created_at = ""

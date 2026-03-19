@@ -69,7 +69,7 @@ def run():
                 if log:
                     print '\t\tFixing4 %s with %s' % (truemorph[2], predmorph[2])
                 truemorph[-1] = predmorph[-1]
-                j += 1 
+                j += 1
                 i += 1
                 numchanges += 1
             elif truemorph[2][:3] == predmorph[2][:3] and len(osent)>j+1 and \

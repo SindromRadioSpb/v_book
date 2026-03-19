@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
@@ -23,8 +23,8 @@ from PyQt6.QtWidgets import (
 )
 
 from app.infra.db_path_resolver import (
-    STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
     SETTINGS_KEY_ACTIVE_DB_PATH,
+    STARTUP_DEFER_SIZE_THRESHOLD_BYTES,
     clear_deferred_db_startup_guard,
     discover_baseline_db_path,
     get_default_db_path,
@@ -44,10 +44,10 @@ class FirstRunWizardDialog(QDialog):
         self,
         parent=None,
         *,
-        open_resources_manager: Optional[Callable[[], None]] = None,
-        open_mt_settings: Optional[Callable[[], None]] = None,
-        open_audio_settings: Optional[Callable[[], None]] = None,
-        restart_with_db_path: Optional[Callable[[Path], bool]] = None,
+        open_resources_manager: Callable[[], None] | None = None,
+        open_mt_settings: Callable[[], None] | None = None,
+        open_audio_settings: Callable[[], None] | None = None,
+        restart_with_db_path: Callable[[Path], bool] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("HDLE Premium Setup Wizard")
@@ -58,8 +58,8 @@ class FirstRunWizardDialog(QDialog):
         self.open_mt_settings = open_mt_settings
         self.open_audio_settings = open_audio_settings
         self.restart_with_db_path = restart_with_db_path
-        self._restart_candidate_path: Optional[Path] = None
-        self._health_worker: Optional[UnifiedHealthCheckWorker] = None
+        self._restart_candidate_path: Path | None = None
+        self._health_worker: UnifiedHealthCheckWorker | None = None
         self._health_request_seq = 0
         self._active_health_request_id = 0
         self._health_refresh_pending = False
@@ -109,9 +109,13 @@ class FirstRunWizardDialog(QDialog):
         page1 = QWidget()
         l1 = QVBoxLayout(page1)
         l1.addWidget(QLabel("<b>Step 1/6 - Data folder</b>"))
-        l1.addWidget(QLabel("Choose where HDLE stores models, datasets, logs, and temporary files."))
+        l1.addWidget(
+            QLabel("Choose where HDLE stores models, datasets, logs, and temporary files.")
+        )
         row = QHBoxLayout()
-        self.data_root_edit = QLineEdit(self.settings.get_string(ResourcePaths.SETTINGS_KEY_DATA_ROOT, ""))
+        self.data_root_edit = QLineEdit(
+            self.settings.get_string(ResourcePaths.SETTINGS_KEY_DATA_ROOT, "")
+        )
         row.addWidget(self.data_root_edit, 1)
         browse = QPushButton("Browse...")
         browse.clicked.connect(self._browse_data_root)
@@ -219,7 +223,9 @@ class FirstRunWizardDialog(QDialog):
         page6 = QWidget()
         l6 = QVBoxLayout(page6)
         l6.addWidget(QLabel("<b>Step 6/6 - Health Check</b>"))
-        self.health_status_label = QLabel("Health summary will load in background after the wizard opens.")
+        self.health_status_label = QLabel(
+            "Health summary will load in background after the wizard opens."
+        )
         self.health_status_label.setWordWrap(True)
         l6.addWidget(self.health_status_label)
         self.refresh_health_btn = QPushButton("Run Health Check")
@@ -228,7 +234,9 @@ class FirstRunWizardDialog(QDialog):
         self.health_summary_counts_label = QLabel("Waiting for health results...")
         self.health_summary_counts_label.setWordWrap(True)
         l6.addWidget(self.health_summary_counts_label)
-        self.health_recommendation_label = QLabel("Recommended next step will appear after the health check.")
+        self.health_recommendation_label = QLabel(
+            "Recommended next step will appear after the health check."
+        )
         self.health_recommendation_label.setWordWrap(True)
         l6.addWidget(self.health_recommendation_label)
         health_actions = QHBoxLayout()
@@ -259,7 +267,9 @@ class FirstRunWizardDialog(QDialog):
         QTimer.singleShot(0, self._refresh_health_summary)
 
     def _browse_data_root(self) -> None:
-        start = self.data_root_edit.text().strip() or str(ResourcePaths.resolve_data_root(create=True))
+        start = self.data_root_edit.text().strip() or str(
+            ResourcePaths.resolve_data_root(create=True)
+        )
         selected = QFileDialog.getExistingDirectory(self, "Select data folder", start)
         if selected:
             self.data_root_edit.setText(selected)
@@ -371,7 +381,9 @@ class FirstRunWizardDialog(QDialog):
             and info.schema_version < info.supported_schema_version
         ):
             status += " It is older than the app schema; expect one longer restart because backup and migration may run."
-        elif info.schema_version is not None and info.schema_version == info.supported_schema_version:
+        elif (
+            info.schema_version is not None and info.schema_version == info.supported_schema_version
+        ):
             status += " If this is the DB you plan to use next, finish the wizard and restart once."
         if info.size_bytes >= STARTUP_DEFER_SIZE_THRESHOLD_BYTES:
             status += " This is a heavy DB, so reconnect can take longer than the default local DB. Prefer one deliberate restart into it rather than repeated DB switching."
@@ -386,10 +398,14 @@ class FirstRunWizardDialog(QDialog):
 
         if selected != default_db:
             if not info.exists:
-                QMessageBox.warning(self, "Database Selection", "Selected database file does not exist.")
+                QMessageBox.warning(
+                    self, "Database Selection", "Selected database file does not exist."
+                )
                 return False
             if info.error:
-                QMessageBox.warning(self, "Database Selection", f"Cannot read selected DB.\n\n{info.error}")
+                QMessageBox.warning(
+                    self, "Database Selection", f"Cannot read selected DB.\n\n{info.error}"
+                )
                 return False
             if info.schema_version is not None and info.supported_schema_version > 0:
                 if info.schema_version > info.supported_schema_version:
@@ -411,7 +427,9 @@ class FirstRunWizardDialog(QDialog):
             current_db = Path(DBService.get_instance().db_manager.db_path).resolve()
         except Exception:
             current_db = None
-        self._restart_candidate_path = selected if (current_db is None or selected != current_db) else None
+        self._restart_candidate_path = (
+            selected if (current_db is None or selected != current_db) else None
+        )
         return True
 
     def _refresh_resource_status(self) -> None:
@@ -440,7 +458,9 @@ class FirstRunWizardDialog(QDialog):
         request_id = int(self._health_request_seq)
         self._active_health_request_id = request_id
         self._health_refresh_pending = False
-        self._set_health_summary_loading("Checking health summary in background...", preserve_text=True)
+        self._set_health_summary_loading(
+            "Checking health summary in background...", preserve_text=True
+        )
 
         worker = UnifiedHealthCheckWorker()
         app = QApplication.instance()
@@ -449,13 +469,21 @@ class FirstRunWizardDialog(QDialog):
         self._health_worker = worker
         worker.finished.connect(worker.deleteLater)
         worker.error.connect(worker.deleteLater)
-        worker.finished.connect(lambda report, seq=request_id: self._on_health_summary_loaded(report, seq))
-        worker.error.connect(lambda message, seq=request_id: self._on_health_summary_error(message, seq))
         worker.finished.connect(
-            lambda _report, current=worker, seq=request_id: self._on_health_worker_finished(current, seq)
+            lambda report, seq=request_id: self._on_health_summary_loaded(report, seq)
         )
         worker.error.connect(
-            lambda _message, current=worker, seq=request_id: self._on_health_worker_finished(current, seq)
+            lambda message, seq=request_id: self._on_health_summary_error(message, seq)
+        )
+        worker.finished.connect(
+            lambda _report, current=worker, seq=request_id: self._on_health_worker_finished(
+                current, seq
+            )
+        )
+        worker.error.connect(
+            lambda _message, current=worker, seq=request_id: self._on_health_worker_finished(
+                current, seq
+            )
         )
         worker.start()
 
@@ -463,7 +491,9 @@ class FirstRunWizardDialog(QDialog):
         self.health_status_label.setText(status_text)
         self.refresh_health_btn.setEnabled(False)
         self.health_summary_counts_label.setText("Waiting for health results...")
-        self.health_recommendation_label.setText("Recommended next step will appear after the health check.")
+        self.health_recommendation_label.setText(
+            "Recommended next step will appear after the health check."
+        )
         self.health_fix_resources_btn.setEnabled(False)
         self.health_fix_mt_btn.setEnabled(False)
         self.health_fix_audio_btn.setEnabled(False)
@@ -503,7 +533,9 @@ class FirstRunWizardDialog(QDialog):
             f"Optional: {counts['optional']} | OK: {counts['ok']}"
         )
         if actions["resources"]:
-            recommendation = "Recommended next step: Open Resources Manager and complete local setup."
+            recommendation = (
+                "Recommended next step: Open Resources Manager and complete local setup."
+            )
         elif actions["mt"]:
             recommendation = "Recommended next step: Open MT Provider Settings and finish provider configuration."
         elif actions["audio"]:
@@ -529,7 +561,9 @@ class FirstRunWizardDialog(QDialog):
         self.health_fix_resources_btn.setEnabled(actions["resources"])
         self.health_fix_mt_btn.setEnabled(actions["mt"])
         self.health_fix_audio_btn.setEnabled(actions["audio"])
-        self.health_status_label.setText(f"Health summary ready ({report.get('overall', 'unknown')}).")
+        self.health_status_label.setText(
+            f"Health summary ready ({report.get('overall', 'unknown')})."
+        )
         self.refresh_health_btn.setEnabled(True)
 
     def _on_health_summary_loaded(self, report: dict, request_id: int) -> None:
@@ -542,7 +576,9 @@ class FirstRunWizardDialog(QDialog):
             return
         self.health_status_label.setText(f"Health check failed: {message}")
         self.health_summary_counts_label.setText("Health summary unavailable.")
-        self.health_recommendation_label.setText("Recommended next step: Fix the health-check error and retry.")
+        self.health_recommendation_label.setText(
+            "Recommended next step: Fix the health-check error and retry."
+        )
         self.health_fix_resources_btn.setEnabled(False)
         self.health_fix_mt_btn.setEnabled(False)
         self.health_fix_audio_btn.setEnabled(False)
@@ -603,10 +639,10 @@ class FirstRunWizardDialog(QDialog):
 def show_first_run_wizard(
     parent=None,
     *,
-    open_resources_manager: Optional[Callable[[], None]] = None,
-    open_mt_settings: Optional[Callable[[], None]] = None,
-    open_audio_settings: Optional[Callable[[], None]] = None,
-    restart_with_db_path: Optional[Callable[[Path], bool]] = None,
+    open_resources_manager: Callable[[], None] | None = None,
+    open_mt_settings: Callable[[], None] | None = None,
+    open_audio_settings: Callable[[], None] | None = None,
+    restart_with_db_path: Callable[[Path], bool] | None = None,
 ) -> int:
     dialog = FirstRunWizardDialog(
         parent=parent,

@@ -1,28 +1,28 @@
 """Project dashboard - main landing page."""
-import logging
-from typing import List
 
+import logging
+
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
     QHBoxLayout,
-    QPushButton,
-    QTableView,
-    QLabel,
     QHeaderView,
+    QLabel,
     QMenu,
     QProgressDialog,
+    QPushButton,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
 
 from app.domain.dto import ProjectStats
-from app.ui.models_qt import ProjectListModel
+from app.services.project_service import ProjectService
 from app.ui.dialogs import CreateProjectDialog, show_error, show_info
 from app.ui.dialogs.project_artifact_governance_dialog import (
     ProjectArtifactGovernanceDialog,
 )
+from app.ui.models_qt import ProjectListModel
 from app.ui.workers import ProjectDeleteWorker
-from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,8 @@ class ProjectDashboard(QWidget):
         # Verification button (P1 Premium)
         verification_btn = QPushButton("🔍 P1 Verification")
         verification_btn.setToolTip("Open P1 Scenario 7 verification panel (Ctrl+Shift+V)")
-        verification_btn.setStyleSheet("""
+        verification_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #2196F3;
                 color: white;
@@ -69,7 +70,8 @@ class ProjectDashboard(QWidget):
             QPushButton:hover {
                 background-color: #1976D2;
             }
-        """)
+        """
+        )
         verification_btn.clicked.connect(self.on_open_verification)
         header_layout.addWidget(verification_btn)
 
@@ -169,10 +171,7 @@ class ProjectDashboard(QWidget):
 
                 # Emit project catalog for workspace sidebar search/recent section.
                 self.projects_loaded.emit(
-                    [
-                        {"project_id": int(p.project_id), "name": str(p.name)}
-                        for p in project_stats
-                    ]
+                    [{"project_id": int(p.project_id), "name": str(p.name)} for p in project_stats]
                 )
 
         except Exception as e:
@@ -239,6 +238,7 @@ class ProjectDashboard(QWidget):
         # Block deletion of reference corpus
         if project.is_general_corpus:
             from PyQt6.QtWidgets import QMessageBox
+
             QMessageBox.warning(
                 self,
                 "Cannot Delete Reference Corpus",
@@ -251,7 +251,7 @@ class ProjectDashboard(QWidget):
                 f"✓ Extract terms\n\n"
                 f"To remove this corpus, first unmark it as reference "
                 f"(set is_general_corpus=0 in database).",
-                QMessageBox.StandardButton.Ok
+                QMessageBox.StandardButton.Ok,
             )
             return
 
@@ -310,7 +310,9 @@ class ProjectDashboard(QWidget):
                 try:
                     self.project_deleted.emit(int(deleted_project_id))
                 except (TypeError, ValueError):
-                    logger.warning("Delete report contains invalid project_id: %r", deleted_project_id)
+                    logger.warning(
+                        "Delete report contains invalid project_id: %r", deleted_project_id
+                    )
             show_info(
                 self,
                 "Project Deleted",
@@ -360,6 +362,7 @@ class ProjectDashboard(QWidget):
         """Handle F2 key to start editing Name column."""
         if obj == self.project_table and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
+
             if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_F2:
                 # Get current selection
                 current_index = self.project_table.currentIndex()

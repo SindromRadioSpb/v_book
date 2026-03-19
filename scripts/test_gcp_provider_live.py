@@ -6,6 +6,7 @@ Tests:
 3. Translate test phrase
 4. Display result
 """
+
 import sys
 import json
 from pathlib import Path
@@ -35,7 +36,9 @@ def test_live_translation():
     print("=" * 60)
 
     # SA JSON path
-    sa_json_path = r"J:\Project_Vibe\V_book -info files\api_key_Google_translait\hdle-translate-sa.json"
+    sa_json_path = (
+        r"J:\Project_Vibe\V_book -info files\api_key_Google_translait\hdle-translate-sa.json"
+    )
 
     print(f"\n1. Loading Service Account JSON from file...")
     print(f"   Path: {sa_json_path}")
@@ -104,7 +107,7 @@ def test_live_translation():
     success_count = 0
     for i, (source_text, src_lang, tgt_lang) in enumerate(test_cases, 1):
         print(f"\nTest {i}/{len(test_cases)}:")
-        print(f"  Source: \"{source_text}\" ({src_lang})")
+        print(f'  Source: "{source_text}" ({src_lang})')
         print(f"  Target: {tgt_lang}")
 
         request = TranslationRequest(
@@ -120,7 +123,7 @@ def test_live_translation():
             print(f"  [OK] Translation successful!")
             # Safely encode result for Windows console
             try:
-                print(f"  Result: \"{result.translated_text}\"")
+                print(f'  Result: "{result.translated_text}"')
             except UnicodeEncodeError:
                 print(f"  Result: <{len(result.translated_text)} chars> (Unicode display issue)")
             print(f"  Latency: {result.latency_ms}ms")

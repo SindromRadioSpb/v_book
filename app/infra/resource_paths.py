@@ -7,7 +7,6 @@ import platform
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -58,7 +57,7 @@ class ResourcePaths:
         return Path.home() / ".local" / "share" / "hdle"
 
     @classmethod
-    def _normalize_root(cls, value: Optional[str]) -> Optional[Path]:
+    def _normalize_root(cls, value: str | None) -> Path | None:
         text = (value or "").strip()
         if not text:
             return None
@@ -71,7 +70,7 @@ class ResourcePaths:
     def resolve_data_root(cls, settings=None, *, create: bool = True) -> Path:
         """Resolve writable data root from env/settings/defaults."""
         env_override = cls._normalize_root(os.getenv(cls.ENV_KEY_DATA_ROOT))
-        settings_override: Optional[Path] = None
+        settings_override: Path | None = None
         if env_override is None and settings is not None:
             try:
                 raw_setting = settings.get_string(cls.SETTINGS_KEY_DATA_ROOT, "")

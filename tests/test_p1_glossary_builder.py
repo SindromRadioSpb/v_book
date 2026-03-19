@@ -8,8 +8,9 @@ Tests verify:
 - Empty glossary graceful handling
 - Hash invalidation on content change
 """
+
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.infra.sa_models import TMEntry, DictProject, Library
@@ -18,83 +19,28 @@ from app.services.glossary_builder_service import GlossaryBuilderService
 
 @pytest.fixture
 def db_session():
-    """Create in-memory SQLite session with minimal schema."""
+    """Create in-memory SQLite session with schema from ORM models."""
     engine = create_engine("sqlite:///:memory:")
 
-    # Create only needed tables (library, dict_project, tm_entry)
-    with engine.connect() as conn:
-        # library table
-        conn.execute(text("""
-            CREATE TABLE library (
-                library_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-        """))
-
-        # dict_project table
-        conn.execute(text("""
-            CREATE TABLE dict_project (
-                project_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                library_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                src_lang TEXT NOT NULL,
-                tgt_lang TEXT NOT NULL,
-                description TEXT,
-                nlp_engine TEXT NOT NULL DEFAULT 'stanza',
-                nlp_engine_version TEXT,
-                mwe_min_freq INTEGER NOT NULL DEFAULT 3,
-                mwe_min_pmi REAL NOT NULL DEFAULT 3.0,
-                mwe_min_tscore REAL NOT NULL DEFAULT 2.0,
-                mwe_max_n INTEGER NOT NULL DEFAULT 3,
-                is_general_corpus INTEGER NOT NULL DEFAULT 0,
-                general_corpus_id INTEGER,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                FOREIGN KEY (library_id) REFERENCES library(library_id) ON DELETE CASCADE
-            )
-        """))
-
-        # tm_entry table (minimal schema)
-        conn.execute(text("""
-            CREATE TABLE tm_entry (
-                tm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NULL,
-                kind TEXT NOT NULL,
-                src_lang TEXT NOT NULL,
-                tgt_lang TEXT NOT NULL,
-                src_text TEXT NOT NULL,
-                src_norm TEXT NOT NULL,
-                translation TEXT NOT NULL,
-                translation_norm TEXT NULL,
-                pos TEXT NULL,
-                domain TEXT NULL,
-                notes TEXT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                confidence REAL NULL,
-                origin TEXT NOT NULL,
-                source_ref TEXT NULL,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                approved_at TEXT NULL,
-                approved_by TEXT NULL,
-                FOREIGN KEY (project_id) REFERENCES dict_project(project_id) ON DELETE CASCADE
-            )
-        """))
-
-        conn.commit()
-
-    # Create test data via SQL
-    with engine.connect() as conn:
-        # Insert library
-        conn.execute(text("INSERT INTO library (name) VALUES ('Test Library')"))
-        # Insert project
-        conn.execute(text("""
-            INSERT INTO dict_project (library_id, name, src_lang, tgt_lang)
-            VALUES (1, 'Test Project', 'he', 'ru')
-        """))
-        conn.commit()
+    # Use ORM tables directly so schema always reflects current models
+    Library.__table__.create(engine, checkfirst=True)
+    DictProject.__table__.create(engine, checkfirst=True)
+    TMEntry.__table__.create(engine, checkfirst=True)
 
     session = Session(engine)
+
+    # Create seed data via ORM
+    lib = Library(name="Test Library")
+    session.add(lib)
+    session.flush()
+    project = DictProject(
+        library_id=lib.library_id,
+        name="Test Project",
+        src_lang="he",
+        tgt_lang="ru",
+    )
+    session.add(project)
+    session.commit()
 
     yield session
 
@@ -165,35 +111,38 @@ def test_build_canonical_glossary_deterministic(db_session, glossary_service):
 
 
 def test_conflict_resolution_priority(db_session, glossary_service):
-    """Duplicate source term → highest priority (confidence) wins."""
-    # Add conflicting terms (same source, different targets)
-    terms = [
-        TMEntry(
-            project_id=1,
-            kind="lemma",
-            src_lang="he",
-            tgt_lang="ru",
-            src_text="כלב",
-            src_norm="כלב",
-            translation="собака",
-            status="approved",
-            confidence=0.9,  # Higher priority
-            origin="user_edit",
-        ),
-        TMEntry(
-            project_id=1,
-            kind="lemma",
-            src_lang="he",
-            tgt_lang="ru",
-            src_text="כלב",
-            src_norm="כלב",
-            translation="пёс",
-            status="approved",
-            confidence=0.5,  # Lower priority
-            origin="import",
-        ),
-    ]
-    db_session.add_all(terms)
+    """Global entry vs project entry for same term → highest priority (confidence) wins.
+
+    The service merges project_id=1 entries with project_id=None (global) entries.
+    Conflict = same src_norm from different scopes.
+    """
+    # Global entry: lower confidence
+    global_entry = TMEntry(
+        project_id=None,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="כלב",
+        src_norm="כלב",
+        translation="пёс",
+        status="approved",
+        confidence=0.5,  # Lower priority
+        origin="import",
+    )
+    # Project entry: higher confidence — should win
+    project_entry = TMEntry(
+        project_id=1,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="כלב",
+        src_norm="כלב",
+        translation="собака",
+        status="approved",
+        confidence=0.9,  # Higher priority
+        origin="user_edit",
+    )
+    db_session.add_all([global_entry, project_entry])
     db_session.commit()
 
     # Build glossary
@@ -214,35 +163,34 @@ def test_conflict_resolution_priority(db_session, glossary_service):
 
 
 def test_conflict_resolution_stable_sort(db_session, glossary_service):
-    """Same priority → first alphabetically by source_term."""
-    # Add terms with same priority
-    terms = [
-        TMEntry(
-            project_id=1,
-            kind="lemma",
-            src_lang="he",
-            tgt_lang="ru",
-            src_text="בית",  # "bet" (house)
-            src_norm="בית",
-            translation="дом",
-            status="approved",
-            confidence=0.8,
-            origin="user_edit",
-        ),
-        TMEntry(
-            project_id=1,
-            kind="lemma",
-            src_lang="he",
-            tgt_lang="ru",
-            src_text="בית",  # Same source
-            src_norm="בית",
-            translation="здание",
-            status="approved",
-            confidence=0.8,  # Same priority
-            origin="import",
-        ),
-    ]
-    db_session.add_all(terms)
+    """Same priority, global vs project scope → first entry by DB order is kept (stable)."""
+    # Global entry: same confidence as project entry
+    global_entry = TMEntry(
+        project_id=None,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="בית",
+        src_norm="בית",
+        translation="здание",
+        status="approved",
+        confidence=0.8,
+        origin="import",
+    )
+    # Project entry: same confidence
+    project_entry = TMEntry(
+        project_id=1,
+        kind="lemma",
+        src_lang="he",
+        tgt_lang="ru",
+        src_text="בית",  # Same source
+        src_norm="בית",
+        translation="дом",
+        status="approved",
+        confidence=0.8,  # Same priority
+        origin="user_edit",
+    )
+    db_session.add_all([global_entry, project_entry])
     db_session.commit()
 
     # Build glossary

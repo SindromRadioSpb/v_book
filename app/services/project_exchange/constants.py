@@ -14,18 +14,18 @@ PRONUNCIATION_METADATA_FILENAME = "pronunciation_metadata.tsv"
 
 # Tables to EXCLUDE from export (system/operational/security)
 EXCLUDED_TABLES = {
-    "credentials",           # Security: encrypted API keys
-    "security_audit_log",    # Operational: security logs
-    "mt_cache",              # Ephemeral: translation cache
-    "mt_usage",              # Operational: provider usage tracking
-    "audio_usage",           # Operational: audio provider usage tracking
-    "schema_meta",           # System: migration version tracker
-    "task_queue",            # Transient: job queue state
-    "processor_run",         # Operational: processing run logs
-    "run_error",             # Operational: processing error logs
-    "sentence_fts",          # Virtual: FTS5 table (rebuilt on import)
-    "term_fts",              # Virtual: FTS5 table (rebuilt on import)
-    "pronunciation_entry",   # Global metadata layer (export/import via dedicated pronunciation exchange)
+    "credentials",  # Security: encrypted API keys
+    "security_audit_log",  # Operational: security logs
+    "mt_cache",  # Ephemeral: translation cache
+    "mt_usage",  # Operational: provider usage tracking
+    "audio_usage",  # Operational: audio provider usage tracking
+    "schema_meta",  # System: migration version tracker
+    "task_queue",  # Transient: job queue state
+    "processor_run",  # Operational: processing run logs
+    "run_error",  # Operational: processing error logs
+    "sentence_fts",  # Virtual: FTS5 table (rebuilt on import)
+    "term_fts",  # Virtual: FTS5 table (rebuilt on import)
+    "pronunciation_entry",  # Global metadata layer (export/import via dedicated pronunciation exchange)
 }
 
 # Topological order for import (respects FK constraints)
@@ -171,8 +171,8 @@ TABLE_SCHEMA = {
         "pk": "term_id",
         "fks": {
             "project_id": "dict_project",
-            "lemma_id": "lemma",        # Nullable (mutually exclusive with ngram_id)
-            "ngram_id": "ngram",        # Nullable (mutually exclusive with lemma_id)
+            "lemma_id": "lemma",  # Nullable (mutually exclusive with ngram_id)
+            "ngram_id": "ngram",  # Nullable (mutually exclusive with lemma_id)
             "pinned_sentence_id": "document_sentence",
         },
     },
@@ -180,8 +180,8 @@ TABLE_SCHEMA = {
         "pk": "tm_id",
         "fks": {
             "project_id": "dict_project",
-            "lemma_id": "lemma",        # Nullable
-            "ngram_id": "ngram",        # Nullable
+            "lemma_id": "lemma",  # Nullable
+            "ngram_id": "ngram",  # Nullable
         },
     },
     "tm_global": {
@@ -192,10 +192,10 @@ TABLE_SCHEMA = {
         "pk": "tm_id",
         "fks": {
             "project_id": "dict_project",  # Nullable (global TM)
-            "lemma_id": "lemma",           # Nullable
+            "lemma_id": "lemma",  # Nullable
             "cluster_id": "term_cluster",  # Nullable
-            "ngram_id": "ngram",           # Nullable
-            "tm_global_id": "tm_global",   # Nullable
+            "ngram_id": "ngram",  # Nullable
+            "tm_global_id": "tm_global",  # Nullable
         },
     },
     "tm_entry_history": {

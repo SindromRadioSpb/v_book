@@ -4,15 +4,15 @@ Tests MetricsRegistry validation, StatsService computation, and XLSX export
 using the deterministic METRICS_FIXTURE_v1 project.
 """
 
-import unittest
-import tempfile
 import os
+import tempfile
+import unittest
 from pathlib import Path
 
 from app.services.db_service import DBService
-from app.services.stats_service import StatsService
 from app.services.export_service import ExportService
-from app.services.metrics_registry import get_registry, MetricType
+from app.services.metrics_registry import MetricType, get_registry
+from app.services.stats_service import StatsService
 from app.tools.seed_metrics_fixture_project import FixtureSeed
 
 
@@ -36,7 +36,9 @@ class TestMetricsIntegration(unittest.TestCase):
         cls.fixture_project_id = 1  # First project
         cls.fixture_project_name = "METRICS_FIXTURE_v1"
 
-        print(f"\n[OK] Fixture project '{cls.fixture_project_name}' seeded (ID={cls.fixture_project_id})")
+        print(
+            f"\n[OK] Fixture project '{cls.fixture_project_name}' seeded (ID={cls.fixture_project_id})"
+        )
 
     def test_01_registry_validates_fixture_metrics(self):
         """Test that MetricsRegistry validates fixture project metrics."""
@@ -124,17 +126,28 @@ class TestMetricsIntegration(unittest.TestCase):
             stats = stats_service.compute_project_stats(session, self.fixture_project_id)
 
             # Approved counts <= totals
-            self.assertLessEqual(stats.tm_approved_count, stats.tm_entry_count,
-                                 "tm_approved > tm_total")
-            print(f"  [OK] tm_approved ({stats.tm_approved_count}) <= tm_total ({stats.tm_entry_count})")
+            self.assertLessEqual(
+                stats.tm_approved_count, stats.tm_entry_count, "tm_approved > tm_total"
+            )
+            print(
+                f"  [OK] tm_approved ({stats.tm_approved_count}) <= tm_total ({stats.tm_entry_count})"
+            )
 
-            self.assertLessEqual(stats.term_approved_count, stats.term_cluster_count,
-                                 "term_approved > term_total")
-            print(f"  [OK] term_approved ({stats.term_approved_count}) <= term_total ({stats.term_cluster_count})")
+            self.assertLessEqual(
+                stats.term_approved_count, stats.term_cluster_count, "term_approved > term_total"
+            )
+            print(
+                f"  [OK] term_approved ({stats.term_approved_count}) <= term_total ({stats.term_cluster_count})"
+            )
 
-            self.assertLessEqual(stats.lemmas_with_translation_count, stats.lemma_count,
-                                 "lemmas_with_translation > lemma_count")
-            print(f"  [OK] lemmas_with_translation ({stats.lemmas_with_translation_count}) <= lemma_count ({stats.lemma_count})")
+            self.assertLessEqual(
+                stats.lemmas_with_translation_count,
+                stats.lemma_count,
+                "lemmas_with_translation > lemma_count",
+            )
+            print(
+                f"  [OK] lemmas_with_translation ({stats.lemmas_with_translation_count}) <= lemma_count ({stats.lemma_count})"
+            )
 
     def test_05_fixture_matches_expected_values(self):
         """Test that fixture metrics match documented ground truth."""
@@ -162,7 +175,9 @@ class TestMetricsIntegration(unittest.TestCase):
 
             self.assertEqual(stats.project_name, expected["project_name"])
             self.assertEqual(stats.lemma_count, expected["lemma_count"])
-            self.assertEqual(stats.lemmas_with_translation_count, expected["lemmas_with_translation_count"])
+            self.assertEqual(
+                stats.lemmas_with_translation_count, expected["lemmas_with_translation_count"]
+            )
             self.assertEqual(stats.term_cluster_count, expected["term_cluster_count"])
             self.assertEqual(stats.term_approved_count, expected["term_approved_count"])
             self.assertEqual(stats.tm_entry_count, expected["tm_entry_count"])
@@ -170,10 +185,18 @@ class TestMetricsIntegration(unittest.TestCase):
             self.assertEqual(stats.dict_entry_count, expected["dict_entry_count"])
 
             # Float comparisons with tolerance
-            self.assertAlmostEqual(stats.lemma_coverage_pct, expected["lemma_coverage_pct"], places=1)
-            self.assertAlmostEqual(stats.tm_approval_rate_pct, expected["tm_approval_rate_pct"], places=1)
-            self.assertAlmostEqual(stats.term_approval_rate_pct, expected["term_approval_rate_pct"], places=1)
-            self.assertAlmostEqual(stats.tm_entries_per_lemma_pct, expected["tm_entries_per_lemma_pct"], places=1)
+            self.assertAlmostEqual(
+                stats.lemma_coverage_pct, expected["lemma_coverage_pct"], places=1
+            )
+            self.assertAlmostEqual(
+                stats.tm_approval_rate_pct, expected["tm_approval_rate_pct"], places=1
+            )
+            self.assertAlmostEqual(
+                stats.term_approval_rate_pct, expected["term_approval_rate_pct"], places=1
+            )
+            self.assertAlmostEqual(
+                stats.tm_entries_per_lemma_pct, expected["tm_entries_per_lemma_pct"], places=1
+            )
 
             print(f"  [OK] All {len(expected)} metrics match ground truth")
 
@@ -185,7 +208,7 @@ class TestMetricsIntegration(unittest.TestCase):
 
         with self.db_service.get_session() as session:
             # Export to temp file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as f:
                 temp_path = f.name
 
             try:
@@ -193,6 +216,7 @@ class TestMetricsIntegration(unittest.TestCase):
 
                 # Read XLSX and verify Statistics sheet
                 import openpyxl
+
                 wb = openpyxl.load_workbook(temp_path, read_only=True)
 
                 self.assertIn("Statistics", wb.sheetnames, "Statistics sheet missing")
@@ -206,8 +230,9 @@ class TestMetricsIntegration(unittest.TestCase):
                 registry = get_registry()
                 expected_rows = len(registry.get_ordered_specs())
 
-                self.assertEqual(data_rows, expected_rows,
-                                f"Expected {expected_rows} rows, got {data_rows}")
+                self.assertEqual(
+                    data_rows, expected_rows, f"Expected {expected_rows} rows, got {data_rows}"
+                )
 
                 print(f"  [OK] XLSX Statistics has {data_rows} rows (matches registry)")
 
@@ -226,7 +251,7 @@ class TestMetricsIntegration(unittest.TestCase):
                 for label in expected_labels:
                     self.assertIn(label, metric_labels, f"Missing metric: {label}")
 
-                print(f"  [OK] All key metric labels present")
+                print("  [OK] All key metric labels present")
 
                 # Close workbook before deleting
                 wb.close()
@@ -254,7 +279,9 @@ class TestMetricsIntegration(unittest.TestCase):
         self.assertEqual(specs1[1].label, "Project ID")
 
         # Verify separators are in correct positions (3, 12, 16)
-        separator_positions = [i for i, spec in enumerate(specs1) if spec.type == MetricType.SEPARATOR]
+        separator_positions = [
+            i for i, spec in enumerate(specs1) if spec.type == MetricType.SEPARATOR
+        ]
         self.assertEqual(len(separator_positions), 3, "Should have 3 separators")
 
         print(f"  [OK] Ordering is deterministic ({len(specs1)} specs)")

@@ -11,14 +11,15 @@ Covers:
 
 Run: python test_m7_ui_integration.py
 """
-import sys
+
 import io
+import sys
 import unittest
 from pathlib import Path
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Qt imports (headless)
 from PyQt6.QtCore import QCoreApplication, Qt
@@ -44,6 +45,7 @@ class M7UITestCase(unittest.TestCase):
         cls.db_path = Path("test_m7_ui.db")
         if cls.db_path.exists():
             import time
+
             # Wait a bit for file to be released
             time.sleep(0.1)
             try:
@@ -52,26 +54,28 @@ class M7UITestCase(unittest.TestCase):
                 pass  # File still locked, skip
 
         from app.services.db_service import DBService
+
         DBService.initialize(cls.db_path)
         cls.db_service = DBService.get_instance()
 
         # Apply M7 migrations
         import sqlite3
+
         con = sqlite3.connect(str(cls.db_path))
 
         # Apply 004 (M7 base schema)
-        migration_004 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        migration_004 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
         con.executescript(migration_004)
 
         # Apply 005 (add 'revert' origin)
-        migration_005 = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_005 = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding="utf-8")
         con.executescript(migration_005)
 
         con.close()
 
         # Create test FK structure (Library → DictProject → Lemmas)
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             # Create Library
             library = Library(
@@ -97,6 +101,7 @@ class M7UITestCase(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         if cls.db_path.exists():
             cls.db_path.unlink()
@@ -106,13 +111,14 @@ class M7UITestCase(unittest.TestCase):
 # Test 1: LemmaTableModel - Basic integration
 # ============================================================================
 
+
 class TestLemmaTableModel(unittest.TestCase):
     """Test LemmaTableModel basic functionality."""
 
     def test_initialization(self):
         """Test LemmaTableModel initializes correctly."""
-        from app.ui.models_qt import LemmaTableModel
         from app.domain.dto import LemmaStats
+        from app.ui.models_qt import LemmaTableModel
 
         lemmas = [
             LemmaStats(lemma_id=1, lemma_text="בית", pos="NOUN", freq_abs=100, doc_freq=10),
@@ -128,8 +134,8 @@ class TestLemmaTableModel(unittest.TestCase):
 
     def test_translation_column(self):
         """Test translation column displays correctly."""
-        from app.ui.models_qt import LemmaTableModel
         from app.domain.dto import LemmaStats
+        from app.ui.models_qt import LemmaTableModel
 
         lemmas = [
             LemmaStats(
@@ -139,7 +145,7 @@ class TestLemmaTableModel(unittest.TestCase):
                 freq_abs=100,
                 doc_freq=10,
                 translation="дом",
-                status="approved"
+                status="approved",
             ),
         ]
 
@@ -152,9 +158,9 @@ class TestLemmaTableModel(unittest.TestCase):
 
     def test_source_column_with_translation_result(self):
         """Test source column with TranslationResult."""
-        from app.ui.models_qt import LemmaTableModel
         from app.domain.dto import LemmaStats
         from app.services.translation_service import TranslationResult
+        from app.ui.models_qt import LemmaTableModel
 
         lemmas = [LemmaStats(lemma_id=1, lemma_text="בית", pos="NOUN", freq_abs=100, doc_freq=10)]
         model = LemmaTableModel(lemmas)
@@ -164,11 +170,7 @@ class TestLemmaTableModel(unittest.TestCase):
 
         # Update with TranslationResult
         results = {
-            ("בית", "lemma"): TranslationResult(
-                translation="дом",
-                source="tm",
-                status="approved"
-            )
+            ("בית", "lemma"): TranslationResult(translation="дом", source="tm", status="approved")
         }
         model.update_translations(results)
 
@@ -179,8 +181,8 @@ class TestLemmaTableModel(unittest.TestCase):
 
     def test_inline_edit(self):
         """Test inline edit of translation."""
-        from app.ui.models_qt import LemmaTableModel
         from app.domain.dto import LemmaStats
+        from app.ui.models_qt import LemmaTableModel
 
         lemmas = [LemmaStats(lemma_id=1, lemma_text="בית", pos="NOUN", freq_abs=100, doc_freq=10)]
         model = LemmaTableModel(lemmas)
@@ -204,14 +206,15 @@ class TestLemmaTableModel(unittest.TestCase):
 # Test 2: Inline Edit → TM Entry Creation
 # ============================================================================
 
+
 class TestInlineEditWorkflow(M7UITestCase):
     """Test inline edit creates TM entry."""
 
     def test_inline_edit_creates_tm_entry(self):
         """Test that inline edit creates TM entry in database."""
-        from app.ui.models_qt import LemmaTableModel
         from app.domain.dto import LemmaStats
         from app.infra.sa_models import TMEntry
+        from app.ui.models_qt import LemmaTableModel
 
         lemmas = [LemmaStats(lemma_id=1, lemma_text="בית", pos="NOUN", freq_abs=100, doc_freq=10)]
         model = LemmaTableModel(lemmas)
@@ -256,13 +259,14 @@ class TestInlineEditWorkflow(M7UITestCase):
 # Test 3: TermClusterTableModel
 # ============================================================================
 
+
 class TestTermClusterTableModel(unittest.TestCase):
     """Test TermClusterTableModel."""
 
     def test_initialization(self):
         """Test TermClusterTableModel initializes correctly."""
-        from app.ui.models_qt import TermClusterTableModel
         from app.domain.dto import ClusterStats
+        from app.ui.models_qt import TermClusterTableModel
 
         clusters = [
             ClusterStats(
@@ -288,9 +292,9 @@ class TestTermClusterTableModel(unittest.TestCase):
 
     def test_translation_update(self):
         """Test term cluster translation update."""
-        from app.ui.models_qt import TermClusterTableModel
         from app.domain.dto import ClusterStats
         from app.services.translation_service import TranslationResult
+        from app.ui.models_qt import TermClusterTableModel
 
         clusters = [
             ClusterStats(
@@ -313,9 +317,7 @@ class TestTermClusterTableModel(unittest.TestCase):
         # Update with translation result
         results = {
             ("בית_ספר", "term_cluster"): TranslationResult(
-                translation="школа",
-                source="dict",
-                status="approved"
+                translation="школа", source="dict", status="approved"
             )
         }
         model.update_translations(results)
@@ -330,14 +332,16 @@ class TestTermClusterTableModel(unittest.TestCase):
 # Test 4: TranslationResolveWorker
 # ============================================================================
 
+
 class TestTranslationResolveWorker(M7UITestCase):
     """Test TranslationResolveWorker."""
 
     def test_worker_lifecycle(self):
         """Test worker runs and emits results."""
-        from app.ui.workers import TranslationResolveWorker
-        from app.infra.sa_models import TMEntry
         from PyQt6.QtCore import QEventLoop, QTimer
+
+        from app.infra.sa_models import TMEntry
+        from app.ui.workers import TranslationResolveWorker
 
         # Create test TM entry
         with self.db_service.get_session() as session:
@@ -414,14 +418,15 @@ class TestTranslationResolveWorker(M7UITestCase):
 # Test 5: Status Filtering
 # ============================================================================
 
+
 class TestStatusFiltering(M7UITestCase):
     """Test status filtering (draft/approved)."""
 
     def test_draft_hidden_by_default(self):
         """Test draft entries are hidden by default."""
-        from app.services.translation_service import TranslationService
-        from app.infra.sa_models import TMEntry
         from app.domain.normalization import normalize_for_tm
+        from app.infra.sa_models import TMEntry
+        from app.services.translation_service import TranslationService
 
         tm_service = TranslationService()
 
@@ -472,13 +477,15 @@ class TestStatusFiltering(M7UITestCase):
 # Test 6: Coverage Calculation
 # ============================================================================
 
+
 class TestCoverageCalculation(M7UITestCase):
     """Test coverage % calculation."""
 
     def test_coverage_percentage(self):
         """Test coverage % calculation."""
+        from sqlalchemy import func, select
+
         from app.infra.sa_models import Lemma, LemmaProjectStat, TMEntry
-        from sqlalchemy import select, func
 
         # Create lemmas
         with self.db_service.get_session() as session:
@@ -539,13 +546,15 @@ class TestCoverageCalculation(M7UITestCase):
 # Test 7: History and Revert
 # ============================================================================
 
+
 class TestHistoryAndRevert(M7UITestCase):
     """Test TM history and revert functionality."""
 
     def test_history_created_on_update(self):
         """Test that updating TM entry creates history."""
-        from app.infra.sa_models import TMEntry, TMEntryHistory
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry, TMEntryHistory
 
         # Create initial TM entry
         with self.db_service.get_session() as session:
@@ -587,9 +596,11 @@ class TestHistoryAndRevert(M7UITestCase):
 
         # Verify history exists
         with self.db_service.get_session() as session:
-            history_records = session.execute(
-                select(TMEntryHistory).where(TMEntryHistory.tm_id == entry_id)
-            ).scalars().all()
+            history_records = (
+                session.execute(select(TMEntryHistory).where(TMEntryHistory.tm_id == entry_id))
+                .scalars()
+                .all()
+            )
 
             self.assertEqual(len(history_records), 1)
             self.assertEqual(history_records[0].version, 1)
@@ -598,8 +609,9 @@ class TestHistoryAndRevert(M7UITestCase):
 
     def test_revert_to_previous_version(self):
         """Test reverting TM entry to previous version."""
+        from sqlalchemy import func, select
+
         from app.infra.sa_models import TMEntry, TMEntryHistory
-        from sqlalchemy import select, func
 
         # Create entry with history
         with self.db_service.get_session() as session:
@@ -637,8 +649,7 @@ class TestHistoryAndRevert(M7UITestCase):
             # Get version 1 from history
             history_v1 = session.execute(
                 select(TMEntryHistory).where(
-                    TMEntryHistory.tm_id == entry_id,
-                    TMEntryHistory.version == 1
+                    TMEntryHistory.tm_id == entry_id, TMEntryHistory.version == 1
                 )
             ).scalar()
 
@@ -668,9 +679,7 @@ class TestHistoryAndRevert(M7UITestCase):
 
             # Should have 2 history records now
             history_count = session.execute(
-                select(func.count(TMEntryHistory.hist_id)).where(
-                    TMEntryHistory.tm_id == entry_id
-                )
+                select(func.count(TMEntryHistory.hist_id)).where(TMEntryHistory.tm_id == entry_id)
             ).scalar()
             self.assertEqual(history_count, 2)
 
@@ -680,9 +689,9 @@ class TestHistoryAndRevert(M7UITestCase):
 # ============================================================================
 
 if __name__ == "__main__":
-    print("="*70)
+    print("=" * 70)
     print("M7 UI Integration - Automated Tests")
-    print("="*70)
+    print("=" * 70)
     print()
 
     unittest.main(verbosity=2)

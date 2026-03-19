@@ -92,23 +92,29 @@ def _get_doc_counts(session, project_id: int) -> tuple[int, int]:
     """Return (total_all, already_processed) for the project."""
     from sqlalchemy import text
 
-    total_all = session.execute(
-        text(
-            "SELECT COUNT(sd.doc_id) FROM source_document sd"
-            " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
-            " WHERE sc.project_id = :pid"
-        ),
-        {"pid": project_id},
-    ).scalar() or 0
+    total_all = (
+        session.execute(
+            text(
+                "SELECT COUNT(sd.doc_id) FROM source_document sd"
+                " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+                " WHERE sc.project_id = :pid"
+            ),
+            {"pid": project_id},
+        ).scalar()
+        or 0
+    )
 
-    already_processed = session.execute(
-        text(
-            "SELECT COUNT(sd.doc_id) FROM source_document sd"
-            " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
-            " WHERE sc.project_id = :pid AND sd.status = 'processed'"
-        ),
-        {"pid": project_id},
-    ).scalar() or 0
+    already_processed = (
+        session.execute(
+            text(
+                "SELECT COUNT(sd.doc_id) FROM source_document sd"
+                " JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+                " WHERE sc.project_id = :pid AND sd.status = 'processed'"
+            ),
+            {"pid": project_id},
+        ).scalar()
+        or 0
+    )
 
     return total_all, already_processed
 
@@ -188,31 +194,35 @@ def _get_missing_snapshot_doc_ids(session, project_id: int) -> list[int]:
 def _get_snapshot_coverage(session, project_id: int) -> dict[str, Any]:
     from sqlalchemy import text
 
-    row = session.execute(
-        text(
-            "WITH processed_docs AS ("
-            "  SELECT sd.doc_id, COALESCE(sd.sentence_count, 0) AS sentence_count"
-            "  FROM source_document sd"
-            "  JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
-            "  WHERE sc.project_id = :pid AND sd.status = 'processed'"
-            "), snapshot_counts AS ("
-            "  SELECT ds.doc_id, COUNT(*) AS snapshot_count"
-            "  FROM sentence_nlp_snapshot sns"
-            "  JOIN document_sentence ds ON ds.sentence_id = sns.sentence_id"
-            "  GROUP BY ds.doc_id"
-            ") "
-            "SELECT "
-            "  COUNT(pd.doc_id) AS processed_docs,"
-            "  COALESCE(SUM(pd.sentence_count), 0) AS sentence_count_total,"
-            "  COALESCE(SUM(COALESCE(snap.snapshot_count, 0)), 0) AS snapshot_count_total,"
-            "  SUM(CASE WHEN pd.sentence_count > 0 AND COALESCE(snap.snapshot_count, 0) >= pd.sentence_count THEN 1 ELSE 0 END) AS fully_covered_docs,"
-            "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) = 0 THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
-            "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) > 0 AND COALESCE(snap.snapshot_count, 0) < pd.sentence_count THEN 1 ELSE 0 END) AS partial_snapshot_docs "
-            "FROM processed_docs pd "
-            "LEFT JOIN snapshot_counts snap ON snap.doc_id = pd.doc_id"
-        ),
-        {"pid": project_id},
-    ).mappings().one()
+    row = (
+        session.execute(
+            text(
+                "WITH processed_docs AS ("
+                "  SELECT sd.doc_id, COALESCE(sd.sentence_count, 0) AS sentence_count"
+                "  FROM source_document sd"
+                "  JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id"
+                "  WHERE sc.project_id = :pid AND sd.status = 'processed'"
+                "), snapshot_counts AS ("
+                "  SELECT ds.doc_id, COUNT(*) AS snapshot_count"
+                "  FROM sentence_nlp_snapshot sns"
+                "  JOIN document_sentence ds ON ds.sentence_id = sns.sentence_id"
+                "  GROUP BY ds.doc_id"
+                ") "
+                "SELECT "
+                "  COUNT(pd.doc_id) AS processed_docs,"
+                "  COALESCE(SUM(pd.sentence_count), 0) AS sentence_count_total,"
+                "  COALESCE(SUM(COALESCE(snap.snapshot_count, 0)), 0) AS snapshot_count_total,"
+                "  SUM(CASE WHEN pd.sentence_count > 0 AND COALESCE(snap.snapshot_count, 0) >= pd.sentence_count THEN 1 ELSE 0 END) AS fully_covered_docs,"
+                "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) = 0 THEN 1 ELSE 0 END) AS zero_snapshot_docs,"
+                "  SUM(CASE WHEN COALESCE(snap.snapshot_count, 0) > 0 AND COALESCE(snap.snapshot_count, 0) < pd.sentence_count THEN 1 ELSE 0 END) AS partial_snapshot_docs "
+                "FROM processed_docs pd "
+                "LEFT JOIN snapshot_counts snap ON snap.doc_id = pd.doc_id"
+            ),
+            {"pid": project_id},
+        )
+        .mappings()
+        .one()
+    )
 
     processed_docs = int(row["processed_docs"] or 0)
     sentence_count_total = int(row["sentence_count_total"] or 0)
@@ -227,11 +237,11 @@ def _get_snapshot_coverage(session, project_id: int) -> dict[str, Any]:
         "partial_snapshot_docs": int(row["partial_snapshot_docs"] or 0),
         "sentence_snapshot_coverage_pct": (
             round(snapshot_count_total / sentence_count_total * 100.0, 4)
-            if sentence_count_total else None
+            if sentence_count_total
+            else None
         ),
         "doc_full_coverage_pct": (
-            round(fully_covered_docs / processed_docs * 100.0, 4)
-            if processed_docs else None
+            round(fully_covered_docs / processed_docs * 100.0, 4) if processed_docs else None
         ),
     }
 
@@ -444,10 +454,10 @@ def _collect_snapshot_backfill_probe(
         if checkpoint_row is not None:
             payload["checkpoint_passive"] = [int(value) for value in checkpoint_row]
         try:
-            snapshot_row = conn.execute(
-                "SELECT MAX(rowid) FROM sentence_nlp_snapshot"
-            ).fetchone()
-            payload["snapshot_max_rowid"] = int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
+            snapshot_row = conn.execute("SELECT MAX(rowid) FROM sentence_nlp_snapshot").fetchone()
+            payload["snapshot_max_rowid"] = (
+                int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
+            )
         except sqlite3.Error as exc:
             payload["snapshot_probe_error"] = str(exc)
         payload["quick_check"] = _run_quick_check_probe(
@@ -485,7 +495,13 @@ def _build_snapshot_probe_callback(
         _log_batch_state(state, state_tracker)
         phase = str(state.get("phase") or "")
         chunks_completed = int(state.get("chunks_completed") or 0)
-        should_probe = phase in {"started", "verifying_integrity", "completed", "failed", "cancelled"}
+        should_probe = phase in {
+            "started",
+            "verifying_integrity",
+            "completed",
+            "failed",
+            "cancelled",
+        }
         if not should_probe and probe_every_chunks > 0 and phase == "chunk_complete":
             should_probe = chunks_completed > 0 and chunks_completed % probe_every_chunks == 0
         if not should_probe:
@@ -511,18 +527,11 @@ def _is_snapshot_backfill_write(args: argparse.Namespace) -> bool:
 
 
 def _is_reference_reprocess_write(args: argparse.Namespace) -> bool:
-    return bool(
-        args.reprocess_all
-        and not args.verify_only
-        and not args.dry_run
-    )
+    return bool(args.reprocess_all and not args.verify_only and not args.dry_run)
 
 
 def _is_snapshot_stats_rebuild_write(args: argparse.Namespace) -> bool:
-    return bool(
-        args.rebuild_snapshot_stats
-        and not args.dry_run
-    )
+    return bool(args.rebuild_snapshot_stats and not args.dry_run)
 
 
 def _is_reference_heavy_write(args: argparse.Namespace) -> bool:
@@ -557,7 +566,9 @@ def _sqlite_health_probe(db_path: Path) -> dict[str, Any]:
         conn.execute("SELECT 1 FROM source_document LIMIT 1").fetchone()
         conn.execute("SELECT 1 FROM document_sentence LIMIT 1").fetchone()
         try:
-            conn.execute("SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1").fetchone()
+            conn.execute(
+                "SELECT sentence_id FROM sentence_nlp_snapshot ORDER BY sentence_id DESC LIMIT 1"
+            ).fetchone()
         except sqlite3.Error:
             # A bounded probe should not fail solely because the snapshot table is empty.
             pass
@@ -636,15 +647,13 @@ def _run_reference_heavy_write_preflight(
     report["backup_probe"] = backup_probe
 
     if not target_probe.get("ok"):
-        report["error"] = (
-            "Target DB failed preflight health probe: "
-            + str(target_probe.get("error") or "unknown error")
+        report["error"] = "Target DB failed preflight health probe: " + str(
+            target_probe.get("error") or "unknown error"
         )
         return report
     if not backup_probe.get("ok"):
-        report["error"] = (
-            "Backup DB failed preflight health probe: "
-            + str(backup_probe.get("error") or "unknown error")
+        report["error"] = "Backup DB failed preflight health probe: " + str(
+            backup_probe.get("error") or "unknown error"
         )
         return report
 
@@ -683,22 +692,26 @@ def main() -> None:
         description="CLI-only NLP processing for reference corpus (PERF-SCALE PATCH-J)"
     )
     parser.add_argument("--db-path", required=True, help="Path to main HDLE Premium DB")
-    parser.add_argument(
-        "--project-id", type=int, help="Project ID (preferred)"
-    )
+    parser.add_argument("--project-id", type=int, help="Project ID (preferred)")
     parser.add_argument(
         "--project-name", type=str, help="Project name (fallback if --project-id not given)"
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=50,
+        "--chunk-size",
+        type=int,
+        default=50,
         help="Documents per chunk; for snapshot backfill this is the super-chunk boundary (default: 50)",
     )
     parser.add_argument(
-        "--chunk-sleep", type=float, default=0.5,
+        "--chunk-sleep",
+        type=float,
+        default=0.5,
         help="Sleep seconds between chunks for WAL interleave (default: 0.5)",
     )
     parser.add_argument(
-        "--max-docs", type=int, default=0,
+        "--max-docs",
+        type=int,
+        default=0,
         help="Stop after N documents; 0 = no limit",
     )
     parser.add_argument(
@@ -708,15 +721,18 @@ def main() -> None:
         help="Skip the first N candidate docs before applying --max-docs (for deterministic bounded probes).",
     )
     parser.add_argument(
-        "--no-mock", action="store_true",
+        "--no-mock",
+        action="store_true",
         help="Use Stanza NLP engine instead of Mock (rule-based)",
     )
     parser.add_argument(
-        "--use-gpu", action="store_true",
+        "--use-gpu",
+        action="store_true",
         help="Enable GPU for Stanza (requires CUDA)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="List what would be processed without writing",
     )
     parser.add_argument(
@@ -878,13 +894,27 @@ def main() -> None:
     if (args.resume_latest or args.resume_run_id is not None) and (
         args.rebuild_snapshot_stats or args.verify_snapshot_stats
     ):
-        parser.error("--resume-latest/--resume-run-id are not supported for snapshot stats rebuild/verify")
-    if args.preflight_only and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
-        parser.error("--preflight-only requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
-    if args.backup_db_path and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
-        parser.error("--backup-db-path requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
-    if args.allow_protected_db_heavy_write and not (args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats):
-        parser.error("--allow-protected-db-heavy-write requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats")
+        parser.error(
+            "--resume-latest/--resume-run-id are not supported for snapshot stats rebuild/verify"
+        )
+    if args.preflight_only and not (
+        args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats
+    ):
+        parser.error(
+            "--preflight-only requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats"
+        )
+    if args.backup_db_path and not (
+        args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats
+    ):
+        parser.error(
+            "--backup-db-path requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats"
+        )
+    if args.allow_protected_db_heavy_write and not (
+        args.backfill_snapshots or args.reprocess_all or args.rebuild_snapshot_stats
+    ):
+        parser.error(
+            "--allow-protected-db-heavy-write requires --backfill-snapshots, --reprocess-all, or --rebuild-snapshot-stats"
+        )
 
     db_path = Path(args.db_path)
     if not db_path.exists():
@@ -921,6 +951,7 @@ def main() -> None:
             else:
                 from sqlalchemy import select
                 from app.infra.sa_models import DictProject
+
                 project = session.execute(
                     select(DictProject).where(DictProject.name == args.project_name)
                 ).scalar_one_or_none()
@@ -932,7 +963,8 @@ def main() -> None:
             is_ref = bool(getattr(project, "is_reference", 0) or project.is_general_corpus)
             logger.info(
                 "Project: '%s' (id=%d, is_reference=%s, is_general_corpus=%s)",
-                project.name, project_id,
+                project.name,
+                project_id,
                 getattr(project, "is_reference", 0),
                 project.is_general_corpus,
             )
@@ -950,7 +982,12 @@ def main() -> None:
             missing_snapshot_doc_ids: list[int] = []
             snapshot_coverage: dict[str, Any] | None = None
 
-            if args.backfill_snapshots or is_reprocess_mode or is_snapshot_stats_rebuild_mode or is_snapshot_stats_verify_mode:
+            if (
+                args.backfill_snapshots
+                or is_reprocess_mode
+                or is_snapshot_stats_rebuild_mode
+                or is_snapshot_stats_verify_mode
+            ):
                 processed_doc_ids = _get_processed_doc_ids(session, project_id)
             elif wants_resume:
                 project_doc_ids = _get_project_doc_ids(session, project_id)
@@ -965,7 +1002,10 @@ def main() -> None:
         pct_done = already_processed / total_all * 100 if total_all else 0
         logger.info(
             "Total docs: %d | Already processed: %d (%.1f%%) | To process: %d",
-            total_all, already_processed, pct_done, len(remaining_doc_ids),
+            total_all,
+            already_processed,
+            pct_done,
+            len(remaining_doc_ids),
         )
         if snapshot_coverage is not None:
             logger.info(
@@ -974,12 +1014,16 @@ def main() -> None:
                 snapshot_coverage["fully_covered_docs"],
                 snapshot_coverage["zero_snapshot_docs"],
                 snapshot_coverage["partial_snapshot_docs"],
-                snapshot_coverage["sentence_snapshot_coverage_pct"]
-                if snapshot_coverage["sentence_snapshot_coverage_pct"] is not None
-                else "-",
-                snapshot_coverage["doc_full_coverage_pct"]
-                if snapshot_coverage["doc_full_coverage_pct"] is not None
-                else "-",
+                (
+                    snapshot_coverage["sentence_snapshot_coverage_pct"]
+                    if snapshot_coverage["sentence_snapshot_coverage_pct"] is not None
+                    else "-"
+                ),
+                (
+                    snapshot_coverage["doc_full_coverage_pct"]
+                    if snapshot_coverage["doc_full_coverage_pct"] is not None
+                    else "-"
+                ),
             )
 
         if args.coverage_only:
@@ -1070,11 +1114,15 @@ def main() -> None:
             operation_label = (
                 "snapshot backfill"
                 if args.backfill_snapshots
-                else "reference reprocess"
-                if is_reprocess_mode
-                else "snapshot stats rebuild"
-                if is_snapshot_stats_rebuild_mode
-                else "reference write"
+                else (
+                    "reference reprocess"
+                    if is_reprocess_mode
+                    else (
+                        "snapshot stats rebuild"
+                        if is_snapshot_stats_rebuild_mode
+                        else "reference write"
+                    )
+                )
             )
             preflight = _run_reference_heavy_write_preflight(
                 db_path=db_path,
@@ -1141,7 +1189,13 @@ def main() -> None:
                 for i in range(0, len(doc_ids_to_process), args.chunk_size)
             ]
             for chunk_idx, chunk in enumerate(chunks, 1):
-                logger.info("[DRY-RUN] Chunk %d/%d | docs=%d | sample=%s", chunk_idx, len(chunks), len(chunk), chunk[:3])
+                logger.info(
+                    "[DRY-RUN] Chunk %d/%d | docs=%d | sample=%s",
+                    chunk_idx,
+                    len(chunks),
+                    len(chunk),
+                    chunk[:3],
+                )
             logger.info("Finished. success=%d error=%d time=0.0s", total_success, total_error)
             return
 
@@ -1173,7 +1227,9 @@ def main() -> None:
                     source_label=source_label,
                     resume_latest=bool(args.resume_latest),
                     resume_run_id=args.resume_run_id,
-                    contract="snapshot_backfill_v1" if args.backfill_snapshots else "process_document_v2",
+                    contract=(
+                        "snapshot_backfill_v1" if args.backfill_snapshots else "process_document_v2"
+                    ),
                 )
             _log_batch_verification(report)
             if not report.get("ok"):
@@ -1284,11 +1340,11 @@ def main() -> None:
         except Exception as exc:
             logger.error(
                 "%s failed after %.1fs: %s",
-                "Snapshot backfill"
-                if args.backfill_snapshots
-                else "Reference re-processing"
-                if is_reprocess_mode
-                else "Reference processing",
+                (
+                    "Snapshot backfill"
+                    if args.backfill_snapshots
+                    else "Reference re-processing" if is_reprocess_mode else "Reference processing"
+                ),
                 time.monotonic() - start,
                 exc,
             )
@@ -1296,7 +1352,9 @@ def main() -> None:
 
         logger.info(
             "Finished. success=%d error=%d time=%.1fs",
-            total_success, total_error, time.monotonic() - start,
+            total_success,
+            total_error,
+            time.monotonic() - start,
         )
         if total_error > 0:
             sys.exit(2)

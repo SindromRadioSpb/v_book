@@ -7,21 +7,20 @@ Automated verification that TM entries survive:
 Uses snapshot-by-default for safety (no production DB modification).
 """
 
-import os
-import shutil
 import hashlib
 import logging
-from datetime import datetime
-from pathlib import Path
+import os
+import shutil
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, select, func
+from datetime import datetime
 
-from app.services.db_service import DBService
-from app.infra.sa_models import Lemma, TermCluster, TMEntry, DictProject
-from app.services.translation_service import TranslationService
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session
+
 from app.domain.normalization import normalize_for_tm
+from app.infra.sa_models import Lemma, TermCluster, TMEntry
+from app.services.db_service import DBService
+from app.services.translation_service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SnapshotInfo:
     """Information about DB snapshot."""
+
     source_path: str
     snapshot_path: str
     timestamp: str
@@ -39,16 +39,18 @@ class SnapshotInfo:
 @dataclass
 class TestItem:
     """Item to test TM persistence."""
+
     kind: str  # lemma, term_cluster, surface
     src_text: str
     src_norm: str
-    item_id: Optional[int] = None  # lemma_id or cluster_id
+    item_id: int | None = None  # lemma_id or cluster_id
     priority: int = 0  # Higher = better test candidate
 
 
 @dataclass
 class SeededTM:
     """TM entry created for testing."""
+
     tm_id: int
     item: TestItem
     translation: str
@@ -58,12 +60,13 @@ class SeededTM:
 @dataclass
 class VerificationPhaseResult:
     """Result of one verification phase."""
+
     phase_name: str
     items_checked: int
     items_passed: int
     items_failed: int
     duration_ms: float
-    failures: List[dict] = field(default_factory=list)
+    failures: list[dict] = field(default_factory=list)
 
     @property
     def success_rate(self) -> float:
@@ -76,23 +79,24 @@ class VerificationPhaseResult:
 @dataclass
 class P1VerificationReport:
     """Complete P1 verification report."""
+
     timestamp: str
     source_db_path: str
     snapshot_db_path: str
     snapshot_sha256: str
-    project_id: Optional[int]
-    test_items: List[TestItem]
-    seeded_tm_entries: List[SeededTM]
+    project_id: int | None
+    test_items: list[TestItem]
+    seeded_tm_entries: list[SeededTM]
 
     # Phases
-    phase_pre_extraction: Optional[VerificationPhaseResult] = None
-    phase_post_extraction: Optional[VerificationPhaseResult] = None
-    phase_post_restart: Optional[VerificationPhaseResult] = None
+    phase_pre_extraction: VerificationPhaseResult | None = None
+    phase_post_extraction: VerificationPhaseResult | None = None
+    phase_post_restart: VerificationPhaseResult | None = None
 
     # Summary
     status: str = "UNKNOWN"  # PASS, PARTIAL, SKIPPED, FAIL
     total_duration_ms: float = 0.0
-    error_summary: Optional[str] = None
+    error_summary: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -130,7 +134,7 @@ class P1VerificationReport:
             "error_summary": self.error_summary,
         }
 
-    def _phase_to_dict(self, phase: Optional[VerificationPhaseResult]) -> Optional[dict]:
+    def _phase_to_dict(self, phase: VerificationPhaseResult | None) -> dict | None:
         """Convert phase to dict."""
         if not phase:
             return None
@@ -156,7 +160,7 @@ class P1VerificationService:
         """Cancel ongoing verification."""
         self._cancelled = True
 
-    def create_snapshot_db(self, src_db_path: str, out_dir: Optional[str] = None) -> SnapshotInfo:
+    def create_snapshot_db(self, src_db_path: str, out_dir: str | None = None) -> SnapshotInfo:
         """
         Create snapshot copy of DB for safe testing.
 
@@ -185,7 +189,9 @@ class P1VerificationService:
         # Get size
         size_bytes = os.path.getsize(snapshot_path)
 
-        logger.info(f"Created snapshot: {snapshot_path} ({size_bytes} bytes, SHA256: {sha256[:16]}...)")
+        logger.info(
+            f"Created snapshot: {snapshot_path} ({size_bytes} bytes, SHA256: {sha256[:16]}...)"
+        )
 
         return SnapshotInfo(
             source_path=src_db_path,
@@ -203,7 +209,7 @@ class P1VerificationService:
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
 
-    def select_test_items(self, session: Session, project_id: Optional[int]) -> List[TestItem]:
+    def select_test_items(self, session: Session, project_id: int | None) -> list[TestItem]:
         """
         Select 3 test items (priority: term_cluster > lemma > surface).
 
@@ -219,19 +225,25 @@ class P1VerificationService:
         # Priority 1: Term cluster representative
         stmt = (
             select(TermCluster)
-            .where(TermCluster.project_id == project_id if project_id else TermCluster.project_id.is_(None))
+            .where(
+                TermCluster.project_id == project_id
+                if project_id
+                else TermCluster.project_id.is_(None)
+            )
             .order_by(TermCluster.freq_abs.desc())
             .limit(1)
         )
         cluster = session.execute(stmt).scalar()
         if cluster:
-            items.append(TestItem(
-                kind="term_cluster",
-                src_text=cluster.representative_he,
-                src_norm=cluster.canonical_key,
-                item_id=cluster.cluster_id,
-                priority=3,
-            ))
+            items.append(
+                TestItem(
+                    kind="term_cluster",
+                    src_text=cluster.representative_he,
+                    src_norm=cluster.canonical_key,
+                    item_id=cluster.cluster_id,
+                    priority=3,
+                )
+            )
 
         # Priority 2: Multiword lemma
         stmt = (
@@ -244,13 +256,15 @@ class P1VerificationService:
         lemma_multi = session.execute(stmt).scalar()
         if lemma_multi:
             normalized = normalize_for_tm("he", lemma_multi.lemma_text, "lemma")
-            items.append(TestItem(
-                kind="lemma",
-                src_text=lemma_multi.lemma_text,
-                src_norm=normalized.norm,
-                item_id=lemma_multi.lemma_id,
-                priority=2,
-            ))
+            items.append(
+                TestItem(
+                    kind="lemma",
+                    src_text=lemma_multi.lemma_text,
+                    src_norm=normalized.norm,
+                    item_id=lemma_multi.lemma_id,
+                    priority=2,
+                )
+            )
 
         # Priority 3: Single-word lemma
         if len(items) < 3:
@@ -264,13 +278,15 @@ class P1VerificationService:
             lemma_single = session.execute(stmt).scalar()
             if lemma_single:
                 normalized = normalize_for_tm("he", lemma_single.lemma_text, "lemma")
-                items.append(TestItem(
-                    kind="lemma",
-                    src_text=lemma_single.lemma_text,
-                    src_norm=normalized.norm,
-                    item_id=lemma_single.lemma_id,
-                    priority=1,
-                ))
+                items.append(
+                    TestItem(
+                        kind="lemma",
+                        src_text=lemma_single.lemma_text,
+                        src_norm=normalized.norm,
+                        item_id=lemma_single.lemma_id,
+                        priority=1,
+                    )
+                )
 
         logger.info(f"Selected {len(items)} test items (project_id={project_id})")
         return items
@@ -278,11 +294,11 @@ class P1VerificationService:
     def seed_tm_entries(
         self,
         session: Session,
-        items: List[TestItem],
-        project_id: Optional[int],
+        items: list[TestItem],
+        project_id: int | None,
         src_lang: str = "he",
         tgt_lang: str = "ru",
-    ) -> List[SeededTM]:
+    ) -> list[SeededTM]:
         """
         Create TM entries for test items (strict mode).
 
@@ -298,9 +314,9 @@ class P1VerificationService:
         """
         # Clean up old P1_TEST entries to avoid UNIQUE constraint conflicts
         from sqlalchemy import delete
+
         stmt = delete(TMEntry).where(
-            TMEntry.project_id == project_id,
-            TMEntry.source_ref == "p1_verification"
+            TMEntry.project_id == project_id, TMEntry.source_ref == "p1_verification"
         )
         result = session.execute(stmt)
         if result.rowcount > 0:
@@ -333,14 +349,18 @@ class P1VerificationService:
             session.add(entry)
             session.flush()
 
-            seeded.append(SeededTM(
-                tm_id=entry.tm_id,
-                item=item,
-                translation=translation,
-                src_norm=normalized.norm,
-            ))
+            seeded.append(
+                SeededTM(
+                    tm_id=entry.tm_id,
+                    item=item,
+                    translation=translation,
+                    src_norm=normalized.norm,
+                )
+            )
 
-            logger.info(f"Seeded TM entry: tm_id={entry.tm_id}, kind={item.kind}, src_text={item.src_text}")
+            logger.info(
+                f"Seeded TM entry: tm_id={entry.tm_id}, kind={item.kind}, src_text={item.src_text}"
+            )
 
         session.commit()
         return seeded
@@ -348,8 +368,8 @@ class P1VerificationService:
     def verify_resolve(
         self,
         session: Session,
-        seeded_tm: List[SeededTM],
-        project_id: Optional[int],
+        seeded_tm: list[SeededTM],
+        project_id: int | None,
         src_lang: str = "he",
         tgt_lang: str = "ru",
     ) -> VerificationPhaseResult:
@@ -367,6 +387,7 @@ class P1VerificationService:
             VerificationPhaseResult
         """
         import time
+
         start_time = time.time()
 
         passed = 0
@@ -392,14 +413,16 @@ class P1VerificationService:
                 passed += 1
             else:
                 failed += 1
-                failures.append({
-                    "item": tm.item.src_text,
-                    "kind": tm.item.kind,
-                    "expected_translation": tm.translation,
-                    "actual_translation": result.translation,
-                    "expected_source": "tm",
-                    "actual_source": result.source,
-                })
+                failures.append(
+                    {
+                        "item": tm.item.src_text,
+                        "kind": tm.item.kind,
+                        "expected_translation": tm.translation,
+                        "actual_translation": result.translation,
+                        "expected_source": "tm",
+                        "actual_source": result.source,
+                    }
+                )
 
         duration_ms = (time.time() - start_time) * 1000
 
@@ -429,6 +452,7 @@ class P1VerificationService:
         # Create new engine/session
         engine = create_engine(f"sqlite:///{snapshot_db_path}", echo=False)
         from sqlalchemy.orm import sessionmaker
+
         session_factory = sessionmaker(bind=engine)
         session = session_factory()
 

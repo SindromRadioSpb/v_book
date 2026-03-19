@@ -41,7 +41,9 @@ def test_again_resets_progress_and_sets_due_tomorrow():
             summary = service.apply_review(session, progress_id, "again")
             session.commit()
 
-            row = session.execute(select(StudyProgress).where(StudyProgress.id == progress_id)).scalar_one()
+            row = session.execute(
+                select(StudyProgress).where(StudyProgress.id == progress_id)
+            ).scalar_one()
             assert row.review_count == 0
             assert row.interval_days == 1
             assert row.lapse_count == 1

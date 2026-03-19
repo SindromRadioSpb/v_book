@@ -3,11 +3,16 @@
 Improved progress dialog with stage support and better UX.
 """
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QPushButton,
-    QProgressBar, QHBoxLayout, QFrame
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class BatchProgressDialogV2(QDialog):

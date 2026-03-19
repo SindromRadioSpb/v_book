@@ -8,21 +8,20 @@ Provides:
 Threading: all methods run in a caller thread (typically a QThread worker).
 WAL safety: short read transactions only; writes go through existing services.
 """
-import logging
-from typing import List, Optional, Dict, Set
 
-from sqlalchemy import select, func, text
+import logging
+
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import (
-    DocumentSentence,
-    SourceDocument,
-    SourceCorpus,
-    TMEntry,
-    SentencePronunciation,
-)
 from app.domain.dto import SentenceDTO, SentenceNiqqudOverlay
 from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.sa_models import (
+    DocumentSentence,
+    SourceCorpus,
+    SourceDocument,
+    TMEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,13 @@ class SentencesWorkspaceService:
         session: Session,
         project_id: int,
         *,
-        doc_id_filter: Optional[int] = None,
-        text_search: Optional[str] = None,
+        doc_id_filter: int | None = None,
+        text_search: str | None = None,
         sort_by: str = "sentence_id",
         sort_dir: str = "asc",
         page: int = 1,
         page_size: int = 100,
-    ) -> List[SentenceDTO]:
+    ) -> list[SentenceDTO]:
         """Return one page of sentences for the project with overlay data.
 
         Args:
@@ -90,7 +89,7 @@ class SentencesWorkspaceService:
             text = str(row["text"])
             norm = self._norm(src_lang, text)
             translation_entry = translation_map.get(norm)
-            overlay: Optional[SentenceNiqqudOverlay] = niqqud_map.get(sentence_id)
+            overlay: SentenceNiqqudOverlay | None = niqqud_map.get(sentence_id)
             result.append(
                 SentenceDTO(
                     sentence_id=sentence_id,
@@ -118,8 +117,8 @@ class SentencesWorkspaceService:
         session: Session,
         project_id: int,
         *,
-        doc_id_filter: Optional[int] = None,
-        text_search: Optional[str] = None,
+        doc_id_filter: int | None = None,
+        text_search: str | None = None,
     ) -> int:
         """Count sentences for pagination.
 
@@ -161,11 +160,11 @@ class SentencesWorkspaceService:
         session: Session,
         project_id: int,
         *,
-        doc_id_filter: Optional[int] = None,
-        text_search: Optional[str] = None,
+        doc_id_filter: int | None = None,
+        text_search: str | None = None,
         page: int = 1,
         page_size: int = 100,
-    ) -> List[int]:
+    ) -> list[int]:
         """Return sentence_ids for the current page (for batch actions)."""
         corpus_ids = self._get_project_corpus_ids(session, project_id)
         stmt = (
@@ -186,9 +185,9 @@ class SentencesWorkspaceService:
         session: Session,
         project_id: int,
         *,
-        doc_id_filter: Optional[int] = None,
-        text_search: Optional[str] = None,
-    ) -> List[int]:
+        doc_id_filter: int | None = None,
+        text_search: str | None = None,
+    ) -> list[int]:
         """Return all sentence_ids matching current filter (for 'All Filtered' batch action)."""
         corpus_ids = self._get_project_corpus_ids(session, project_id)
         stmt = (
@@ -205,14 +204,14 @@ class SentencesWorkspaceService:
     def get_sentence_texts_by_ids(
         self,
         session: Session,
-        sentence_ids: List[int],
-    ) -> Dict[int, str]:
+        sentence_ids: list[int],
+    ) -> dict[int, str]:
         """Batch-fetch sentence texts for a list of IDs (for batch action workers)."""
         if not sentence_ids:
             return {}
-        stmt = select(
-            DocumentSentence.sentence_id, DocumentSentence.text
-        ).where(DocumentSentence.sentence_id.in_(sentence_ids))
+        stmt = select(DocumentSentence.sentence_id, DocumentSentence.text).where(
+            DocumentSentence.sentence_id.in_(sentence_ids)
+        )
         return {sid: text for sid, text in session.execute(stmt).all()}
 
     # ------------------------------------------------------------------
@@ -224,8 +223,8 @@ class SentencesWorkspaceService:
         session: Session,
         project_id: int,
         src_lang: str,
-        texts: List[str],
-    ) -> Dict[str, tuple]:
+        texts: list[str],
+    ) -> dict[str, tuple]:
         """Return {norm_text: (translation, status, source)} for sentence texts.
 
         Looks up kind='surface' TM entries for this project.
@@ -236,23 +235,27 @@ class SentencesWorkspaceService:
         norms = [self._norm(src_lang, t) for t in texts]
         norm_set = list(set(norms))
 
-        stmt = select(
-            TMEntry.src_norm,
-            TMEntry.translation,
-            TMEntry.status,
-            TMEntry.origin,
-        ).where(
-            TMEntry.kind == "surface",
-            TMEntry.src_lang == src_lang,
-            TMEntry.src_norm.in_(norm_set),
-            TMEntry.project_id == project_id,
-            TMEntry.status.in_(["draft", "approved"]),
-        ).order_by(
-            # Prefer approved over draft when duplicates
-            TMEntry.status.desc()
+        stmt = (
+            select(
+                TMEntry.src_norm,
+                TMEntry.translation,
+                TMEntry.status,
+                TMEntry.origin,
+            )
+            .where(
+                TMEntry.kind == "surface",
+                TMEntry.src_lang == src_lang,
+                TMEntry.src_norm.in_(norm_set),
+                TMEntry.project_id == project_id,
+                TMEntry.status.in_(["draft", "approved"]),
+            )
+            .order_by(
+                # Prefer approved over draft when duplicates
+                TMEntry.status.desc()
+            )
         )
 
-        result: Dict[str, tuple] = {}
+        result: dict[str, tuple] = {}
         for src_norm, translation, status, origin in session.execute(stmt).all():
             if src_norm not in result:  # first wins (ordered by status desc)
                 result[src_norm] = (translation, status, origin)
@@ -261,8 +264,8 @@ class SentencesWorkspaceService:
     def _batch_get_sentence_niqqud(
         self,
         session: Session,
-        sentence_ids: List[int],
-    ) -> Dict[int, "SentenceNiqqudOverlay"]:
+        sentence_ids: list[int],
+    ) -> dict[int, "SentenceNiqqudOverlay"]:
         """Return {sentence_id: SentenceNiqqudOverlay} from sentence_pronunciation table.
 
         Uses the dedicated sentence-level niqqud store (Migration 024).
@@ -273,23 +276,27 @@ class SentencesWorkspaceService:
             return {}
         try:
             from app.services.sentence_pronunciation_service import SentencePronunciationService
+
             svc = SentencePronunciationService()
             return svc.bulk_get_niqqud(session, sentence_ids)
         except Exception:
-            logger.debug("sentence_pronunciation lookup failed (table may not exist yet)", exc_info=True)
+            logger.debug(
+                "sentence_pronunciation lookup failed (table may not exist yet)", exc_info=True
+            )
             return {}
 
     def _batch_get_audio(
         self,
         session: Session,
         src_lang: str,
-        texts: List[str],
-    ) -> Dict[tuple[str, str], str]:
+        texts: list[str],
+    ) -> dict[tuple[str, str], str]:
         """Return {(norm_text, source_text): audio_status} using hash-aware audio lookup."""
         if not texts:
             return {}
         try:
             from app.services.audio_asset_service import AudioAssetService
+
             svc = AudioAssetService()
             items = [
                 {
@@ -325,14 +332,14 @@ class SentencesWorkspaceService:
         self,
         session: Session,
         *,
-        corpus_ids: List[int],
-        doc_id_filter: Optional[int],
-        text_search: Optional[str],
+        corpus_ids: list[int],
+        doc_id_filter: int | None,
+        text_search: str | None,
         sort_by: str,
         sort_dir: str,
         page: int,
         page_size: int,
-    ) -> List[dict]:
+    ) -> list[dict]:
         if not corpus_ids:
             return []
 
@@ -389,7 +396,7 @@ class SentencesWorkspaceService:
     @staticmethod
     def _should_use_sentence_id_pk_scan(
         *,
-        doc_id_filter: Optional[int],
+        doc_id_filter: int | None,
         sort_by: str,
         sort_dir: str,
     ) -> bool:
@@ -403,24 +410,19 @@ class SentencesWorkspaceService:
         self,
         session: Session,
         *,
-        corpus_ids: List[int],
-        text_search: Optional[str],
+        corpus_ids: list[int],
+        text_search: str | None,
         page: int,
         page_size: int,
-    ) -> List[dict]:
+    ) -> list[dict]:
         # On large multi-corpus projects, SQLite can choose idx_sentence_corpus_sent_id
         # plus TEMP B-TREE ORDER BY for the default page load. For the actual
         # user-visible path (sentence_id ASC), a rowid/PK-ordered scan is cheaper.
         corpus_params = {
-            f"corpus_id_{idx}": int(corpus_id)
-            for idx, corpus_id in enumerate(corpus_ids)
+            f"corpus_id_{idx}": int(corpus_id) for idx, corpus_id in enumerate(corpus_ids)
         }
-        where_parts = [
-            "corpus_id IN ({})".format(
-                ", ".join(f":{name}" for name in corpus_params.keys())
-            )
-        ]
-        params: Dict[str, object] = {
+        where_parts = ["corpus_id IN ({})".format(", ".join(f":{name}" for name in corpus_params))]
+        params: dict[str, object] = {
             **corpus_params,
             "limit": int(page_size),
             "offset": int((page - 1) * page_size),
@@ -451,20 +453,17 @@ class SentencesWorkspaceService:
         return rows
 
     @staticmethod
-    def _get_doc_names_by_ids(session: Session, doc_ids: List[int]) -> Dict[int, str]:
+    def _get_doc_names_by_ids(session: Session, doc_ids: list[int]) -> dict[int, str]:
         if not doc_ids:
             return {}
         unique_doc_ids = sorted({int(doc_id) for doc_id in doc_ids})
         stmt = select(SourceDocument.doc_id, SourceDocument.file_name).where(
             SourceDocument.doc_id.in_(unique_doc_ids)
         )
-        return {
-            int(doc_id): file_name or ""
-            for doc_id, file_name in session.execute(stmt).all()
-        }
+        return {int(doc_id): file_name or "" for doc_id, file_name in session.execute(stmt).all()}
 
     @staticmethod
-    def _get_project_corpus_ids(session: Session, project_id: int) -> List[int]:
+    def _get_project_corpus_ids(session: Session, project_id: int) -> list[int]:
         """Return all corpus_ids belonging to project_id (cached in caller for batch use)."""
         stmt = select(SourceCorpus.corpus_id).where(SourceCorpus.project_id == project_id)
         return [row[0] for row in session.execute(stmt).all()]
@@ -473,5 +472,6 @@ class SentencesWorkspaceService:
     def _get_project_src_lang(session: Session, project_id: int) -> str:
         """Get src_lang for a project (default 'he')."""
         from app.infra.sa_models import DictProject
+
         proj = session.get(DictProject, project_id)
         return proj.src_lang if proj else "he"

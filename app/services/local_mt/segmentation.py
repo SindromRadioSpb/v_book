@@ -15,10 +15,9 @@ Example:
     Separators: ["", "", ""]
     Reassembly: segments[0] + separators[0] + segments[1] + ...
 """
+
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
-
 
 # ============================================================================
 # Constants
@@ -26,8 +25,8 @@ from typing import List, Tuple
 
 # Sentence boundary patterns (in priority order)
 SENTENCE_BOUNDARIES = [
-    r'[.!?…]+',  # Multiple punctuation marks
-    r'\n+',      # Newlines
+    r"[.!?…]+",  # Multiple punctuation marks
+    r"\n+",  # Newlines
 ]
 
 # Maximum segment lengths (safety limits for NLLB)
@@ -64,7 +63,7 @@ def segment_text(
     max_chars: int = MAX_CHARS_PER_SEGMENT,
     max_tokens: int = MAX_TOKENS_PER_SEGMENT,
     min_chars: int = MIN_CHARS_PER_SEGMENT,
-) -> List[TextSegment]:
+) -> list[TextSegment]:
     """
     Segment text into sentence-level chunks.
 
@@ -81,7 +80,7 @@ def segment_text(
         return []
 
     # Normalize line endings
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     # Split by sentence boundaries
     segments = _split_by_boundaries(text)
@@ -95,18 +94,20 @@ def segment_text(
     # Create TextSegment objects
     result = []
     for i, (segment_text, separator) in enumerate(segments):
-        result.append(TextSegment(
-            text=segment_text,
-            separator=separator,
-            index=i,
-            char_count=len(segment_text),
-            estimated_tokens=_estimate_token_count(segment_text),
-        ))
+        result.append(
+            TextSegment(
+                text=segment_text,
+                separator=separator,
+                index=i,
+                char_count=len(segment_text),
+                estimated_tokens=_estimate_token_count(segment_text),
+            )
+        )
 
     return result
 
 
-def reassemble_text(segments: List[TextSegment], translations: List[str]) -> str:
+def reassemble_text(segments: list[TextSegment], translations: list[str]) -> str:
     """
     Reassemble translated segments with original separators.
 
@@ -134,7 +135,7 @@ def reassemble_text(segments: List[TextSegment], translations: List[str]) -> str
         result.append(translation)
         result.append(segment.separator)
 
-    return ''.join(result)
+    return "".join(result)
 
 
 # ============================================================================
@@ -142,7 +143,7 @@ def reassemble_text(segments: List[TextSegment], translations: List[str]) -> str
 # ============================================================================
 
 
-def _split_by_boundaries(text: str) -> List[Tuple[str, str]]:
+def _split_by_boundaries(text: str) -> list[tuple[str, str]]:
     """
     Split text by sentence boundaries, preserving separators.
 
@@ -154,7 +155,7 @@ def _split_by_boundaries(text: str) -> List[Tuple[str, str]]:
     """
     # Pattern that captures sentence boundaries + optional trailing whitespace
     # This ensures we preserve both punctuation and spacing
-    pattern = r'([.!?…]+\s*|\n+)'
+    pattern = r"([.!?…]+\s*|\n+)"
 
     # Split while preserving separators
     parts = re.split(pattern, text)
@@ -163,14 +164,14 @@ def _split_by_boundaries(text: str) -> List[Tuple[str, str]]:
     segments = []
     i = 0
     while i < len(parts):
-        segment_text = parts[i] if i < len(parts) else ''
+        segment_text = parts[i] if i < len(parts) else ""
 
         # Get separator (next part if it exists)
-        separator = ''
+        separator = ""
         if i + 1 < len(parts):
             next_part = parts[i + 1]
             # Check if next part is a separator (matches boundary pattern)
-            if next_part and re.match(r'^([.!?…]+\s*|\n+)$', next_part):
+            if next_part and re.match(r"^([.!?…]+\s*|\n+)$", next_part):
                 separator = next_part
                 i += 2  # Skip both segment and separator
             else:
@@ -186,10 +187,10 @@ def _split_by_boundaries(text: str) -> List[Tuple[str, str]]:
 
 
 def _enforce_length_limits(
-    segments: List[Tuple[str, str]],
+    segments: list[tuple[str, str]],
     max_chars: int,
     max_tokens: int,
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """
     Split segments that exceed length limits.
 
@@ -223,8 +224,8 @@ def _enforce_length_limits(
                 if current_chars + word_chars > max_chars:
                     # Flush current chunk
                     if current_chunk:
-                        chunk_text = ' '.join(current_chunk)
-                        result.append((chunk_text, ''))
+                        chunk_text = " ".join(current_chunk)
+                        result.append((chunk_text, ""))
                         current_chunk = [word]
                         current_chars = len(word)
                 else:
@@ -233,16 +234,16 @@ def _enforce_length_limits(
 
             # Add remaining chunk with original separator
             if current_chunk:
-                chunk_text = ' '.join(current_chunk)
+                chunk_text = " ".join(current_chunk)
                 result.append((chunk_text, separator))
 
     return result
 
 
 def _merge_short_segments(
-    segments: List[Tuple[str, str]],
+    segments: list[tuple[str, str]],
     min_chars: int,
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """
     Merge very short segments with neighbors.
 

@@ -48,7 +48,9 @@ def test_pls_export_import_roundtrip():
         with Session(engine) as session:
             session.query(PronunciationEntry).delete()
             session.commit()
-            imported = exchange.import_pls(session, in_path=pls_path, default_lang="he", is_override=False)
+            imported = exchange.import_pls(
+                session, in_path=pls_path, default_lang="he", is_override=False
+            )
             session.commit()
             assert imported["processed"] >= 1
             assert imported["updated"] == 1
@@ -95,7 +97,9 @@ def test_pls_import_does_not_override_manual():
             exchange.export_pls(session, out_path=pls_path, lang="he")
 
         with Session(engine) as session:
-            imported = exchange.import_pls(session, in_path=pls_path, default_lang="he", is_override=False)
+            imported = exchange.import_pls(
+                session, in_path=pls_path, default_lang="he", is_override=False
+            )
             session.commit()
             assert imported["processed"] >= 1
             row = svc.get_entry(session, lang="he", src_norm="foo")

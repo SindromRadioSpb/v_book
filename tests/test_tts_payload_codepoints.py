@@ -56,10 +56,11 @@ def test_sanitized_payload_has_no_taamim_or_bidi_and_keeps_niqqud():
     reasons = {item.reason for item in removed}
     assert "taamim" in reasons
     assert "format_char" in reasons
-    assert "pipe_removed" in reasons
+    assert "pipe_to_space" in reasons
 
     # Sanity check: niqqud characters are combining marks.
-    niqqud_categories = [unicodedata.category(ch) for ch in sanitized if 0x05B0 <= ord(ch) <= 0x05BC]
+    niqqud_categories = [
+        unicodedata.category(ch) for ch in sanitized if 0x05B0 <= ord(ch) <= 0x05BC
+    ]
     assert niqqud_categories
     assert all(cat == "Mn" for cat in niqqud_categories)
-

@@ -85,7 +85,9 @@ def _prepare_runtime_dll_paths() -> None:
         if resolved.lower() not in normalized_path and resolved not in prefix_parts:
             prefix_parts.append(resolved)
     if prefix_parts:
-        os.environ["PATH"] = ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+        os.environ["PATH"] = (
+            ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+        )
 
 
 def _contains_niqqud(text: str) -> bool:
@@ -135,7 +137,9 @@ def _ensure_hf_home() -> None:
         configured_path = Path(configured)
         try:
             configured_path.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=str(configured_path), prefix="hf_write_test_", delete=True):
+            with tempfile.NamedTemporaryFile(
+                dir=str(configured_path), prefix="hf_write_test_", delete=True
+            ):
                 pass
             return
         except Exception:
@@ -152,7 +156,9 @@ def _ensure_hf_home() -> None:
     for candidate in candidates:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=str(candidate), prefix="hf_write_test_", delete=True):
+            with tempfile.NamedTemporaryFile(
+                dir=str(candidate), prefix="hf_write_test_", delete=True
+            ):
                 pass
             os.environ["HF_HOME"] = str(candidate)
             os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -242,7 +248,9 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
     if model_path is None:
         report["stage"] = "model_load"
         report["error"] = "Phonikud ONNX model path is not configured or not found."
-        report["details"] = "Configure pronunciation/phonikud/model_path or install local phonikud model resources."
+        report["details"] = (
+            "Configure pronunciation/phonikud/model_path or install local phonikud model resources."
+        )
         report["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
         return 1, report
 

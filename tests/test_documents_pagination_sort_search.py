@@ -95,8 +95,18 @@ def test_documents_search_title_is_global(docs_engine):
     with Session(docs_engine) as session:
         corpus_id = _seed_docs(session, count=90)
         # Inject matches outside first 25 inserted rows.
-        target_a = session.query(SourceDocument).filter(SourceDocument.corpus_id == corpus_id).offset(55).first()
-        target_b = session.query(SourceDocument).filter(SourceDocument.corpus_id == corpus_id).offset(70).first()
+        target_a = (
+            session.query(SourceDocument)
+            .filter(SourceDocument.corpus_id == corpus_id)
+            .offset(55)
+            .first()
+        )
+        target_b = (
+            session.query(SourceDocument)
+            .filter(SourceDocument.corpus_id == corpus_id)
+            .offset(70)
+            .first()
+        )
         target_a.file_name = "needle_alpha.txt"
         target_b.file_name = "needle_beta.txt"
         session.commit()

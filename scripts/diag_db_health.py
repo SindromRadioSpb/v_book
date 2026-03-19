@@ -19,10 +19,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -82,9 +79,7 @@ class DBHealthChecker:
         print("-" * 40)
 
         try:
-            cursor = self.conn.execute(
-                "SELECT value FROM schema_meta WHERE key='schema_version'"
-            )
+            cursor = self.conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'")
             row = cursor.fetchone()
             if row:
                 version = int(row[0])
@@ -108,13 +103,12 @@ class DBHealthChecker:
         print("2. FTS Tables Check")
         print("-" * 40)
 
-        expected_fts = ['sentence_fts', 'term_fts']
+        expected_fts = ["sentence_fts", "term_fts"]
 
         for table_name in expected_fts:
             try:
                 cursor = self.conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                    (table_name,)
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
                 )
                 if cursor.fetchone():
                     print(f"   {table_name}: EXISTS")
@@ -132,19 +126,19 @@ class DBHealthChecker:
         print("-" * 40)
 
         expected_triggers = [
-            'trg_sentence_ai',  # INSERT on document_sentence
-            'trg_sentence_ad',  # DELETE on document_sentence
-            'trg_sentence_au',  # UPDATE on document_sentence
-            'trg_term_search_ai',  # INSERT on term_search
-            'trg_term_search_ad',  # DELETE on term_search
-            'trg_term_search_au',  # UPDATE on term_search
+            "trg_sentence_ai",  # INSERT on document_sentence
+            "trg_sentence_ad",  # DELETE on document_sentence
+            "trg_sentence_au",  # UPDATE on document_sentence
+            "trg_term_search_ai",  # INSERT on term_search
+            "trg_term_search_ad",  # DELETE on term_search
+            "trg_term_search_au",  # UPDATE on term_search
         ]
 
         for trigger_name in expected_triggers:
             try:
                 cursor = self.conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
-                    (trigger_name,)
+                    (trigger_name,),
                 )
                 if cursor.fetchone():
                     print(f"   {trigger_name}: EXISTS")
@@ -177,9 +171,7 @@ class DBHealthChecker:
             stuck_runs = cursor.fetchall()
 
             if stuck_runs:
-                self.warnings.append(
-                    f"Found {len(stuck_runs)} stuck runs (status='running')"
-                )
+                self.warnings.append(f"Found {len(stuck_runs)} stuck runs (status='running')")
                 print(f"   Found {len(stuck_runs)} stuck run(s):")
                 for run_id, started_at, engine in stuck_runs:
                     print(f"     - run_id={run_id}, started={started_at}, engine={engine}")
@@ -258,13 +250,11 @@ class DBHealthChecker:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Database health diagnostic tool"
-    )
+    parser = argparse.ArgumentParser(description="Database health diagnostic tool")
     parser.add_argument(
         "--db-path",
         default=str(project_root / "hdle_premium.db"),
-        help="Path to database file (default: dev DB)"
+        help="Path to database file (default: dev DB)",
     )
 
     args = parser.parse_args()

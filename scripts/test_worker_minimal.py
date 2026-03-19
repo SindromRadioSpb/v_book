@@ -1,4 +1,5 @@
 """Minimal worker test - NO logging, direct stdout only."""
+
 import multiprocessing
 import sys
 import time
@@ -34,7 +35,9 @@ def worker_func(conn: Connection, model_path: str):
         sys.stdout.flush()
 
         start = time.perf_counter()
-        tokenizer = NllbTokenizer.from_pretrained("facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn")
+        tokenizer = NllbTokenizer.from_pretrained(
+            "facebook/nllb-200-distilled-1.3B", src_lang="eng_Latn"
+        )
         elapsed = time.perf_counter() - start
 
         sys.stdout.write(f"[Worker] Tokenizer loaded in {elapsed:.2f}s\n")
@@ -56,11 +59,12 @@ def worker_func(conn: Connection, model_path: str):
         sys.stdout.write(f"[Worker] ERROR: {e}\n")
         sys.stdout.flush()
         import traceback
+
         traceback.print_exc()
         conn.send({"ok": False, "error": str(e)})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("=== MINIMAL WORKER TEST (NO LOGGING) ===")
 
     model_path = r"C:\Users\Win10_Game_OS\AppData\Local\HDLE\models\facebook_nllb-200-distilled-1.3B_ctranslate2"

@@ -6,15 +6,14 @@ Tests that:
 3. View History shows correct changes
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
-from datetime import datetime
 
-from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
 
 from app.services.db_service import DBService
 
@@ -32,9 +31,11 @@ class TestTranslationManagementPersistence(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -45,7 +46,7 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -119,23 +120,22 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         Regression test for bug where inline edits disappeared.
         """
-        from app.ui.translation_management_panel import TranslationManagementPanel
-        from app.infra.sa_models import TMEntry
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry
+        from app.ui.translation_management_panel import TranslationManagementPanel
 
         # Create panel
         panel = TranslationManagementPanel(project_id=1)
 
         # Load entries synchronously (avoid async worker issues in tests)
         from app.services.translation_admin_service import TranslationAdminService
+
         service = TranslationAdminService()
 
         with self.db_service.get_session() as session:
             entries = service.search_tm_entries(
-                session,
-                filters={"scope": "project", "project_id": 1},
-                limit=100,
-                offset=0
+                session, filters={"scope": "project", "project_id": 1}, limit=100, offset=0
             )
 
         panel.model.update_entries(entries, len(entries))
@@ -155,11 +155,7 @@ class TestTranslationManagementPersistence(unittest.TestCase):
         new_translation = "новая книга"
         model_index = panel.model.index(lemma_row, 3)  # Translation column
 
-        success = panel.model.setData(
-            model_index,
-            new_translation,
-            Qt.ItemDataRole.EditRole
-        )
+        success = panel.model.setData(model_index, new_translation, Qt.ItemDataRole.EditRole)
         self.assertTrue(success, "setData should succeed")
 
         # Process events to ensure on_translation_edited executes
@@ -171,8 +167,9 @@ class TestTranslationManagementPersistence(unittest.TestCase):
             entry = session.execute(stmt).scalar()
 
             self.assertIsNotNone(entry)
-            self.assertEqual(entry.translation, new_translation,
-                           "Translation should be saved in DB")
+            self.assertEqual(
+                entry.translation, new_translation, "Translation should be saved in DB"
+            )
 
         # Reload panel (simulate closing and reopening)
         panel.close()
@@ -183,10 +180,7 @@ class TestTranslationManagementPersistence(unittest.TestCase):
         # Load entries again
         with self.db_service.get_session() as session:
             entries = service.search_tm_entries(
-                session,
-                filters={"scope": "project", "project_id": 1},
-                limit=100,
-                offset=0
+                session, filters={"scope": "project", "project_id": 1}, limit=100, offset=0
             )
 
         panel2.model.update_entries(entries, len(entries))
@@ -204,8 +198,9 @@ class TestTranslationManagementPersistence(unittest.TestCase):
         entry2 = panel2.model.get_entry(lemma_row2)
 
         # CRITICAL: Translation should persist
-        self.assertEqual(entry2.translation, new_translation,
-                        "Translation should persist after reload")
+        self.assertEqual(
+            entry2.translation, new_translation, "Translation should persist after reload"
+        )
 
         panel2.close()
         panel2.deleteLater()
@@ -215,23 +210,22 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         Regression test for bug where approving reset translation to old value.
         """
-        from app.ui.translation_management_panel import TranslationManagementPanel
-        from app.infra.sa_models import TMEntry
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry
+        from app.ui.translation_management_panel import TranslationManagementPanel
 
         # Create panel
         panel = TranslationManagementPanel(project_id=1)
 
         # Load entries
         from app.services.translation_admin_service import TranslationAdminService
+
         service = TranslationAdminService()
 
         with self.db_service.get_session() as session:
             entries = service.search_tm_entries(
-                session,
-                filters={"scope": "project", "project_id": 1},
-                limit=100,
-                offset=0
+                session, filters={"scope": "project", "project_id": 1}, limit=100, offset=0
             )
 
         panel.model.update_entries(entries, len(entries))
@@ -259,15 +253,11 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         # Approve selected (should NOT reset translation)
         from app.services.translation_admin_service import TranslationAdminService
+
         service = TranslationAdminService()
 
         with self.db_service.get_session() as session:
-            service.bulk_set_status(
-                session,
-                [self.term_tm_id],
-                "approved",
-                approved_by="test_user"
-            )
+            service.bulk_set_status(session, [self.term_tm_id], "approved", approved_by="test_user")
 
         # Verify in DB
         with self.db_service.get_session() as session:
@@ -275,10 +265,10 @@ class TestTranslationManagementPersistence(unittest.TestCase):
             entry = session.execute(stmt).scalar()
 
             # CRITICAL: Translation should NOT be reset
-            self.assertEqual(entry.translation, new_translation,
-                           "Translation should not be reset by approve")
-            self.assertEqual(entry.status, "approved",
-                           "Status should be approved")
+            self.assertEqual(
+                entry.translation, new_translation, "Translation should not be reset by approve"
+            )
+            self.assertEqual(entry.status, "approved", "Status should be approved")
 
         panel.close()
         panel.deleteLater()
@@ -288,36 +278,25 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         Regression test for history not recording inline edits.
         """
+
         from app.services.translation_admin_service import TranslationAdminService
-        from app.infra.sa_models import TMEntry
-        from sqlalchemy import select
 
         service = TranslationAdminService()
 
         # Edit translation (creates history)
         with self.db_service.get_session() as session:
-            service.update_translation(
-                session,
-                self.lemma_tm_id,
-                "измененная книга"
-            )
+            service.update_translation(session, self.lemma_tm_id, "измененная книга")
 
         # Approve (creates history)
         with self.db_service.get_session() as session:
-            service.set_status(
-                session,
-                self.lemma_tm_id,
-                "approved",
-                approved_by="test_user"
-            )
+            service.set_status(session, self.lemma_tm_id, "approved", approved_by="test_user")
 
         # Get history
         with self.db_service.get_session() as session:
             history = service.get_history(session, self.lemma_tm_id)
 
         # Should have at least 2 entries (edit + approve)
-        self.assertGreaterEqual(len(history), 2,
-                               "History should record both edit and approve")
+        self.assertGreaterEqual(len(history), 2, "History should record both edit and approve")
 
         # Check that history contains correct change kinds
         change_kinds = [h.change_kind for h in history]
@@ -326,8 +305,9 @@ class TestTranslationManagementPersistence(unittest.TestCase):
 
         # Check that latest entry has correct translation
         latest = history[0]  # Assuming newest first
-        self.assertEqual(latest.translation, "измененная книга",
-                        "History should record correct translation")
+        self.assertEqual(
+            latest.translation, "измененная книга", "History should record correct translation"
+        )
 
 
 if __name__ == "__main__":

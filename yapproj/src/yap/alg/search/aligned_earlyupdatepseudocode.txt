@@ -24,5 +24,3 @@ loop do
 		then return best
 	candidates <- TOP-B(agenda, B)
 	agenda <- CLEAR(agenda)
-
-

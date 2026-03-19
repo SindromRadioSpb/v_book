@@ -20,13 +20,14 @@ Example:
     Result: ["מערכת נתוני בסיס", "מנהל קבצים"]
     Applied: [{"src": "database system", "tm_translation": "מערכת נתוני בסיס"}]
 """
+
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 
-from app.infra.sa_models import TMEntry, TMAlias
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.infra.sa_models import TMAlias, TMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +48,15 @@ class AppliedTerm:
     mt_translation: str
     tm_id: int
     kind: str
-    confidence: Optional[float] = None
+    confidence: float | None = None
 
 
 @dataclass
 class PostprocessResult:
     """Result of glossary postprocessing."""
 
-    translations: List[str]  # Updated translations
-    applied_terms: List[AppliedTerm]  # Terms that were applied
+    translations: list[str]  # Updated translations
+    applied_terms: list[AppliedTerm]  # Terms that were applied
     match_count: int  # Number of matches found
 
 
@@ -94,8 +95,8 @@ def query_approved_terms(
     session: Session,
     src_lang: str,
     tgt_lang: str,
-    project_id: Optional[int] = None,
-) -> Dict[str, TMEntry]:
+    project_id: int | None = None,
+) -> dict[str, TMEntry]:
     """
     Query approved TM entries for language pair.
 
@@ -121,9 +122,7 @@ def query_approved_terms(
         stmt = stmt.where(TMEntry.project_id.is_(None))
     else:
         # Project TM + global TM
-        stmt = stmt.where(
-            (TMEntry.project_id == project_id) | (TMEntry.project_id.is_(None))
-        )
+        stmt = stmt.where((TMEntry.project_id == project_id) | (TMEntry.project_id.is_(None)))
 
     # Execute query
     entries = session.execute(stmt).scalars().all()
@@ -140,8 +139,8 @@ def query_approved_terms(
 
 def query_aliases(
     session: Session,
-    tm_ids: List[int],
-) -> Dict[str, int]:
+    tm_ids: list[int],
+) -> dict[str, int]:
     """
     Query aliases for TM entries.
 
@@ -175,11 +174,11 @@ def query_aliases(
 
 def apply_glossary(
     session: Session,
-    source_segments: List[str],
-    target_segments: List[str],
+    source_segments: list[str],
+    target_segments: list[str],
     src_lang: str,
     tgt_lang: str,
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
 ) -> PostprocessResult:
     """
     Apply glossary terms to MT output.
@@ -244,16 +243,18 @@ def apply_glossary(
             updated_translations.append(matched_entry.translation)
 
             # Record applied term
-            applied_terms.append(AppliedTerm(
-                segment_index=i,
-                src_text=src_seg,
-                src_norm=src_norm,
-                tm_translation=matched_entry.translation,
-                mt_translation=tgt_seg,
-                tm_id=matched_entry.tm_id,
-                kind=matched_entry.kind,
-                confidence=matched_entry.confidence,
-            ))
+            applied_terms.append(
+                AppliedTerm(
+                    segment_index=i,
+                    src_text=src_seg,
+                    src_norm=src_norm,
+                    tm_translation=matched_entry.translation,
+                    mt_translation=tgt_seg,
+                    tm_id=matched_entry.tm_id,
+                    kind=matched_entry.kind,
+                    confidence=matched_entry.confidence,
+                )
+            )
 
             logger.debug(
                 f"Applied TM term: '{src_seg}' → '{matched_entry.translation}' "
@@ -281,8 +282,8 @@ def apply_glossary_to_text(
     target_text: str,
     src_lang: str,
     tgt_lang: str,
-    project_id: Optional[int] = None,
-) -> tuple[str, List[AppliedTerm]]:
+    project_id: int | None = None,
+) -> tuple[str, list[AppliedTerm]]:
     """
     Apply glossary to single text pair (convenience wrapper).
 

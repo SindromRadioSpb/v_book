@@ -5,16 +5,15 @@ All sanitization failures should be logged via audit module.
 """
 
 import re
-from typing import Optional
 
+from .errors import QueryComplexityError, SanitizationError
 from .policy import (
-    FTS5_SPECIAL_CHARS,
     FTS5_RESERVED_WORDS,
+    FTS5_SPECIAL_CHARS,
     LOG_SANITIZE_CHARS,
     MAX_LOG_INPUT_LENGTH,
     MAX_QUERY_LENGTH,
 )
-from .errors import SanitizationError, QueryComplexityError
 
 
 def sanitize_fts5_query(query: str, strict: bool = True) -> str:
@@ -59,7 +58,7 @@ def sanitize_fts5_query(query: str, strict: bool = True) -> str:
             escaped = escaped.replace('"', '""')
         else:
             # Remove other special chars
-            escaped = escaped.replace(char, '')
+            escaped = escaped.replace(char, "")
 
     # 3. Handle reserved words
     if strict:
@@ -67,7 +66,7 @@ def sanitize_fts5_query(query: str, strict: bool = True) -> str:
         query_upper = escaped.upper()
         for word in FTS5_RESERVED_WORDS:
             # Match whole words only, not substrings
-            pattern = r'\b' + word + r'\b'
+            pattern = r"\b" + word + r"\b"
             if re.search(pattern, query_upper):
                 raise QueryComplexityError(
                     f"FTS5 operators not allowed: {word}",
@@ -78,7 +77,7 @@ def sanitize_fts5_query(query: str, strict: bool = True) -> str:
         # Escape reserved words by quoting them
         for word in FTS5_RESERVED_WORDS:
             # Replace standalone words only (not substrings)
-            pattern = r'\b' + word + r'\b'
+            pattern = r"\b" + word + r"\b"
             escaped = re.sub(pattern, f'"{word}"', escaped, flags=re.IGNORECASE)
 
     # 4. Wrap in quotes for exact phrase matching
@@ -112,7 +111,7 @@ def sanitize_csv_cell(cell_value: str) -> str:
     return cell_value
 
 
-def sanitize_for_log(user_input: str, max_length: Optional[int] = None) -> str:
+def sanitize_for_log(user_input: str, max_length: int | None = None) -> str:
     """
     Sanitize user input for safe logging (prevent log injection/forging).
 
@@ -141,11 +140,11 @@ def sanitize_for_log(user_input: str, max_length: Optional[int] = None) -> str:
         sanitized = sanitized.replace(char, replacement)
 
     # 2. Remove non-printable characters (except space)
-    sanitized = ''.join(c if c.isprintable() or c == ' ' else '.' for c in sanitized)
+    sanitized = "".join(c if c.isprintable() or c == " " else "." for c in sanitized)
 
     # 3. Truncate
     if len(sanitized) > max_length:
-        sanitized = sanitized[:max_length] + '...'
+        sanitized = sanitized[:max_length] + "..."
 
     return sanitized
 
@@ -178,7 +177,7 @@ def sanitize_xml_text(text: str) -> str:
             or (0x10000 <= codepoint <= 0x10FFFF)
         )
 
-    return ''.join(c for c in text if is_valid_xml_char(c))
+    return "".join(c for c in text if is_valid_xml_char(c))
 
 
 def sanitize_filename(filename: str) -> str:
@@ -204,13 +203,13 @@ def sanitize_filename(filename: str) -> str:
         raise SanitizationError("Empty filename", reason="EMPTY")
 
     # Remove path separators (prevent directory traversal)
-    sanitized = filename.replace('/', '_').replace('\\', '_')
+    sanitized = filename.replace("/", "_").replace("\\", "_")
 
     # Remove null bytes
-    sanitized = sanitized.replace('\0', '')
+    sanitized = sanitized.replace("\0", "")
 
     # Remove control characters
-    sanitized = ''.join(c if c.isprintable() else '_' for c in sanitized)
+    sanitized = "".join(c if c.isprintable() else "_" for c in sanitized)
 
     # Trim whitespace
     sanitized = sanitized.strip()
@@ -218,10 +217,12 @@ def sanitize_filename(filename: str) -> str:
     # Length limit
     if len(sanitized) > 255:
         # Keep extension
-        name, ext = sanitized.rsplit('.', 1) if '.' in sanitized else (sanitized, '')
-        sanitized = name[:250] + ('.' + ext if ext else '')
+        name, ext = sanitized.rsplit(".", 1) if "." in sanitized else (sanitized, "")
+        sanitized = name[:250] + ("." + ext if ext else "")
 
     if not sanitized:
-        raise SanitizationError("Filename became empty after sanitization", reason="EMPTY_AFTER_SANITIZATION")
+        raise SanitizationError(
+            "Filename became empty after sanitization", reason="EMPTY_AFTER_SANITIZATION"
+        )
 
     return sanitized

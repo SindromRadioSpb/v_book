@@ -4,9 +4,8 @@ Validates registry structure, ordering, bounds, and invariants.
 """
 
 import unittest
-from app.services.metrics_registry import (
-    MetricsRegistry, MetricType, MetricId, get_registry
-)
+
+from app.services.metrics_registry import MetricId, MetricType, get_registry
 
 
 class TestMetricsRegistry(unittest.TestCase):

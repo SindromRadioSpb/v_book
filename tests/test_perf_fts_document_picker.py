@@ -8,6 +8,7 @@ Covers:
 - Sync triggers keep FTS index consistent after INSERT / UPDATE / DELETE
 - Existing LIKE-based picker tests still pass without FTS5 table
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -157,15 +158,11 @@ def test_ensure_document_name_fts_creates_table():
         conn2 = sqlite3.connect(db_path)
         tables = {
             r[0]
-            for r in conn2.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         triggers = {
             r[0]
-            for r in conn2.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger'"
-            ).fetchall()
+            for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
         }
         conn2.close()
 
@@ -208,12 +205,10 @@ def test_fts_trigger_insert_syncs(fts_engine):
     with Session(fts_engine) as session:
         project_id, _ = _seed(session, count=5)
         # Add a unique document after seeding
-        corpus_id = (
-            session.execute(
-                text("SELECT corpus_id FROM source_corpus WHERE project_id=:p"),
-                {"p": project_id},
-            ).scalar()
-        )
+        corpus_id = session.execute(
+            text("SELECT corpus_id FROM source_corpus WHERE project_id=:p"),
+            {"p": project_id},
+        ).scalar()
         new_doc = SourceDocument(
             corpus_id=corpus_id,
             file_path="/wiki/unique_test_fts",
@@ -237,9 +232,9 @@ def test_fts_trigger_insert_syncs(fts_engine):
             offset=0,
         )
 
-    assert any(dto.file_name == "unique_fts_title_xyz" for dto in results), (
-        f"FTS should have indexed new doc; got: {[d.file_name for d in results]}"
-    )
+    assert any(
+        dto.file_name == "unique_fts_title_xyz" for dto in results
+    ), f"FTS should have indexed new doc; got: {[d.file_name for d in results]}"
 
 
 def test_fts_trigger_delete_syncs(fts_engine):
@@ -271,9 +266,9 @@ def test_fts_trigger_delete_syncs(fts_engine):
             offset=0,
         )
 
-    assert all(dto.doc_id != doc_id_to_delete for dto in results), (
-        "Deleted doc must not appear in FTS results"
-    )
+    assert all(
+        dto.doc_id != doc_id_to_delete for dto in results
+    ), "Deleted doc must not appear in FTS results"
 
 
 # ---------------------------------------------------------------------------
@@ -424,9 +419,7 @@ def test_picker_tag_prefix_mode_unchanged(fts_engine):
             limit=50,
             offset=0,
         )
-        total = svc.get_project_documents_total_count(
-            session, project_id, search_query="tag:wiki"
-        )
+        total = svc.get_project_documents_total_count(session, project_id, search_query="tag:wiki")
 
     assert total > 0
     assert len(page) == total

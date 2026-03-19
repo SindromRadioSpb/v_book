@@ -26,17 +26,13 @@ def main():
 
     project_id = 7  # Материаловедение (Гос 1)
 
-    results = {
-        "project_id": project_id,
-        "test_cases": [],
-        "statistics": {}
-    }
+    results = {"project_id": project_id, "test_cases": [], "statistics": {}}
 
     # Test Case 1: Lemma תתקש
     cursor.execute(
         "SELECT lemma_id, lemma_text, norm_text, is_noise FROM lemma "
         "WHERE project_id=? AND lemma_text=?",
-        (project_id, "תתקש")
+        (project_id, "תתקש"),
     )
     lemma = cursor.fetchone()
 
@@ -50,36 +46,37 @@ def main():
             "lemma_text": lemma_text,
             "norm_text": norm_text,
             "is_noise": is_noise,
-            "is_noise_label": "NOISE" if is_noise == 1 else "VALID"
+            "is_noise_label": "NOISE" if is_noise == 1 else "VALID",
         }
 
         # Check TMEntry by src_text
         cursor.execute(
             "SELECT tm_id, src_text, src_norm, is_noise, lemma_id FROM tm_entry "
             "WHERE project_id=? AND kind='lemma' AND src_text=?",
-            (project_id, lemma_text)
+            (project_id, lemma_text),
         )
         tm_by_text = cursor.fetchall()
 
         test1["tm_entries_by_text"] = []
         for tm in tm_by_text:
             tm_id, src_text, src_norm, tm_is_noise, linked_lemma_id = tm
-            test1["tm_entries_by_text"].append({
-                "tm_id": tm_id,
-                "src_text": src_text,
-                "src_norm": src_norm,
-                "is_noise": tm_is_noise,
-                "is_noise_label": "NOISE" if tm_is_noise == 1 else "VALID",
-                "lemma_id": linked_lemma_id,
-                "is_linked": linked_lemma_id is not None,
-                "sync_issue": tm_is_noise != is_noise,
-                "link_issue": linked_lemma_id is None
-            })
+            test1["tm_entries_by_text"].append(
+                {
+                    "tm_id": tm_id,
+                    "src_text": src_text,
+                    "src_norm": src_norm,
+                    "is_noise": tm_is_noise,
+                    "is_noise_label": "NOISE" if tm_is_noise == 1 else "VALID",
+                    "lemma_id": linked_lemma_id,
+                    "is_linked": linked_lemma_id is not None,
+                    "sync_issue": tm_is_noise != is_noise,
+                    "link_issue": linked_lemma_id is None,
+                }
+            )
 
         # Check TMEntry by lemma_id
         cursor.execute(
-            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?",
-            (lemma_id,)
+            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,)
         )
         tm_by_id = cursor.fetchall()
 
@@ -92,7 +89,7 @@ def main():
     cursor.execute(
         "SELECT cluster_id, representative_he, norm_text, is_noise FROM term_cluster "
         "WHERE project_id=? AND representative_he=?",
-        (project_id, "תשובה ג")
+        (project_id, "תשובה ג"),
     )
     cluster = cursor.fetchone()
 
@@ -106,36 +103,37 @@ def main():
             "representative_he": repr_he,
             "norm_text": norm_text,
             "is_noise": is_noise,
-            "is_noise_label": "NOISE" if is_noise == 1 else "VALID"
+            "is_noise_label": "NOISE" if is_noise == 1 else "VALID",
         }
 
         # Check TMEntry by src_text
         cursor.execute(
             "SELECT tm_id, src_text, src_norm, is_noise, cluster_id FROM tm_entry "
             "WHERE project_id=? AND kind='term_cluster' AND src_text=?",
-            (project_id, repr_he)
+            (project_id, repr_he),
         )
         tm_by_text = cursor.fetchall()
 
         test2["tm_entries_by_text"] = []
         for tm in tm_by_text:
             tm_id, src_text, src_norm, tm_is_noise, linked_cluster_id = tm
-            test2["tm_entries_by_text"].append({
-                "tm_id": tm_id,
-                "src_text": src_text,
-                "src_norm": src_norm,
-                "is_noise": tm_is_noise,
-                "is_noise_label": "NOISE" if tm_is_noise == 1 else "VALID",
-                "cluster_id": linked_cluster_id,
-                "is_linked": linked_cluster_id is not None,
-                "sync_issue": tm_is_noise != is_noise,
-                "link_issue": linked_cluster_id is None
-            })
+            test2["tm_entries_by_text"].append(
+                {
+                    "tm_id": tm_id,
+                    "src_text": src_text,
+                    "src_norm": src_norm,
+                    "is_noise": tm_is_noise,
+                    "is_noise_label": "NOISE" if tm_is_noise == 1 else "VALID",
+                    "cluster_id": linked_cluster_id,
+                    "is_linked": linked_cluster_id is not None,
+                    "sync_issue": tm_is_noise != is_noise,
+                    "link_issue": linked_cluster_id is None,
+                }
+            )
 
         # Check TMEntry by cluster_id
         cursor.execute(
-            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE cluster_id=?",
-            (cluster_id,)
+            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE cluster_id=?", (cluster_id,)
         )
         tm_by_id = cursor.fetchall()
 
@@ -147,25 +145,23 @@ def main():
     # Statistics
     cursor.execute(
         "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma' AND lemma_id IS NULL",
-        (project_id,)
+        (project_id,),
     )
     unlinked_lemmas = cursor.fetchone()[0]
 
     cursor.execute(
         "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster' AND cluster_id IS NULL",
-        (project_id,)
+        (project_id,),
     )
     unlinked_clusters = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma'",
-        (project_id,)
+        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma'", (project_id,)
     )
     total_lemma_tm = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster'",
-        (project_id,)
+        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster'", (project_id,)
     )
     total_cluster_tm = cursor.fetchone()[0]
 
@@ -175,7 +171,7 @@ def main():
         "unlinked_lemma_tm": unlinked_lemmas,
         "total_cluster_tm": total_cluster_tm,
         "linked_cluster_tm": total_cluster_tm - unlinked_clusters,
-        "unlinked_cluster_tm": unlinked_clusters
+        "unlinked_cluster_tm": unlinked_clusters,
     }
 
     conn.close()
@@ -195,7 +191,9 @@ def main():
     print(f"    Unlinked: {unlinked_clusters}")
 
     if unlinked_lemmas > 0 or unlinked_clusters > 0:
-        print(f"\nROOT CAUSE: {unlinked_lemmas + unlinked_clusters} TMEntry records are NOT LINKED!")
+        print(
+            f"\nROOT CAUSE: {unlinked_lemmas + unlinked_clusters} TMEntry records are NOT LINKED!"
+        )
         print("  Bidirectional sync requires source_id (lemma_id/cluster_id) to be set.")
         print("  Solution: Run improved backfill script.")
 

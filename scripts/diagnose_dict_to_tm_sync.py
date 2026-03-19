@@ -36,7 +36,7 @@ def main():
     # Step 1: Check lemma state
     cursor.execute(
         "SELECT lemma_id, is_noise, noise_reason FROM lemma WHERE project_id=? AND lemma_text=?",
-        (project_id, lemma_text)
+        (project_id, lemma_text),
     )
     lemma = cursor.fetchone()
 
@@ -55,7 +55,7 @@ def main():
     cursor.execute(
         "SELECT tm_id, src_text, is_noise, lemma_id, noise_reason FROM tm_entry "
         "WHERE project_id=? AND kind='lemma' AND src_text=?",
-        (project_id, lemma_text)
+        (project_id, lemma_text),
     )
     tm_by_text = cursor.fetchall()
 
@@ -72,13 +72,12 @@ def main():
             print(f"    >>> PROBLEM: lemma_id mismatch! Expected {lemma_id}, got {linked_lemma_id}")
 
         if is_noise != lemma_is_noise:
-            print(f"    >>> SYNC ISSUE: Lemma is_noise={lemma_is_noise}, TMEntry is_noise={is_noise}")
+            print(
+                f"    >>> SYNC ISSUE: Lemma is_noise={lemma_is_noise}, TMEntry is_noise={is_noise}"
+            )
 
     # By lemma_id
-    cursor.execute(
-        "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?",
-        (lemma_id,)
-    )
+    cursor.execute("SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,))
     tm_by_id = cursor.fetchall()
 
     print(f"\n[TMEntry by lemma_id={lemma_id}]")
@@ -124,6 +123,7 @@ def main():
 
         # Check the exact code
         import re
+
         pattern = r"if self\.model_class == \"Lemma\":.*?session\.execute\(sync_stmt\)"
         match = re.search(pattern, content, re.DOTALL)
         if match:

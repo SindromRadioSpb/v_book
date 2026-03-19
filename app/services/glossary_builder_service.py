@@ -20,11 +20,11 @@ Usage:
     glossary_hash = canonical.glossary_hash
     deepl_payload = service.to_deepl_format(canonical)
 """
+
 import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -49,7 +49,7 @@ class GlossaryEntry:
 class CanonicalGlossary:
     """Canonical glossary format (provider-agnostic)."""
 
-    entries: List[GlossaryEntry]
+    entries: list[GlossaryEntry]
     source_lang: str  # e.g., "he" (Hebrew)
     target_lang: str  # e.g., "ru" (Russian)
     glossary_hash: str  # SHA256 of deterministic JSON
@@ -84,8 +84,8 @@ class GlossaryBuilderService:
         self,
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int] = None,
-        max_entries: Optional[int] = None,
+        project_id: int | None = None,
+        max_entries: int | None = None,
     ) -> CanonicalGlossary:
         """
         Build canonical glossary from approved terms.
@@ -101,39 +101,29 @@ class GlossaryBuilderService:
         """
         # Get max entries from settings if not specified
         if max_entries is None:
-            max_entries = self._settings.get_int(
-                "mt/glossary/max_entries_default", default=5000
-            )
+            max_entries = self._settings.get_int("mt/glossary/max_entries_default", default=5000)
 
         # Query approved terms
-        stmt = (
-            select(TMEntry)
-            .where(
-                TMEntry.status == "approved",
-                TMEntry.src_lang == src_lang,
-                TMEntry.tgt_lang == tgt_lang,
-            )
+        stmt = select(TMEntry).where(
+            TMEntry.status == "approved",
+            TMEntry.src_lang == src_lang,
+            TMEntry.tgt_lang == tgt_lang,
         )
 
         # Filter by project (include NULL = global terms)
         if project_id is not None:
-            stmt = stmt.where(
-                (TMEntry.project_id == project_id) | (TMEntry.project_id.is_(None))
-            )
+            stmt = stmt.where((TMEntry.project_id == project_id) | (TMEntry.project_id.is_(None)))
         else:
             stmt = stmt.where(TMEntry.project_id.is_(None))
 
         # Order by confidence DESC (higher confidence = higher priority)
         # Then by src_text ASC (stable tie-breaker)
-        stmt = stmt.order_by(
-            TMEntry.confidence.desc().nulls_last(),
-            TMEntry.src_text.asc()
-        )
+        stmt = stmt.order_by(TMEntry.confidence.desc().nulls_last(), TMEntry.src_text.asc())
 
         results = self._session.execute(stmt).scalars().all()
 
         # Build entries with conflict resolution
-        entries_dict: Dict[str, GlossaryEntry] = {}  # canonical_key → entry
+        entries_dict: dict[str, GlossaryEntry] = {}  # canonical_key → entry
         for tm_entry in results:
             canonical_key = self._normalize_key(tm_entry.src_text)
             priority_score = tm_entry.confidence if tm_entry.confidence else 0.5
@@ -174,8 +164,7 @@ class GlossaryBuilderService:
         truncated = total_entries > max_entries
         if truncated:
             logger.info(
-                f"Glossary truncated: {total_entries} entries → {max_entries} "
-                f"(provider limit)"
+                f"Glossary truncated: {total_entries} entries → {max_entries} " f"(provider limit)"
             )
             entries = entries[:max_entries]
 
@@ -230,8 +219,7 @@ class GlossaryBuilderService:
             "source_lang": canonical.source_lang,
             "target_lang": canonical.target_lang,
             "entries": [
-                {"source": e.source_term, "target": e.target_term}
-                for e in canonical.entries
+                {"source": e.source_term, "target": e.target_term} for e in canonical.entries
             ],
         }
 
@@ -262,9 +250,7 @@ class GlossaryBuilderService:
     # Provider-specific adapters
     # ========================================================================
 
-    def to_provider_format(
-        self, canonical: CanonicalGlossary, provider_id: str
-    ) -> Optional[Dict]:
+    def to_provider_format(self, canonical: CanonicalGlossary, provider_id: str) -> dict | None:
         """
         Convert canonical glossary to provider-specific format.
 
@@ -285,7 +271,7 @@ class GlossaryBuilderService:
             logger.debug(f"Provider {provider_id} glossary format not implemented")
             return None
 
-    def to_deepl_format(self, canonical: CanonicalGlossary) -> Dict:
+    def to_deepl_format(self, canonical: CanonicalGlossary) -> dict:
         """
         Convert to DeepL glossary format.
 
@@ -298,14 +284,10 @@ class GlossaryBuilderService:
         Returns:
             DeepL-specific payload
         """
-        max_entries = self._settings.get_int(
-            "mt/glossary/max_entries_deepl", default=5000
-        )
+        max_entries = self._settings.get_int("mt/glossary/max_entries_deepl", default=5000)
 
         entries = canonical.entries[:max_entries]
-        entries_tsv = "\n".join(
-            f"{e.source_term}\t{e.target_term}" for e in entries
-        )
+        entries_tsv = "\n".join(f"{e.source_term}\t{e.target_term}" for e in entries)
 
         return {
             "format": "tsv",
@@ -315,7 +297,7 @@ class GlossaryBuilderService:
             "entry_count": len(entries),
         }
 
-    def to_microsoft_format(self, canonical: CanonicalGlossary) -> Dict:
+    def to_microsoft_format(self, canonical: CanonicalGlossary) -> dict:
         """
         Convert to Microsoft Custom Translator format.
 
@@ -328,19 +310,13 @@ class GlossaryBuilderService:
         Returns:
             Microsoft-specific payload
         """
-        max_entries = self._settings.get_int(
-            "mt/glossary/max_entries_microsoft", default=10000
-        )
+        max_entries = self._settings.get_int("mt/glossary/max_entries_microsoft", default=10000)
 
         entries = canonical.entries[:max_entries]
 
-        return {
-            "translations": [
-                {"from": e.source_term, "to": e.target_term} for e in entries
-            ]
-        }
+        return {"translations": [{"from": e.source_term, "to": e.target_term} for e in entries]}
 
-    def to_libretranslate_format(self, canonical: CanonicalGlossary) -> Dict:
+    def to_libretranslate_format(self, canonical: CanonicalGlossary) -> dict:
         """
         Convert to LibreTranslate format.
 

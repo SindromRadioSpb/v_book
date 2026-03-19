@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.infra.sa_models import Lemma, TermCluster, TMEntry
 from app.services.db_service import DBService
 from app.services.stats_service import StatsService
-from app.infra.sa_models import Lemma, TMEntry, TermCluster
 
 
 class TestStatsService(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestStatsService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test database."""
-        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         cls.temp_db.close()
         cls.db_path = cls.temp_db.name
 
@@ -29,9 +29,10 @@ class TestStatsService(unittest.TestCase):
 
         # Apply M7 TM migration (required for tm_entry table)
         import sqlite3
+
         migration_path = Path("schema/004_m7_translation_memory.sql")
         if migration_path.exists():
-            migration_sql = migration_path.read_text(encoding='utf-8')
+            migration_sql = migration_path.read_text(encoding="utf-8")
             con = sqlite3.connect(cls.db_path)
             con.executescript(migration_sql)
             con.close()
@@ -39,6 +40,7 @@ class TestStatsService(unittest.TestCase):
         # Create test project
         with cls.db_service.get_session() as session:
             from app.services.project_service import ProjectService
+
             project_service = ProjectService()
             project = project_service.create_project(
                 session,

@@ -50,9 +50,11 @@ def test_nlp_engine_readiness_worker_skips_cuda_when_stanza_missing(monkeypatch)
         "_probe_cuda_available",
         lambda: (_ for _ in ()).throw(AssertionError("CUDA probe must be skipped")),
     )
-    worker.result_ready.connect(lambda request_id, stanza_available, cuda_available: events.append(
-        (request_id, stanza_available, cuda_available)
-    ))
+    worker.result_ready.connect(
+        lambda request_id, stanza_available, cuda_available: events.append(
+            (request_id, stanza_available, cuda_available)
+        )
+    )
 
     worker.run()
 

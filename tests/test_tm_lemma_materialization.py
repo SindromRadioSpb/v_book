@@ -56,7 +56,10 @@ def test_materialize_project_lemmas_to_tm_creates_missing_rows():
         with Session(engine) as session:
             project_id = _seed_project(session, lemmas=5)
             first_lemma = session.execute(
-                select(Lemma).where(Lemma.project_id == project_id).order_by(Lemma.lemma_id.asc()).limit(1)
+                select(Lemma)
+                .where(Lemma.project_id == project_id)
+                .order_by(Lemma.lemma_id.asc())
+                .limit(1)
             ).scalar_one()
             session.add(
                 TMEntry(
@@ -86,7 +89,11 @@ def test_materialize_project_lemmas_to_tm_creates_missing_rows():
             created_count = session.execute(
                 select(func.count())
                 .select_from(TMEntry)
-                .where(TMEntry.project_id == project_id, TMEntry.kind == "lemma", TMEntry.source_ref == "lemma_materialize_full")
+                .where(
+                    TMEntry.project_id == project_id,
+                    TMEntry.kind == "lemma",
+                    TMEntry.source_ref == "lemma_materialize_full",
+                )
             ).scalar()
             assert int(created_count or 0) == 4
     finally:
@@ -123,7 +130,9 @@ def test_materialize_project_lemmas_to_tm_dry_run_does_not_write():
             project_id = _seed_project(session, lemmas=3)
             stats = service.materialize_project_lemmas_to_tm(session, project_id, dry_run=True)
             tm_count = session.execute(
-                select(func.count()).select_from(TMEntry).where(TMEntry.project_id == project_id, TMEntry.kind == "lemma")
+                select(func.count())
+                .select_from(TMEntry)
+                .where(TMEntry.project_id == project_id, TMEntry.kind == "lemma")
             ).scalar()
 
             assert stats["initial_missing_lemma_links"] == 3
@@ -132,4 +141,3 @@ def test_materialize_project_lemmas_to_tm_dry_run_does_not_write():
     finally:
         engine.dispose()
         db_path.unlink(missing_ok=True)
-

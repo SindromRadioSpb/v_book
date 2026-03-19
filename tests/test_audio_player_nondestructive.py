@@ -12,6 +12,7 @@ from app.services.audio_player_service import AudioPlayerService, AudioTrack
 @pytest.fixture(scope="module")
 def qapp():
     from PyQt6.QtCore import QCoreApplication
+
     app = QCoreApplication.instance() or QCoreApplication(sys.argv)
     return app
 
@@ -160,7 +161,9 @@ def test_enqueue_start_immediately_plays_newly_added_item(service, tmp_audio):
     begin_mock.assert_called_once()
 
 
-def test_enqueue_start_immediately_reuses_existing_source_track_without_duplicate(service, tmp_audio):
+def test_enqueue_start_immediately_reuses_existing_source_track_without_duplicate(
+    service, tmp_audio
+):
     """Single-row Play reuses existing queue row by (kind, source_id, project_id)."""
     _inject_tracks(service, tmp_audio[:3])
     service._tracks[1].context = {
@@ -222,6 +225,7 @@ def test_enqueue_deduplicates_existing_source_rows_for_multi_item_enqueue(servic
 
 class _FakeDTO:
     """Minimal stub mimicking AudioQueueItemDTO for enqueue_from_db tests."""
+
     def __init__(self, item_id, hebrew, niqqud="", translation="", kind="sentence"):
         self.item_id = item_id
         self.snapshot_hebrew = hebrew
@@ -245,6 +249,7 @@ def test_enqueue_from_db_appends_items(service):
     assert service._tracks[2].label == "בית"
     # path is empty (no audio yet)
     from pathlib import Path
+
     assert service._tracks[0].path == Path("")
 
 
@@ -263,7 +268,7 @@ def test_enqueue_from_db_stores_context(service):
 def test_enqueue_from_db_prepend_shifts_index(service, tmp_audio):
     """prepend mode inserts before existing tracks and adjusts current_index."""
     _inject_tracks(service, tmp_audio[:2])
-    service._current_index = 1   # pretend track[1] is current
+    service._current_index = 1  # pretend track[1] is current
     dtos = [_FakeDTO(10, "אחד"), _FakeDTO(11, "שניים")]
     n = service.enqueue_from_db(dtos, mode="prepend")
     assert n == 2
@@ -341,7 +346,7 @@ def test_jump_to_index_out_of_bounds_is_noop(service, tmp_audio):
     """jump_to_index with out-of-range index does nothing."""
     _inject_tracks(service, tmp_audio[:2])
     service._current_index = 0
-    service.jump_to_index(5)   # beyond end
+    service.jump_to_index(5)  # beyond end
     service.jump_to_index(-1)  # below 0
     assert service._current_index == 0
 

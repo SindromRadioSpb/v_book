@@ -11,21 +11,26 @@ Returns:
     1 if validation fails
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.infra.sa_models import (
+    DictProject,
+    Lemma,
+    Library,
+    SourceCorpus,
+    SourceDocument,
+    TermCluster,
+    TMEntry,
+)
 from app.services.db_service import DBService
 from app.services.stats_service import StatsService
-from app.infra.sa_models import (
-    Library, DictProject, Lemma, TMEntry, TermCluster, TermAlias,
-    DictEntry, DictSource, SourceCorpus, SourceDocument
-)
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -64,9 +69,9 @@ class FixtureSeed:
         with self.db_service.get_session() as session:
             # 1. Delete existing fixture project
             logger.info(f"Deleting existing {self.FIXTURE_NAME} project...")
-            existing = session.query(DictProject).filter(
-                DictProject.name == self.FIXTURE_NAME
-            ).first()
+            existing = (
+                session.query(DictProject).filter(DictProject.name == self.FIXTURE_NAME).first()
+            )
             if existing:
                 session.delete(existing)
                 session.commit()
@@ -86,7 +91,7 @@ class FixtureSeed:
             project = DictProject(
                 library_id=library.library_id,
                 name=self.FIXTURE_NAME,
-                description="Deterministic fixture for metrics testing"
+                description="Deterministic fixture for metrics testing",
             )
             session.add(project)
             session.flush()
@@ -96,9 +101,7 @@ class FixtureSeed:
             # 4. Create corpus and document
             logger.info("Creating corpus and document...")
             corpus = SourceCorpus(
-                project_id=project_id,
-                name="fixture_corpus",
-                description="Fixture corpus"
+                project_id=project_id, name="fixture_corpus", description="Fixture corpus"
             )
             session.add(corpus)
             session.flush()
@@ -112,7 +115,7 @@ class FixtureSeed:
             )
             session.add(doc)
             session.flush()
-            logger.info(f"  ✓ Created 1 document")
+            logger.info("  ✓ Created 1 document")
 
             # 5. Create 10 lemmas
             logger.info("Creating 10 lemmas...")
@@ -126,7 +129,7 @@ class FixtureSeed:
                 session.add(lemma)
                 lemmas.append(lemma)
             session.flush()
-            logger.info(f"  ✓ Created 10 lemmas")
+            logger.info("  ✓ Created 10 lemmas")
 
             # 6. Create 8 TM entries (6 approved, 2 draft)
             #    Cover first 6 lemmas (60% coverage)
@@ -159,7 +162,7 @@ class FixtureSeed:
                 )
                 session.add(tm_entry)
             session.flush()
-            logger.info(f"  ✓ Created 8 TM entries (6 approved, 2 draft)")
+            logger.info("  ✓ Created 8 TM entries (6 approved, 2 draft)")
 
             # 7. Create 5 term clusters (2 approved, 3 needs_review)
             logger.info("Creating 5 term clusters (2 approved, 3 needs_review)...")
@@ -182,7 +185,7 @@ class FixtureSeed:
                 session.add(cluster)
 
             session.flush()
-            logger.info(f"  ✓ Created 5 term clusters (2 approved, 3 needs_review)")
+            logger.info("  ✓ Created 5 term clusters (2 approved, 3 needs_review)")
 
             # 8. Skip dict entries for simplicity (not critical for metrics)
             # Dict entries require complex schema (src_lang, tgt_lang, src_norm, etc.)
@@ -190,7 +193,7 @@ class FixtureSeed:
             logger.info("Skipping dict entries (not critical for metrics)")
 
             session.commit()
-            logger.info(f"  ✓ Fixture data created successfully")
+            logger.info("  ✓ Fixture data created successfully")
 
             # 9. Validate metrics
             logger.info("\n" + "=" * 60)
@@ -228,16 +231,22 @@ class FixtureSeed:
                     matches = actual_value == expected_value
 
                 if matches:
-                    logger.info(f"  ✓ {metric_key:30s} = {actual_value} (expected {expected_value})")
+                    logger.info(
+                        f"  ✓ {metric_key:30s} = {actual_value} (expected {expected_value})"
+                    )
                 else:
-                    logger.error(f"  ✗ {metric_key:30s} = {actual_value} (expected {expected_value})")
+                    logger.error(
+                        f"  ✗ {metric_key:30s} = {actual_value} (expected {expected_value})"
+                    )
                     all_passed = False
 
             logger.info("=" * 60)
 
             if all_passed:
                 logger.info("✅ ALL METRICS MATCH GROUND TRUTH")
-                logger.info(f"Fixture project '{self.FIXTURE_NAME}' created successfully (ID={project_id})")
+                logger.info(
+                    f"Fixture project '{self.FIXTURE_NAME}' created successfully (ID={project_id})"
+                )
                 return True
             else:
                 logger.error("❌ METRICS VALIDATION FAILED")

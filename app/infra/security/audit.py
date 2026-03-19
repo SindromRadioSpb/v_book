@@ -7,14 +7,13 @@ Used for compliance, threat detection, and post-incident analysis.
 import json
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Optional, Any, Dict
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .policy import OUTCOME_ALLOW, OUTCOME_BLOCK, OUTCOME_FAIL
+from .policy import OUTCOME_ALLOW, OUTCOME_FAIL
 from .sanitizer import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -64,12 +63,12 @@ class AuditLogger:
         event_type: str,
         outcome: str,
         operation: str,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        reason: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        project_id: Optional[int] = None,
-        duration_ms: Optional[float] = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        reason: str | None = None,
+        details: dict[str, Any] | None = None,
+        project_id: int | None = None,
+        duration_ms: float | None = None,
     ) -> None:
         """
         Log security audit event.
@@ -98,7 +97,8 @@ class AuditLogger:
             details_json = json.dumps(details) if details else None
 
             # Insert audit log entry
-            sql = text("""
+            sql = text(
+                """
                 INSERT INTO security_audit_log (
                     event_type, outcome, operation, resource_type, resource_id,
                     reason, details, project_id, duration_ms
@@ -106,19 +106,23 @@ class AuditLogger:
                     :event_type, :outcome, :operation, :resource_type, :resource_id,
                     :reason, :details, :project_id, :duration_ms
                 )
-            """)
+            """
+            )
 
-            self.session.execute(sql, {
-                'event_type': event_type,
-                'outcome': outcome,
-                'operation': operation,
-                'resource_type': resource_type,
-                'resource_id': resource_id,
-                'reason': reason,
-                'details': details_json,
-                'project_id': project_id,
-                'duration_ms': duration_ms,
-            })
+            self.session.execute(
+                sql,
+                {
+                    "event_type": event_type,
+                    "outcome": outcome,
+                    "operation": operation,
+                    "resource_type": resource_type,
+                    "resource_id": resource_id,
+                    "reason": reason,
+                    "details": details_json,
+                    "project_id": project_id,
+                    "duration_ms": duration_ms,
+                },
+            )
 
             # Commit immediately to ensure audit log persistence
             # (even if parent transaction rolls back)
@@ -139,9 +143,9 @@ class AuditLogger:
         self,
         event_type: str,
         operation: str,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        project_id: Optional[int] = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        project_id: int | None = None,
     ):
         """
         Context manager for timed operations with automatic audit logging.
@@ -206,5 +210,5 @@ class AuditContext:
 
     def __init__(self):
         self.outcome: str = OUTCOME_ALLOW  # Default to ALLOW
-        self.reason: Optional[str] = None
-        self.details: Optional[Dict[str, Any]] = None
+        self.reason: str | None = None
+        self.details: dict[str, Any] | None = None

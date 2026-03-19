@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -18,7 +17,7 @@ class ImportOptions:
     """Options for project import."""
 
     rename_if_conflict: bool = True  # Auto-rename project if name exists
-    custom_name: Optional[str] = None  # Override project name
+    custom_name: str | None = None  # Override project name
 
 
 @dataclass
@@ -83,10 +82,10 @@ class ExportReport:
     """Result of export operation."""
 
     success: bool
-    bundle_path: Optional[Path] = None
-    manifest: Optional[ManifestInfo] = None
+    bundle_path: Path | None = None
+    manifest: ManifestInfo | None = None
     elapsed_seconds: float = 0.0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -94,9 +93,9 @@ class ImportReport:
     """Result of import operation."""
 
     success: bool
-    new_project_id: Optional[int] = None
-    new_project_name: Optional[str] = None
+    new_project_id: int | None = None
+    new_project_name: str | None = None
     table_counts: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
-    error_message: Optional[str] = None
+    error_message: str | None = None

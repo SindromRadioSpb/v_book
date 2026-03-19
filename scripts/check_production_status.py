@@ -14,14 +14,16 @@ print("=" * 70)
 print()
 
 # Document status
-cur.execute("""
+cur.execute(
+    """
     SELECT status, COUNT(*) as count
     FROM source_document sd
     JOIN source_corpus sc ON sd.corpus_id = sc.corpus_id
     WHERE sc.project_id = 1
     GROUP BY status
     ORDER BY status
-""")
+"""
+)
 
 print("Document Status:")
 print("-" * 70)
@@ -29,7 +31,7 @@ total = 0
 processed = 0
 for status, count in cur.fetchall():
     total += count
-    if status == 'processed':
+    if status == "processed":
         processed = count
     print(f"  {status:12s}: {count:6,d} ({count/387639*100:5.1f}%)")
 
@@ -48,11 +50,13 @@ if total > 0:
 cur.execute("SELECT COUNT(*) FROM lemma WHERE project_id = 1")
 lemma_count = cur.fetchone()[0]
 
-cur.execute("""
+cur.execute(
+    """
     SELECT SUM(freq_abs)
     FROM lemma_project_stat
     WHERE project_id = 1
-""")
+"""
+)
 token_count = cur.fetchone()[0] or 0
 
 print("Lemma Statistics:")

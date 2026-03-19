@@ -61,4 +61,3 @@ def test_player_loads_and_reloads_playback_settings():
     assert service.gap_ms == 555
     assert service.post_roll_ms == 666
     assert service.play_mode == "interrupt"
-

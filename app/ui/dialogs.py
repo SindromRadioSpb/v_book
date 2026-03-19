@@ -1,15 +1,18 @@
 """Dialog windows."""
+
 import logging
+
 from PyQt6.QtWidgets import (
     QDialog,
-    QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QTextEdit,
-    QPushButton,
     QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
+
 from app.infra.security import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -65,18 +68,18 @@ class CreateProjectDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Validation Error",
-                "Project name is too long (max 255 characters).\n\nPlease use a shorter name."
+                "Project name is too long (max 255 characters).\n\nPlease use a shorter name.",
             )
             return
 
         # Check for problematic characters (basic validation)
-        forbidden_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        forbidden_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
         if any(char in name for char in forbidden_chars):
             QMessageBox.warning(
                 self,
                 "Validation Error",
                 f"Project name contains forbidden characters.\n\n"
-                f"Please avoid: {' '.join(forbidden_chars)}"
+                f"Please avoid: {' '.join(forbidden_chars)}",
             )
             return
 
@@ -84,7 +87,7 @@ class CreateProjectDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Validation Error",
-                "Description is too long (max 10,000 characters).\n\nPlease shorten the description."
+                "Description is too long (max 10,000 characters).\n\nPlease shorten the description.",
             )
             return
 
@@ -135,8 +138,8 @@ class TextViewDialog(QDialog):
 
         # Apply highlighting if requested
         if highlight_text:
-            from PyQt6.QtGui import QTextCursor, QTextCharFormat
             from PyQt6.QtCore import Qt
+            from PyQt6.QtGui import QTextCharFormat, QTextCursor
 
             cursor = text_edit.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
@@ -197,7 +200,7 @@ class WhyTranslationDialog(QDialog):
             "dict": "Offline Dictionary",
             "mt_cache": "Machine Translation (Cached)",
             "mt": "Machine Translation (Live)",
-            "none": "No Translation Found"
+            "none": "No Translation Found",
         }.get(translation_result.source, translation_result.source)
         info_layout.addWidget(QLabel(f"<b>Source:</b> {source_display}"))
 
@@ -213,7 +216,7 @@ class WhyTranslationDialog(QDialog):
                 "import": "Imported from Dictionary",
                 "mt_accept": "MT Suggestion (Accepted)",
                 "mt_auto": "MT Automatic",
-                "merge": "Merged Entry"
+                "merge": "Merged Entry",
             }.get(translation_result.origin, translation_result.origin)
             info_layout.addWidget(QLabel(f"<b>Origin:</b> {origin_display}"))
 
@@ -227,7 +230,9 @@ class WhyTranslationDialog(QDialog):
 
         # Dictionary source
         if translation_result.dict_source_name:
-            info_layout.addWidget(QLabel(f"<b>Dictionary:</b> {translation_result.dict_source_name}"))
+            info_layout.addWidget(
+                QLabel(f"<b>Dictionary:</b> {translation_result.dict_source_name}")
+            )
 
         # MT provider
         if translation_result.provider:

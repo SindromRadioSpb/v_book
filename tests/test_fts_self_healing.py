@@ -87,9 +87,7 @@ class TestFTSSelfHealing:
             conn.execute(
                 "INSERT INTO dict_project (project_id, library_id, name) VALUES (1, 1, 'Test Project')"
             )
-            conn.execute(
-                "INSERT INTO library (library_id, name) VALUES (1, 'Test Library')"
-            )
+            conn.execute("INSERT INTO library (library_id, name) VALUES (1, 'Test Library')")
             conn.execute(
                 "INSERT INTO source_corpus (corpus_id, project_id, name) VALUES (1, 1, 'Test Corpus')"
             )
@@ -197,8 +195,12 @@ class TestFTSSelfHealing:
         try:
             # Insert test data
             conn.execute("INSERT INTO library (library_id, name) VALUES (1, 'Test')")
-            conn.execute("INSERT INTO dict_project (project_id, library_id, name) VALUES (1, 1, 'Test')")
-            conn.execute("INSERT INTO source_corpus (corpus_id, project_id, name) VALUES (1, 1, 'Test')")
+            conn.execute(
+                "INSERT INTO dict_project (project_id, library_id, name) VALUES (1, 1, 'Test')"
+            )
+            conn.execute(
+                "INSERT INTO source_corpus (corpus_id, project_id, name) VALUES (1, 1, 'Test')"
+            )
             conn.execute(
                 "INSERT INTO source_document (doc_id, corpus_id, file_path, file_name, file_ext, sha256) "
                 "VALUES (1, 1, '/test', 'test.txt', '.txt', 'abc123')"

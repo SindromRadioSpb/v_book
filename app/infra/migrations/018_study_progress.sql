@@ -72,4 +72,3 @@ WHERE study_progress_id IS NULL;
 -- Schema version
 -- ---------------------------------------------------------------------------
 UPDATE schema_meta SET value = '18' WHERE key = 'schema_version';
-

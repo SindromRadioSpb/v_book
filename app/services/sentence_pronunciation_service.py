@@ -7,6 +7,7 @@ Key contract:
 - QC tiers: ok (>=0.75 coverage), partial (0.40-0.75), rejected (<0.40), failed (error).
 - See docs/SENTENCES_NIQQUD.md for full contract.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,8 +16,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 SANITIZER_VERSION = "1"
 
 # Guard thresholds (can be overridden per-call via GuardParams)
-DEFAULT_MIN_LEN = 5        # characters
-DEFAULT_MAX_LEN = 2000     # characters
+DEFAULT_MIN_LEN = 5  # characters
+DEFAULT_MAX_LEN = 2000  # characters
 DEFAULT_MIN_HE_RATIO = 0.10  # fraction of Hebrew letter chars in preprocessed text
 
 # QC thresholds
@@ -44,6 +44,7 @@ DEFAULT_SEGMENT_MAX_CHARS = 380
 
 
 # ── Hebrew helpers ──────────────────────────────────────────────────────────────
+
 
 def _is_hebrew_letter(char: str) -> bool:
     """Return True if char is a Hebrew letter (U+05D0–U+05EA, U+FB1D–U+FB4E)."""
@@ -76,16 +77,14 @@ def compute_niqqud_coverage(niqqud_text: str) -> float:
     he_words = [w for w in words if any(_is_hebrew_letter(c) for c in w)]
     if not he_words:
         return 0.0
-    words_with_nikud = sum(
-        1 for w in he_words if any(_count_nikud(c) for c in w)
-    )
+    words_with_nikud = sum(1 for w in he_words if any(_count_nikud(c) for c in w))
     return words_with_nikud / len(he_words)
 
 
 # ── Segmenter ───────────────────────────────────────────────────────────────────
 
 # Clause boundary pattern: split after [.,;:!?] followed by whitespace, or on newlines.
-_CLAUSE_BOUNDARY_RE = re.compile(r'(?<=[.,;:!?\n])\s+|\n+')
+_CLAUSE_BOUNDARY_RE = re.compile(r"(?<=[.,;:!?\n])\s+|\n+")
 
 
 class SentenceSegmenter:
@@ -94,7 +93,7 @@ class SentenceSegmenter:
     def __init__(self, max_chars: int = DEFAULT_SEGMENT_MAX_CHARS):
         self.max_chars = max_chars
 
-    def split(self, text: str) -> List[str]:
+    def split(self, text: str) -> list[str]:
         """Return list of segments, each ≤ max_chars if possible.
 
         If a single clause is already longer than max_chars, it passes through
@@ -105,7 +104,7 @@ class SentenceSegmenter:
 
         # Try splitting on clause boundaries
         parts = _CLAUSE_BOUNDARY_RE.split(text)
-        segments: List[str] = []
+        segments: list[str] = []
         current = ""
 
         for part in parts:
@@ -129,6 +128,7 @@ class SentenceSegmenter:
 
 # ── Guard params ────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class GuardParams:
     min_len: int = DEFAULT_MIN_LEN
@@ -137,6 +137,7 @@ class GuardParams:
 
 
 # ── Service ─────────────────────────────────────────────────────────────────────
+
 
 class SentencePronunciationService:
     """Core CRUD + QC for the sentence_pronunciation table."""
@@ -166,18 +167,33 @@ class SentencePronunciationService:
 
     # ── Text preprocessing ────────────────────────────────────────────────────
 
-    _FORMAT_CODEPOINTS = frozenset([
-        0x061C, 0x200C, 0x200D, 0x200E, 0x200F,
-        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-        0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF,
-    ])
+    _FORMAT_CODEPOINTS = frozenset(
+        [
+            0x061C,
+            0x200C,
+            0x200D,
+            0x200E,
+            0x200F,
+            0x202A,
+            0x202B,
+            0x202C,
+            0x202D,
+            0x202E,
+            0x2060,
+            0x2066,
+            0x2067,
+            0x2068,
+            0x2069,
+            0xFEFF,
+        ]
+    )
     _MULTISPACE_RE = re.compile(r"[ \t]+")
 
     @classmethod
     def preprocess_text(cls, text: str) -> str:
         """Strip bidi/joiners, normalize whitespace; keep punctuation and numbers."""
-        chars: List[str] = []
-        for char in (text or ""):
+        chars: list[str] = []
+        for char in text or "":
             if ord(char) in cls._FORMAT_CODEPOINTS:
                 continue
             chars.append(char)
@@ -192,8 +208,8 @@ class SentencePronunciationService:
     def should_process(
         text: str,
         *,
-        guard: Optional[GuardParams] = None,
-    ) -> Tuple[bool, str]:
+        guard: GuardParams | None = None,
+    ) -> tuple[bool, str]:
         """Check whether a sentence should be processed.
 
         Returns (True, "") if ok, or (False, skip_reason) otherwise.
@@ -216,12 +232,13 @@ class SentencePronunciationService:
     # ── QC ────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def run_qc(niqqud_text: str) -> Tuple[str, Optional[str], Optional[float]]:
+    def run_qc(niqqud_text: str) -> tuple[str, str | None, float | None]:
         """Validate generated niqqud text.
 
         Returns (qc_status, qc_reason, niqqud_coverage).
         """
         from app.services.pronunciation_quality_service import PronunciationQualityService
+
         if not niqqud_text or not niqqud_text.strip():
             return "rejected", "empty_output", 0.0
 
@@ -240,7 +257,7 @@ class SentencePronunciationService:
 
     @staticmethod
     def _now_str() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def upsert_auto(
         self,
@@ -250,12 +267,12 @@ class SentencePronunciationService:
         lang: str,
         src_hash: str,
         src_preprocessed: str,
-        niqqud_text: Optional[str],
-        confidence: Optional[float],
+        niqqud_text: str | None,
+        confidence: float | None,
         qc_status: str,
-        qc_reason: Optional[str],
-        niqqud_coverage: Optional[float],
-        phonikud_version: Optional[str],
+        qc_reason: str | None,
+        niqqud_coverage: float | None,
+        phonikud_version: str | None,
         mode: str = "fill_only",  # "fill_only" | "rebuild"
     ) -> str:
         """Insert or update a sentence_pronunciation row (auto source).
@@ -274,10 +291,7 @@ class SentencePronunciationService:
             if existing.is_override:
                 return "skipped_has_override"
             if mode == "fill_only":
-                if (
-                    existing.src_hash == src_hash
-                    and existing.niqqud_text
-                ):
+                if existing.src_hash == src_hash and existing.niqqud_text:
                     return "skipped_same_hash"
             else:  # rebuild
                 if existing.src_hash == src_hash and existing.niqqud_text:
@@ -332,7 +346,7 @@ class SentencePronunciationService:
         src_preprocessed: str,
         error_kind: str,
         error_details: str,
-        phonikud_version: Optional[str],
+        phonikud_version: str | None,
     ) -> None:
         """Record a failed generation attempt without overwriting an override."""
         existing = session.get(SentencePronunciation, sentence_id)
@@ -376,10 +390,11 @@ class SentencePronunciationService:
         *,
         sentence_id: int,
         niqqud_text: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> None:
         """Save a manual override — sets is_override=1, source='manual'."""
         from app.services.pronunciation_quality_service import PronunciationQualityService
+
         clean_text = PronunciationQualityService.sanitize_tts_text(niqqud_text)
         now = self._now_str()
         existing = session.get(SentencePronunciation, sentence_id)
@@ -434,7 +449,7 @@ class SentencePronunciationService:
         self,
         session: Session,
         sentence_id: int,
-    ) -> Optional[SentenceNiqqudOverlay]:
+    ) -> SentenceNiqqudOverlay | None:
         """Return the effective niqqud overlay for one sentence_id, or None."""
         row = session.get(SentencePronunciation, sentence_id)
         if row is None:
@@ -444,8 +459,8 @@ class SentencePronunciationService:
     def bulk_get_niqqud(
         self,
         session: Session,
-        sentence_ids: List[int],
-    ) -> Dict[int, SentenceNiqqudOverlay]:
+        sentence_ids: list[int],
+    ) -> dict[int, SentenceNiqqudOverlay]:
         """Batch lookup: {sentence_id: SentenceNiqqudOverlay}.
 
         Only returns rows where niqqud_text is not empty (qc_status ok/partial/auto_fixed/manual).
@@ -462,6 +477,7 @@ class SentencePronunciationService:
     @staticmethod
     def _to_overlay(row: SentencePronunciation) -> SentenceNiqqudOverlay:
         from app.services.pronunciation_quality_service import PronunciationQualityService
+
         # Only serve niqqud_text if it has actual nikud marks; otherwise expose None
         # (so the UI won't show empty/plain text as if it were nikud-ized)
         text = row.niqqud_text

@@ -32,7 +32,9 @@ def test_pronunciation_import_export_roundtrip():
 
         with in_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f, delimiter="\t")
-            writer.writerow(["lang", "src_norm", "niqqud_text", "ipa", "source", "is_override", "notes"])
+            writer.writerow(
+                ["lang", "src_norm", "niqqud_text", "ipa", "source", "is_override", "notes"]
+            )
             writer.writerow(["he", "shalom", "שָׁלוֹם", "", "manual", "1", "seed"])
             writer.writerow(["he", "bayit", "בַּיִת", "", "auto", "0", "seed"])
 
@@ -77,7 +79,9 @@ def test_pronunciation_import_keeps_manual_override():
 
         with in_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f, delimiter="\t")
-            writer.writerow(["lang", "src_norm", "niqqud_text", "ipa", "source", "is_override", "notes"])
+            writer.writerow(
+                ["lang", "src_norm", "niqqud_text", "ipa", "source", "is_override", "notes"]
+            )
             writer.writerow(["he", "shalom", "AUTO", "", "auto", "0", "auto"])
 
         with Session(engine) as session:

@@ -4,10 +4,9 @@
 Tests P1 Scenario 7 verification without manual UI interaction.
 """
 
-import unittest
 import os
 import tempfile
-import shutil
+import unittest
 from pathlib import Path
 
 from app.services.db_service import DBService
@@ -30,10 +29,11 @@ class TestP1VerificationService(unittest.TestCase):
 
         # Apply M7 migrations for TM support
         import sqlite3
-        from pathlib import Path
 
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
 
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
@@ -42,7 +42,7 @@ class TestP1VerificationService(unittest.TestCase):
 
         # Create minimal test data
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject, Lemma, LemmaProjectStat
+            from app.infra.sa_models import DictProject, Lemma, LemmaProjectStat, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -80,7 +80,7 @@ class TestP1VerificationService(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up test database."""
-        if hasattr(cls, 'test_db'):
+        if hasattr(cls, "test_db"):
             try:
                 os.unlink(cls.test_db.name)
             except:

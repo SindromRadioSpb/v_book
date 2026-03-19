@@ -2,8 +2,9 @@
 
 import logging
 import time
+from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import Any, TypeVar
 
 from sqlalchemy.exc import OperationalError
 
@@ -27,7 +28,7 @@ def _is_locked_operational_error(exc: OperationalError) -> bool:
 
 def _rollback_from_callable(
     func: Callable[..., Any],
-    rollback_callback: Optional[Callable[[], None]],
+    rollback_callback: Callable[[], None] | None,
 ) -> None:
     rollback_fn = rollback_callback
     if rollback_fn is None:
@@ -48,8 +49,8 @@ def _rollback_from_callable(
 def _build_backoff_schedule(
     *,
     retries: int,
-    backoff_schedule: Optional[Sequence[float]],
-    initial_delay: Optional[float],
+    backoff_schedule: Sequence[float] | None,
+    initial_delay: float | None,
     backoff_factor: float,
     max_delay: float,
 ) -> tuple[float, ...]:
@@ -73,8 +74,8 @@ def _build_backoff_schedule(
 
 def retry_on_db_locked(
     max_retries: int = 4,
-    backoff_schedule: Optional[Sequence[float]] = None,
-    initial_delay: Optional[float] = None,
+    backoff_schedule: Sequence[float] | None = None,
+    initial_delay: float | None = None,
     backoff_factor: float = 2.0,
     max_delay: float = 2.0,
 ) -> Callable:
@@ -118,12 +119,12 @@ def with_retry_on_locked(
     func: Callable[..., T],
     *args: Any,
     max_retries: int = 4,
-    backoff_schedule: Optional[Sequence[float]] = None,
-    initial_delay: Optional[float] = None,
+    backoff_schedule: Sequence[float] | None = None,
+    initial_delay: float | None = None,
     backoff_factor: float = 2.0,
     max_delay: float = 2.0,
-    rollback_callback: Optional[Callable[[], None]] = None,
-    retry_callback: Optional[Callable[[int, int, float, str], None]] = None,
+    rollback_callback: Callable[[], None] | None = None,
+    retry_callback: Callable[[int, int, float, str], None] | None = None,
     **kwargs: Any,
 ) -> T:
     """Execute function with retry/backoff for transient SQLite lock windows.
@@ -146,7 +147,7 @@ def with_retry_on_locked(
         max_delay=max_delay,
     )
 
-    last_exception: Optional[OperationalError] = None
+    last_exception: OperationalError | None = None
 
     for attempt_idx in range(total_attempts):
         try:

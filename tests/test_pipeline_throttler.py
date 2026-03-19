@@ -9,6 +9,7 @@ Covers:
 - Throttler does not interfere with non-heavy categories
 - After unregister, slot becomes free again
 """
+
 from __future__ import annotations
 
 import pytest

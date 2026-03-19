@@ -30,12 +30,10 @@ def _seed_base_data(db_path: Path, *, with_orphans: bool) -> None:
         cur.execute("PRAGMA foreign_keys=OFF")
         cur.execute("INSERT INTO library(library_id, name) VALUES (1, 'Default Library')")
         cur.execute(
-            "INSERT INTO dict_project(project_id, library_id, name) "
-            "VALUES (1, 1, 'Reference')"
+            "INSERT INTO dict_project(project_id, library_id, name) " "VALUES (1, 1, 'Reference')"
         )
         cur.execute(
-            "INSERT INTO source_corpus(corpus_id, project_id, name) "
-            "VALUES (1, 1, 'Main Corpus')"
+            "INSERT INTO source_corpus(corpus_id, project_id, name) " "VALUES (1, 1, 'Main Corpus')"
         )
         if with_orphans:
             # Simulate leftover rows from a corrupted delete path.
@@ -85,9 +83,7 @@ def test_create_project_allocates_next_ids_without_orphans():
         _seed_base_data(db_path, with_orphans=False)
         engine, session = _make_session(db_path)
         try:
-            lib = session.execute(
-                select(Library).where(Library.library_id == 1)
-            ).scalar_one()
+            lib = session.execute(select(Library).where(Library.library_id == 1)).scalar_one()
             project = _make_service().create_project(
                 session,
                 name="Regular project",
@@ -115,9 +111,7 @@ def test_create_project_avoids_reusing_ids_when_orphans_exist():
         _seed_base_data(db_path, with_orphans=True)
         engine, session = _make_session(db_path)
         try:
-            lib = session.execute(
-                select(Library).where(Library.library_id == 1)
-            ).scalar_one()
+            lib = session.execute(select(Library).where(Library.library_id == 1)).scalar_one()
             project = _make_service().create_project(
                 session,
                 name="Recovered project",
@@ -142,4 +136,3 @@ def test_create_project_avoids_reusing_ids_when_orphans_exist():
             engine.dispose()
     finally:
         db_path.unlink(missing_ok=True)
-

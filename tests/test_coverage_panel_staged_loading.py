@@ -29,7 +29,9 @@ def test_coverage_worker_emits_partial_before_lemma_metrics(monkeypatch):
         def compute_termcluster_coverage(self, session, project_id, include_draft=False):
             return CoverageMetrics(total=10, covered=9, uncovered=1, coverage_pct=90.0)
 
-        def list_untranslated_lemmas(self, session, project_id, limit=100, order_by="freq", include_draft=False):
+        def list_untranslated_lemmas(
+            self, session, project_id, limit=100, order_by="freq", include_draft=False
+        ):
             return [
                 LemmaCoverageRow(
                     lemma_id=1,

@@ -8,7 +8,9 @@ from pathlib import Path
 
 
 def _load_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "check_perf_correctness_harness.py"
+    module_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "check_perf_correctness_harness.py"
+    )
     spec = importlib.util.spec_from_file_location("check_perf_correctness_harness", module_path)
     assert spec is not None
     assert spec.loader is not None
@@ -174,4 +176,3 @@ def test_correctness_harness_malformed_json_fails(tmp_path: Path) -> None:
     assert rc == 1
     text = report.read_text(encoding="utf-8")
     assert "Malformed JSON" in text
-

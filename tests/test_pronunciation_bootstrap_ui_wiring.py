@@ -42,6 +42,7 @@ def test_dialog_renders_health_status_and_samples(qtbot):
     assert "latency=12ms" in dialog.health_details_label.text()
     assert "שלום -> שָׁלוֹם" in dialog.health_samples_label.text()
 
+
 def test_dialog_sanitizes_model_path_before_persist(qtbot):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
@@ -54,7 +55,10 @@ def test_dialog_sanitizes_model_path_before_persist(qtbot):
     dialog._save_settings()
 
     assert dialog.model_path_edit.text() == "J:/Models/phonikud/phonikud-1.0.int8"
-    assert settings.get_string("pronunciation/phonikud/model_path", "") == "J:/Models/phonikud/phonikud-1.0.int8"
+    assert (
+        settings.get_string("pronunciation/phonikud/model_path", "")
+        == "J:/Models/phonikud/phonikud-1.0.int8"
+    )
 
 
 def test_dialog_accepts_selected_items_scope(qtbot):

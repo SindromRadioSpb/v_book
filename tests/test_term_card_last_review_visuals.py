@@ -28,7 +28,9 @@ def test_term_card_last_review_column_and_row_highlight():
         ]
     )
 
-    assert model.headerData(9, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Last Review"
+    assert (
+        model.headerData(9, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Last Review"
+    )
     assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == "Easy"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None

@@ -3,7 +3,9 @@ from google.cloud import translate_v3
 
 
 def main() -> None:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"J:\Project_Vibe\V_book -info files\api_key_Google_translait\hdle-translate-sa.json"
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
+        r"J:\Project_Vibe\V_book -info files\api_key_Google_translait\hdle-translate-sa.json"
+    )
 
     project_id = "gen-lang-client-0212091660"
     location = "global"

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -107,20 +107,26 @@ class DerivedArtifactGovernanceService:
         artifacts = [
             self._build_lemma_doc_stat_metric(
                 project_id=int(project_id),
-                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
+                is_reference_project=bool(
+                    getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)
+                ),
                 lemma_doc_rows=int(lemma_doc_rows or 0),
                 processed_docs=processed_docs,
             ),
             self._build_lemma_project_stat_metric(
                 project_id=int(project_id),
-                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
+                is_reference_project=bool(
+                    getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)
+                ),
                 lemma_project_rows=int(lemma_project_rows or 0),
                 processed_docs=processed_docs,
             ),
             self._build_snapshot_metric(
                 snapshot_summary,
                 project_id=int(project_id),
-                is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
+                is_reference_project=bool(
+                    getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)
+                ),
             ),
             self._build_processor_run_metric(
                 project_id=int(project_id),
@@ -146,7 +152,9 @@ class DerivedArtifactGovernanceService:
         return DerivedArtifactGovernanceSummaryDTO(
             project_id=int(project.project_id),
             project_name=str(project.name or ""),
-            is_reference_project=bool(getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)),
+            is_reference_project=bool(
+                getattr(project, "is_general_corpus", 0) or getattr(project, "is_reference", 0)
+            ),
             total_docs=int(total_docs or 0),
             processed_docs=processed_docs,
             snapshot_sentence_coverage_pct=snapshot_summary.sentence_coverage_pct,
@@ -170,29 +178,33 @@ class DerivedArtifactGovernanceService:
         )
 
     @staticmethod
-    def _scalar(session: Session, stmt, params: Optional[dict[str, Any]] = None) -> tuple[int, float]:
+    def _scalar(session: Session, stmt, params: dict[str, Any] | None = None) -> tuple[int, float]:
         started_at = time.perf_counter()
         value = session.execute(stmt, params or {}).scalar() or 0
         return int(value or 0), round(time.perf_counter() - started_at, 3)
 
     @staticmethod
-    def _rows(session: Session, stmt, params: Optional[dict[str, Any]] = None) -> tuple[list[dict[str, Any]], float]:
+    def _rows(
+        session: Session, stmt, params: dict[str, Any] | None = None
+    ) -> tuple[list[dict[str, Any]], float]:
         started_at = time.perf_counter()
         rows = [dict(row) for row in session.execute(stmt, params or {}).mappings().all()]
         return rows, round(time.perf_counter() - started_at, 3)
 
     @staticmethod
-    def _mapping(session: Session, stmt, params: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], float]:
+    def _mapping(
+        session: Session, stmt, params: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], float]:
         started_at = time.perf_counter()
         row = dict(session.execute(stmt, params or {}).mappings().one())
         return row, round(time.perf_counter() - started_at, 3)
 
     @staticmethod
     def _utc_now() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     @staticmethod
-    def _format_ratio(numerator: int, denominator: int) -> Optional[str]:
+    def _format_ratio(numerator: int, denominator: int) -> str | None:
         if denominator <= 0:
             return None
         return f"{(float(numerator) / float(denominator)):.2f}"
@@ -362,7 +374,8 @@ class DerivedArtifactGovernanceService:
             detail_lines.append(f"Approx. {ratio} run rows per processed document.")
         if status_rows:
             detail_lines.append(
-                "Status mix: " + ", ".join(f"{row['status']}={int(row['n']):,}" for row in status_rows)
+                "Status mix: "
+                + ", ".join(f"{row['status']}={int(row['n']):,}" for row in status_rows)
             )
         return DerivedArtifactMetricDTO(
             artifact_key="processor_run",
@@ -386,7 +399,9 @@ class DerivedArtifactGovernanceService:
             maintenance_cli_hint=(
                 f"python scripts\\prune_project_telemetry.py --db-path <db-path> --project-id {int(project_id)} --keep-latest-ok 200"
             ),
-            maintenance_preflight_hint=self._build_telemetry_retention_preflight_cli(project_id=project_id),
+            maintenance_preflight_hint=self._build_telemetry_retention_preflight_cli(
+                project_id=project_id
+            ),
         )
 
     def _build_run_error_metric(
@@ -405,7 +420,8 @@ class DerivedArtifactGovernanceService:
             detail_lines.append(f"Approx. error row rate: {error_rate:.4f}% of run rows.")
         if error_stage_rows:
             detail_lines.append(
-                "Stage mix: " + ", ".join(f"{row['stage']}={int(row['n']):,}" for row in error_stage_rows)
+                "Stage mix: "
+                + ", ".join(f"{row['stage']}={int(row['n']):,}" for row in error_stage_rows)
             )
         return DerivedArtifactMetricDTO(
             artifact_key="run_error",
@@ -428,7 +444,7 @@ class DerivedArtifactGovernanceService:
         )
 
     @staticmethod
-    def _build_reference_rebuild_cli(*, project_id: int, is_reference_project: bool) -> Optional[str]:
+    def _build_reference_rebuild_cli(*, project_id: int, is_reference_project: bool) -> str | None:
         if not is_reference_project:
             return None
         return (
@@ -441,7 +457,7 @@ class DerivedArtifactGovernanceService:
         *,
         project_id: int,
         is_reference_project: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         if not is_reference_project:
             return None
         return (
@@ -459,7 +475,7 @@ class DerivedArtifactGovernanceService:
         )
 
     @staticmethod
-    def _format_pct(value: Optional[float]) -> str:
+    def _format_pct(value: float | None) -> str:
         if value is None:
             return "n/a"
         return f"{float(value):.2f}%"

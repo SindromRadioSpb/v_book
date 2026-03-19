@@ -4,9 +4,9 @@ This module provides shared functionality for creating WAL-safe database copies,
 computing file hashes, and managing storage directories.
 """
 
-import sqlite3
 import hashlib
 import logging
+import sqlite3
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

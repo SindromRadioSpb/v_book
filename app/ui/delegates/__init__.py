@@ -1,2 +1,1 @@
 """UI delegates package."""
-

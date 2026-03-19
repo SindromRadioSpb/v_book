@@ -5,6 +5,7 @@ This script configures MT provider settings:
 - Configures provider chain with local_nllb first
 - Enables local_nllb provider
 """
+
 import json
 from PyQt6.QtCore import QSettings
 
@@ -12,10 +13,7 @@ from PyQt6.QtCore import QSettings
 def enable_mt_providers():
     """Enable MT providers with default configuration."""
     settings = QSettings(
-        QSettings.Format.IniFormat,
-        QSettings.Scope.UserScope,
-        "HDLE_Premium",
-        "HDLE_Premium"
+        QSettings.Format.IniFormat, QSettings.Scope.UserScope, "HDLE_Premium", "HDLE_Premium"
     )
 
     print("Configuring MT provider settings...")
@@ -37,7 +35,10 @@ def enable_mt_providers():
         "deepl": {"enabled": False, "rate_limit": 60},  # Disabled by default (requires API key)
         "microsoft": {"enabled": False, "rate_limit": 60},  # Disabled by default (requires API key)
         "libretranslate": {"enabled": False, "rate_limit": 60},  # Disabled by default
-        "local_seamless": {"enabled": False, "rate_limit": 9999},  # Disabled by default (model not installed)
+        "local_seamless": {
+            "enabled": False,
+            "rate_limit": 9999,
+        },  # Disabled by default (model not installed)
     }
 
     print("\n[OK] Configured individual providers:")

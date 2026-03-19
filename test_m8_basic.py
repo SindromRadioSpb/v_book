@@ -7,11 +7,10 @@ Tests TermCardService and migration 005.
 import os
 import tempfile
 import unittest
-from pathlib import Path
 
+from app.infra.sa_models import TermCluster
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
-from app.infra.sa_models import TermCluster, TermAlias, StopwordSet
 
 
 class TestM8BasicCuration(unittest.TestCase):
@@ -20,7 +19,7 @@ class TestM8BasicCuration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test database."""
-        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         cls.temp_db.close()
         cls.db_path = cls.temp_db.name
 
@@ -32,6 +31,7 @@ class TestM8BasicCuration(unittest.TestCase):
         with cls.db_service.get_session() as session:
             # Create test project
             from app.services.project_service import ProjectService
+
             project_service = ProjectService()
             project = project_service.create_project(
                 session,
@@ -58,7 +58,9 @@ class TestM8BasicCuration(unittest.TestCase):
 
         with self.db_service.get_session() as session:
             # Check schema_meta
-            result = session.execute(text("SELECT value FROM schema_meta WHERE key='schema_version'"))
+            result = session.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            )
             version = result.scalar()
             # Should be at least 5 (M8 migration)
             # But might be higher if M7 migrations also ran
@@ -92,9 +94,9 @@ class TestM8BasicCuration(unittest.TestCase):
             session.commit()
 
             # Verify
-            retrieved = session.query(TermCluster).filter(
-                TermCluster.canonical_key == "בית_ספר"
-            ).first()
+            retrieved = (
+                session.query(TermCluster).filter(TermCluster.canonical_key == "בית_ספר").first()
+            )
             self.assertIsNotNone(retrieved)
             self.assertEqual(retrieved.curation_status, "auto")
             self.assertIsNone(retrieved.pinned_translation)

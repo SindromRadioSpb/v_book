@@ -1,6 +1,8 @@
 """Text preprocessing pipeline (M3)."""
+
 import logging
-from app.domain.hebrew_utils import strip_nikud, strip_cantillation, normalize_whitespace
+
+from app.domain.hebrew_utils import normalize_whitespace, strip_cantillation, strip_nikud
 
 logger = logging.getLogger(__name__)
 

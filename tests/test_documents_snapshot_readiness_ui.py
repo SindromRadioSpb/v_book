@@ -164,7 +164,7 @@ def test_documents_view_copy_snapshot_coverage_cli_uses_safe_command(qtbot):
     text = app.clipboard().text()
     assert "--coverage-only" in text
     assert "--backfill-snapshots" in text
-    assert '--project-id 5' in text
+    assert "--project-id 5" in text
     assert "hewiki test.db" in text
     assert view.status_label.text == "Coverage CLI copied to clipboard."
 
@@ -183,4 +183,7 @@ def test_documents_view_snapshot_refresh_queues_when_worker_is_running():
     DocumentsView.refresh_snapshot_readiness(view)
 
     assert view._snapshot_refresh_pending is True
-    assert view.snapshot_readiness_panel.loading[-1] == "Refresh queued; current summary stays visible..."
+    assert (
+        view.snapshot_readiness_panel.loading[-1]
+        == "Refresh queued; current summary stays visible..."
+    )

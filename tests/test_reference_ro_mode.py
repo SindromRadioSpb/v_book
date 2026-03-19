@@ -8,6 +8,7 @@ Covers:
 - DBService.attach_reference / get_ref_session / detach_reference lifecycle
 - DBService.shutdown closes all reference managers
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -92,9 +93,7 @@ def test_ro_manager_query_only_pragma():
         mgr = ReadOnlyDatabaseManager(db_path)
         with mgr.get_session() as session:
             with pytest.raises(OperationalError):
-                session.execute(
-                    text("INSERT INTO ref_data VALUES (99, 'forbidden')")
-                )
+                session.execute(text("INSERT INTO ref_data VALUES (99, 'forbidden')"))
                 session.commit()
         mgr.close()
     finally:
@@ -111,9 +110,7 @@ def test_dbservice_attach_and_get_ref_session():
     try:
         DBService.attach_reference(project_id=999, db_path=db_path)
         with DBService.get_ref_session(999) as session:
-            val = session.execute(
-                text("SELECT val FROM ref_data WHERE id=1")
-            ).scalar()
+            val = session.execute(text("SELECT val FROM ref_data WHERE id=1")).scalar()
         assert val == "hello"
     finally:
         DBService.detach_reference(999)
@@ -137,9 +134,7 @@ def test_dbservice_attach_idempotent_same_path():
         DBService.attach_reference(project_id=888, db_path=db_path)
         DBService.attach_reference(project_id=888, db_path=db_path)  # no-op
         with DBService.get_ref_session(888) as session:
-            val = session.execute(
-                text("SELECT val FROM ref_data WHERE id=1")
-            ).scalar()
+            val = session.execute(text("SELECT val FROM ref_data WHERE id=1")).scalar()
         assert val == "hello"
     finally:
         DBService.detach_reference(888)

@@ -2,18 +2,19 @@
 
 This script tests batch translate functionality programmatically to diagnose issues.
 """
+
 import logging
 import sys
 from pathlib import Path
 
 # Set UTF-8 encoding for stdout to handle Hebrew text
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Setup logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 from sqlalchemy import create_engine
@@ -47,9 +48,7 @@ def test_batch_translate():
 
     # Step 2: Find project
     print("\n[STEP 2] Finding project 'Тест_Перевод'...")
-    project = session.query(DictProject).filter(
-        DictProject.name == "Тест_Перевод"
-    ).first()
+    project = session.query(DictProject).filter(DictProject.name == "Тест_Перевод").first()
 
     if not project:
         print("  [ERROR] Project 'Тест_Перевод' not found!")
@@ -62,17 +61,25 @@ def test_batch_translate():
 
     # Step 3: Get term clusters without translation
     print("\n[STEP 3] Finding term clusters without Russian translation...")
-    clusters = session.query(TermCluster).filter(
-        TermCluster.project_id == project.project_id,
-        (TermCluster.pinned_translation == None) | (TermCluster.pinned_translation == "")
-    ).limit(5).all()  # Limit to 5 for testing
+    clusters = (
+        session.query(TermCluster)
+        .filter(
+            TermCluster.project_id == project.project_id,
+            (TermCluster.pinned_translation == None) | (TermCluster.pinned_translation == ""),
+        )
+        .limit(5)
+        .all()
+    )  # Limit to 5 for testing
 
     if not clusters:
         print("  [INFO] No term clusters without translation found")
         # Try to get ANY clusters
-        clusters = session.query(TermCluster).filter(
-            TermCluster.project_id == project.project_id
-        ).limit(5).all()
+        clusters = (
+            session.query(TermCluster)
+            .filter(TermCluster.project_id == project.project_id)
+            .limit(5)
+            .all()
+        )
 
     print(f"  [OK] Found {len(clusters)} term clusters")
     for cluster in clusters:
@@ -86,8 +93,7 @@ def test_batch_translate():
     print("\n[STEP 4] Initializing local MT providers...")
     try:
         registered_count = initialize_local_providers(
-            db_session=session,
-            project_id=project.project_id
+            db_session=session, project_id=project.project_id
         )
         print(f"  [OK] Registered {registered_count} local providers")
     except Exception as e:
@@ -162,6 +168,7 @@ def test_batch_translate():
     except Exception as e:
         print(f"\n  [ERROR] Batch translate failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
     finally:

@@ -61,9 +61,9 @@ def test_update_translation_enters_serialized_write_gate(monkeypatch) -> None:
         service.update_translation(session, tm_id=1, translation="new", notes="edited")
 
         updated = session.execute(select(TMEntry).where(TMEntry.tm_id == 1)).scalar_one()
-        history_rows = session.execute(
-            select(TMEntryHistory).where(TMEntryHistory.tm_id == 1)
-        ).scalars().all()
+        history_rows = (
+            session.execute(select(TMEntryHistory).where(TMEntryHistory.tm_id == 1)).scalars().all()
+        )
 
         assert updated.translation == "new"
         assert updated.notes == "edited"
@@ -72,4 +72,3 @@ def test_update_translation_enters_serialized_write_gate(monkeypatch) -> None:
     finally:
         session.close()
         engine.dispose()
-

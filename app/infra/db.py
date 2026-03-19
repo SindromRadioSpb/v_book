@@ -1,9 +1,9 @@
 """Database connection and migration management."""
+
 import logging
 import os
 import sqlite3 as _sqlite3
 from pathlib import Path
-from typing import Optional
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -63,9 +63,7 @@ class DatabaseManager:
             except Exception:
                 pass  # Don't block checkout on PRAGMA failure
 
-        self.SessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=self.engine
-        )
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
         # PERF-SCALE PATCH-C: dedicated read engine.
         # Separate connection pool for read-only workers (page loads, searches,
@@ -171,15 +169,11 @@ class DatabaseManager:
                 reason = f"pre_migration_{current_version}_to_{target_version}"
 
                 try:
-                    backup_info = backup_service.create_migration_backup(
-                        self.db_path, reason
-                    )
+                    backup_info = backup_service.create_migration_backup(self.db_path, reason)
                     logger.info(f"Migration backup created: {backup_info.backup_path}")
                 except Exception as e:
                     logger.error(f"Backup failed: {e}")
-                    raise RuntimeError(
-                        f"Cannot proceed with migration - backup failed: {e}"
-                    ) from e
+                    raise RuntimeError(f"Cannot proceed with migration - backup failed: {e}") from e
 
                 # Apply migrations
                 for sql_file in pending_migrations:
@@ -227,9 +221,7 @@ class DatabaseManager:
 
                 # NEW: Cleanup old backups (retention policy)
                 backup_dir = self.db_path.parent / "backups"
-                backup_service.cleanup_old_backups(
-                    backup_dir, max_count=10, max_age_days=30
-                )
+                backup_service.cleanup_old_backups(backup_dir, max_count=10, max_age_days=30)
 
         except RuntimeError as e:
             # Lock acquisition or backup failure
@@ -344,9 +336,7 @@ class ReadOnlyDatabaseManager:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         if not self.db_path.exists():
-            raise FileNotFoundError(
-                f"Reference DB not found: {self.db_path}"
-            )
+            raise FileNotFoundError(f"Reference DB not found: {self.db_path}")
 
         # Use a creator function to open the SQLite file via the URI interface
         # with mode=ro.  This bypasses SQLAlchemy's URL-string path encoding
@@ -379,9 +369,7 @@ class ReadOnlyDatabaseManager:
             cursor.execute("PRAGMA cache_size=-65536")
             cursor.close()
 
-        self.SessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=self.engine
-        )
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         logger.info(f"ReadOnly reference DB opened: {self.db_path}")
 
     def get_session(self) -> Session:

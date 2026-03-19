@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -32,7 +32,7 @@ class AddToUserDictionaryDialog(QDialog):
         self,
         *,
         selected_count: int,
-        default_dictionary_id: Optional[int] = None,
+        default_dictionary_id: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -139,10 +139,10 @@ class AddToUserDictionaryDialog(QDialog):
             return
         self.accept()
 
-    def selected_dictionary_id(self) -> Optional[int]:
+    def selected_dictionary_id(self) -> int | None:
         return self.dictionary_combo.currentData()
 
-    def options(self) -> Dict[str, Any]:
+    def options(self) -> dict[str, Any]:
         tags = [t.strip() for t in self.tags_edit.text().split(",") if t.strip()]
         return {
             "skip_duplicates": self.skip_duplicates_checkbox.isChecked(),
@@ -156,8 +156,8 @@ def show_add_to_user_dictionary_dialog(
     *,
     parent=None,
     selected_count: int,
-    default_dictionary_id: Optional[int] = None,
-) -> Tuple[bool, Optional[int], Dict[str, Any]]:
+    default_dictionary_id: int | None = None,
+) -> tuple[bool, int | None, dict[str, Any]]:
     """Show modal dialog and return user choice."""
     dialog = AddToUserDictionaryDialog(
         selected_count=selected_count,
@@ -168,4 +168,3 @@ def show_add_to_user_dictionary_dialog(
     if result == QDialog.DialogCode.Accepted:
         return True, dialog.selected_dictionary_id(), dialog.options()
     return False, None, {}
-

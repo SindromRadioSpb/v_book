@@ -22,9 +22,9 @@ def test_tm_entry_model():
     print("\n[Test 1] TMEntry model has noise fields")
 
     # Check that fields exist
-    assert hasattr(TMEntry, 'is_noise'), "TMEntry missing is_noise field"
-    assert hasattr(TMEntry, 'noise_reason'), "TMEntry missing noise_reason field"
-    assert hasattr(TMEntry, 'norm_text'), "TMEntry missing norm_text field"
+    assert hasattr(TMEntry, "is_noise"), "TMEntry missing is_noise field"
+    assert hasattr(TMEntry, "noise_reason"), "TMEntry missing noise_reason field"
+    assert hasattr(TMEntry, "norm_text"), "TMEntry missing norm_text field"
 
     print("  [OK] TMEntry has is_noise, noise_reason, norm_text fields")
 
@@ -36,7 +36,7 @@ def test_admin_service_bulk_method():
     print("\n[Test 2] TranslationAdminService has set_noise_status_bulk method")
 
     service = TranslationAdminService()
-    assert hasattr(service, 'set_noise_status_bulk'), "Missing set_noise_status_bulk method"
+    assert hasattr(service, "set_noise_status_bulk"), "Missing set_noise_status_bulk method"
 
     print("  [OK] set_noise_status_bulk method exists")
 
@@ -53,7 +53,7 @@ def test_hide_noise_filter():
     sig = inspect.signature(service.search_tm_entries)
 
     # Verify filters parameter exists
-    assert 'filters' in sig.parameters, "search_tm_entries missing filters parameter"
+    assert "filters" in sig.parameters, "search_tm_entries missing filters parameter"
 
     print("  [OK] search_tm_entries accepts filters (including hide_noise)")
 
@@ -65,11 +65,7 @@ def test_bulk_worker_supports_tm_entry():
     print("\n[Test 4] BulkNoiseUpdateWorker supports TMEntry")
 
     # Create worker with TMEntry model
-    worker = BulkNoiseUpdateWorker(
-        model_class="TMEntry",
-        item_ids=[1, 2, 3],
-        is_noise=True
-    )
+    worker = BulkNoiseUpdateWorker(model_class="TMEntry", item_ids=[1, 2, 3], is_noise=True)
 
     assert worker.model_class == "TMEntry", "Worker didn't accept TMEntry model_class"
 
@@ -117,6 +113,7 @@ def main():
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

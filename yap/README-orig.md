@@ -6,7 +6,7 @@ yap is yet another parser written in Go. It was implemented to test the hypothes
 yap contains an implementation of the framework and parser of zpar from Z&N 2011 ([Transition-based Dependency Parsing with Rich Non-local Features by Zhang and Nivre, 2011](http://www.aclweb.org/anthology/P11-2033.pdf)) with flags for precise output parity (i.e. bug replication), trained on the morphologically disambiguated
 Modern Hebrew treebank.
 
-A live demo of parsing Hebrew texts is provided [here](http://onlp.openu.org.il/). 
+A live demo of parsing Hebrew texts is provided [here](http://onlp.openu.org.il/).
 
 yap is no longer under development. It is currently supported as part of the ONLP lab tool kit.
 
@@ -15,7 +15,7 @@ Publications
 
 A [paper on the morphological analysis and disambiguation aspect for Modern Hebrew
 and Universal Dependencies](http://www.aclweb.org/anthology/C/C16/C16-1033.pdf) was presented at COLING 2016.
-The complete joint morphosyntactic model, along with  benchmark experiments and error analysis are available in a TACL paper accepted for publication in 2018, to be uploaded soon. 
+The complete joint morphosyntactic model, along with  benchmark experiments and error analysis are available in a TACL paper accepted for publication in 2018, to be uploaded soon.
 
 yap was also used for parsing Hebrew, as well as many other languages, in the following academic studies:
 - The ONLP lab at the CoNLL shared Task on Raw-to-Dependencies parsing at CoNLL 2017
@@ -28,7 +28,7 @@ If you use yap for an academic publication, we'd appreciate a [note](reutts@open
 
 Licensing Highlights:
 ---------------------
-- The code is provided with a permissive license (apache 2.0), as is, and without warranties. 
+- The code is provided with a permissive license (apache 2.0), as is, and without warranties.
 - The data and lexicon the parser uses belong to [MILA](http://www.mila.cs.technion.ac.il/) at the Technion
 - For *production* use, please check with Prof. Alon Itay from The technion data/lexicon license conditions.
 
@@ -62,7 +62,7 @@ You may want to use a go workspace manager or have a shell script to set ``$GOPA
 
 Processing Modern Hebrew
 -----------
-Currently only Pipeline Morphological Analysis, Disambiguation, and Dependency Parsing 
+Currently only Pipeline Morphological Analysis, Disambiguation, and Dependency Parsing
 of pre-tokenized Hebrew text is supported. For Hebrew Morphological Analysis, the input
 format should have tokens separated by a newline, with another newline to separate sentences.
 

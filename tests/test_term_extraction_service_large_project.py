@@ -72,10 +72,18 @@ def test_extract_terms_collects_before_overwrite(monkeypatch):
             {np_key: {"lemma_phrase": "term np", "pos_pattern": "NOUN|NOUN"}},
         ),
     )
-    monkeypatch.setattr(service, "_clear_existing_terms", lambda *args, **kwargs: order.append("clear"))
-    monkeypatch.setattr(service, "_store_ngrams", lambda *args, **kwargs: order.append("store_ngrams") or 1)
-    monkeypatch.setattr(service, "_store_np_chunks", lambda *args, **kwargs: order.append("store_np") or 1)
-    monkeypatch.setattr(service, "_cluster_terms", lambda *args, **kwargs: order.append("cluster") or 2)
+    monkeypatch.setattr(
+        service, "_clear_existing_terms", lambda *args, **kwargs: order.append("clear")
+    )
+    monkeypatch.setattr(
+        service, "_store_ngrams", lambda *args, **kwargs: order.append("store_ngrams") or 1
+    )
+    monkeypatch.setattr(
+        service, "_store_np_chunks", lambda *args, **kwargs: order.append("store_np") or 1
+    )
+    monkeypatch.setattr(
+        service, "_cluster_terms", lambda *args, **kwargs: order.append("cluster") or 2
+    )
 
     report = service._extract_terms_for_project_legacy(
         _Session(),
@@ -166,7 +174,13 @@ def test_extract_terms_for_project_small_pipeline(monkeypatch, tmp_path: Path):
         lib = Library(name="lib")
         session.add(lib)
         session.flush()
-        project = DictProject(library_id=lib.library_id, name="project", src_lang="he", tgt_lang="ru", nlp_engine="mock")
+        project = DictProject(
+            library_id=lib.library_id,
+            name="project",
+            src_lang="he",
+            tgt_lang="ru",
+            nlp_engine="mock",
+        )
         session.add(project)
         session.flush()
         corpus = SourceCorpus(project_id=project.project_id, name="corpus")
@@ -190,8 +204,12 @@ def test_extract_terms_for_project_small_pipeline(monkeypatch, tmp_path: Path):
         session.flush()
         session.add_all(
             [
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=3, doc_freq=1),
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=3, doc_freq=1),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=3, doc_freq=1
+                ),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=3, doc_freq=1
+                ),
             ]
         )
         session.commit()
@@ -247,7 +265,13 @@ def test_cluster_terms_backfills_canonical_and_preserves_source_kinds(monkeypatc
         lib = Library(name="lib")
         session.add(lib)
         session.flush()
-        project = DictProject(library_id=lib.library_id, name="project", src_lang="he", tgt_lang="ru", nlp_engine="mock")
+        project = DictProject(
+            library_id=lib.library_id,
+            name="project",
+            src_lang="he",
+            tgt_lang="ru",
+            nlp_engine="mock",
+        )
         session.add(project)
         session.flush()
 
@@ -273,8 +297,12 @@ def test_cluster_terms_backfills_canonical_and_preserves_source_kinds(monkeypatc
         session.flush()
         session.add_all(
             [
-                NgramProjectStat(project_id=project.project_id, ngram_id=ng1.ngram_id, freq_abs=4, doc_freq=2),
-                NgramProjectStat(project_id=project.project_id, ngram_id=ng2.ngram_id, freq_abs=3, doc_freq=1),
+                NgramProjectStat(
+                    project_id=project.project_id, ngram_id=ng1.ngram_id, freq_abs=4, doc_freq=2
+                ),
+                NgramProjectStat(
+                    project_id=project.project_id, ngram_id=ng2.ngram_id, freq_abs=3, doc_freq=1
+                ),
             ]
         )
         session.commit()
@@ -364,7 +392,13 @@ def test_extract_terms_chunked_run_resumes_after_cancel(monkeypatch, tmp_path: P
         lib = Library(name="lib")
         session.add(lib)
         session.flush()
-        project = DictProject(library_id=lib.library_id, name="project", src_lang="he", tgt_lang="ru", nlp_engine="mock")
+        project = DictProject(
+            library_id=lib.library_id,
+            name="project",
+            src_lang="he",
+            tgt_lang="ru",
+            nlp_engine="mock",
+        )
         session.add(project)
         session.flush()
         corpus = SourceCorpus(project_id=project.project_id, name="corpus")
@@ -389,8 +423,12 @@ def test_extract_terms_chunked_run_resumes_after_cancel(monkeypatch, tmp_path: P
         session.flush()
         session.add_all(
             [
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=5, doc_freq=2),
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=5, doc_freq=2),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=5, doc_freq=2
+                ),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=5, doc_freq=2
+                ),
             ]
         )
         session.commit()
@@ -550,8 +588,12 @@ def test_extract_terms_chunked_state_callback_includes_run_metadata_and_pause_re
         session.flush()
         session.add_all(
             [
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=2, doc_freq=1),
-                LemmaProjectStat(project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=2, doc_freq=1),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma1.lemma_id, freq_abs=2, doc_freq=1
+                ),
+                LemmaProjectStat(
+                    project_id=project.project_id, lemma_id=lemma2.lemma_id, freq_abs=2, doc_freq=1
+                ),
             ]
         )
         session.commit()
@@ -582,5 +624,10 @@ def test_extract_terms_chunked_state_callback_includes_run_metadata_and_pause_re
     assert "" not in phases
     assert "paused" in phases
     assert "resumed" in phases
-    assert any(state.get("phase") == "paused" and state.get("stage") == "Paused at batch checkpoint" for state in states)
-    assert any(state.get("phase") == "completed" and state.get("status") == "ok" for state in states)
+    assert any(
+        state.get("phase") == "paused" and state.get("stage") == "Paused at batch checkpoint"
+        for state in states
+    )
+    assert any(
+        state.get("phase") == "completed" and state.get("status") == "ok" for state in states
+    )

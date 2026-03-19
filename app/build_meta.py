@@ -1,4 +1,5 @@
 """Build metadata helpers for runtime traceability."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,10 +26,16 @@ def _load_generated_build_info() -> dict[str, Any]:
         return {}
 
     return {
-        "commit": str(getattr(generated_build_info, "BUILD_COMMIT", _FALLBACK_BUILD_COMMIT) or _FALLBACK_BUILD_COMMIT),
-        "dirty": _normalize_dirty(getattr(generated_build_info, "BUILD_DIRTY", _FALLBACK_BUILD_DIRTY)),
+        "commit": str(
+            getattr(generated_build_info, "BUILD_COMMIT", _FALLBACK_BUILD_COMMIT)
+            or _FALLBACK_BUILD_COMMIT
+        ),
+        "dirty": _normalize_dirty(
+            getattr(generated_build_info, "BUILD_DIRTY", _FALLBACK_BUILD_DIRTY)
+        ),
         "built_at_utc": str(
-            getattr(generated_build_info, "BUILD_TIME_UTC", _FALLBACK_BUILD_TIME_UTC) or _FALLBACK_BUILD_TIME_UTC
+            getattr(generated_build_info, "BUILD_TIME_UTC", _FALLBACK_BUILD_TIME_UTC)
+            or _FALLBACK_BUILD_TIME_UTC
         ),
     }
 

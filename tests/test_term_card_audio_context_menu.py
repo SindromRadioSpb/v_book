@@ -83,8 +83,12 @@ def _build_term_card_view(selected_count: int):
     view.on_play_audio_selected = lambda: state.__setitem__("play", state["play"] + 1)
     view.on_add_selected_to_playlist = lambda: state.__setitem__("playlist", state["playlist"] + 1)
     view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add", state["add"] + 1)
-    view.on_edit_pronunciation_selected = lambda: state.__setitem__("edit_pron", state["edit_pron"] + 1)
-    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__("bootstrap", state["bootstrap"] + 1)
+    view.on_edit_pronunciation_selected = lambda: state.__setitem__(
+        "edit_pron", state["edit_pron"] + 1
+    )
+    view.on_pronunciation_bootstrap_selected = lambda: state.__setitem__(
+        "bootstrap", state["bootstrap"] + 1
+    )
     return view, state
 
 
@@ -110,15 +114,30 @@ def test_term_card_context_menu_includes_audio_actions(monkeypatch):
     FakeMenu.last.actions[4].triggered.emit()
     FakeMenu.last.actions[5].triggered.emit()
 
-    assert state == {"generate": 1, "play": 1, "playlist": 1, "add": 1, "edit_pron": 1, "bootstrap": 1}
+    assert state == {
+        "generate": 1,
+        "play": 1,
+        "playlist": 1,
+        "add": 1,
+        "edit_pron": 1,
+        "bootstrap": 1,
+    }
 
 
 def test_term_card_selected_pronunciation_items_use_surface_norm():
     class _QueueModel:
         def __init__(self):
             self._cards = [
-                type("Card", (), {"cluster_id": 1, "representative_he": "בפלדה", "canonical_key": "פלדה"})(),
-                type("Card", (), {"cluster_id": 2, "representative_he": "לפלדה", "canonical_key": "פלדה"})(),
+                type(
+                    "Card",
+                    (),
+                    {"cluster_id": 1, "representative_he": "בפלדה", "canonical_key": "פלדה"},
+                )(),
+                type(
+                    "Card",
+                    (),
+                    {"cluster_id": 2, "representative_he": "לפלדה", "canonical_key": "פלדה"},
+                )(),
             ]
 
         def get_card(self, row):

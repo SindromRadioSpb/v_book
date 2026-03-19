@@ -131,4 +131,3 @@ Plan:
 - Dictionary count uses `idx_lemma_noise` and remains a bounded read.
 - Document picker empty search still uses temporary sort; index pack migration adds `idx_doc_corpus_file_name` to reduce sort pressure for file-name ordered pagination paths.
 - Document picker text search uses temporary sort due flexible text predicate; this is expected for contains-style matching.
-

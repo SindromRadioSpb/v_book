@@ -28,18 +28,18 @@ Usage:
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Dict, Set
 from datetime import datetime
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.infra.sa_models import TMEntry
-from app.services.translation_service import TranslationService
-from app.services.tm_global_service import TMGlobalService
-from app.infra.translators.providers_registry import ProvidersRegistry
 from app.domain.normalization.normalizer import normalize_for_tm
+from app.infra.sa_models import TMEntry
+from app.infra.translators.providers_registry import ProvidersRegistry
+from app.services.tm_global_service import TMGlobalService
+from app.services.translation_service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -52,18 +52,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BatchTranslateItem:
     """Single item to translate."""
+
     entity_type: str  # "lemma" | "term_cluster" | "tm_entry"
     entity_id: str  # Unique identifier within entity_type
     source_text: str
     src_lang: str
     tgt_lang: str
-    current_translation: Optional[str]
-    project_id: Optional[int]
+    current_translation: str | None
+    project_id: int | None
 
 
 @dataclass
 class BatchTranslateOptions:
     """Batch translation execution options."""
+
     provider_mode: str = "chain"  # "chain" | "force:<provider_id>"
     write_mode: str = "fill_empty"  # "fill_empty" | "overwrite" | "skip_nonempty"
     chunk_size: int = 50
@@ -74,27 +76,29 @@ class BatchTranslateOptions:
 @dataclass
 class RowResult:
     """Result for a single row."""
+
     entity_id: str
     source_text: str
-    old_translation: Optional[str]
-    new_translation: Optional[str]
-    provider_id: Optional[str]
+    old_translation: str | None
+    new_translation: str | None
+    provider_id: str | None
     cache_hit: bool
-    latency_ms: Optional[int]
-    error_message: Optional[str]
+    latency_ms: int | None
+    error_message: str | None
     skipped: bool
 
 
 @dataclass
 class BatchResult:
     """Overall batch result."""
+
     total: int
     succeeded: int
     skipped: int
     failed: int
     job_id: str
     elapsed_ms: int
-    row_results: List[RowResult] = field(default_factory=list)
+    row_results: list[RowResult] = field(default_factory=list)
 
 
 # ============================================================================
@@ -112,10 +116,10 @@ class BatchTranslateEngineV2:
     def execute(
         self,
         session: Session,
-        items: List[BatchTranslateItem],
+        items: list[BatchTranslateItem],
         options: BatchTranslateOptions,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> BatchResult:
         """Execute batch translation.
 
@@ -139,7 +143,9 @@ class BatchTranslateEngineV2:
 
         # Phase 1: Dedupe and prepare translation map
         unique_texts = self._dedupe_items(items)
-        logger.info(f"[JOB:{job_id[:8]}] Deduped: {len(items)} items → {len(unique_texts)} unique texts")
+        logger.info(
+            f"[JOB:{job_id[:8]}] Deduped: {len(items)} items → {len(unique_texts)} unique texts"
+        )
 
         # Phase 2: Translate unique texts
         translation_map = self._translate_unique_texts(
@@ -188,7 +194,7 @@ class BatchTranslateEngineV2:
 
         return result
 
-    def _dedupe_items(self, items: List[BatchTranslateItem]) -> Set[tuple]:
+    def _dedupe_items(self, items: list[BatchTranslateItem]) -> set[tuple]:
         """Extract unique (src_text, src_lang, tgt_lang) tuples."""
         unique = set()
         for item in items:
@@ -199,11 +205,11 @@ class BatchTranslateEngineV2:
     def _translate_unique_texts(
         self,
         session: Session,
-        unique_texts: Set[tuple],
+        unique_texts: set[tuple],
         options: BatchTranslateOptions,
         job_id: str,
-        cancel_check: Optional[Callable[[], bool]],
-    ) -> Dict[tuple, str]:
+        cancel_check: Callable[[], bool] | None,
+    ) -> dict[tuple, str]:
         """Translate unique texts and return mapping.
 
         Returns:
@@ -217,7 +223,9 @@ class BatchTranslateEngineV2:
 
         for src_text, src_lang, tgt_lang in unique_texts:
             if cancel_check and cancel_check():
-                logger.info(f"[JOB:{job_id[:8]}] Translation phase cancelled at {completed}/{total}")
+                logger.info(
+                    f"[JOB:{job_id[:8]}] Translation phase cancelled at {completed}/{total}"
+                )
                 break
 
             try:
@@ -229,9 +237,7 @@ class BatchTranslateEngineV2:
                     )
                 else:
                     # Use TranslationService (provider chain)
-                    translated = self._translate_with_service(
-                        session, src_text, src_lang, tgt_lang
-                    )
+                    translated = self._translate_with_service(session, src_text, src_lang, tgt_lang)
 
                 if translated:
                     translation_map[(src_text, src_lang, tgt_lang)] = translated
@@ -239,9 +245,7 @@ class BatchTranslateEngineV2:
                 completed += 1
 
             except Exception as e:
-                logger.warning(
-                    f"[JOB:{job_id[:8]}] Failed to translate '{src_text[:50]}...': {e}"
-                )
+                logger.warning(f"[JOB:{job_id[:8]}] Failed to translate '{src_text[:50]}...': {e}")
                 # Continue with other texts (resilient)
 
         logger.info(
@@ -256,7 +260,7 @@ class BatchTranslateEngineV2:
         src_text: str,
         src_lang: str,
         tgt_lang: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Translate using TranslationService (provider chain)."""
         result = self.translation_service.resolve_translation(
             session=session,
@@ -276,7 +280,7 @@ class BatchTranslateEngineV2:
         src_text: str,
         src_lang: str,
         tgt_lang: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Translate using specific provider (force mode)."""
         provider = self.providers_registry.get(provider_id)
         if not provider:
@@ -284,6 +288,7 @@ class BatchTranslateEngineV2:
 
         # Use provider directly
         from app.infra.translators.base_provider import TranslationRequest
+
         request = TranslationRequest(
             text=src_text,
             source_lang=src_lang,
@@ -295,13 +300,13 @@ class BatchTranslateEngineV2:
     def _process_items(
         self,
         session: Session,
-        items: List[BatchTranslateItem],
-        translation_map: Dict[tuple, str],
+        items: list[BatchTranslateItem],
+        translation_map: dict[tuple, str],
         options: BatchTranslateOptions,
         job_id: str,
-        progress_callback: Optional[Callable[[int, int], None]],
-        cancel_check: Optional[Callable[[], bool]],
-    ) -> List[RowResult]:
+        progress_callback: Callable[[int, int], None] | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> list[RowResult]:
         """Process items in chunks, apply write_mode, commit to DB."""
         row_results = []
         completed = 0
@@ -314,17 +319,19 @@ class BatchTranslateEngineV2:
                 # Mark remaining as skipped
                 for i in range(chunk_start, total):
                     item = items[i]
-                    row_results.append(RowResult(
-                        entity_id=item.entity_id,
-                        source_text=item.source_text,
-                        old_translation=item.current_translation,
-                        new_translation=None,
-                        provider_id=None,
-                        cache_hit=False,
-                        latency_ms=None,
-                        error_message="Cancelled",
-                        skipped=True,
-                    ))
+                    row_results.append(
+                        RowResult(
+                            entity_id=item.entity_id,
+                            source_text=item.source_text,
+                            old_translation=item.current_translation,
+                            new_translation=None,
+                            provider_id=None,
+                            cache_hit=False,
+                            latency_ms=None,
+                            error_message="Cancelled",
+                            skipped=True,
+                        )
+                    )
                 break
 
             chunk_end = min(chunk_start + options.chunk_size, total)
@@ -340,7 +347,9 @@ class BatchTranslateEngineV2:
                 # Commit chunk (unless dry_run)
                 if not options.dry_run:
                     session.commit()
-                    chunk_succeeded = sum(1 for r in chunk_results if not r.skipped and not r.error_message)
+                    chunk_succeeded = sum(
+                        1 for r in chunk_results if not r.skipped and not r.error_message
+                    )
                     logger.debug(
                         f"[JOB:{job_id[:8]}] Committed chunk {chunk_start}-{chunk_end}: succeeded={chunk_succeeded}"
                     )
@@ -352,22 +361,26 @@ class BatchTranslateEngineV2:
                     progress_callback(completed, total)
 
             except Exception as e:
-                logger.error(f"[JOB:{job_id[:8]}] Chunk {chunk_start}-{chunk_end} failed: {e}", exc_info=True)
+                logger.error(
+                    f"[JOB:{job_id[:8]}] Chunk {chunk_start}-{chunk_end} failed: {e}", exc_info=True
+                )
                 session.rollback()
 
                 # Mark chunk items as failed
                 for item in chunk:
-                    row_results.append(RowResult(
-                        entity_id=item.entity_id,
-                        source_text=item.source_text,
-                        old_translation=item.current_translation,
-                        new_translation=None,
-                        provider_id=None,
-                        cache_hit=False,
-                        latency_ms=None,
-                        error_message=f"Chunk error: {str(e)}",
-                        skipped=False,
-                    ))
+                    row_results.append(
+                        RowResult(
+                            entity_id=item.entity_id,
+                            source_text=item.source_text,
+                            old_translation=item.current_translation,
+                            new_translation=None,
+                            provider_id=None,
+                            cache_hit=False,
+                            latency_ms=None,
+                            error_message=f"Chunk error: {str(e)}",
+                            skipped=False,
+                        )
+                    )
 
                 completed += len(chunk)
 
@@ -380,11 +393,11 @@ class BatchTranslateEngineV2:
     def _process_chunk(
         self,
         session: Session,
-        chunk: List[BatchTranslateItem],
-        translation_map: Dict[tuple, str],
+        chunk: list[BatchTranslateItem],
+        translation_map: dict[tuple, str],
         options: BatchTranslateOptions,
         job_id: str,
-    ) -> List[RowResult]:
+    ) -> list[RowResult]:
         """Process a single chunk of items."""
         results = []
 
@@ -393,17 +406,19 @@ class BatchTranslateEngineV2:
 
             # Check skip logic (write_mode)
             if self._should_skip(item, options.write_mode):
-                results.append(RowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=None,
-                    provider_id=None,
-                    cache_hit=False,
-                    latency_ms=None,
-                    error_message=None,
-                    skipped=True,
-                ))
+                results.append(
+                    RowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message=None,
+                        skipped=True,
+                    )
+                )
                 continue
 
             # Get translation from map
@@ -411,58 +426,62 @@ class BatchTranslateEngineV2:
             translation = translation_map.get(key)
 
             if not translation:
-                results.append(RowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=None,
-                    provider_id=None,
-                    cache_hit=False,
-                    latency_ms=int((time.perf_counter() - row_start) * 1000),
-                    error_message="No translation available",
-                    skipped=False,
-                ))
+                results.append(
+                    RowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=int((time.perf_counter() - row_start) * 1000),
+                        error_message="No translation available",
+                        skipped=False,
+                    )
+                )
                 continue
 
             # Write to DB
             try:
                 self._write_to_db(session, item, translation)
 
-                results.append(RowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=translation,
-                    provider_id="dedupe",  # From translation map
-                    cache_hit=False,
-                    latency_ms=int((time.perf_counter() - row_start) * 1000),
-                    error_message=None,
-                    skipped=False,
-                ))
+                results.append(
+                    RowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=translation,
+                        provider_id="dedupe",  # From translation map
+                        cache_hit=False,
+                        latency_ms=int((time.perf_counter() - row_start) * 1000),
+                        error_message=None,
+                        skipped=False,
+                    )
+                )
 
             except Exception as e:
                 logger.warning(
                     f"[JOB:{job_id[:8]}] Failed to write {item.entity_type}/{item.entity_id}: {e}"
                 )
-                results.append(RowResult(
-                    entity_id=item.entity_id,
-                    source_text=item.source_text,
-                    old_translation=item.current_translation,
-                    new_translation=None,
-                    provider_id=None,
-                    cache_hit=False,
-                    latency_ms=int((time.perf_counter() - row_start) * 1000),
-                    error_message=str(e),
-                    skipped=False,
-                ))
+                results.append(
+                    RowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=int((time.perf_counter() - row_start) * 1000),
+                        error_message=str(e),
+                        skipped=False,
+                    )
+                )
 
         return results
 
     def _should_skip(self, item: BatchTranslateItem, write_mode: str) -> bool:
         """Check if item should be skipped based on write_mode."""
-        if write_mode == "fill_empty":
-            return bool(item.current_translation and item.current_translation.strip())
-        elif write_mode == "skip_nonempty":
+        if write_mode == "fill_empty" or write_mode == "skip_nonempty":
             return bool(item.current_translation and item.current_translation.strip())
         elif write_mode == "overwrite":
             return False
@@ -530,7 +549,9 @@ class BatchTranslateEngineV2:
             src_norm = normalized.norm
 
             if not src_norm or not src_norm.strip():
-                raise ValueError(f"normalize_for_tm returned empty src_norm for: {item.source_text}")
+                raise ValueError(
+                    f"normalize_for_tm returned empty src_norm for: {item.source_text}"
+                )
 
         except Exception as e:
             raise ValueError(f"Normalization failed for term '{item.source_text}': {e}")
@@ -582,7 +603,7 @@ class BatchTranslateEngineV2:
 
     def _build_cancelled_result(
         self,
-        items: List[BatchTranslateItem],
+        items: list[BatchTranslateItem],
         job_id: str,
         start_time: float,
     ) -> BatchResult:

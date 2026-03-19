@@ -6,20 +6,21 @@ Tests XLSX import functionality (if openpyxl available):
 - Same logic as CSV import
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
 try:
     import openpyxl
+
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-from app.services.dictionary_import_service import DictionaryImportService
 from app.services.db_service import DBService
+from app.services.dictionary_import_service import DictionaryImportService
 
 
 @unittest.skipIf(not OPENPYXL_AVAILABLE, "openpyxl not available")
@@ -35,7 +36,7 @@ class TestDictionaryImportXLSX(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.close()
@@ -50,7 +51,7 @@ class TestDictionaryImportXLSX(unittest.TestCase):
 
     def setUp(self):
         """Clean tables."""
-        from app.infra.sa_models import DictSource, DictEntry
+        from app.infra.sa_models import DictEntry, DictSource
 
         with self.db_service.get_session() as session:
             session.query(DictEntry).delete()
@@ -60,7 +61,7 @@ class TestDictionaryImportXLSX(unittest.TestCase):
     def test_import_2column_xlsx(self):
         """Test importing 2-column XLSX (he, ru)."""
         # Create test XLSX
-        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         xlsx_file.close()
 
         wb = openpyxl.Workbook()
@@ -110,12 +111,14 @@ class TestDictionaryImportXLSX(unittest.TestCase):
     def test_import_full_format_xlsx(self):
         """Test importing full format XLSX with headers."""
         # Create test XLSX with headers
-        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         xlsx_file.close()
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(["kind", "src_lang", "tgt_lang", "src_text", "translation", "pos", "domain", "status"])
+        ws.append(
+            ["kind", "src_lang", "tgt_lang", "src_text", "translation", "pos", "domain", "status"]
+        )
         ws.append(["lemma", "he", "ru", "בית", "дом", "NOUN", "general", "approved"])
         ws.append(["term_cluster", "he", "ru", "בית הספר", "школа", "", "education", "approved"])
         wb.save(xlsx_file.name)
@@ -161,7 +164,7 @@ class TestDictionaryImportXLSX(unittest.TestCase):
     def test_sha256_dedup_xlsx(self):
         """Test SHA256 deduplication works for XLSX."""
         # Create test XLSX
-        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        xlsx_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         xlsx_file.close()
 
         wb = openpyxl.Workbook()

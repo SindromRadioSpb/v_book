@@ -4,24 +4,22 @@ Production-safe verification gate for P3 (import/export/conflicts).
 Creates DB snapshot and runs comprehensive E2E tests without touching production DB.
 """
 
-import logging
-import hashlib
-import shutil
-import json
-import time
-import tempfile
 import csv
-from pathlib import Path
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Any, Optional
+import hashlib
+import logging
+import shutil
+import tempfile
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.services.dictionary_import_service import DictionaryImportService
-from app.services.translation_service import TranslationService
 from app.services.export_service import ExportService
-from app.domain.dto import ImportReport
+from app.services.translation_service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +31,8 @@ class VerificationStep:
     name: str
     status: str  # PASS|FAIL|SKIP
     elapsed_ms: float
-    details: Dict[str, Any]
-    error: Optional[str] = None
+    details: dict[str, Any]
+    error: str | None = None
 
 
 @dataclass
@@ -44,11 +42,11 @@ class P3VerificationReport:
     snapshot_path: str
     snapshot_sha256: str
     timestamp: str
-    steps: List[VerificationStep]
+    steps: list[VerificationStep]
     overall_status: str  # PASS|FAIL|SKIP
     total_elapsed_ms: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON export."""
         return asdict(self)
 
@@ -125,7 +123,7 @@ class P3VerificationService:
         project_id: int,
         snapshot_path: str,
         snapshot_sha256: str,
-        options: Optional[Dict[str, Any]] = None
+        options: dict[str, Any] | None = None,
     ) -> P3VerificationReport:
         """Run full P3 verification suite.
 
@@ -209,17 +207,16 @@ class P3VerificationService:
         return report
 
     def _verify_csv_import_2col(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify 2-column CSV import."""
         start_time = time.time()
 
         try:
             # Create temp CSV
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("בית,дом\n")
                 f.write("ספר,книга\n")
                 f.write("שולחן,стол\n")
@@ -249,7 +246,7 @@ class P3VerificationService:
                             "total": report.total,
                             "added": report.added,
                             "sha256": report.sha256[:16] + "...",
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -257,7 +254,7 @@ class P3VerificationService:
                         status="FAIL",
                         elapsed_ms=elapsed_ms,
                         details={"report": asdict(report)},
-                        error=f"Expected 3/3, got {report.added}/{report.total}"
+                        error=f"Expected 3/3, got {report.added}/{report.total}",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -269,21 +266,20 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )
 
     def _verify_csv_import_full(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify full-format CSV import."""
         start_time = time.time()
 
         try:
             # Create full-format CSV
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("kind,src_lang,tgt_lang,src_text,translation,status,priority,aliases\n")
                 f.write("lemma,he,ru,אבא,отец,approved,10,папа|батя\n")
                 f.write("lemma,he,ru,אמא,мать,approved,10,мама|матушка\n")
@@ -310,7 +306,7 @@ class P3VerificationService:
                         details={
                             "total": report.total,
                             "added": report.added,
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -318,7 +314,7 @@ class P3VerificationService:
                         status="FAIL",
                         elapsed_ms=elapsed_ms,
                         details={"report": asdict(report)},
-                        error=f"Expected 2-4 entries, got {report.added}/{report.total}"
+                        error=f"Expected 2-4 entries, got {report.added}/{report.total}",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -330,14 +326,11 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )
 
     def _verify_xlsx_import(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify XLSX import."""
         start_time = time.time()
@@ -353,11 +346,11 @@ class P3VerificationService:
                     name="XLSX Import",
                     status="SKIP",
                     elapsed_ms=elapsed_ms,
-                    details={"reason": "openpyxl not installed"}
+                    details={"reason": "openpyxl not installed"},
                 )
 
             # Create minimal XLSX
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as f:
                 xlsx_path = f.name
 
             wb = openpyxl.Workbook()
@@ -383,7 +376,7 @@ class P3VerificationService:
                         name="XLSX Import",
                         status="PASS",
                         elapsed_ms=elapsed_ms,
-                        details={"total": report.total, "added": report.added}
+                        details={"total": report.total, "added": report.added},
                     )
                 else:
                     return VerificationStep(
@@ -391,7 +384,7 @@ class P3VerificationService:
                         status="FAIL",
                         elapsed_ms=elapsed_ms,
                         details={"report": asdict(report)},
-                        error=f"Expected 1/1, got {report.added}/{report.total}"
+                        error=f"Expected 1/1, got {report.added}/{report.total}",
                     )
             finally:
                 Path(xlsx_path).unlink(missing_ok=True)
@@ -399,25 +392,19 @@ class P3VerificationService:
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
             return VerificationStep(
-                name="XLSX Import",
-                status="FAIL",
-                elapsed_ms=elapsed_ms,
-                details={},
-                error=str(e)
+                name="XLSX Import", status="FAIL", elapsed_ms=elapsed_ms, details={}, error=str(e)
             )
 
     def _verify_conflict_policies(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify conflict policies (skip, overwrite, keep_both)."""
         start_time = time.time()
 
         try:
-            from app.infra.sa_models import DictEntry, DictSource
             from sqlalchemy import delete
+
+            from app.infra.sa_models import DictEntry, DictSource
 
             # Clean up test data
             session.execute(delete(DictEntry))
@@ -427,7 +414,9 @@ class P3VerificationService:
             results = {}
 
             # Test skip policy (conflicts within same file)
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("src_text,translation\n")
                 f.write("conflict_test,first_value\n")
                 f.write("conflict_test,second_value\n")  # Duplicate key
@@ -457,7 +446,9 @@ class P3VerificationService:
             session.commit()
 
             # Test overwrite policy (conflicts within same file)
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("src_text,translation\n")
                 f.write("overwrite_test,value_v1\n")
                 f.write("overwrite_test,value_v2\n")  # Overwrite with second value
@@ -484,14 +475,13 @@ class P3VerificationService:
 
             # Verify results
             skip_ok = results["skip"]["added"] == 1 and results["skip"]["skipped"] == 1
-            overwrite_ok = results["overwrite"]["added"] == 1 and results["overwrite"]["updated"] == 1
+            overwrite_ok = (
+                results["overwrite"]["added"] == 1 and results["overwrite"]["updated"] == 1
+            )
 
             if skip_ok and overwrite_ok:
                 return VerificationStep(
-                    name="Conflict Policies",
-                    status="PASS",
-                    elapsed_ms=elapsed_ms,
-                    details=results
+                    name="Conflict Policies", status="PASS", elapsed_ms=elapsed_ms, details=results
                 )
             else:
                 return VerificationStep(
@@ -499,7 +489,7 @@ class P3VerificationService:
                     status="FAIL",
                     elapsed_ms=elapsed_ms,
                     details=results,
-                    error=f"skip_ok={skip_ok}, overwrite_ok={overwrite_ok}"
+                    error=f"skip_ok={skip_ok}, overwrite_ok={overwrite_ok}",
                 )
 
         except Exception as e:
@@ -509,14 +499,11 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )
 
     def _verify_cancel_behavior(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify chunk commit + cancel flag."""
         start_time = time.time()
@@ -524,7 +511,9 @@ class P3VerificationService:
         try:
             # P3.1.3: Test chunk commit by importing medium-sized file
             # Create CSV with 500 rows (will be ~3 chunks at 200 rows/chunk)
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 for i in range(500):
                     f.write(f"word_{i},перевод_{i}\n")
                 csv_path = f.name
@@ -564,7 +553,7 @@ class P3VerificationService:
                             "added": report.added,
                             "chunk_commit": True,
                             "progress_callbacks": progress_callbacks[0],
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -574,9 +563,9 @@ class P3VerificationService:
                         details={
                             "added": report.added,
                             "expected": 500,
-                            "callbacks": progress_callbacks[0]
+                            "callbacks": progress_callbacks[0],
                         },
-                        error=f"Expected 500 rows with callbacks, got {report.added} with {progress_callbacks[0]} callbacks"
+                        error=f"Expected 500 rows with callbacks, got {report.added} with {progress_callbacks[0]} callbacks",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -588,14 +577,11 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )
 
     def _verify_sha256_dedup(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify SHA256 deduplication of dict_source."""
         start_time = time.time()
@@ -604,7 +590,9 @@ class P3VerificationService:
             from app.infra.sa_models import DictSource
 
             # Create CSV
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("dedup_test,дедуп\n")
                 csv_path = f.name
 
@@ -655,7 +643,7 @@ class P3VerificationService:
                             "sha256": sha256_1[:16] + "...",
                             "dict_sources_count": count1,
                             "dedup_working": True,
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -668,7 +656,7 @@ class P3VerificationService:
                             "count1": count1,
                             "count2": count2,
                         },
-                        error="SHA256 mismatch or duplicate sources created"
+                        error="SHA256 mismatch or duplicate sources created",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -676,18 +664,11 @@ class P3VerificationService:
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
             return VerificationStep(
-                name="SHA256 Dedup",
-                status="FAIL",
-                elapsed_ms=elapsed_ms,
-                details={},
-                error=str(e)
+                name="SHA256 Dedup", status="FAIL", elapsed_ms=elapsed_ms, details={}, error=str(e)
             )
 
     def _verify_csv_injection(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify CSV injection protection."""
         start_time = time.time()
@@ -711,7 +692,9 @@ class P3VerificationService:
             session.commit()
 
             # Export to CSV
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 csv_path = f.name
 
             try:
@@ -722,15 +705,15 @@ class P3VerificationService:
                 )
 
                 # Read CSV and check sanitization
-                with open(csv_path, 'r', encoding='utf-8') as f:
+                with open(csv_path, encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     rows = list(reader)
 
                 # Check if dangerous chars are sanitized
                 sanitized = False
                 for row in rows:
-                    src_text = row.get('src_text', '')
-                    translation = row.get('translation', '')
+                    src_text = row.get("src_text", "")
+                    translation = row.get("translation", "")
 
                     # Should be prefixed with '
                     if src_text.startswith("'=") and translation.startswith("'+"):
@@ -749,7 +732,7 @@ class P3VerificationService:
                             "sanitized": True,
                             "example_input": "=2+2",
                             "example_output": "'=2+2",
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -757,7 +740,7 @@ class P3VerificationService:
                         status="FAIL",
                         elapsed_ms=elapsed_ms,
                         details={"sanitized": False},
-                        error="Dangerous chars not sanitized"
+                        error="Dangerous chars not sanitized",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -769,44 +752,41 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )
 
     def _verify_resolve_sanity(
-        self,
-        session: Session,
-        project_id: int,
-        options: Dict[str, Any]
+        self, session: Session, project_id: int, options: dict[str, Any]
     ) -> VerificationStep:
         """Verify resolve sanity (dict → TM override)."""
         start_time = time.time()
 
         try:
-            from app.infra.sa_models import DictEntry, TMEntry, DictProject
-            from app.domain.normalization import normalize_for_tm
             from sqlalchemy import delete
+
+            from app.domain.normalization import normalize_for_tm
+            from app.infra.sa_models import DictEntry, DictProject, TMEntry
 
             # Clean up any existing test data first
             norm_result = normalize_for_tm("he", "resolve_test", "lemma")
             session.execute(
-                delete(TMEntry).where(
-                    TMEntry.src_norm == norm_result.norm,
-                    TMEntry.kind == "lemma"
-                )
+                delete(TMEntry).where(TMEntry.src_norm == norm_result.norm, TMEntry.kind == "lemma")
             )
             session.execute(
                 delete(DictEntry).where(
-                    DictEntry.src_norm == norm_result.norm,
-                    DictEntry.kind == "lemma"
+                    DictEntry.src_norm == norm_result.norm, DictEntry.kind == "lemma"
                 )
             )
             session.commit()
 
             # Ensure project exists
-            project = session.query(DictProject).filter(DictProject.project_id == project_id).first()
+            project = (
+                session.query(DictProject).filter(DictProject.project_id == project_id).first()
+            )
             if not project:
                 # Create project
                 from app.infra.sa_models import Library
+
                 library = session.query(Library).first()
                 if not library:
                     library = Library(library_id=1, name="Test Library")
@@ -824,7 +804,9 @@ class P3VerificationService:
                 session.commit()
 
             # Import dict entry
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv", encoding="utf-8"
+            ) as f:
                 f.write("resolve_test,dict_value\n")
                 csv_path = f.name
 
@@ -902,7 +884,7 @@ class P3VerificationService:
                             "tm_resolve": result2.translation,
                             "tm_source": result2.source,
                             "precedence": "TM > dict ✓",
-                        }
+                        },
                     )
                 else:
                     return VerificationStep(
@@ -915,7 +897,7 @@ class P3VerificationService:
                             "result1": result1.translation if result1.translation else "None",
                             "result2": result2.translation if result2.translation else "None",
                         },
-                        error=f"dict_hit={dict_hit}, tm_hit={tm_hit}"
+                        error=f"dict_hit={dict_hit}, tm_hit={tm_hit}",
                     )
             finally:
                 Path(csv_path).unlink(missing_ok=True)
@@ -927,5 +909,5 @@ class P3VerificationService:
                 status="FAIL",
                 elapsed_ms=elapsed_ms,
                 details={},
-                error=str(e)
+                error=str(e),
             )

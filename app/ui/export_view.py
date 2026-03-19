@@ -1,22 +1,23 @@
 """Export view - export to various formats (M9)."""
+
 import logging
 import os
 from pathlib import Path
+
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QRadioButton,
     QButtonGroup,
     QCheckBox,
-    QGroupBox,
     QFileDialog,
-    QProgressBar,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
     QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt
 
 from app.ui.workers import ExportWorker
 
@@ -93,9 +94,13 @@ class ExportView(QWidget):
         self.exclude_noise_cb.setToolTip("Exclude lemmas and terms marked as noise from export")
         options_layout.addWidget(self.exclude_noise_cb)
 
-        self.show_classification_cb = QCheckBox("Include classification columns (entity_class, is_noise, noise_reason)")
+        self.show_classification_cb = QCheckBox(
+            "Include classification columns (entity_class, is_noise, noise_reason)"
+        )
         self.show_classification_cb.setChecked(False)  # Default: don't show
-        self.show_classification_cb.setToolTip("Add columns showing entity classification and noise status")
+        self.show_classification_cb.setToolTip(
+            "Add columns showing entity classification and noise status"
+        )
         options_layout.addWidget(self.show_classification_cb)
 
         options_group.setLayout(options_layout)
@@ -196,9 +201,7 @@ class ExportView(QWidget):
         """Start export worker."""
         export_options = self.get_export_options(format_key)
 
-        self.export_worker = ExportWorker(
-            self.project_id, file_path, format_key, **export_options
-        )
+        self.export_worker = ExportWorker(self.project_id, file_path, format_key, **export_options)
 
         # Connect signals
         self.export_worker.progress.connect(self.on_export_progress)

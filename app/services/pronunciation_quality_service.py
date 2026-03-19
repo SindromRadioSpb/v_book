@@ -5,17 +5,16 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
 class PronunciationQualityResult:
     """Sanitization result for one pronunciation text field."""
 
-    value: Optional[str]
+    value: str | None
     is_valid: bool
-    qc_flag: Optional[str]
-    reason: Optional[str] = None
+    qc_flag: str | None
+    reason: str | None = None
 
 
 @dataclass
@@ -96,14 +95,14 @@ class PronunciationQualityService:
         )
 
     @classmethod
-    def sanitize_tts_text_with_meta(cls, value: Optional[str]) -> tuple[str, List[RemovedCodepoint]]:
+    def sanitize_tts_text_with_meta(cls, value: str | None) -> tuple[str, list[RemovedCodepoint]]:
         """Return sanitized TTS text and removed codepoint diagnostics."""
         text = (value or "").strip()
         if not text:
             return "", []
 
-        removed: List[RemovedCodepoint] = []
-        out_chars: List[str] = []
+        removed: list[RemovedCodepoint] = []
+        out_chars: list[str] = []
         for index, char in enumerate(text):
             if cls._is_taamim(char):
                 removed.append(cls._removed_record(index=index, char=char, reason="taamim"))
@@ -125,20 +124,20 @@ class PronunciationQualityService:
         return normalized, removed
 
     @classmethod
-    def sanitize_tts_text(cls, value: Optional[str]) -> str:
+    def sanitize_tts_text(cls, value: str | None) -> str:
         """Return safe spoken text payload for provider requests."""
         sanitized, _removed = cls.sanitize_tts_text_with_meta(value)
         return sanitized
 
     @classmethod
-    def sanitize_spoken_text(cls, value: Optional[str]) -> str:
+    def sanitize_spoken_text(cls, value: str | None) -> str:
         """Backward-compatible alias for sanitizer used in spoken payloads."""
         return cls.sanitize_tts_text(value)
 
     @classmethod
     def normalize_field(
         cls,
-        value: Optional[str],
+        value: str | None,
         *,
         strict: bool,
     ) -> PronunciationQualityResult:
@@ -177,7 +176,7 @@ class PronunciationQualityService:
         return PronunciationQualityResult(value=sanitized, is_valid=True, qc_flag=None)
 
     @classmethod
-    def has_hebrew_nikud(cls, value: Optional[str]) -> bool:
+    def has_hebrew_nikud(cls, value: str | None) -> bool:
         """Return True when value contains Hebrew vowel/diacritic marks."""
         text = (value or "").strip()
         if not text:
@@ -190,12 +189,12 @@ class PronunciationQualityService:
         return False
 
     @classmethod
-    def spoken_letters_signature(cls, value: Optional[str]) -> str:
+    def spoken_letters_signature(cls, value: str | None) -> str:
         """Return comparable signature without diacritics/formatting noise."""
         sanitized = cls.sanitize_tts_text(value)
         if not sanitized:
             return ""
-        chars: List[str] = []
+        chars: list[str] = []
         for char in sanitized:
             category = unicodedata.category(char)
             if category.startswith("M"):
@@ -208,7 +207,9 @@ class PronunciationQualityService:
         return cls._MULTISPACE_RE.sub(" ", "".join(chars)).strip()
 
     @classmethod
-    def has_source_structure_mismatch(cls, source_text: Optional[str], candidate_text: Optional[str]) -> bool:
+    def has_source_structure_mismatch(
+        cls, source_text: str | None, candidate_text: str | None
+    ) -> bool:
         """Detect when generated pronunciation drops/adds source letters/tokens."""
         source_sig = cls.spoken_letters_signature(source_text)
         candidate_sig = cls.spoken_letters_signature(candidate_text)

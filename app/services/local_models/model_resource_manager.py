@@ -20,12 +20,11 @@ Usage:
     manifest = manager.load_manifest(model_path / "manifest.json")
     is_valid = manager.verify_manifest(manifest, model_path)
 """
-import hashlib
+
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
 
 from app.infra.resource_paths import ResourcePaths
 
@@ -81,7 +80,7 @@ class ModelResourceManager:
         model_dirname = f"{safe_model_id}_{backend}"
         return self._models_root / model_dirname
 
-    def load_manifest(self, manifest_path: Path) -> Optional[Dict]:
+    def load_manifest(self, manifest_path: Path) -> dict | None:
         """
         Load manifest.json from path.
 
@@ -96,7 +95,7 @@ class ModelResourceManager:
             return None
 
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
 
             logger.debug(f"Loaded manifest: {manifest_path}")
@@ -112,7 +111,7 @@ class ModelResourceManager:
         backend: str,
         package_sha256: str,
         size_bytes: int,
-        languages: Dict[str, List[str]],
+        languages: dict[str, list[str]],
     ) -> bool:
         """
         Write manifest.json to path.
@@ -135,7 +134,7 @@ class ModelResourceManager:
             "package_sha256": package_sha256,
             "size_bytes": size_bytes,
             "languages": languages,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         try:
@@ -151,10 +150,10 @@ class ModelResourceManager:
 
     def verify_manifest(
         self,
-        manifest: Dict,
+        manifest: dict,
         model_path: Path,
         skip_sha256: bool = False,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Verify manifest integrity.
 
@@ -227,7 +226,7 @@ class ModelResourceManager:
         model_id: str,
         backend: str,
         skip_sha256: bool = True,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Check if model is installed and valid.
 
@@ -280,14 +279,12 @@ class ModelResourceManager:
             backend: Backend
             reason: Degradation reason
         """
-        logger.error(
-            f"Model DEGRADED: {model_id} ({backend}) - Reason: {reason}"
-        )
+        logger.error(f"Model DEGRADED: {model_id} ({backend}) - Reason: {reason}")
 
         # TODO: Persist degradation status to database for monitoring
         # For now, just log the event
 
-    def get_model_info(self, model_id: str, backend: str) -> Optional[Dict]:
+    def get_model_info(self, model_id: str, backend: str) -> dict | None:
         """
         Get model information from manifest.
 
@@ -302,7 +299,7 @@ class ModelResourceManager:
         manifest_path = model_path / "manifest.json"
         return self.load_manifest(manifest_path)
 
-    def list_installed_models(self) -> List[Dict]:
+    def list_installed_models(self) -> list[dict]:
         """
         List all installed models.
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import StudyProgress, TMGlobal, UserDictionary, UserDictionaryItem
+from app.infra.sa_models import Base, StudyProgress, TMGlobal, UserDictionary, UserDictionaryItem
 from app.services.user_dictionary_service import UserDictionaryService
 
 
@@ -21,10 +21,8 @@ def _engine():
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     engine = create_engine(f"sqlite:///{tmp.name}")
-    StudyProgress.__table__.create(engine, checkfirst=True)
-    TMGlobal.__table__.create(engine, checkfirst=True)
-    UserDictionary.__table__.create(engine, checkfirst=True)
-    UserDictionaryItem.__table__.create(engine, checkfirst=True)
+    # Create all tables so JOIN-dependent queries (dict_project, security_audit_log) work
+    Base.metadata.create_all(engine)
     return engine, Path(tmp.name)
 
 
@@ -62,7 +60,9 @@ def _add_item(
             tgt_lang="ru",
             src_text=f"src-{canonical_hash}",
             src_norm=f"src-{canonical_hash}",
-            canonical_hash=service.build_canonical_hash("he", "ru", "lemma", f"src-{canonical_hash}"),
+            canonical_hash=service.build_canonical_hash(
+                "he", "ru", "lemma", f"src-{canonical_hash}"
+            ),
             tags_json="[]",
             is_noise=is_noise,
             study_state="new",

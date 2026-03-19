@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from PyQt6.QtCore import QSignalBlocker, Qt, QTimer
 from PyQt6.QtGui import QIntValidator
@@ -44,8 +43,8 @@ class DocumentPickerDialog(QDialog):
         self,
         *,
         project_id: int,
-        selected_doc_id: Optional[int] = None,
-        settings: Optional[SettingsService] = None,
+        selected_doc_id: int | None = None,
+        settings: SettingsService | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -56,12 +55,12 @@ class DocumentPickerDialog(QDialog):
         self.total_count = 0
         self._request_seq = 0
         self._active_request_id = 0
-        self._worker: Optional[ProjectDocumentsPageWorker] = None
+        self._worker: ProjectDocumentsPageWorker | None = None
         self._current_rows = []
         self._selected_doc_id = selected_doc_id
         self._selected_doc_name = "All Documents"
         self._frequent_tag_buttons: dict[str, QPushButton] = {}
-        self._frequent_tags_cache: Optional[list[str]] = None
+        self._frequent_tags_cache: list[str] | None = None
         self._count_pending = False
 
         self._search_timer = QTimer(self)
@@ -296,7 +295,9 @@ class DocumentPickerDialog(QDialog):
             QSignalBlocker(self.tag_mode_combo),
         ]
         self.document_edit.setText(self.settings.get_string(self._settings_key("document"), ""))
-        self.document_id_edit.setText(self.settings.get_string(self._settings_key("document_id"), ""))
+        self.document_id_edit.setText(
+            self.settings.get_string(self._settings_key("document_id"), "")
+        )
         self.topic_edit.setText(self.settings.get_string(self._settings_key("topic"), ""))
         self.tag_edit.setText(self.settings.get_string(self._settings_key("tags"), ""))
         level = self.settings.get_string(self._settings_key("level"), "All") or "All"
@@ -309,11 +310,15 @@ class DocumentPickerDialog(QDialog):
 
     def _save_filter_state(self) -> None:
         self.settings.set_value(self._settings_key("document"), self.document_edit.text().strip())
-        self.settings.set_value(self._settings_key("document_id"), self.document_id_edit.text().strip())
+        self.settings.set_value(
+            self._settings_key("document_id"), self.document_id_edit.text().strip()
+        )
         self.settings.set_value(self._settings_key("topic"), self.topic_edit.text().strip())
         self.settings.set_value(self._settings_key("tags"), self.tag_edit.text().strip())
         self.settings.set_value(self._settings_key("level"), self.level_combo.currentText().strip())
-        self.settings.set_value(self._settings_key("tag_mode"), self.tag_mode_combo.currentText().strip())
+        self.settings.set_value(
+            self._settings_key("tag_mode"), self.tag_mode_combo.currentText().strip()
+        )
 
     def _on_search_timeout(self) -> None:
         self._reload(reset_page=True)
@@ -511,7 +516,7 @@ class DocumentPickerDialog(QDialog):
         self._selected_doc_name = "All Documents"
         self.accept()
 
-    def _current_document_id_filter(self) -> Optional[int]:
+    def _current_document_id_filter(self) -> int | None:
         raw_value = self.document_id_edit.text().strip()
         if not raw_value:
             return None
@@ -520,7 +525,7 @@ class DocumentPickerDialog(QDialog):
         except ValueError:
             return None
 
-    def _current_level_filter(self) -> Optional[str]:
+    def _current_level_filter(self) -> str | None:
         level = self.level_combo.currentText().strip()
         return None if level == "All" else level
 
@@ -614,7 +619,9 @@ class DocumentPickerDialog(QDialog):
         for tag in tags:
             self._add_filter_chip(f"Tag: {tag}")
         if tags:
-            self._add_filter_chip("Tag mode: All" if self._current_tag_mode() == "all" else "Tag mode: Any")
+            self._add_filter_chip(
+                "Tag mode: All" if self._current_tag_mode() == "all" else "Tag mode: Any"
+            )
         if topic:
             self._add_filter_chip(f"Topic: {topic}")
         if level:
@@ -651,7 +658,7 @@ class DocumentPickerDialog(QDialog):
         self._frequent_tags_cache = cleaned
         self._render_quick_tags(cleaned)
 
-    def selected_document(self) -> tuple[Optional[int], str]:
+    def selected_document(self) -> tuple[int | None, str]:
         return self._selected_doc_id, self._selected_doc_name
 
     def closeEvent(self, event) -> None:  # noqa: N802

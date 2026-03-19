@@ -1,4 +1,6 @@
-﻿import os, sys, sqlite3
+﻿import os
+import sqlite3
+import sys
 
 db_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join("test_data", "test.db")
 print("DB PATH:", os.path.abspath(db_path))
@@ -19,12 +21,14 @@ c.execute("PRAGMA foreign_keys = ON;")
 print("foreign_keys (after)  =", c.execute("PRAGMA foreign_keys;").fetchone())
 
 # Проверка наличия ключевых таблиц/FTS
-tables = c.execute("""
+tables = c.execute(
+    """
 SELECT name, type
 FROM sqlite_master
 WHERE name IN ('library','dict_project','source_corpus','source_document','lemma','ngram','document_sentence','sentence_fts','term_fts')
 ORDER BY name;
-""").fetchall()
+"""
+).fetchall()
 print("key_objects =", tables)
 
 # Проверка что schema_meta и версия на месте

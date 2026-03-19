@@ -140,7 +140,10 @@ def _ud_item() -> SimpleNamespace:
 def test_dictionary_model_has_niqqud_column():
     model = LemmaTableModel([_lemma()])
     assert model.headerData(10, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
-    assert model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole) == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    assert (
+        model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole)
+        == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    )
     tooltip = model.data(model.index(0, 10), Qt.ItemDataRole.ToolTipRole)
     assert "Source: manual" in tooltip
 
@@ -148,31 +151,44 @@ def test_dictionary_model_has_niqqud_column():
 def test_terms_model_has_niqqud_column():
     model = TermClusterTableModel([_cluster()])
     assert model.headerData(17, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
-    assert model.data(model.index(0, 17), Qt.ItemDataRole.DisplayRole) == "ЧћЦґЧ™Ч©ЧЃЧ•Ц№ЧЁ Ч”Ц·ЧћЦјЦ°Ч©ЧЃЦ»Ч¤ЦјЦёЧў"
+    assert (
+        model.data(model.index(0, 17), Qt.ItemDataRole.DisplayRole)
+        == "ЧћЦґЧ™Ч©ЧЃЧ•Ц№ЧЁ Ч”Ц·ЧћЦјЦ°Ч©ЧЃЦ»Ч¤ЦјЦёЧў"
+    )
 
 
 def test_tm_model_has_niqqud_column():
     model = TranslationManagementTableModel([_tm_entry()])
     assert model.headerData(12, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
-    assert model.data(model.index(0, 12), Qt.ItemDataRole.DisplayRole) == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    assert (
+        model.data(model.index(0, 12), Qt.ItemDataRole.DisplayRole)
+        == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    )
 
 
 def test_term_card_model_has_niqqud_column():
     model = TermCardTableModel([_term_card()])
     assert model.headerData(10, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
-    assert model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole) == "ЧћЦґЧ™Ч©ЧЃЧ•Ц№ЧЁ Ч”Ц·ЧћЦјЦ°Ч©ЧЃЦ»Ч¤ЦјЦёЧў"
+    assert (
+        model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole)
+        == "ЧћЦґЧ™Ч©ЧЃЧ•Ц№ЧЁ Ч”Ц·ЧћЦјЦ°Ч©ЧЃЦ»Ч¤ЦјЦёЧў"
+    )
 
 
 def test_user_dictionary_model_has_niqqud_column():
     model = UserDictionaryItemsTableModel([_ud_item()])
     assert model.headerData(10, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
-    assert model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole) == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    assert (
+        model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole)
+        == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
+    )
 
 
 def test_user_dictionary_model_has_project_metadata_columns():
     model = UserDictionaryItemsTableModel([_ud_item()])
-    assert model.headerData(7, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Project ID"
+    assert (
+        model.headerData(7, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Project ID"
+    )
     assert model.headerData(8, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Project"
     assert model.data(model.index(0, 7), Qt.ItemDataRole.DisplayRole) == "7"
     assert model.data(model.index(0, 8), Qt.ItemDataRole.DisplayRole) == "Project 7"
-

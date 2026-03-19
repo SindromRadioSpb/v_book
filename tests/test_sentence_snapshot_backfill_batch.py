@@ -49,7 +49,9 @@ def _seed_processed_docs_without_snapshots(session, count: int = 3) -> list[int]
     lib = Library(name="L")
     session.add(lib)
     session.flush()
-    project = DictProject(library_id=lib.library_id, name="Snapshot Backfill", src_lang="he", tgt_lang="ru")
+    project = DictProject(
+        library_id=lib.library_id, name="Snapshot Backfill", src_lang="he", tgt_lang="ru"
+    )
     session.add(project)
     session.flush()
     corpus = SourceCorpus(project_id=project.project_id, name="C")
@@ -116,7 +118,9 @@ class _Engine:
         return "1"
 
 
-def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lemma_stats(monkeypatch) -> None:
+def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lemma_stats(
+    monkeypatch,
+) -> None:
     db_path = _init_temp_db()
     _reset_db_service()
     DBService.initialize(db_path)
@@ -143,9 +147,15 @@ def test_snapshot_backfill_batch_persists_missing_snapshots_without_touching_lem
             )
             snapshots = session.execute(select(SentenceNLPSnapshot)).scalars().all()
             staged_rows = session.execute(select(SentenceNLPSnapshotStage)).scalars().all()
-            docs = session.execute(
-                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument)
+                    .where(SourceDocument.doc_id.in_(doc_ids))
+                    .order_by(SourceDocument.doc_id.asc())
+                )
+                .scalars()
+                .all()
+            )
             lemmas = session.execute(select(Lemma)).scalars().all()
 
         assert (ok_count, err_count) == (2, 0)
@@ -196,9 +206,11 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="snapshot_backfill_test",
             )
-            runs_after_first = session.execute(
-                select(ProcessorRun).order_by(ProcessorRun.run_id.asc())
-            ).scalars().all()
+            runs_after_first = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.asc()))
+                .scalars()
+                .all()
+            )
             staged_after_first = session.execute(select(SentenceNLPSnapshotStage)).scalars().all()
 
         assert (ok_1, err_1) == (1, 0)
@@ -219,9 +231,11 @@ def test_snapshot_backfill_batch_resumes_cancelled_run(monkeypatch) -> None:
                 resume_latest=True,
                 source_label="snapshot_backfill_test",
             )
-            final_runs = session.execute(
-                select(ProcessorRun).order_by(ProcessorRun.run_id.asc())
-            ).scalars().all()
+            final_runs = (
+                session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.asc()))
+                .scalars()
+                .all()
+            )
             snapshots = session.execute(select(SentenceNLPSnapshot)).scalars().all()
 
         assert (ok_2, err_2) == (2, 0)
@@ -269,9 +283,15 @@ def test_snapshot_backfill_batch_marks_run_failed_on_integrity_error(monkeypatch
             run = session.execute(
                 select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
             ).scalar_one()
-            run_errors = session.execute(
-                select(RunError).where(RunError.run_id == run.run_id).order_by(RunError.error_id.asc())
-            ).scalars().all()
+            run_errors = (
+                session.execute(
+                    select(RunError)
+                    .where(RunError.run_id == run.run_id)
+                    .order_by(RunError.error_id.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         assert run.status == "failed"
         assert run.stage == "failed_integrity"
@@ -345,7 +365,11 @@ def test_snapshot_backfill_batch_clears_stale_stage_rows_before_resume(monkeypat
         monkeypatch.setattr(
             service,
             "_run_snapshot_backfill_segment_check",
-            lambda **kwargs: {"ok": True, "quick_check_rows": ["ok"], "quick_check_timed_out": False},
+            lambda **kwargs: {
+                "ok": True,
+                "quick_check_rows": ["ok"],
+                "quick_check_timed_out": False,
+            },
         )
 
         with db.get_session() as session:
@@ -358,12 +382,18 @@ def test_snapshot_backfill_batch_clears_stale_stage_rows_before_resume(monkeypat
                 resume_latest=True,
                 source_label="snapshot_backfill_test",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
-            sentence_id = session.execute(
-                select(DocumentSentence.sentence_id)
-                .where(DocumentSentence.doc_id == doc_ids[1])
-                .order_by(DocumentSentence.sent_index.asc())
-            ).scalars().first()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
+            sentence_id = (
+                session.execute(
+                    select(DocumentSentence.sentence_id)
+                    .where(DocumentSentence.doc_id == doc_ids[1])
+                    .order_by(DocumentSentence.sent_index.asc())
+                )
+                .scalars()
+                .first()
+            )
             assert sentence_id is not None
             session.add(
                 SentenceNLPSnapshotStage(

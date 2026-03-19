@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import QMessageBox
 
 from app.infra.settings import SettingsService
 
-
 MMS_LICENSE_ACCEPTED_KEY = "audio/providers/mms_tts_local/license_accepted"
 
 

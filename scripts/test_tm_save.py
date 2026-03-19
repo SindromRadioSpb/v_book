@@ -1,4 +1,5 @@
 """Test TM entry save for term cluster translation."""
+
 import logging
 import sys
 import io
@@ -10,7 +11,7 @@ from app.domain.normalization import normalize_for_tm
 from datetime import datetime
 
 # Set UTF-8 encoding
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -26,9 +27,7 @@ with Session() as session:
     # Find a term cluster
     project_id = 2  # Тест_Перевод
 
-    stmt = select(TermCluster).where(
-        TermCluster.project_id == project_id
-    ).limit(1)
+    stmt = select(TermCluster).where(TermCluster.project_id == project_id).limit(1)
     cluster = session.execute(stmt).scalar()
 
     if not cluster:

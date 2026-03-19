@@ -35,4 +35,3 @@ def test_settings_button_reloads_provider_list_after_save(monkeypatch, qtbot):
 
     assert dialog.provider_combo.count() == 2
     assert dialog.provider_combo.itemText(0) == "google_cloud_tts"
-

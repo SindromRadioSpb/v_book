@@ -7,23 +7,24 @@ Tests:
 4. TM persistence after re-extraction
 5. Status workflow
 """
-import sys
+
 import io
+import sys
 from pathlib import Path
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-print("="*70)
+print("=" * 70)
 print("M7: Translation Memory - Automated Tests")
-print("="*70)
+print("=" * 70)
 
-from app.services.db_service import DBService
-from app.services.translation_service import TranslationService
 from app.domain.normalization import normalize_text
 from app.domain.term_extraction.canonicalizer import canonicalize_hebrew_term
-from app.infra.sa_models import TMEntry, DictSource, DictEntry
+from app.infra.sa_models import DictEntry, DictSource, TMEntry
+from app.services.db_service import DBService
+from app.services.translation_service import TranslationService
 
 # Setup test DB
 test_db = Path("test_m7.db")
@@ -35,7 +36,8 @@ db_service = DBService.get_instance()
 
 # Apply M7 migration
 import sqlite3
-migration_sql = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+
+migration_sql = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
 con = sqlite3.connect(str(test_db))
 con.executescript(migration_sql)
 con.close()
@@ -64,10 +66,12 @@ for text, expected_norm in test_cases:
     # M5 compatibility REQUIRED for lemma/term_cluster per contract
     m7_result = normalize_text("he", text, "lemma", "strict")
 
-    match = (m5_key == m7_result.norm == expected_norm)
+    match = m5_key == m7_result.norm == expected_norm
     status = "✅" if match else "❌"
 
-    print(f"  {status} '{text}' → M5: {m5_key}, M7 (lemma): {m7_result.norm}, Expected: {expected_norm}")
+    print(
+        f"  {status} '{text}' → M5: {m5_key}, M7 (lemma): {m7_result.norm}, Expected: {expected_norm}"
+    )
 
     if not match:
         test1_pass = False
@@ -202,10 +206,7 @@ with db_service.get_session() as session:
     items = [(word, "lemma") for word, _ in test_words]
     results = tm_service.bulk_resolve(session, items)
 
-    all_found = all(
-        results.get((word, "lemma")).translation == trans
-        for word, trans in test_words
-    )
+    all_found = all(results.get((word, "lemma")).translation == trans for word, trans in test_words)
 
     if all_found:
         print(f"  ✅ Bulk resolve found all {len(test_words)} items")
@@ -306,9 +307,9 @@ DBService.shutdown()
 # ============================================================================
 # Summary
 # ============================================================================
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print("TEST SUMMARY")
-print("="*70)
+print("=" * 70)
 
 if not failed_tests:
     print("✅ ALL TESTS PASSED")

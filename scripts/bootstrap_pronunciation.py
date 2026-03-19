@@ -44,7 +44,9 @@ def main() -> int:
     parser.add_argument("--lang", default="he", help="Source language (default: he)")
     parser.add_argument("--chunk-size", type=int, default=500, help="Chunk size for processing")
     parser.add_argument("--generator", choices=["phonikud", "noop"], default="phonikud")
-    parser.add_argument("--strict-generator", action="store_true", help="Fail if selected generator is unavailable")
+    parser.add_argument(
+        "--strict-generator", action="store_true", help="Fail if selected generator is unavailable"
+    )
     parser.add_argument("--model-path", default="", help="Optional Phonikud model/checkpoint path")
     parser.add_argument(
         "--disable-phonikud",
@@ -57,9 +59,15 @@ def main() -> int:
         action="store_true",
         help="Only fill missing auto values (default mode)",
     )
-    mode.add_argument("--rebuild-auto", action="store_true", help="Allow overwrite of existing auto rows")
-    parser.add_argument("--limit", type=int, default=0, help="Optional limit of source norms to process")
-    parser.add_argument("--dry-run", action="store_true", help="Collect/generate but do not persist to DB")
+    mode.add_argument(
+        "--rebuild-auto", action="store_true", help="Allow overwrite of existing auto rows"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Optional limit of source norms to process"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Collect/generate but do not persist to DB"
+    )
     parser.add_argument("--skip-lemmas", action="store_true")
     parser.add_argument("--skip-terms", action="store_true")
     parser.add_argument("--skip-user-dictionary", action="store_true")
@@ -82,7 +90,9 @@ def main() -> int:
 
     try:
         if hasattr(generator, "health_check"):
-            health = generator.health_check(["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"])
+            health = generator.health_check(
+                ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
+            )
             logger.info(
                 "Phonikud health: status=%s mode=%s latency_ms=%s model_path=%s",
                 health.status,

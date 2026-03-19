@@ -1,6 +1,6 @@
 """Data Transfer Objects."""
+
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass
@@ -22,28 +22,28 @@ class LemmaStats:
 
     lemma_id: int
     lemma_text: str
-    pos: Optional[str]
+    pos: str | None
     freq_abs: int
     doc_freq: int
-    translation: Optional[str] = None
+    translation: str | None = None
     status: str = "auto"
-    entity_class: Optional[str] = None
-    is_noise: Optional[int] = None
-    noise_reason: Optional[str] = None
-    norm_text: Optional[str] = None
+    entity_class: str | None = None
+    is_noise: int | None = None
+    noise_reason: str | None = None
+    norm_text: str | None = None
     saved_to_ud: bool = False
     in_user_dictionary_count: int = 0
-    study_state: Optional[str] = None
-    study_due_human: Optional[str] = None
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
-    translation_tier: Optional[str] = None
-    audio_status: Optional[str] = None
-    study_tooltip: Optional[str] = None
-    pronunciation_text: Optional[str] = None
-    pronunciation_source: Optional[str] = None
-    pronunciation_confidence: Optional[float] = None
-    pronunciation_qc: Optional[str] = None
+    study_state: str | None = None
+    study_due_human: str | None = None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
+    translation_tier: str | None = None
+    audio_status: str | None = None
+    study_tooltip: str | None = None
+    pronunciation_text: str | None = None
+    pronunciation_source: str | None = None
+    pronunciation_confidence: float | None = None
+    pronunciation_qc: str | None = None
 
 
 @dataclass
@@ -55,9 +55,9 @@ class NgramStats:
     n: int
     freq_abs: int
     doc_freq: int
-    pmi: Optional[float]
-    tscore: Optional[float]
-    translation: Optional[str] = None
+    pmi: float | None
+    tscore: float | None
+    translation: str | None = None
     status: str = "auto"
 
 
@@ -86,12 +86,12 @@ class DocumentDTO:
     sentence_count: int
     token_count: int
     imported_at: str
-    processed_at: Optional[str] = None
+    processed_at: str | None = None
     # Metadata fields (Migration 023)
-    tag: Optional[str] = None
-    link_url: Optional[str] = None
-    level: Optional[str] = None    # aleph | bet | gimel | he
-    topic: Optional[str] = None
+    tag: str | None = None
+    link_url: str | None = None
+    level: str | None = None  # aleph | bet | gimel | he
+    topic: str | None = None
 
 
 @dataclass
@@ -99,14 +99,14 @@ class SentenceNiqqudOverlay:
     """Sentence-level niqqud overlay from sentence_pronunciation table (Migration 024)."""
 
     sentence_id: int
-    niqqud_text: Optional[str]
-    qc_status: str          # ok | auto_fixed | partial | rejected | failed | pending
-    qc_reason: Optional[str]
-    source: str             # auto_phonikud | manual | import_csv
-    confidence: Optional[float]
-    niqqud_coverage: Optional[float]
+    niqqud_text: str | None
+    qc_status: str  # ok | auto_fixed | partial | rejected | failed | pending
+    qc_reason: str | None
+    source: str  # auto_phonikud | manual | import_csv
+    confidence: float | None
+    niqqud_coverage: float | None
     is_override: bool
-    review_status: str      # auto | pending_review | approved | rejected_by_user
+    review_status: str  # auto | pending_review | approved | rejected_by_user
 
 
 @dataclass
@@ -119,19 +119,19 @@ class SentenceDTO:
     sent_index: int
     text: str
     # TM overlay
-    translation: Optional[str] = None
-    translation_status: Optional[str] = None
-    translation_source: Optional[str] = None
+    translation: str | None = None
+    translation_status: str | None = None
+    translation_source: str | None = None
     # Sentence niqqud overlay (sentence_pronunciation table, Migration 024)
-    pronunciation_text: Optional[str] = None   # effective niqqud_text
-    niqqud_qc: Optional[str] = None            # qc_status badge
-    niqqud_source: Optional[str] = None
-    niqqud_confidence: Optional[float] = None
-    niqqud_coverage: Optional[float] = None
+    pronunciation_text: str | None = None  # effective niqqud_text
+    niqqud_qc: str | None = None  # qc_status badge
+    niqqud_source: str | None = None
+    niqqud_confidence: float | None = None
+    niqqud_coverage: float | None = None
     niqqud_is_override: bool = False
-    niqqud_review: Optional[str] = None
+    niqqud_review: str | None = None
     # Audio overlay
-    audio_status: Optional[str] = None
+    audio_status: str | None = None
 
 
 @dataclass
@@ -147,7 +147,7 @@ class DeleteReport:
     ngrams_deleted: int
     term_cards_deleted: int
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -159,14 +159,14 @@ class ExtractReport:
     np_chunks_extracted: int  # M5.3: NP chunks
     clusters_created: int
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
     cancelled: bool = False
-    run_id: Optional[int] = None
+    run_id: int | None = None
     docs_processed: int = 0
     docs_total: int = 0
     snapshot_rows_used: int = 0
     reparsed_sentences: int = 0
-    snapshot_reuse_pct: Optional[float] = None
+    snapshot_reuse_pct: float | None = None
 
 
 @dataclass
@@ -184,24 +184,24 @@ class SnapshotReadinessSummaryDTO:
     remaining_uncovered_docs: int
     sentence_count_total: int
     snapshot_count_total: int
-    sentence_coverage_pct: Optional[float]
-    doc_coverage_pct: Optional[float]
+    sentence_coverage_pct: float | None
+    doc_coverage_pct: float | None
     stats_valid_docs: int = 0
     stats_unknown_docs: int = 0
     stats_invalid_docs: int = 0
     coverage_is_degraded: bool = False
     coverage_source: str = "snapshot_doc_stats"
-    latest_backfill_run_id: Optional[int] = None
-    latest_backfill_status: Optional[str] = None
-    latest_backfill_stage: Optional[str] = None
-    latest_backfill_last_doc_id: Optional[int] = None
-    latest_backfill_finished_at: Optional[str] = None
+    latest_backfill_run_id: int | None = None
+    latest_backfill_status: str | None = None
+    latest_backfill_stage: str | None = None
+    latest_backfill_last_doc_id: int | None = None
+    latest_backfill_finished_at: str | None = None
     latest_backfill_docs_processed: int = 0
     latest_backfill_docs_total: int = 0
     contract_state: str = "no_snapshot_coverage"
-    contract_note: Optional[str] = None
-    summary_note: Optional[str] = None
-    last_refreshed_at: Optional[str] = None
+    contract_note: str | None = None
+    summary_note: str | None = None
+    last_refreshed_at: str | None = None
 
 
 @dataclass
@@ -216,11 +216,11 @@ class DerivedArtifactMetricDTO:
     quantity_basis: str
     status: str
     summary: str
-    detail_lines: List[str] = field(default_factory=list)
-    maintenance_mode: Optional[str] = None
-    maintenance_note: Optional[str] = None
-    maintenance_cli_hint: Optional[str] = None
-    maintenance_preflight_hint: Optional[str] = None
+    detail_lines: list[str] = field(default_factory=list)
+    maintenance_mode: str | None = None
+    maintenance_note: str | None = None
+    maintenance_cli_hint: str | None = None
+    maintenance_preflight_hint: str | None = None
 
 
 @dataclass
@@ -234,12 +234,12 @@ class DerivedArtifactGovernanceSummaryDTO:
     processed_docs: int
     observability_note: str
     storage_note: str
-    snapshot_sentence_coverage_pct: Optional[float] = None
-    snapshot_doc_coverage_pct: Optional[float] = None
-    lifecycle_note: Optional[str] = None
-    snapshot_contract_note: Optional[str] = None
-    last_refreshed_at: Optional[str] = None
-    artifacts: List[DerivedArtifactMetricDTO] = field(default_factory=list)
+    snapshot_sentence_coverage_pct: float | None = None
+    snapshot_doc_coverage_pct: float | None = None
+    lifecycle_note: str | None = None
+    snapshot_contract_note: str | None = None
+    last_refreshed_at: str | None = None
+    artifacts: list[DerivedArtifactMetricDTO] = field(default_factory=list)
 
 
 @dataclass
@@ -256,13 +256,13 @@ class ProjectTelemetryRetentionSummaryDTO:
     kept_recent_ok_runs: int
     prunable_ok_runs: int
     prunable_run_error_rows: int
-    oldest_prunable_run_id: Optional[int] = None
-    newest_prunable_run_id: Optional[int] = None
+    oldest_prunable_run_id: int | None = None
+    newest_prunable_run_id: int | None = None
     applied: bool = False
     deleted_runs: int = 0
     deleted_run_errors: int = 0
-    summary_note: Optional[str] = None
-    vacuum_note: Optional[str] = None
+    summary_note: str | None = None
+    vacuum_note: str | None = None
 
 
 @dataclass
@@ -272,15 +272,15 @@ class NLPProcessRunState:
     run_id: int
     project_id: int
     status: str
-    stage: Optional[str]
+    stage: str | None
     docs_total: int
     docs_processed: int
     docs_failed: int
     chunks_total: int
     chunks_completed: int
-    last_doc_id: Optional[int] = None
-    params_hash: Optional[str] = None
-    error_message: Optional[str] = None
+    last_doc_id: int | None = None
+    params_hash: str | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -290,14 +290,14 @@ class TermExtractionRunState:
     run_id: int
     project_id: int
     status: str
-    stage: Optional[str]
+    stage: str | None
     docs_total: int
     docs_processed: int
     docs_failed: int
     chunks_total: int
     chunks_completed: int
-    last_doc_id: Optional[int] = None
-    error_message: Optional[str] = None
+    last_doc_id: int | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -307,109 +307,110 @@ class ClusterStats:
     cluster_id: int
     canonical_key: str
     representative_he: str
-    representative_lemma: Optional[str]
+    representative_lemma: str | None
     freq_abs: int
     doc_freq: int
     members_count: int
-    best_pmi: Optional[float]
-    best_llr: Optional[float]
-    best_dice: Optional[float]
-    best_tscore: Optional[float]
+    best_pmi: float | None
+    best_llr: float | None
+    best_dice: float | None
+    best_tscore: float | None
     # M5.4: Termhood metrics vs reference corpus
-    weirdness: Optional[float] = None
-    keyness_llr: Optional[float] = None
-    termhood_score: Optional[float] = None
+    weirdness: float | None = None
+    keyness_llr: float | None = None
+    termhood_score: float | None = None
     # M7: Translation
-    translation: Optional[str] = None
-    translation_source: Optional[str] = None  # tm|dict|mt_cache|mt|none
-    translation_status: Optional[str] = None  # approved|draft
+    translation: str | None = None
+    translation_source: str | None = None  # tm|dict|mt_cache|mt|none
+    translation_status: str | None = None  # approved|draft
     # Task 11: Entity classification
-    entity_class: Optional[str] = None
-    is_noise: Optional[int] = None
-    noise_reason: Optional[str] = None
-    norm_text: Optional[str] = None
+    entity_class: str | None = None
+    is_noise: int | None = None
+    noise_reason: str | None = None
+    norm_text: str | None = None
     saved_to_ud: bool = False
     in_user_dictionary_count: int = 0
-    study_state: Optional[str] = None
-    study_due_human: Optional[str] = None
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
-    translation_tier: Optional[str] = None
-    audio_status: Optional[str] = None
-    study_tooltip: Optional[str] = None
-    pronunciation_text: Optional[str] = None
-    pronunciation_source: Optional[str] = None
-    pronunciation_confidence: Optional[float] = None
-    pronunciation_qc: Optional[str] = None
+    study_state: str | None = None
+    study_due_human: str | None = None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
+    translation_tier: str | None = None
+    audio_status: str | None = None
+    study_tooltip: str | None = None
+    pronunciation_text: str | None = None
+    pronunciation_source: str | None = None
+    pronunciation_confidence: float | None = None
+    pronunciation_qc: str | None = None
 
 
 @dataclass
 class TranslationResultDTO:
     """M7 Translation result for UI layer."""
 
-    translation: Optional[str] = None
+    translation: str | None = None
     source: str = "none"  # tm|dict|mt_cache|mt|none
-    status: Optional[str] = None  # approved|draft|rejected|deprecated
-    confidence: Optional[float] = None
-    origin: Optional[str] = None  # user_edit|import|mt_accept|mt_auto
-    matched_on: Optional[str] = None  # src_norm|alias_norm|variant_norm
-    match_key_used: Optional[str] = None
-    provider: Optional[str] = None  # MT provider name
-    dict_source_name: Optional[str] = None
-    tm_id: Optional[int] = None
-    notes: Optional[str] = None
+    status: str | None = None  # approved|draft|rejected|deprecated
+    confidence: float | None = None
+    origin: str | None = None  # user_edit|import|mt_accept|mt_auto
+    matched_on: str | None = None  # src_norm|alias_norm|variant_norm
+    match_key_used: str | None = None
+    provider: str | None = None  # MT provider name
+    dict_source_name: str | None = None
+    tm_id: int | None = None
+    notes: str | None = None
 
 
 # ============================================================================
 # P2: Translation Management & QA/Coverage DTOs
 # ============================================================================
 
+
 @dataclass
 class TMEntryDTO:
     """P2: TM Entry for management panel."""
 
     tm_id: int
-    project_id: Optional[int]  # None = global
+    project_id: int | None  # None = global
     kind: str  # lemma|ngram|term_cluster|surface
     src_lang: str
     tgt_lang: str
     src_text: str
     src_norm: str
     translation: str
-    translation_norm: Optional[str]
-    pos: Optional[str]
-    domain: Optional[str]
-    notes: Optional[str]
+    translation_norm: str | None
+    pos: str | None
+    domain: str | None
+    notes: str | None
     status: str  # draft|approved|rejected|deprecated
-    confidence: Optional[float]
+    confidence: float | None
     origin: str  # user_edit|import|mt_accept|mt_auto|merge
-    source_ref: Optional[str]
+    source_ref: str | None
     created_at: str
     updated_at: str
-    approved_at: Optional[str]
-    approved_by: Optional[str]
-    is_noise: Optional[int]  # 0=not noise, 1=noise, None=legacy
-    noise_reason: Optional[str]  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
-    norm_text: Optional[str]  # Normalized text for noise detection
+    approved_at: str | None
+    approved_by: str | None
+    is_noise: int | None  # 0=not noise, 1=noise, None=legacy
+    noise_reason: str | None  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
+    norm_text: str | None  # Normalized text for noise detection
     # Source entity links (for is_noise synchronization)
-    lemma_id: Optional[int]
-    cluster_id: Optional[int]
-    ngram_id: Optional[int]
+    lemma_id: int | None
+    cluster_id: int | None
+    ngram_id: int | None
     # Global TM canonical link (Task 19)
-    tm_global_id: Optional[int] = None
+    tm_global_id: int | None = None
     # Study/meta indicators (non-intrusive overlays)
     in_user_dictionary_count: int = 0
-    study_state: Optional[str] = None
-    study_due_human: Optional[str] = None
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
-    study_tooltip: Optional[str] = None
-    audio_status: Optional[str] = None
-    pronunciation_text: Optional[str] = None
-    pronunciation_source: Optional[str] = None
-    pronunciation_confidence: Optional[float] = None
-    pronunciation_qc: Optional[str] = None
-    raw_src_norm: Optional[str] = None
+    study_state: str | None = None
+    study_due_human: str | None = None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
+    study_tooltip: str | None = None
+    audio_status: str | None = None
+    pronunciation_text: str | None = None
+    pronunciation_source: str | None = None
+    pronunciation_confidence: float | None = None
+    pronunciation_qc: str | None = None
+    raw_src_norm: str | None = None
 
 
 @dataclass
@@ -418,7 +419,7 @@ class UserDictionaryDTO:
 
     dictionary_id: int
     name: str
-    description: Optional[str]
+    description: str | None
     is_pinned: int
     sort_order: int
     created_at: str
@@ -439,85 +440,85 @@ class UserDictionaryItemDTO:
     src_norm: str
     canonical_hash: str
     tags_json: str
-    notes: Optional[str]
+    notes: str | None
     is_noise: int
-    noise_reason: Optional[str]
+    noise_reason: str | None
     study_state: str
-    study_progress_id: Optional[int]
+    study_progress_id: int | None
     is_suspended: int
-    suspended_reason: Optional[str]
-    last_seen_at: Optional[str]
+    suspended_reason: str | None
+    last_seen_at: str | None
     seen_count: int
-    origin_project_id: Optional[int]
-    origin_project_name: Optional[str]
-    origin_entity_type: Optional[str]
-    origin_entity_id: Optional[str]
-    origin_tm_entry_id: Optional[int]
-    origin_doc_id: Optional[int]
-    origin_source_ref: Optional[str]
+    origin_project_id: int | None
+    origin_project_name: str | None
+    origin_entity_type: str | None
+    origin_entity_id: str | None
+    origin_tm_entry_id: int | None
+    origin_doc_id: int | None
+    origin_source_ref: str | None
     created_at: str
     updated_at: str
-    translation: Optional[str] = None
-    translation_status: Optional[str] = None
-    translation_origin: Optional[str] = None
-    translation_confidence: Optional[float] = None
-    tm_global_id: Optional[int] = None
+    translation: str | None = None
+    translation_status: str | None = None
+    translation_origin: str | None = None
+    translation_confidence: float | None = None
+    tm_global_id: int | None = None
     audio_status: str = "missing"
     origin_kind: str = "manual"
     computed_study_state: str = "new"
-    study_due_human: Optional[str] = None
-    study_due_at: Optional[str] = None
+    study_due_human: str | None = None
+    study_due_at: str | None = None
     study_review_count: int = 0
     study_lapse_count: int = 0
     study_interval_days: int = 0
     study_ease_factor: float = 2.5
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
     translation_tier: str = "missing"
-    status_tooltip: Optional[str] = None
-    pronunciation_text: Optional[str] = None
-    pronunciation_source: Optional[str] = None
-    pronunciation_confidence: Optional[float] = None
-    pronunciation_qc: Optional[str] = None
+    status_tooltip: str | None = None
+    pronunciation_text: str | None = None
+    pronunciation_source: str | None = None
+    pronunciation_confidence: float | None = None
+    pronunciation_qc: str | None = None
 
 
 @dataclass
 class PronunciationEntryDTO:
     """Pronunciation entry payload."""
 
-    entry_id: Optional[int]
+    entry_id: int | None
     lang: str
     src_norm: str
-    niqqud_text: Optional[str]
-    ipa: Optional[str]
-    reading_text: Optional[str]
+    niqqud_text: str | None
+    ipa: str | None
+    reading_text: str | None
     source: str
-    confidence: Optional[float]
+    confidence: float | None
     is_override: int
-    notes: Optional[str]
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    notes: str | None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 @dataclass
 class StudyProgressSummaryDTO:
     """Computed SRS summary for one canonical hash."""
 
-    progress_id: Optional[int]
+    progress_id: int | None
     canonical_hash: str
-    first_seen_at: Optional[str]
-    last_review_at: Optional[str]
-    due_at: Optional[str]
+    first_seen_at: str | None
+    last_review_at: str | None
+    due_at: str | None
     review_count: int
     lapse_count: int
     interval_days: int
     ease_factor: float
-    last_quality: Optional[int]
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
+    last_quality: int | None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
     is_suspended: bool = False
     study_state: str = "new"
-    due_human: Optional[str] = None
+    due_human: str | None = None
 
 
 @dataclass
@@ -536,8 +537,8 @@ class StudyCardDTO:
     translation_tier: str
     origin_kind: str
     study_state: str
-    due_human: Optional[str]
-    progress_id: Optional[int]
+    due_human: str | None
+    progress_id: int | None
     review_count: int
     lapse_count: int
     interval_days: int
@@ -552,7 +553,7 @@ class TMHistoryDTO:
     tm_id: int
     version: int
     translation: str
-    notes: Optional[str]
+    notes: str | None
     status: str
     origin: str
     changed_at: str
@@ -575,7 +576,7 @@ class LemmaCoverageRow:
 
     lemma_id: int
     lemma_text: str
-    pos: Optional[str]
+    pos: str | None
     freq_abs: int
     doc_freq: int
 
@@ -589,7 +590,7 @@ class TermClusterCoverageRow:
     canonical_key: str
     freq_abs: int
     doc_freq: int
-    termhood_score: Optional[float]
+    termhood_score: float | None
 
 
 # ============================================================================
@@ -607,12 +608,12 @@ class ImportRow:
     tgt_lang: str
     src_text: str
     translation: str
-    pos: Optional[str] = None
-    domain: Optional[str] = None
+    pos: str | None = None
+    domain: str | None = None
     status: str = "approved"
-    priority: Optional[int] = None
-    notes: Optional[str] = None
-    aliases: Optional[List[str]] = None  # Additional src_text variants
+    priority: int | None = None
+    notes: str | None = None
+    aliases: list[str] | None = None  # Additional src_text variants
 
 
 @dataclass
@@ -645,9 +646,9 @@ class ImportReport:
     skipped: int
     conflicts: int
     invalid: int
-    invalid_rows: List[ImportInvalidRow]
-    conflict_details: List[ImportConflict]
-    dict_source_id: Optional[int]
+    invalid_rows: list[ImportInvalidRow]
+    conflict_details: list[ImportConflict]
+    dict_source_id: int | None
     sha256: str
     elapsed_ms: float
 
@@ -660,37 +661,37 @@ class TermCardDTO:
     project_id: int
     canonical_key: str
     representative_he: str
-    representative_lemma: Optional[str]
+    representative_lemma: str | None
     freq_abs: int
     doc_freq: int
     members_count: int
-    best_pmi: Optional[float]
-    best_llr: Optional[float]
-    best_dice: Optional[float]
-    best_tscore: Optional[float]
-    tfidf: Optional[float]
-    weirdness: Optional[float]
-    source_kinds: Optional[str]
+    best_pmi: float | None
+    best_llr: float | None
+    best_dice: float | None
+    best_tscore: float | None
+    tfidf: float | None
+    weirdness: float | None
+    source_kinds: str | None
     curation_status: str  # auto/needs_review/approved/rejected
-    pinned_translation: Optional[str]
-    pinned_translation_lang: Optional[str]
-    pinned_example_sent_id: Optional[int]
-    pinned_example_text: Optional[str]
-    curation_notes: Optional[str]
-    curated_at: Optional[str]
-    curated_by: Optional[str]
-    aliases: List[str]  # Variant forms
+    pinned_translation: str | None
+    pinned_translation_lang: str | None
+    pinned_example_sent_id: int | None
+    pinned_example_text: str | None
+    curation_notes: str | None
+    curated_at: str | None
+    curated_by: str | None
+    aliases: list[str]  # Variant forms
     is_stopword: bool
     created_at: str
     updated_at: str
     in_user_dictionary_count: int = 0
-    study_state: Optional[str] = None
-    study_due_human: Optional[str] = None
-    last_grade: Optional[str] = None
-    last_graded_at: Optional[str] = None
-    study_tooltip: Optional[str] = None
-    audio_status: Optional[str] = None
-    pronunciation_text: Optional[str] = None
-    pronunciation_source: Optional[str] = None
-    pronunciation_confidence: Optional[float] = None
-    pronunciation_qc: Optional[str] = None
+    study_state: str | None = None
+    study_due_human: str | None = None
+    last_grade: str | None = None
+    last_graded_at: str | None = None
+    study_tooltip: str | None = None
+    audio_status: str | None = None
+    pronunciation_text: str | None = None
+    pronunciation_source: str | None = None
+    pronunciation_confidence: float | None = None
+    pronunciation_qc: str | None = None

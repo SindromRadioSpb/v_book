@@ -5,10 +5,9 @@ with configurable retention policies to prevent unlimited storage growth.
 """
 
 import logging
-from pathlib import Path
-from datetime import datetime, timedelta
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from app.services.db_snapshot_base import DBSnapshotBase
 
@@ -29,7 +28,7 @@ class BackupInfo:
 class BackupService(DBSnapshotBase):
     """Migration backup service with retention policy."""
 
-    def __init__(self, backup_dir: Optional[Path] = None):
+    def __init__(self, backup_dir: Path | None = None):
         """
         Initialize backup service.
 
@@ -41,7 +40,7 @@ class BackupService(DBSnapshotBase):
             self._ensure_directory(backup_dir)
 
     def create_migration_backup(
-        self, db_path: Path, reason: str, backup_dir: Optional[Path] = None
+        self, db_path: Path, reason: str, backup_dir: Path | None = None
     ) -> BackupInfo:
         """
         Create WAL-safe backup before migration.
@@ -72,6 +71,7 @@ class BackupService(DBSnapshotBase):
 
         try:
             import shutil
+
             stat = shutil.disk_usage(backup_dir)
             if stat.free < required_space:
                 raise RuntimeError(
@@ -164,9 +164,7 @@ class BackupService(DBSnapshotBase):
             if backup_time < cutoff_date:
                 try:
                     old_backup.unlink()
-                    logger.info(
-                        f"Deleted old backup: {old_backup.name} (age: {age_days} days)"
-                    )
+                    logger.info(f"Deleted old backup: {old_backup.name} (age: {age_days} days)")
                     deleted_count += 1
                 except Exception as e:
                     logger.warning(f"Failed to delete backup {old_backup.name}: {e}")

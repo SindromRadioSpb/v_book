@@ -9,14 +9,14 @@ Tests CSV import functionality:
 - Cancel flag
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
-from app.services.dictionary_import_service import DictionaryImportService
 from app.services.db_service import DBService
+from app.services.dictionary_import_service import DictionaryImportService
 
 
 class TestDictionaryImportCSV(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestDictionaryImportCSV(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.close()
@@ -41,7 +41,7 @@ class TestDictionaryImportCSV(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -64,7 +64,7 @@ class TestDictionaryImportCSV(unittest.TestCase):
 
     def setUp(self):
         """Clean dict tables before each test."""
-        from app.infra.sa_models import DictSource, DictEntry
+        from app.infra.sa_models import DictEntry, DictSource
 
         with self.db_service.get_session() as session:
             session.query(DictEntry).delete()
@@ -74,7 +74,9 @@ class TestDictionaryImportCSV(unittest.TestCase):
     def test_import_2column_csv(self):
         """Test importing 2-column CSV (he, ru)."""
         # Create test CSV
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("בית,дом\n")
         csv_file.write("ספר,книга\n")
         csv_file.write("שולחן,стол\n")
@@ -123,7 +125,9 @@ class TestDictionaryImportCSV(unittest.TestCase):
     def test_import_full_format_csv(self):
         """Test importing full format CSV with headers."""
         # Create test CSV with headers
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("kind,src_lang,tgt_lang,src_text,translation,pos,domain,status\n")
         csv_file.write("lemma,he,ru,בית,дом,NOUN,general,approved\n")
         csv_file.write("term_cluster,he,ru,בית הספר,школа,,education,approved\n")
@@ -171,7 +175,9 @@ class TestDictionaryImportCSV(unittest.TestCase):
         """Test importing CSV with aliases."""
         # Create test CSV with aliases column
         # Use aliases that normalize differently to avoid UNIQUE constraint violation
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("src_text,translation,aliases\n")
         csv_file.write("בית,дом,ספר;שולחן\n")  # Use different words as aliases for testing
         csv_file.close()
@@ -217,7 +223,9 @@ class TestDictionaryImportCSV(unittest.TestCase):
     def test_sha256_dedup(self):
         """Test SHA256 deduplication prevents re-import."""
         # Create test CSV
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("בית,дом\n")
         csv_file.close()
 
@@ -259,7 +267,9 @@ class TestDictionaryImportCSV(unittest.TestCase):
     def test_cancel_flag(self):
         """Test cancel flag interrupts import."""
         # Create CSV with 300 rows (will commit first 200, then cancel on second chunk)
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         for i in range(300):
             csv_file.write(f"word{i},перевод{i}\n")
         csv_file.close()

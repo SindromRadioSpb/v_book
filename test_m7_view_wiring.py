@@ -8,13 +8,14 @@ Tests the integration of DictionaryView and TermsView with:
 These tests run headless (QT_QPA_PLATFORM=offscreen).
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
+
+from PyQt6.QtCore import QEventLoop, Qt, QTimer
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QEventLoop, QTimer, Qt
 
 # Ensure QApplication exists for tests
 app = QApplication.instance()
@@ -33,12 +34,15 @@ class TestDictionaryViewWiring(unittest.TestCase):
 
         # Apply schema via DBService
         from app.services.db_service import DBService
+
         DBService.initialize(cls.test_db.name)
         cls.db_service = DBService.get_instance()
 
         # Apply M7 migrations manually
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -46,7 +50,7 @@ class TestDictionaryViewWiring(unittest.TestCase):
 
         # Create test library, project and lemmas
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject, Lemma, LemmaProjectStat
+            from app.infra.sa_models import DictProject, Lemma, LemmaProjectStat, Library
 
             # Create library
             library = Library(library_id=1, name="Test Library")
@@ -58,7 +62,7 @@ class TestDictionaryViewWiring(unittest.TestCase):
                 name="Test Project",
                 src_lang="he",
                 tgt_lang="ru",
-                description="Test project for view wiring"
+                description="Test project for view wiring",
             )
             session.add(project)
             session.flush()
@@ -95,12 +99,14 @@ class TestDictionaryViewWiring(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         os.unlink(cls.test_db.name)
 
     def setUp(self):
         """Clean up TM entries before each test."""
         from app.infra.sa_models import TMEntry
+
         with self.db_service.get_session() as session:
             session.query(TMEntry).delete()
             session.commit()
@@ -154,8 +160,8 @@ class TestDictionaryViewWiring(unittest.TestCase):
 
     def test_04_dictionary_view_inline_edit_saves_to_tm(self):
         """Test that inline edit saves to TM."""
-        from app.ui.dictionary_view import DictionaryView
         from app.infra.sa_models import TMEntry
+        from app.ui.dictionary_view import DictionaryView
 
         view = DictionaryView(self.project_id)
 
@@ -177,9 +183,7 @@ class TestDictionaryViewWiring(unittest.TestCase):
 
         # Check TM entry was created
         with self.db_service.get_session() as session:
-            tm_entries = session.query(TMEntry).filter(
-                TMEntry.project_id == self.project_id
-            ).all()
+            tm_entries = session.query(TMEntry).filter(TMEntry.project_id == self.project_id).all()
             self.assertGreater(len(tm_entries), 0)
 
             # Find our entry
@@ -208,15 +212,11 @@ class TestDictionaryViewWiring(unittest.TestCase):
         if view.lemma_model.rowCount() > 0:
             try:
                 # Note: We can't call exec() in headless mode, so we just create the dialog
-                from app.ui.dialogs import WhyTranslationDialog
                 from app.services.translation_service import TranslationResult
+                from app.ui.dialogs import WhyTranslationDialog
 
                 lemma = view.lemma_model.lemmas[0]
-                result = TranslationResult(
-                    translation="test",
-                    source="tm",
-                    status="approved"
-                )
+                result = TranslationResult(translation="test", source="tm", status="approved")
                 dialog = WhyTranslationDialog(result, lemma.lemma_text, view)
                 self.assertIsNotNone(dialog)
                 dialog.close()
@@ -237,12 +237,15 @@ class TestTermsViewWiring(unittest.TestCase):
 
         # Apply schema via DBService
         from app.services.db_service import DBService
+
         DBService.initialize(cls.test_db.name)
         cls.db_service = DBService.get_instance()
 
         # Apply M7 migrations manually
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -250,8 +253,8 @@ class TestTermsViewWiring(unittest.TestCase):
 
         # Create test library, project and term clusters
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject, TermCluster
             from app.domain.normalization import normalize_for_tm
+            from app.infra.sa_models import DictProject, Library, TermCluster
 
             # Create library
             library = Library(library_id=1, name="Test Library")
@@ -263,7 +266,7 @@ class TestTermsViewWiring(unittest.TestCase):
                 name="Test Project",
                 src_lang="he",
                 tgt_lang="ru",
-                description="Test project for terms view wiring"
+                description="Test project for terms view wiring",
             )
             session.add(project)
             session.flush()
@@ -293,12 +296,14 @@ class TestTermsViewWiring(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         os.unlink(cls.test_db.name)
 
     def setUp(self):
         """Clean up TM entries before each test."""
         from app.infra.sa_models import TMEntry
+
         with self.db_service.get_session() as session:
             session.query(TMEntry).delete()
             session.commit()
@@ -350,8 +355,8 @@ class TestTermsViewWiring(unittest.TestCase):
 
     def test_04_terms_view_inline_edit_saves_to_tm(self):
         """Test that inline edit saves term translation to TM."""
-        from app.ui.terms_view import TermsView
         from app.infra.sa_models import TMEntry
+        from app.ui.terms_view import TermsView
 
         view = TermsView(self.project_id)
 
@@ -373,10 +378,11 @@ class TestTermsViewWiring(unittest.TestCase):
 
         # Check TM entry was created
         with self.db_service.get_session() as session:
-            tm_entries = session.query(TMEntry).filter(
-                TMEntry.project_id == self.project_id,
-                TMEntry.kind == "term_cluster"
-            ).all()
+            tm_entries = (
+                session.query(TMEntry)
+                .filter(TMEntry.project_id == self.project_id, TMEntry.kind == "term_cluster")
+                .all()
+            )
             self.assertGreater(len(tm_entries), 0)
 
             # Find our entry
@@ -403,15 +409,11 @@ class TestTermsViewWiring(unittest.TestCase):
         # Verify dialog creation
         if view.terms_model.rowCount() > 0:
             try:
-                from app.ui.dialogs import WhyTranslationDialog
                 from app.services.translation_service import TranslationResult
+                from app.ui.dialogs import WhyTranslationDialog
 
                 cluster = view.terms_model.clusters[0]
-                result = TranslationResult(
-                    translation="test",
-                    source="tm",
-                    status="approved"
-                )
+                result = TranslationResult(translation="test", source="tm", status="approved")
                 dialog = WhyTranslationDialog(result, cluster.representative_he, view)
                 self.assertIsNotNone(dialog)
                 dialog.close()

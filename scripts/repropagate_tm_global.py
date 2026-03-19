@@ -27,14 +27,14 @@ from app.main import get_app_dir
 from app.infra.sa_models import TMGlobal
 from sqlalchemy import select
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Re-propagate tm_global to all linked tm_entries')
-    parser.add_argument('--dry-run', action='store_true', help='Dry run mode (no changes)')
-    parser.add_argument('--db-path', help='Path to database file (default: production DB)')
+    parser = argparse.ArgumentParser(description="Re-propagate tm_global to all linked tm_entries")
+    parser.add_argument("--dry-run", action="store_true", help="Dry run mode (no changes)")
+    parser.add_argument("--db-path", help="Path to database file (default: production DB)")
     args = parser.parse_args()
 
     # Get DB instance
@@ -75,24 +75,38 @@ def main():
             count = service.propagate_to_entries(
                 session=session,
                 tm_global_id=g.tm_global_id,
-                fields=["translation", "status", "origin", "confidence", "is_noise", "noise_reason"]
+                fields=[
+                    "translation",
+                    "status",
+                    "origin",
+                    "confidence",
+                    "is_noise",
+                    "noise_reason",
+                ],
             )
             total_updated += count
 
             if count > 0:
-                logger.info(f"[{i}/{len(all_global)}] tm_global_id={g.tm_global_id}: {count} entries updated")
+                logger.info(
+                    f"[{i}/{len(all_global)}] tm_global_id={g.tm_global_id}: {count} entries updated"
+                )
         else:
             # Dry run: just count without updating
             from app.infra.sa_models import TMEntry
-            entries = session.execute(
-                select(TMEntry).where(TMEntry.tm_global_id == g.tm_global_id)
-            ).scalars().all()
+
+            entries = (
+                session.execute(select(TMEntry).where(TMEntry.tm_global_id == g.tm_global_id))
+                .scalars()
+                .all()
+            )
 
             count = sum(1 for e in entries if e.translation != g.translation)
             total_updated += count
 
             if count > 0:
-                logger.info(f"[{i}/{len(all_global)}] tm_global_id={g.tm_global_id}: {count} entries would be updated")
+                logger.info(
+                    f"[{i}/{len(all_global)}] tm_global_id={g.tm_global_id}: {count} entries would be updated"
+                )
 
         # Commit in chunks
         if not args.dry_run and i % chunk_size == 0:

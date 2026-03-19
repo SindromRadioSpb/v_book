@@ -10,44 +10,41 @@ Allows users to:
 import logging
 import re
 from datetime import datetime
-from typing import Optional, List
 
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QLabel,
-    QLineEdit,
+    QCheckBox,
     QComboBox,
-    QPushButton,
-    QTableView,
-    QMessageBox,
     QDialog,
     QDialogButtonBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QSplitter,
-    QCheckBox,
     QMenu,
+    QMessageBox,
     QProgressDialog,
+    QPushButton,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QAction
 
-from app.services.db_service import DBService
-from app.services.audio_playback_service import AudioPlaybackService
-from app.ui.models_qt import TranslationManagementTableModel
-from app.ui.workers import TMSearchWorker, TMExportWorker
-from app.ui.table_layout_controller import TableLayoutController
-from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.domain.dto import TMEntryDTO
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.settings import SettingsService
+from app.services.audio_playback_service import AudioPlaybackService
+from app.services.db_service import DBService
+from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
+from app.ui.delegates.audio_play_delegate import AudioPlayDelegate
 from app.ui.dialogs.add_to_user_dictionary_dialog import show_add_to_user_dictionary_dialog
 from app.ui.dialogs.edit_pronunciation_dialog import show_edit_pronunciation_dialog
-from app.ui.audio_playlist_actions import add_selected_items_to_playlist_dialog
-from app.ui.workers import UserDictionaryBulkAddWorker
+from app.ui.models_qt import TranslationManagementTableModel
+from app.ui.table_layout_controller import TableLayoutController
+from app.ui.workers import TMExportWorker, TMSearchWorker, UserDictionaryBulkAddWorker
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +52,7 @@ logger = logging.getLogger(__name__)
 class ProjectSelectDialog(QDialog):
     """Dialog for selecting multiple projects to filter TM entries."""
 
-    def __init__(self, all_projects: List, selected_ids: Optional[List[int]], parent=None):
+    def __init__(self, all_projects: list, selected_ids: list[int] | None, parent=None):
         """
         Args:
             all_projects: List of DictProject instances
@@ -86,7 +83,9 @@ class ProjectSelectDialog(QDialog):
         # Add "Global (no project)" entry
         global_item = QListWidgetItem("Global (no project)")
         global_item.setCheckState(
-            Qt.CheckState.Checked if (-1 in self.selected_ids or None in self.selected_ids) else Qt.CheckState.Unchecked
+            Qt.CheckState.Checked
+            if (-1 in self.selected_ids or None in self.selected_ids)
+            else Qt.CheckState.Unchecked
         )
         global_item.setData(Qt.ItemDataRole.UserRole, -1)  # Special ID for global
         self.list_widget.addItem(global_item)
@@ -100,7 +99,9 @@ class ProjectSelectDialog(QDialog):
         for project in self.all_projects:
             item = QListWidgetItem(project.name)
             item.setCheckState(
-                Qt.CheckState.Checked if project.project_id in self.selected_ids else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked
+                if project.project_id in self.selected_ids
+                else Qt.CheckState.Unchecked
             )
             item.setData(Qt.ItemDataRole.UserRole, project.project_id)
             self.list_widget.addItem(item)
@@ -121,7 +122,9 @@ class ProjectSelectDialog(QDialog):
         layout.addLayout(buttons_layout)
 
         # OK/Cancel buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -142,7 +145,7 @@ class ProjectSelectDialog(QDialog):
             if item.flags() & Qt.ItemFlag.ItemIsEnabled:
                 item.setCheckState(Qt.CheckState.Unchecked)
 
-    def get_selected_ids(self) -> Optional[List[int]]:
+    def get_selected_ids(self) -> list[int] | None:
         """Get list of selected project IDs.
 
         Returns:
@@ -169,11 +172,11 @@ class ProjectSelectDialog(QDialog):
 class HistoryDialog(QDialog):
     """Dialog for viewing and reverting history."""
 
-    def __init__(self, tm_id: int, history_entries: List, parent=None):
+    def __init__(self, tm_id: int, history_entries: list, parent=None):
         super().__init__(parent)
         self.tm_id = tm_id
         self.history_entries = history_entries
-        self.selected_version: Optional[int] = None
+        self.selected_version: int | None = None
         self.init_ui()
 
     def init_ui(self):
@@ -208,7 +211,9 @@ class HistoryDialog(QDialog):
 
         # Buttons
         button_box = QDialogButtonBox()
-        self.revert_btn = button_box.addButton("Revert to Selected", QDialogButtonBox.ButtonRole.ActionRole)
+        self.revert_btn = button_box.addButton(
+            "Revert to Selected", QDialogButtonBox.ButtonRole.ActionRole
+        )
         self.revert_btn.setEnabled(False)
         self.revert_btn.clicked.connect(self.on_revert)
 
@@ -255,7 +260,7 @@ class KindFilterDialog(QDialog):
     ]
     ALL_KINDS = [kind for kind, _label in KIND_OPTIONS]
 
-    def __init__(self, selected_kinds: Optional[List[str]], parent=None):
+    def __init__(self, selected_kinds: list[str] | None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Kinds")
         self.setMinimumSize(280, 260)
@@ -305,7 +310,7 @@ class KindFilterDialog(QDialog):
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
 
-    def get_selected_kinds(self) -> Optional[List[str]]:
+    def get_selected_kinds(self) -> list[str] | None:
         """Return list of selected kinds, or None if all selected (= no filter)."""
         selected = []
         for i in range(self.list_widget.count()):
@@ -330,16 +335,16 @@ class TranslationManagementPanel(QWidget):
         re.compile(r"sentence[_-]?id[:=](\d+)", re.IGNORECASE),
     )
 
-    def __init__(self, project_id: Optional[int] = None):
+    def __init__(self, project_id: int | None = None):
         super().__init__()
         self.project_id = project_id
-        self.worker: Optional[TMSearchWorker] = None
-        self.export_worker: Optional[TMExportWorker] = None
+        self.worker: TMSearchWorker | None = None
+        self.export_worker: TMExportWorker | None = None
         self.batch_translate_worker = None
         self.batch_audio_worker = None
         self.audio_playback_service = AudioPlaybackService()
-        self.bulk_worker: Optional['BulkNoiseUpdateWorker'] = None
-        self.bulk_progress_dialog: Optional[QProgressDialog] = None
+        self.bulk_worker: BulkNoiseUpdateWorker | None = None
+        self.bulk_progress_dialog: QProgressDialog | None = None
         self.model = TranslationManagementTableModel()
         self.current_filters = {}
         self.search_timer = QTimer()
@@ -354,14 +359,16 @@ class TranslationManagementPanel(QWidget):
         # Settings service for persistence
         self.settings = SettingsService.get_instance()
         self._scope_setting_key = (
-            "tm_panel/scope_mode_project" if self.project_id is not None else "tm_panel/scope_mode_global"
+            "tm_panel/scope_mode_project"
+            if self.project_id is not None
+            else "tm_panel/scope_mode_global"
         )
 
         # State: selected kinds (None = All; [] treated as None)
         self._kind_filter_init_key = "tm_panel/kind_filter_initialized_v2"
         _saved_kinds = self.settings.get_json("tm_panel/kind_filter", None)
         if isinstance(_saved_kinds, list) and len(_saved_kinds) > 0:
-            self.selected_kinds: Optional[List[str]] = [str(k) for k in _saved_kinds if k]
+            self.selected_kinds: list[str] | None = [str(k) for k in _saved_kinds if k]
         else:
             was_initialized = self.settings.get_bool(self._kind_filter_init_key, False)
             if not was_initialized:
@@ -371,10 +378,10 @@ class TranslationManagementPanel(QWidget):
             else:
                 self.selected_kinds = None
 
-        self._selected_source_payload: Optional[dict] = None
+        self._selected_source_payload: dict | None = None
 
         # State: selected project IDs (None = all projects)
-        self.selected_project_ids: Optional[List[int]] = None
+        self.selected_project_ids: list[int] | None = None
         self.all_projects = []  # Loaded in init_ui
         self.scope_mode = self.settings.get_string(
             self._scope_setting_key,
@@ -420,6 +427,7 @@ class TranslationManagementPanel(QWidget):
         # Load all projects for multi-project filter
         try:
             from app.services.project_service import ProjectService
+
             db_service = DBService.get_instance()
             project_service = ProjectService()
             with db_service.get_session() as session:
@@ -506,7 +514,9 @@ class TranslationManagementPanel(QWidget):
 
         row2.addWidget(QLabel("Origin:"))
         self.origin_combo = QComboBox()
-        self.origin_combo.addItems(["All", "user_edit", "import", "mt_accept", "mt_auto", "merge", "revert"])
+        self.origin_combo.addItems(
+            ["All", "user_edit", "import", "mt_accept", "mt_auto", "merge", "revert"]
+        )
         self.origin_combo.currentTextChanged.connect(self.on_filter_changed)
         row2.addWidget(self.origin_combo)
 
@@ -535,7 +545,9 @@ class TranslationManagementPanel(QWidget):
         # Hide Noise checkbox (default: checked)
         self.hide_noise_checkbox = QCheckBox("Hide Noise")
         self.hide_noise_checkbox.setChecked(True)
-        self.hide_noise_checkbox.setToolTip("Hide entries marked as noise (punctuation, numbers, etc.)")
+        self.hide_noise_checkbox.setToolTip(
+            "Hide entries marked as noise (punctuation, numbers, etc.)"
+        )
         self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
         row3.addWidget(self.hide_noise_checkbox)
 
@@ -565,8 +577,8 @@ class TranslationManagementPanel(QWidget):
             table_id="tm_panel",
             table=self.table_view,
             default_widths={
-                0: 46,   # UD
-                1: 70,   # ID
+                0: 46,  # UD
+                1: 70,  # ID
                 2: 110,  # Kind
                 3: 220,  # Source
                 4: 220,  # Translation
@@ -576,8 +588,8 @@ class TranslationManagementPanel(QWidget):
                 8: 170,  # Source Ref
                 9: 120,  # Updated
                 10: 90,  # Noise
-                11: 110, # Last Review
-                12: 180, # Niqqud
+                11: 110,  # Last Review
+                12: 180,  # Niqqud
                 13: 90,  # Audio
             },
         )
@@ -620,6 +632,7 @@ class TranslationManagementPanel(QWidget):
         # Page number input
         pagination_layout.addWidget(QLabel("Page"))
         from PyQt6.QtWidgets import QSpinBox
+
         self.page_spinbox = QSpinBox()
         self.page_spinbox.setMinimum(1)
         self.page_spinbox.setMaximum(1)
@@ -853,9 +866,13 @@ class TranslationManagementPanel(QWidget):
             return False
         if self.search_edit.text().strip() or self.source_ref_edit.text().strip():
             return False
-        return bool(self.selected_kinds and len(self.selected_kinds) == 1 and self.selected_kinds[0] == "lemma")
+        return bool(
+            self.selected_kinds
+            and len(self.selected_kinds) == 1
+            and self.selected_kinds[0] == "lemma"
+        )
 
-    def _count_project_lemmas_cached(self) -> Optional[int]:
+    def _count_project_lemmas_cached(self) -> int | None:
         """Count project lemmas once per (project_id, hide_noise) pair."""
         if self.project_id is None:
             return None
@@ -1060,14 +1077,18 @@ class TranslationManagementPanel(QWidget):
 
         # Update all column headers
         for col_index in range(self.model.columnCount()):
-            col_name = self.model.headerData(col_index, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+            col_name = self.model.headerData(
+                col_index, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole
+            )
 
             if col_index == sorted_index:
                 # Add sort indicator
                 indicator = " ▲" if self.sort_direction == "asc" else " ▼"
                 # Remove existing indicators first
                 clean_name = col_name.replace(" ▲", "").replace(" ▼", "")
-                self.model.setHeaderData(col_index, Qt.Orientation.Horizontal, clean_name + indicator)
+                self.model.setHeaderData(
+                    col_index, Qt.Orientation.Horizontal, clean_name + indicator
+                )
             else:
                 # Remove indicators from other columns
                 clean_name = col_name.replace(" ▲", "").replace(" ▼", "")
@@ -1137,17 +1158,21 @@ class TranslationManagementPanel(QWidget):
             sort_column=self.sort_column,
             sort_direction=self.sort_direction,
         )
-        self.worker.page_ready.connect(lambda entries, seq=request_seq: self.on_search_results(entries, seq))
+        self.worker.page_ready.connect(
+            lambda entries, seq=request_seq: self.on_search_results(entries, seq)
+        )
         self.worker.count_ready.connect(
             lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
         )
-        self.worker.error.connect(lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq))
+        self.worker.error.connect(
+            lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
+        )
         self.worker.finished.connect(
             lambda seq=request_seq, worker=self.worker: self._on_search_worker_finished(worker, seq)
         )
         self.worker.start()
 
-    def _on_search_worker_finished(self, worker: Optional[TMSearchWorker], request_seq: int):
+    def _on_search_worker_finished(self, worker: TMSearchWorker | None, request_seq: int):
         """Clean up completed worker and replay any queued search."""
         if worker is self.worker:
             self.worker = None
@@ -1164,7 +1189,7 @@ class TranslationManagementPanel(QWidget):
     def _build_pending_results_label(self, page_count: int) -> str:
         return f"TM entries: {page_count} (counting total...)"
 
-    def on_search_results(self, entries: List[TMEntryDTO], request_seq: Optional[int] = None):
+    def on_search_results(self, entries: list[TMEntryDTO], request_seq: int | None = None):
         """Handle page rows from worker (count arrives asynchronously)."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -1188,7 +1213,7 @@ class TranslationManagementPanel(QWidget):
         self.on_selection_changed()
         logger.info(f"TM page loaded: {len(entries)} entries")
 
-    def on_search_count_ready(self, total_count: int, request_seq: Optional[int] = None):
+    def on_search_count_ready(self, total_count: int, request_seq: int | None = None):
         """Handle deferred exact count from worker."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -1203,11 +1228,13 @@ class TranslationManagementPanel(QWidget):
         self.model.total_count = self.total_count
         page_count = len(self.model.entries)
         self.results_label.setText(self._build_results_label(page_count, self.total_count))
-        self.status_label.setText("Ready" if self.total_count > 0 or page_count > 0 else "No TM entries found")
+        self.status_label.setText(
+            "Ready" if self.total_count > 0 or page_count > 0 else "No TM entries found"
+        )
         self.update_pagination_controls()
         logger.info(f"TM count completed: total={self.total_count}")
 
-    def on_search_error(self, error_msg: str, request_seq: Optional[int] = None):
+    def on_search_error(self, error_msg: str, request_seq: int | None = None):
         """Handle search error."""
         if request_seq is not None and request_seq != self._active_search_seq:
             logger.debug(
@@ -1249,13 +1276,16 @@ class TranslationManagementPanel(QWidget):
         # Perform action
         try:
             from app.services.translation_admin_service import TranslationAdminService
+
             service = TranslationAdminService()
             db_service = DBService.get_instance()
 
             with db_service.get_session() as session:
                 count = service.bulk_set_status(session, tm_ids, new_status, approved_by="ui_user")
 
-            QMessageBox.information(self, "Success", f"Updated {count} entries to status '{new_status}'.")
+            QMessageBox.information(
+                self, "Success", f"Updated {count} entries to status '{new_status}'."
+            )
             self.perform_search()  # Refresh
 
         except Exception as e:
@@ -1270,7 +1300,9 @@ class TranslationManagementPanel(QWidget):
             return
 
         if len(selected_indexes) > 1:
-            QMessageBox.information(self, "Multiple Selection", "Please select only one entry to view history.")
+            QMessageBox.information(
+                self, "Multiple Selection", "Please select only one entry to view history."
+            )
             return
 
         entry = self.model.get_entry(selected_indexes[0].row())
@@ -1279,6 +1311,7 @@ class TranslationManagementPanel(QWidget):
         # Fetch history
         try:
             from app.services.translation_admin_service import TranslationAdminService
+
             service = TranslationAdminService()
             db_service = DBService.get_instance()
 
@@ -1286,7 +1319,9 @@ class TranslationManagementPanel(QWidget):
                 history = service.get_history(session, tm_id)
 
             if not history:
-                QMessageBox.information(self, "No History", f"No history found for TM entry #{tm_id}.")
+                QMessageBox.information(
+                    self, "No History", f"No history found for TM entry #{tm_id}."
+                )
                 return
 
             # Show dialog
@@ -1305,13 +1340,16 @@ class TranslationManagementPanel(QWidget):
         """Perform revert operation."""
         try:
             from app.services.translation_admin_service import TranslationAdminService
+
             service = TranslationAdminService()
             db_service = DBService.get_instance()
 
             with db_service.get_session() as session:
                 service.revert(session, tm_id, version, approved_by="ui_user")
 
-            QMessageBox.information(self, "Success", f"Reverted TM entry #{tm_id} to version {version}.")
+            QMessageBox.information(
+                self, "Success", f"Reverted TM entry #{tm_id} to version {version}."
+            )
             self.perform_search()  # Refresh
 
         except Exception as e:
@@ -1389,6 +1427,7 @@ class TranslationManagementPanel(QWidget):
         # Allow empty translations (user can delete translation)
         try:
             from app.services.translation_admin_service import TranslationAdminService
+
             service = TranslationAdminService()
             db_service = DBService.get_instance()
 
@@ -1405,17 +1444,16 @@ class TranslationManagementPanel(QWidget):
             logger.info(f"Saved translation for TM entry {entry.tm_id}: {translation_value}")
 
         except Exception as e:
-            logger.error(f"Failed to save translation for TM entry {entry.tm_id}: {e}", exc_info=True)
-            QMessageBox.warning(
-                self,
-                "Save Error",
-                f"Failed to save translation:\n{str(e)}"
+            logger.error(
+                f"Failed to save translation for TM entry {entry.tm_id}: {e}", exc_info=True
             )
+            QMessageBox.warning(self, "Save Error", f"Failed to save translation:\n{str(e)}")
 
     def eventFilter(self, obj, event):
         """Handle keyboard shortcuts: Enter (edit), Ctrl+Left/Right (pagination)."""
         if obj == self.table_view and event.type() == event.Type.KeyPress:
             from PyQt6.QtGui import QKeyEvent
+
             if isinstance(event, QKeyEvent):
                 key = event.key()
                 modifiers = event.modifiers()
@@ -1452,26 +1490,22 @@ class TranslationManagementPanel(QWidget):
             self,
             "Export Translation Memory to Excel",
             default_filename,
-            "Excel Files (*.xlsx);;All Files (*)"
+            "Excel Files (*.xlsx);;All Files (*)",
         )
 
         if not file_path:
             return  # User cancelled
 
         # Ensure .xlsx extension
-        if not file_path.endswith('.xlsx'):
-            file_path += '.xlsx'
+        if not file_path.endswith(".xlsx"):
+            file_path += ".xlsx"
 
         # Build filters (same as current search)
         filters = self.build_filters()
 
         # Create progress dialog
         self.export_progress_dialog = QProgressDialog(
-            "Preparing export...",
-            "Cancel",
-            0,
-            0,  # Indeterminate progress
-            self
+            "Preparing export...", "Cancel", 0, 0, self  # Indeterminate progress
         )
         self.export_progress_dialog.setWindowTitle("Exporting to Excel")
         self.export_progress_dialog.setModal(True)
@@ -1497,21 +1531,19 @@ class TranslationManagementPanel(QWidget):
 
     def on_export_progress(self, message: str):
         """Update export progress dialog."""
-        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+        if hasattr(self, "export_progress_dialog") and self.export_progress_dialog:
             self.export_progress_dialog.setLabelText(message)
 
     def on_export_complete(self, count: int, file_path: str):
         """Handle export completion."""
         # Close progress dialog
-        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+        if hasattr(self, "export_progress_dialog") and self.export_progress_dialog:
             self.export_progress_dialog.close()
             self.export_progress_dialog = None
 
         # Show success message
         QMessageBox.information(
-            self,
-            "Export Complete",
-            f"Successfully exported {count:,} entries to:\n{file_path}"
+            self, "Export Complete", f"Successfully exported {count:,} entries to:\n{file_path}"
         )
 
         logger.info(f"TM export completed: {count} entries to {file_path}")
@@ -1519,16 +1551,12 @@ class TranslationManagementPanel(QWidget):
     def on_export_error(self, error_msg: str):
         """Handle export error."""
         # Close progress dialog
-        if hasattr(self, 'export_progress_dialog') and self.export_progress_dialog:
+        if hasattr(self, "export_progress_dialog") and self.export_progress_dialog:
             self.export_progress_dialog.close()
             self.export_progress_dialog = None
 
         # Show error message
-        QMessageBox.critical(
-            self,
-            "Export Failed",
-            f"Failed to export TM entries:\n{error_msg}"
-        )
+        QMessageBox.critical(self, "Export Failed", f"Failed to export TM entries:\n{error_msg}")
 
         logger.error(f"TM export failed: {error_msg}")
 
@@ -1554,12 +1582,14 @@ class TranslationManagementPanel(QWidget):
             entry = self.model.get_entry(selected_rows[0].row())
             self._selected_source_payload = self._build_source_payload_for_entry(entry)
         if hasattr(self, "go_to_source_btn"):
-            self.go_to_source_btn.setEnabled(selection_count == 1 and self._selected_source_payload is not None)
+            self.go_to_source_btn.setEnabled(
+                selection_count == 1 and self._selected_source_payload is not None
+            )
 
-    def _get_selected_tm_entries(self) -> List[TMEntryDTO]:
+    def _get_selected_tm_entries(self) -> list[TMEntryDTO]:
         """Return selected TM entries in deterministic order."""
         selected_indexes = self.table_view.selectionModel().selectedRows()
-        entries: List[TMEntryDTO] = []
+        entries: list[TMEntryDTO] = []
         for index in sorted(selected_indexes, key=lambda idx: idx.row()):
             entry = self.model.get_entry(index.row())
             if entry:
@@ -1567,7 +1597,7 @@ class TranslationManagementPanel(QWidget):
         return entries
 
     @classmethod
-    def _extract_sentence_id_from_source_ref(cls, source_ref: Optional[str]) -> Optional[int]:
+    def _extract_sentence_id_from_source_ref(cls, source_ref: str | None) -> int | None:
         ref = str(source_ref or "").strip()
         if not ref:
             return None
@@ -1582,7 +1612,7 @@ class TranslationManagementPanel(QWidget):
         return None
 
     @classmethod
-    def _build_source_payload_for_entry(cls, entry: Optional[TMEntryDTO]) -> Optional[dict]:
+    def _build_source_payload_for_entry(cls, entry: TMEntryDTO | None) -> dict | None:
         if entry is None:
             return None
 
@@ -1597,7 +1627,11 @@ class TranslationManagementPanel(QWidget):
         if kind == "lemma" and entry.lemma_id:
             return {"kind": "lemma", "source_id": int(entry.lemma_id), "project_id": project_id}
         if kind == "term_cluster" and entry.cluster_id:
-            return {"kind": "term_cluster", "source_id": int(entry.cluster_id), "project_id": project_id}
+            return {
+                "kind": "term_cluster",
+                "source_id": int(entry.cluster_id),
+                "project_id": project_id,
+            }
         if kind in {"surface", "sentence", "sentences"}:
             sentence_id = cls._extract_sentence_id_from_source_ref(entry.source_ref)
             payload = {"kind": "sentence", "project_id": project_id}
@@ -1627,9 +1661,11 @@ class TranslationManagementPanel(QWidget):
                     "source_id": (
                         int(entry.lemma_id)
                         if entry.kind == "lemma" and entry.lemma_id
-                        else int(entry.cluster_id)
-                        if entry.kind == "term_cluster" and entry.cluster_id
-                        else None
+                        else (
+                            int(entry.cluster_id)
+                            if entry.kind == "term_cluster" and entry.cluster_id
+                            else None
+                        )
                     ),
                     "project_id": entry.project_id,
                     "source_label": "Translation Management",
@@ -1670,11 +1706,14 @@ class TranslationManagementPanel(QWidget):
 
     def on_batch_translate(self):
         """Handle batch translation for selected TM entries."""
+        from app.services.batch_mt_translate_service import (
+            BatchTranslateItem,
+            BatchTranslateOptions,
+        )
+        from app.services.translation_admin_service import TranslationAdminService
         from app.ui.dialogs import show_batch_translate_dialog
         from app.ui.dialogs.batch_progress_dialog_v3 import BatchProgressDialogV3
         from app.ui.workers import BatchTranslateWorker, TranslateAllFilteredWorker
-        from app.services.batch_mt_translate_service import BatchTranslateItem, BatchTranslateOptions
-        from app.services.translation_admin_service import TranslationAdminService
 
         selected_entries = self._get_selected_tm_entries()
         if not selected_entries:
@@ -1729,7 +1768,9 @@ class TranslationManagementPanel(QWidget):
             except Exception as e:
                 logger.warning(f"Failed to recompute total_for_scope for TM batch translate: {e}")
 
-            logger.info(f"Starting TranslateAllFilteredWorker for {total_for_scope} tm_entry records")
+            logger.info(
+                f"Starting TranslateAllFilteredWorker for {total_for_scope} tm_entry records"
+            )
             progress_dialog = BatchProgressDialogV3(parent=self, total=total_for_scope)
             progress_dialog.show()
 
@@ -1747,8 +1788,12 @@ class TranslationManagementPanel(QWidget):
             worker.stats_updated.connect(progress_dialog.update_counts)
             worker.row_translated.connect(progress_dialog.add_recent_item)
             worker.stage_updated.connect(progress_dialog.set_stage)
-            worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
-            worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
+            worker.finished.connect(
+                lambda result: self.on_batch_translate_finished(result, progress_dialog)
+            )
+            worker.error.connect(
+                lambda error: self.on_batch_translate_error(error, progress_dialog)
+            )
             progress_dialog.cancel_requested.connect(worker.cancel)
             progress_dialog.pause_requested.connect(worker.pause)
             progress_dialog.resume_requested.connect(worker.resume)
@@ -1793,7 +1838,9 @@ class TranslationManagementPanel(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self.on_batch_translate_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self.on_batch_translate_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda error: self.on_batch_translate_error(error, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -1873,7 +1920,9 @@ class TranslationManagementPanel(QWidget):
         worker.stats_updated.connect(progress_dialog.update_counts)
         worker.row_translated.connect(progress_dialog.add_recent_item)
         worker.stage_updated.connect(progress_dialog.set_stage)
-        worker.finished.connect(lambda result: self._on_generate_audio_finished(result, progress_dialog))
+        worker.finished.connect(
+            lambda result: self._on_generate_audio_finished(result, progress_dialog)
+        )
         worker.error.connect(lambda err: self._on_generate_audio_error(err, progress_dialog))
         progress_dialog.cancel_requested.connect(worker.cancel)
         progress_dialog.pause_requested.connect(worker.pause)
@@ -1963,9 +2012,11 @@ class TranslationManagementPanel(QWidget):
                     "source_id": (
                         int(entry.lemma_id)
                         if entry.kind == "lemma" and entry.lemma_id
-                        else int(entry.cluster_id)
-                        if entry.kind == "term_cluster" and entry.cluster_id
-                        else None
+                        else (
+                            int(entry.cluster_id)
+                            if entry.kind == "term_cluster" and entry.cluster_id
+                            else None
+                        )
                     ),
                     "project_id": entry.project_id,
                     "source_label": "Translation Management",
@@ -1977,7 +2028,9 @@ class TranslationManagementPanel(QWidget):
             start_immediately=True,
         )
 
-    def _play_audio_items(self, items: list[dict], *, play_mode: str, start_immediately: bool = False):
+    def _play_audio_items(
+        self, items: list[dict], *, play_mode: str, start_immediately: bool = False
+    ):
         try:
             with DBService.get_instance().get_session() as session:
                 ready_items = self.audio_playback_service.resolve_ready_paths(session, items=items)
@@ -2005,9 +2058,7 @@ class TranslationManagementPanel(QWidget):
                             or ""
                         ),
                         "snapshot_translation": str(
-                            payload.get("translation")
-                            or payload.get("snapshot_translation")
-                            or ""
+                            payload.get("translation") or payload.get("snapshot_translation") or ""
                         ),
                         "snapshot_source_label": str(
                             payload.get("source_label")
@@ -2047,14 +2098,18 @@ class TranslationManagementPanel(QWidget):
 
     def on_pronunciation_bootstrap_selected(self):
         """Open pronunciation bootstrap dialog with selected TM rows scope."""
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         selected_items = self._get_selected_pronunciation_items()
         changed = False
         if not selected_items:
             changed = show_pronunciation_bootstrap_dialog(parent=self)
         else:
-            changed = show_pronunciation_bootstrap_dialog(parent=self, selected_items=selected_items)
+            changed = show_pronunciation_bootstrap_dialog(
+                parent=self, selected_items=selected_items
+            )
         if changed:
             self.perform_search()
 
@@ -2108,7 +2163,9 @@ class TranslationManagementPanel(QWidget):
         edit_pron_action = QAction("Mispronounced -> Add Pronunciation...", self)
         edit_pron_action.triggered.connect(self.on_edit_pronunciation_selected)
         menu.addAction(edit_pron_action)
-        bootstrap_pron_action = QAction(f"Pronunciation Bootstrap Selected ({count:,} rows)...", self)
+        bootstrap_pron_action = QAction(
+            f"Pronunciation Bootstrap Selected ({count:,} rows)...", self
+        )
         bootstrap_pron_action.triggered.connect(self.on_pronunciation_bootstrap_selected)
         menu.addAction(bootstrap_pron_action)
         menu.addSeparator()
@@ -2175,7 +2232,9 @@ class TranslationManagementPanel(QWidget):
                 row["origin_source_ref"] = None
             prepared.append(row)
 
-        progress = QProgressDialog("Adding items to dictionary...", "Cancel", 0, len(prepared), self)
+        progress = QProgressDialog(
+            "Adding items to dictionary...", "Cancel", 0, len(prepared), self
+        )
         progress.setWindowTitle("User Dictionaries")
         progress.setModal(True)
         progress.setMinimumDuration(0)
@@ -2245,11 +2304,11 @@ class TranslationManagementPanel(QWidget):
         if count > 100:
             reply = QMessageBox.question(
                 self,
-                'Confirm Bulk Action',
-                f'You are about to mark {count:,} TM entries as {status_text}.\n\n'
-                f'This operation cannot be undone easily.\n\nContinue?',
+                "Confirm Bulk Action",
+                f"You are about to mark {count:,} TM entries as {status_text}.\n\n"
+                f"This operation cannot be undone easily.\n\nContinue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No  # Default to No for safety
+                QMessageBox.StandardButton.No,  # Default to No for safety
             )
             if reply == QMessageBox.StandardButton.No:
                 return
@@ -2268,6 +2327,7 @@ class TranslationManagementPanel(QWidget):
         try:
             # Update via service
             from app.services.translation_admin_service import TranslationAdminService
+
             db_service = DBService.get_instance()
             admin_service = TranslationAdminService()
 
@@ -2282,9 +2342,7 @@ class TranslationManagementPanel(QWidget):
 
             # Show success message
             QMessageBox.information(
-                self,
-                "Success",
-                f"Marked {count:,} TM entries as {status_text}."
+                self, "Success", f"Marked {count:,} TM entries as {status_text}."
             )
 
             logger.info(f"Marked {count} TM entries as {status_text} (direct update)")
@@ -2295,11 +2353,7 @@ class TranslationManagementPanel(QWidget):
 
         except Exception as e:
             logger.error(f"Failed to bulk update noise status: {e}", exc_info=True)
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to update noise status:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to update noise status:\n{str(e)}")
 
     def _run_bulk_update_worker(self, tm_ids: list, source_rows: list, is_noise: bool):
         """Background worker for large datasets (> 1000 rows) with progress dialog."""
@@ -2309,8 +2363,9 @@ class TranslationManagementPanel(QWidget):
         self.bulk_progress_dialog = QProgressDialog(
             f"Marking {len(tm_ids):,} TM entries as {status_text}...",
             "Cancel",
-            0, len(tm_ids),
-            self
+            0,
+            len(tm_ids),
+            self,
         )
         self.bulk_progress_dialog.setWindowTitle("Bulk Noise Update")
         self.bulk_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
@@ -2319,10 +2374,11 @@ class TranslationManagementPanel(QWidget):
 
         # Create worker
         from app.ui.workers import BulkNoiseUpdateWorker
+
         self.bulk_worker = BulkNoiseUpdateWorker(
             model_class="TMEntry",  # Use TMEntry instead of Lemma/TermCluster
             item_ids=tm_ids,
-            is_noise=is_noise
+            is_noise=is_noise,
         )
 
         # Save context for completion handler
@@ -2344,7 +2400,9 @@ class TranslationManagementPanel(QWidget):
         """Update bulk progress dialog."""
         if self.bulk_progress_dialog:
             self.bulk_progress_dialog.setValue(current)
-            self.bulk_progress_dialog.setLabelText(f"Updated {current:,} of {total:,} TM entries...")
+            self.bulk_progress_dialog.setLabelText(
+                f"Updated {current:,} of {total:,} TM entries..."
+            )
 
     def _on_bulk_complete(self, count: int):
         """Handle bulk update completion."""
@@ -2356,11 +2414,7 @@ class TranslationManagementPanel(QWidget):
         status_text = "noise" if self.bulk_worker_is_noise else "valid"
 
         # Show success message
-        QMessageBox.information(
-            self,
-            "Success",
-            f"Marked {count:,} TM entries as {status_text}."
-        )
+        QMessageBox.information(self, "Success", f"Marked {count:,} TM entries as {status_text}.")
 
         logger.info(f"Bulk noise update completed: {count} TM entries marked as {status_text}")
 
@@ -2380,9 +2434,7 @@ class TranslationManagementPanel(QWidget):
 
         # Show error message
         QMessageBox.critical(
-            self,
-            "Bulk Update Failed",
-            f"Failed to update noise status:\n{error_msg}"
+            self, "Bulk Update Failed", f"Failed to update noise status:\n{error_msg}"
         )
 
         logger.error(f"Bulk noise update failed: {error_msg}")

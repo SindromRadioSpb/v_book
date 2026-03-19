@@ -435,22 +435,34 @@ def _validate_repaired_fts(
         errors.append(f"term_fts_count_error_after_repair: {term_err}")
 
     if require_sentence_count_match:
-        doc_sentence_count, doc_sentence_err = _safe_count_query(conn, "SELECT COUNT(*) FROM document_sentence")
+        doc_sentence_count, doc_sentence_err = _safe_count_query(
+            conn, "SELECT COUNT(*) FROM document_sentence"
+        )
         details["counts"]["document_sentence"] = doc_sentence_count
         if doc_sentence_err:
             errors.append(f"document_sentence_count_error_after_repair: {doc_sentence_err}")
-        elif sentence_count is not None and doc_sentence_count is not None and sentence_count != doc_sentence_count:
+        elif (
+            sentence_count is not None
+            and doc_sentence_count is not None
+            and sentence_count != doc_sentence_count
+        ):
             errors.append(
                 "sentence_fts_row_mismatch_after_repair: "
                 f"sentence_fts={sentence_count}, document_sentence={doc_sentence_count}"
             )
 
     if require_term_count_match:
-        term_search_count, term_search_err = _safe_count_query(conn, "SELECT COUNT(*) FROM term_search")
+        term_search_count, term_search_err = _safe_count_query(
+            conn, "SELECT COUNT(*) FROM term_search"
+        )
         details["counts"]["term_search"] = term_search_count
         if term_search_err:
             errors.append(f"term_search_count_error_after_repair: {term_search_err}")
-        elif term_count is not None and term_search_count is not None and term_count != term_search_count:
+        elif (
+            term_count is not None
+            and term_search_count is not None
+            and term_count != term_search_count
+        ):
             errors.append(
                 "term_fts_row_mismatch_after_repair: "
                 f"term_fts={term_count}, term_search={term_search_count}"
@@ -553,7 +565,9 @@ def repair_fts_schema(
                     sentence_rebuild_ok = True
                     summary["actions"].append("rebuild_sentence_fts_completed")
                 else:
-                    summary["warnings"].append(f"rebuild_sentence_fts_failed:{sentence_rebuild_err}")
+                    summary["warnings"].append(
+                        f"rebuild_sentence_fts_failed:{sentence_rebuild_err}"
+                    )
 
                 term_rebuild_err = _rebuild_fts_table(conn, "term_fts")
                 if term_rebuild_err is None:
@@ -628,8 +642,12 @@ def parse_args() -> argparse.Namespace:
         help="Skip FTS data repopulation; repair schema objects only.",
     )
     backup_group = parser.add_mutually_exclusive_group()
-    backup_group.add_argument("--backup", dest="backup", action="store_true", help="Create backup (default).")
-    backup_group.add_argument("--no-backup", dest="backup", action="store_false", help="Skip backup.")
+    backup_group.add_argument(
+        "--backup", dest="backup", action="store_true", help="Create backup (default)."
+    )
+    backup_group.add_argument(
+        "--no-backup", dest="backup", action="store_false", help="Skip backup."
+    )
     parser.set_defaults(backup=True)
     return parser.parse_args()
 

@@ -1,4 +1,5 @@
 """File hashing utilities."""
+
 import hashlib
 from pathlib import Path
 

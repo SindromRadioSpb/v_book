@@ -132,4 +132,3 @@ powershell -ExecutionPolicy Bypass -File scripts\run_pipeline_perf_gate.ps1
   - `0` PASS
   - `2` WARN (informational, may continue)
   - `1` FAIL
-

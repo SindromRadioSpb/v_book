@@ -12,9 +12,10 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
-from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QFrame,
@@ -46,11 +47,11 @@ class SidebarWidget(QFrame):
         self.setMinimumWidth(210)
         self.setMaximumWidth(360)
 
-        self._project_catalog: List[Dict[str, Any]] = []
-        self._recent_project_ids: List[int] = []
-        self._current_project_id: Optional[int] = None
+        self._project_catalog: list[dict[str, Any]] = []
+        self._recent_project_ids: list[int] = []
+        self._current_project_id: int | None = None
         self._active_workspace: str = "workspace.projects"
-        self._badge_values: Dict[str, Optional[int]] = {
+        self._badge_values: dict[str, int | None] = {
             "workspace.audio": None,
             "workspace.tm": None,
             "workspace.user_dictionaries": None,
@@ -179,7 +180,9 @@ class SidebarWidget(QFrame):
         self.project_search_toggle_btn.setCheckable(True)
         self.project_search_toggle_btn.setChecked(True)
         self.project_search_toggle_btn.clicked.connect(
-            lambda: self._toggle_section("project_search", self.project_search_toggle_btn.isChecked())
+            lambda: self._toggle_section(
+                "project_search", self.project_search_toggle_btn.isChecked()
+            )
         )
         layout.addWidget(self.project_search_toggle_btn)
 
@@ -222,7 +225,9 @@ class SidebarWidget(QFrame):
 
         self.import_btn = QPushButton("Import Dictionary")
         self.import_btn.setToolTip("Import dictionary from CSV (Ctrl+Shift+I)")
-        self.import_btn.clicked.connect(lambda: self.action_triggered.emit("tools.import_dictionary"))
+        self.import_btn.clicked.connect(
+            lambda: self.action_triggered.emit("tools.import_dictionary")
+        )
         tools_layout.addWidget(self.import_btn)
 
         self.coverage_btn = QPushButton("QA / Coverage")
@@ -237,7 +242,9 @@ class SidebarWidget(QFrame):
 
         self.refresh_badges_btn = QPushButton("Refresh Counters")
         self.refresh_badges_btn.setToolTip("Refresh workspace counters")
-        self.refresh_badges_btn.clicked.connect(lambda: self.action_triggered.emit("workspace.refresh_badges"))
+        self.refresh_badges_btn.clicked.connect(
+            lambda: self.action_triggered.emit("workspace.refresh_badges")
+        )
         tools_layout.addWidget(self.refresh_badges_btn)
         layout.addWidget(self.tools_section)
 
@@ -281,13 +288,13 @@ class SidebarWidget(QFrame):
             self.tools_toggle_btn.setText("Tools [v]" if expanded else "Tools [>]")
         self.section_state_changed.emit(self.get_sections_state())
 
-    def get_sections_state(self) -> Dict[str, bool]:
+    def get_sections_state(self) -> dict[str, bool]:
         return {
             "project_search_expanded": self.project_search_toggle_btn.isChecked(),
             "tools_expanded": self.tools_toggle_btn.isChecked(),
         }
 
-    def set_sections_state(self, state: Dict[str, bool]) -> None:
+    def set_sections_state(self, state: dict[str, bool]) -> None:
         search_expanded = bool(state.get("project_search_expanded", True))
         tools_expanded = bool(state.get("tools_expanded", True))
 
@@ -332,9 +339,9 @@ class SidebarWidget(QFrame):
     def update_badges(
         self,
         *,
-        queue_count: Optional[int] = None,
-        ud_due_count: Optional[int] = None,
-        tm_filtered_count: Optional[int] = None,
+        queue_count: int | None = None,
+        ud_due_count: int | None = None,
+        tm_filtered_count: int | None = None,
     ) -> None:
         if queue_count is not None:
             qv = int(queue_count)
@@ -346,7 +353,9 @@ class SidebarWidget(QFrame):
             tv = int(tm_filtered_count)
             self._badge_values["workspace.tm"] = tv if tv < 0 else max(0, tv)
 
-        self.audio_btn.setText(self._with_badge("Audio Player", self._badge_values["workspace.audio"]))
+        self.audio_btn.setText(
+            self._with_badge("Audio Player", self._badge_values["workspace.audio"])
+        )
         self.tm_btn.setText(
             self._with_badge("Translation Management", self._badge_values["workspace.tm"])
         )
@@ -355,7 +364,7 @@ class SidebarWidget(QFrame):
         )
 
     @staticmethod
-    def _with_badge(base: str, value: Optional[int]) -> str:
+    def _with_badge(base: str, value: int | None) -> str:
         if value is None:
             return base
         if int(value) < 0:
@@ -364,7 +373,7 @@ class SidebarWidget(QFrame):
 
     def set_current_project(
         self,
-        project_id: Optional[int],
+        project_id: int | None,
         project_name: str,
         scope_text: str = "Current Project",
     ) -> None:
@@ -390,11 +399,11 @@ class SidebarWidget(QFrame):
     def set_project_catalog(
         self,
         projects: Sequence[object],
-        recent_ids: Optional[Iterable[int]] = None,
+        recent_ids: Iterable[int] | None = None,
     ) -> None:
-        normalized: List[Dict[str, Any]] = []
+        normalized: list[dict[str, Any]] = []
         for row in projects:
-            project_id: Optional[int] = None
+            project_id: int | None = None
             name: str = ""
             if isinstance(row, dict):
                 pid = row.get("project_id")
@@ -421,7 +430,7 @@ class SidebarWidget(QFrame):
 
     def set_recent_project_ids(self, recent_ids: Iterable[int]) -> None:
         seen: set[int] = set()
-        ordered: List[int] = []
+        ordered: list[int] = []
         for raw in recent_ids:
             try:
                 pid = int(raw)
@@ -457,9 +466,9 @@ class SidebarWidget(QFrame):
         rows = self._ranked_search_rows(query)
         self._render_project_rows(rows, is_search=True)
 
-    def _recent_rows(self) -> List[Dict[str, Any]]:
+    def _recent_rows(self) -> list[dict[str, Any]]:
         by_id = {int(row["project_id"]): row for row in self._project_catalog}
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for pid in self._recent_project_ids:
             if pid in by_id:
                 rows.append(by_id[pid])
@@ -467,9 +476,9 @@ class SidebarWidget(QFrame):
             rows = self._project_catalog[:8]
         return rows
 
-    def _ranked_search_rows(self, query: str) -> List[Dict[str, Any]]:
+    def _ranked_search_rows(self, query: str) -> list[dict[str, Any]]:
         q = query.casefold()
-        scored: List[tuple[int, str, Dict[str, Any]]] = []
+        scored: list[tuple[int, str, dict[str, Any]]] = []
         for row in self._project_catalog:
             name = str(row.get("name") or "")
             name_cf = name.casefold()
@@ -489,7 +498,7 @@ class SidebarWidget(QFrame):
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [row for _score, _name, row in scored[:20]]
 
-    def _render_project_rows(self, rows: Sequence[Dict[str, Any]], *, is_search: bool) -> None:
+    def _render_project_rows(self, rows: Sequence[dict[str, Any]], *, is_search: bool) -> None:
         self.project_results_list.clear()
 
         for row in rows:
@@ -503,7 +512,9 @@ class SidebarWidget(QFrame):
         has_rows = bool(rows)
         self.project_results_empty_label.setVisible(not has_rows)
         if not has_rows:
-            self.project_results_empty_label.setText("No projects found" if is_search else "No recent projects")
+            self.project_results_empty_label.setText(
+                "No projects found" if is_search else "No recent projects"
+            )
 
         if has_rows:
             self.project_results_list.setCurrentRow(0)
@@ -518,7 +529,9 @@ class SidebarWidget(QFrame):
             if key == Qt.Key.Key_Down:
                 if self.project_results_list.count() > 0:
                     row = max(0, self.project_results_list.currentRow())
-                    self.project_results_list.setCurrentRow(min(row + 1, self.project_results_list.count() - 1))
+                    self.project_results_list.setCurrentRow(
+                        min(row + 1, self.project_results_list.count() - 1)
+                    )
                 return True
             if key == Qt.Key.Key_Up:
                 if self.project_results_list.count() > 0:
@@ -588,7 +601,7 @@ class WorkspaceManager(QWidget):
         self.sidebar.set_active_workspace(workspace_key)
         self.layout_changed.emit()
 
-    def save_layout(self) -> Dict[str, Any]:
+    def save_layout(self) -> dict[str, Any]:
         sizes = self.splitter.sizes()
         sidebar_width = int(sizes[0]) if sizes else 220
         return {
@@ -599,7 +612,7 @@ class WorkspaceManager(QWidget):
             "active_workspace": self.sidebar.active_workspace,
         }
 
-    def restore_layout(self, data: Dict[str, Any]) -> bool:
+    def restore_layout(self, data: dict[str, Any]) -> bool:
         try:
             version = int(data.get("layout_schema_version", 0))
             if version not in (1, 2, 3):

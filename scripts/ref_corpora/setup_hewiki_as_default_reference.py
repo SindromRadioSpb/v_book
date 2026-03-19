@@ -9,6 +9,7 @@ This script:
 Usage:
     python scripts/ref_corpora/setup_hewiki_as_default_reference.py [--assign-existing]
 """
+
 import sys
 import argparse
 import logging
@@ -25,7 +26,7 @@ from app.services.db_service import DBService
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s][%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -37,13 +38,13 @@ def main():
     parser.add_argument(
         "--assign-existing",
         action="store_true",
-        help="Also assign HEWiki as reference for existing projects (excluding HEWiki itself)"
+        help="Also assign HEWiki as reference for existing projects (excluding HEWiki itself)",
     )
     parser.add_argument(
         "--db-path",
         type=Path,
         default=Path("hdle_premium.db"),
-        help="Path to database file (default: hdle_premium.db)"
+        help="Path to database file (default: hdle_premium.db)",
     )
     args = parser.parse_args()
 
@@ -55,14 +56,14 @@ def main():
 
     with db_service.get_session() as session:
         # Find Hebrew Wikipedia Baseline project
-        stmt = select(DictProject).where(
-            DictProject.name == "Hebrew Wikipedia Baseline"
-        )
+        stmt = select(DictProject).where(DictProject.name == "Hebrew Wikipedia Baseline")
         hewiki_project = session.execute(stmt).scalar_one_or_none()
 
         if not hewiki_project:
             logger.error("Hebrew Wikipedia Baseline project not found!")
-            logger.error("Please run import first: scripts/ref_corpora/import_ref_jsonl_to_project.py")
+            logger.error(
+                "Please run import first: scripts/ref_corpora/import_ref_jsonl_to_project.py"
+            )
             return 1
 
         hewiki_id = hewiki_project.project_id
@@ -82,7 +83,7 @@ def main():
                 update(DictProject)
                 .where(
                     DictProject.project_id != hewiki_id,  # Exclude HEWiki itself
-                    DictProject.general_corpus_id.is_(None)  # Only unassigned projects
+                    DictProject.general_corpus_id.is_(None),  # Only unassigned projects
                 )
                 .values(general_corpus_id=hewiki_id)
             )
@@ -93,8 +94,7 @@ def main():
         else:
             # Just count how many projects would be affected
             stmt = select(DictProject).where(
-                DictProject.project_id != hewiki_id,
-                DictProject.general_corpus_id.is_(None)
+                DictProject.project_id != hewiki_id, DictProject.general_corpus_id.is_(None)
             )
             projects = session.execute(stmt).scalars().all()
             if projects:

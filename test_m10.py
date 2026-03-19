@@ -16,17 +16,17 @@ Testing command:
     python test_m10.py
 """
 
-import unittest
-import tempfile
 import shutil
+import tempfile
+import unittest
 from pathlib import Path
+
 import freezegun
 
 from app.infra.db import DatabaseManager
+from app.infra.sa_models import DictProject, ProcessorRun, RunError
 from app.services.db_service import DBService
-from app.services.backup_service import BackupService
 from app.services.snapshot_service import SnapshotService
-from app.infra.sa_models import ProcessorRun, RunError, DictProject
 
 
 class TestM10Golden(unittest.TestCase):
@@ -89,9 +89,7 @@ class TestM10Golden(unittest.TestCase):
             ).fetchone()
             current_version = int(result[0]) if result else 0
 
-        self.assertGreater(
-            current_version, 0, "Schema version should be greater than 0"
-        )
+        self.assertGreater(current_version, 0, "Schema version should be greater than 0")
         print(f"  [OK] Migration completed (schema version: {current_version})")
 
         db_manager.close()
@@ -128,9 +126,7 @@ class TestM10Golden(unittest.TestCase):
         )
 
         self.assertIsNotNone(snapshot_info, "Snapshot info should be returned")
-        self.assertTrue(
-            snapshot_info.snapshot_path.exists(), "Snapshot file should exist"
-        )
+        self.assertTrue(snapshot_info.snapshot_path.exists(), "Snapshot file should exist")
         self.assertGreater(snapshot_info.size_bytes, 0, "Snapshot size should be > 0")
         self.assertIsNotNone(snapshot_info.sha256, "SHA256 should be computed")
         print(f"  [OK] Snapshot created: {snapshot_info.snapshot_path.name}")
@@ -176,9 +172,7 @@ class TestM10Golden(unittest.TestCase):
             session.add(library)
             session.commit()
 
-            project = DictProject(
-                project_id=1, library_id=1, name="Test Project", description=""
-            )
+            project = DictProject(project_id=1, library_id=1, name="Test Project", description="")
             session.add(project)
             session.commit()
 

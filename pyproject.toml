@@ -50,3 +50,67 @@ include = ["app*"]
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear (likely bugs)
+    "UP",  # pyupgrade (modernize syntax)
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",   # line too long — handled by black
+    "B008",   # do not perform function call in default arguments
+    "SIM108", # ternary operator — can reduce readability in complex cases
+    "SIM110", # any() refactor — reduces clarity in multi-condition loops
+]
+exclude = ["tests/*", "scripts/*", "*.spec"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_return_any = false
+# Legacy adoption mode: don't require annotations on every function yet
+# Tighten gradually as new code is written with full type hints.
+no_implicit_optional = false    # existing code: str = None patterns
+warn_unused_ignores = false     # reduces noise from existing # type: ignore
+allow_untyped_defs = true       # don't fail on unannotated legacy functions
+# PyQt6 UI layer: f-string backslash syntax (Python 3.12+, pre-existing)
+exclude = ["tests/", "scripts/", "app/ui/"]
+
+[[tool.mypy.overrides]]
+module = ["PyQt6.*", "stanza.*", "deep_translator.*", "google.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# f-string with backslash — Python 3.12+ syntax, pre-existing in this file
+module = "app.ui.models_qt"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+# services/* и infra/* — baseline pre-existing type errors.
+# Постепенно убирать файлы из этого списка по мере починки типов.
+# Tracked real bug: app.infra.db_retry (tuple vs list, .append на tuple).
+module = ["app.services.*", "app.infra.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+# domain — проверяется строго. Только эти файлы с known pre-existing issues.
+module = [
+    "app.domain.sentence_splitter",
+    "app.domain.term_extraction.np_extractor",
+    "app.domain.term_extraction.ngram_extractor",
+    "app.domain.normalization.normalizer",
+]
+ignore_errors = true

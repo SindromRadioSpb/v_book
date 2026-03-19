@@ -6,13 +6,11 @@ All coverage metrics are in range [0, 100].
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import func, exists, select
 
-from app.infra.sa_models import (
-    DictProject, TMEntry, Lemma, TermCluster, DictEntry, DictSource
-)
+from sqlalchemy import exists, func
+from sqlalchemy.orm import Session
+
+from app.infra.sa_models import DictEntry, DictProject, DictSource, Lemma, TermCluster, TMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +22,7 @@ class ProjectStats:
     All percentage metrics are in range [0.0, 100.0].
     Ratio metrics can exceed 1.0 (density metrics, not coverage).
     """
+
     # Project info
     project_id: int
     project_name: str
@@ -46,23 +45,19 @@ class ProjectStats:
     lemma_coverage_pct: float  # % of lemmas that have ≥1 translation
 
     # Approval rate metrics [0-100%]
-    tm_approval_rate_pct: float      # % of TM entries that are approved
-    term_approval_rate_pct: float    # % of term clusters that are approved
+    tm_approval_rate_pct: float  # % of TM entries that are approved
+    term_approval_rate_pct: float  # % of term clusters that are approved
 
     # Density metrics (can exceed 100%)
     tm_entries_per_lemma_ratio: float  # Average TM entries per lemma (can be >1.0)
-    tm_entries_per_lemma_pct: float    # Same as ratio * 100 (for backward compat)
+    tm_entries_per_lemma_pct: float  # Same as ratio * 100 (for backward compat)
 
 
 class StatsService:
     """Service for computing project statistics."""
 
     def compute_project_stats(
-        self,
-        session: Session,
-        project_id: int,
-        *,
-        translation_status_filter: str = "approved"
+        self, session: Session, project_id: int, *, translation_status_filter: str = "approved"
     ) -> ProjectStats:
         """Compute comprehensive project statistics.
 
@@ -81,9 +76,7 @@ class StatsService:
             Density metrics (ratios) can exceed 100%.
         """
         # Get project
-        project = session.query(DictProject).filter(
-            DictProject.project_id == project_id
-        ).first()
+        project = session.query(DictProject).filter(DictProject.project_id == project_id).first()
 
         project_name = project.name if project else "Unknown"
 
@@ -94,38 +87,55 @@ class StatsService:
         document_count = 0
 
         # Total lemmas
-        lemma_count = session.query(func.count(Lemma.lemma_id)).filter(
-            Lemma.project_id == project_id
-        ).scalar() or 0
+        lemma_count = (
+            session.query(func.count(Lemma.lemma_id))
+            .filter(Lemma.project_id == project_id)
+            .scalar()
+            or 0
+        )
 
         # Total term clusters
-        term_cluster_count = session.query(func.count(TermCluster.cluster_id)).filter(
-            TermCluster.project_id == project_id
-        ).scalar() or 0
+        term_cluster_count = (
+            session.query(func.count(TermCluster.cluster_id))
+            .filter(TermCluster.project_id == project_id)
+            .scalar()
+            or 0
+        )
 
         # Total TM entries
-        tm_entry_count = session.query(func.count(TMEntry.tm_id)).filter(
-            TMEntry.project_id == project_id
-        ).scalar() or 0
+        tm_entry_count = (
+            session.query(func.count(TMEntry.tm_id))
+            .filter(TMEntry.project_id == project_id)
+            .scalar()
+            or 0
+        )
 
         # Total dictionary entries
-        dict_entry_count = session.query(func.count(DictEntry.dict_entry_id)).join(
-            DictSource
-        ).filter(DictSource.project_id == project_id).scalar() or 0
+        dict_entry_count = (
+            session.query(func.count(DictEntry.dict_entry_id))
+            .join(DictSource)
+            .filter(DictSource.project_id == project_id)
+            .scalar()
+            or 0
+        )
 
         # === Approved counts ===
 
         # Approved TM entries
-        tm_approved_count = session.query(func.count(TMEntry.tm_id)).filter(
-            TMEntry.project_id == project_id,
-            TMEntry.status == "approved"
-        ).scalar() or 0
+        tm_approved_count = (
+            session.query(func.count(TMEntry.tm_id))
+            .filter(TMEntry.project_id == project_id, TMEntry.status == "approved")
+            .scalar()
+            or 0
+        )
 
         # Approved term clusters
-        term_approved_count = session.query(func.count(TermCluster.cluster_id)).filter(
-            TermCluster.project_id == project_id,
-            TermCluster.curation_status == "approved"
-        ).scalar() or 0
+        term_approved_count = (
+            session.query(func.count(TermCluster.cluster_id))
+            .filter(TermCluster.project_id == project_id, TermCluster.curation_status == "approved")
+            .scalar()
+            or 0
+        )
 
         # === Coverage metrics ===
 
@@ -134,29 +144,35 @@ class StatsService:
         # Match strategy: TMEntry.src_text == Lemma.lemma_text (same as XLSX export logic)
         if translation_status_filter == "approved":
             # Count distinct lemma_id where there exists an approved TM entry of kind "lemma"
-            lemmas_with_translation_count = session.query(
-                func.count(func.distinct(Lemma.lemma_id))
-            ).filter(
-                Lemma.project_id == project_id,
-                exists().where(
-                    TMEntry.project_id == project_id,
-                    TMEntry.kind == "lemma",
-                    TMEntry.status == "approved",
-                    TMEntry.src_text == Lemma.lemma_text
+            lemmas_with_translation_count = (
+                session.query(func.count(func.distinct(Lemma.lemma_id)))
+                .filter(
+                    Lemma.project_id == project_id,
+                    exists().where(
+                        TMEntry.project_id == project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.status == "approved",
+                        TMEntry.src_text == Lemma.lemma_text,
+                    ),
                 )
-            ).scalar() or 0
+                .scalar()
+                or 0
+            )
         else:
             # Count all lemmas with any TM entry (regardless of status)
-            lemmas_with_translation_count = session.query(
-                func.count(func.distinct(Lemma.lemma_id))
-            ).filter(
-                Lemma.project_id == project_id,
-                exists().where(
-                    TMEntry.project_id == project_id,
-                    TMEntry.kind == "lemma",
-                    TMEntry.src_text == Lemma.lemma_text
+            lemmas_with_translation_count = (
+                session.query(func.count(func.distinct(Lemma.lemma_id)))
+                .filter(
+                    Lemma.project_id == project_id,
+                    exists().where(
+                        TMEntry.project_id == project_id,
+                        TMEntry.kind == "lemma",
+                        TMEntry.src_text == Lemma.lemma_text,
+                    ),
                 )
-            ).scalar() or 0
+                .scalar()
+                or 0
+            )
 
         # === Compute metrics ===
 

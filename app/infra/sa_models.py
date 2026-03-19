@@ -1,11 +1,10 @@
 """SQLAlchemy ORM models matching the database schema."""
-from datetime import datetime, timezone
-from typing import Optional
+
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     CheckConstraint,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -13,7 +12,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -27,7 +25,7 @@ class Base(DeclarativeBase):
 
 def utc_now() -> str:
     """Return current UTC time in ISO format."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 # -----------------------
@@ -49,7 +47,9 @@ class DictProject(Base):
     __tablename__ = "dict_project"
 
     project_id = Column(Integer, primary_key=True)
-    library_id = Column(Integer, ForeignKey("library.library_id", ondelete="CASCADE"), nullable=False)
+    library_id = Column(
+        Integer, ForeignKey("library.library_id", ondelete="CASCADE"), nullable=False
+    )
     name = Column(String, nullable=False)
     description = Column(Text)
     src_lang = Column(String, nullable=False, default="he")
@@ -76,8 +76,8 @@ class DictProject(Base):
 
     # Migration 011: Term extraction parameters tracking (for UX feedback)
     last_extract_np_max_len = Column(Integer)  # Last NP max length used
-    last_extract_min_freq = Column(Integer)     # Last min frequency used
-    last_extract_at = Column(String)            # Last extraction timestamp
+    last_extract_min_freq = Column(Integer)  # Last min frequency used
+    last_extract_at = Column(String)  # Last extraction timestamp
     last_extract_include_np = Column(Integer, default=0)  # Whether NP was included
 
     created_at = Column(String, nullable=False, default=utc_now)
@@ -98,7 +98,9 @@ class SourceCorpus(Base):
     __tablename__ = "source_corpus"
 
     corpus_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     name = Column(String, nullable=False)
     description = Column(Text)
     watch_folder_path = Column(String)
@@ -107,7 +109,9 @@ class SourceCorpus(Base):
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_corpus_project_name"),)
 
     project = relationship("DictProject", back_populates="corpora")
-    documents = relationship("SourceDocument", back_populates="corpus", cascade="all, delete-orphan")
+    documents = relationship(
+        "SourceDocument", back_populates="corpus", cascade="all, delete-orphan"
+    )
 
 
 # -----------------------
@@ -119,7 +123,9 @@ class SourceDocument(Base):
     __tablename__ = "source_document"
 
     doc_id = Column(Integer, primary_key=True)
-    corpus_id = Column(Integer, ForeignKey("source_corpus.corpus_id", ondelete="CASCADE"), nullable=False)
+    corpus_id = Column(
+        Integer, ForeignKey("source_corpus.corpus_id", ondelete="CASCADE"), nullable=False
+    )
 
     file_path = Column(String, nullable=False)
     file_name = Column(String, nullable=False)
@@ -143,10 +149,10 @@ class SourceDocument(Base):
     snapshot_stats_updated_at = Column(Text)
 
     # Document metadata (Migration 023)
-    tag = Column(String)        # Free-text label (max 200 chars, service-validated)
-    link_url = Column(String)   # Clickable URL, http/https only (service-validated)
-    level = Column(String)      # Learning level: aleph/bet/gimel/he (nullable)
-    topic = Column(String)      # Topic/category (max 500 chars, service-validated)
+    tag = Column(String)  # Free-text label (max 200 chars, service-validated)
+    link_url = Column(String)  # Clickable URL, http/https only (service-validated)
+    level = Column(String)  # Learning level: aleph/bet/gimel/he (nullable)
+    topic = Column(String)  # Topic/category (max 500 chars, service-validated)
 
     __table_args__ = (
         UniqueConstraint("corpus_id", "sha256", name="uq_document_corpus_sha256"),
@@ -167,20 +173,28 @@ class SourceDocument(Base):
             name="ck_document_snapshot_stats_state",
         ),
         Index("idx_doc_corpus_status", "corpus_id", "status"),
-        Index("idx_doc_corpus_status_snapshot_state", "corpus_id", "status", "snapshot_stats_state"),
+        Index(
+            "idx_doc_corpus_status_snapshot_state", "corpus_id", "status", "snapshot_stats_state"
+        ),
         Index("idx_doc_level", "level"),
         Index("idx_doc_tag", "tag"),
     )
 
     corpus = relationship("SourceCorpus", back_populates="documents")
-    text = relationship("DocumentText", back_populates="document", uselist=False, cascade="all, delete-orphan")
-    sentences = relationship("DocumentSentence", back_populates="document", cascade="all, delete-orphan")
+    text = relationship(
+        "DocumentText", back_populates="document", uselist=False, cascade="all, delete-orphan"
+    )
+    sentences = relationship(
+        "DocumentSentence", back_populates="document", cascade="all, delete-orphan"
+    )
 
 
 class DocumentText(Base):
     __tablename__ = "document_text"
 
-    doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True)
+    doc_id = Column(
+        Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True
+    )
     raw_text = Column(Text)
     cleaned_text = Column(Text)
     ocr_used = Column(Integer, nullable=False, default=0)
@@ -194,7 +208,9 @@ class DocumentSentence(Base):
     __tablename__ = "document_sentence"
 
     sentence_id = Column(Integer, primary_key=True)
-    doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), nullable=False)
+    doc_id = Column(
+        Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), nullable=False
+    )
     sent_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
     # Denormalized for fast corpus-level pagination (migration 031)
@@ -214,8 +230,10 @@ class DocumentSentence(Base):
         cascade="all, delete-orphan",
     )
     pronunciation = relationship(
-        "SentencePronunciation", back_populates="sentence",
-        uselist=False, cascade="all, delete-orphan",
+        "SentencePronunciation",
+        back_populates="sentence",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
 
 
@@ -284,32 +302,45 @@ class SentencePronunciation(Base):
 
     __tablename__ = "sentence_pronunciation"
 
-    sentence_id       = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="CASCADE"), primary_key=True)
-    lang              = Column(Text, nullable=False, default="he")
-    src_hash          = Column(Text, nullable=False)
-    src_preprocessed  = Column(Text)
-    niqqud_text       = Column(Text)
-    source            = Column(Text, nullable=False, default="auto_phonikud")
-    is_override       = Column(Integer, nullable=False, default=0)
-    confidence        = Column(Float)
-    qc_status         = Column(Text, nullable=False, default="pending")
-    qc_reason         = Column(Text)
-    niqqud_coverage   = Column(Float)
-    phonikud_version  = Column(Text)
+    sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="CASCADE"), primary_key=True
+    )
+    lang = Column(Text, nullable=False, default="he")
+    src_hash = Column(Text, nullable=False)
+    src_preprocessed = Column(Text)
+    niqqud_text = Column(Text)
+    source = Column(Text, nullable=False, default="auto_phonikud")
+    is_override = Column(Integer, nullable=False, default=0)
+    confidence = Column(Float)
+    qc_status = Column(Text, nullable=False, default="pending")
+    qc_reason = Column(Text)
+    niqqud_coverage = Column(Float)
+    phonikud_version = Column(Text)
     sanitizer_version = Column(Text, nullable=False, default="1")
-    error_kind        = Column(Text)
-    error_details     = Column(Text)
-    review_status     = Column(Text, nullable=False, default="auto")
-    created_at        = Column(Text, nullable=False, default=utc_now)
-    updated_at        = Column(Text, nullable=False, default=utc_now, onupdate=utc_now)
+    error_kind = Column(Text)
+    error_details = Column(Text)
+    review_status = Column(Text, nullable=False, default="auto")
+    created_at = Column(Text, nullable=False, default=utc_now)
+    updated_at = Column(Text, nullable=False, default=utc_now, onupdate=utc_now)
 
     __table_args__ = (
         CheckConstraint("source IN ('auto_phonikud','manual','import_csv')", name="ck_sp_source"),
         CheckConstraint("is_override IN (0,1)", name="ck_sp_is_override"),
-        CheckConstraint("qc_status IN ('ok','auto_fixed','partial','rejected','failed','pending')", name="ck_sp_qc_status"),
-        CheckConstraint("review_status IN ('auto','pending_review','approved','rejected_by_user')", name="ck_sp_review_status"),
-        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_sp_confidence"),
-        CheckConstraint("niqqud_coverage IS NULL OR (niqqud_coverage >= 0 AND niqqud_coverage <= 1)", name="ck_sp_coverage"),
+        CheckConstraint(
+            "qc_status IN ('ok','auto_fixed','partial','rejected','failed','pending')",
+            name="ck_sp_qc_status",
+        ),
+        CheckConstraint(
+            "review_status IN ('auto','pending_review','approved','rejected_by_user')",
+            name="ck_sp_review_status",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_sp_confidence"
+        ),
+        CheckConstraint(
+            "niqqud_coverage IS NULL OR (niqqud_coverage >= 0 AND niqqud_coverage <= 1)",
+            name="ck_sp_coverage",
+        ),
         Index("idx_sp_lang_hash", "lang", "src_hash"),
         Index("idx_sp_is_override", "is_override"),
         Index("idx_sp_qc_status", "qc_status"),
@@ -329,7 +360,9 @@ class TermAlias(Base):
     __tablename__ = "term_alias"
 
     alias_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     variant = Column(String, nullable=False)
     canonical = Column(String, nullable=False)
     note = Column(Text)
@@ -341,7 +374,9 @@ class StopwordSet(Base):
     __tablename__ = "stopword_set"
 
     stopset_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     name = Column(String, nullable=False, default="default")
     created_at = Column(String, nullable=False, default=utc_now)
 
@@ -354,7 +389,9 @@ class StopwordItem(Base):
     __tablename__ = "stopword_item"
 
     stopitem_id = Column(Integer, primary_key=True)
-    stopset_id = Column(Integer, ForeignKey("stopword_set.stopset_id", ondelete="CASCADE"), nullable=False)
+    stopset_id = Column(
+        Integer, ForeignKey("stopword_set.stopset_id", ondelete="CASCADE"), nullable=False
+    )
     surface = Column(String)
     lemma_text = Column(String)
     lemma_id = Column(Integer)
@@ -372,7 +409,9 @@ class Lemma(Base):
     __tablename__ = "lemma"
 
     lemma_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     lemma_text = Column(String, nullable=False)
     pos = Column(String)
     morph_json = Column(Text)
@@ -392,11 +431,17 @@ class Lemma(Base):
 class LemmaDocStat(Base):
     __tablename__ = "lemma_doc_stat"
 
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True)
-    doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True
+    )
+    doc_id = Column(
+        Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True
+    )
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="CASCADE"), primary_key=True)
     freq_abs = Column(Integer, nullable=False)
-    sample_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    sample_sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
 
     __table_args__ = (
         CheckConstraint("freq_abs >= 0", name="ck_lemma_doc_freq_abs"),
@@ -407,17 +452,23 @@ class LemmaDocStat(Base):
 class LemmaProjectStat(Base):
     __tablename__ = "lemma_project_stat"
 
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True
+    )
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="CASCADE"), primary_key=True)
     freq_abs = Column(Integer, nullable=False)
     doc_freq = Column(Integer, nullable=False, default=0)
-    sample_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    sample_sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
         CheckConstraint("freq_abs >= 0", name="ck_lemma_proj_freq_abs"),
         CheckConstraint("doc_freq >= 0", name="ck_lemma_proj_doc_freq"),
-        Index("idx_lemma_proj_freq", "project_id", "freq_abs", "lemma_id", postgresql_using="btree"),
+        Index(
+            "idx_lemma_proj_freq", "project_id", "freq_abs", "lemma_id", postgresql_using="btree"
+        ),
     )
 
 
@@ -430,7 +481,9 @@ class Ngram(Base):
     __tablename__ = "ngram"
 
     ngram_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     n = Column(Integer, nullable=False)
     surface_text = Column(String, nullable=False)
     he_canonical = Column(Text)  # M5: Canonical key for clustering
@@ -443,7 +496,9 @@ class Ngram(Base):
     __table_args__ = (
         CheckConstraint("n IN (2, 3, 4, 5)", name="ck_ngram_n"),
         CheckConstraint("source_kind IN ('ngram', 'np')", name="ck_ngram_source_kind"),
-        UniqueConstraint("project_id", "n", "surface_text", "source_kind", name="uq_ngram_project_n_surface"),
+        UniqueConstraint(
+            "project_id", "n", "surface_text", "source_kind", name="uq_ngram_project_n_surface"
+        ),
         Index("idx_ngram_project_surface", "project_id", "n", "surface_text"),
         Index("idx_ngram_canonical", "project_id", "he_canonical"),
         Index("idx_ngram_lemma_phrase", "project_id", "lemma_phrase"),
@@ -464,11 +519,17 @@ class NgramComponent(Base):
 class NgramDocStat(Base):
     __tablename__ = "ngram_doc_stat"
 
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True)
-    doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True
+    )
+    doc_id = Column(
+        Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"), primary_key=True
+    )
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
     freq_abs = Column(Integer, nullable=False)
-    sample_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    sample_sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
 
     __table_args__ = (CheckConstraint("freq_abs >= 0", name="ck_ngram_doc_freq_abs"),)
 
@@ -476,7 +537,9 @@ class NgramDocStat(Base):
 class NgramProjectStat(Base):
     __tablename__ = "ngram_project_stat"
 
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), primary_key=True
+    )
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
     freq_abs = Column(Integer, nullable=False)
     doc_freq = Column(Integer, nullable=False, default=0)
@@ -486,13 +549,17 @@ class NgramProjectStat(Base):
     dice_cache = Column(Float)  # M5: Dice coefficient
     tfidf = Column(Float)  # M5: TF-IDF score
     weirdness = Column(Float)  # M5: Weirdness ratio vs general corpus
-    sample_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    sample_sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
         CheckConstraint("freq_abs >= 0", name="ck_ngram_proj_freq_abs"),
         CheckConstraint("doc_freq >= 0", name="ck_ngram_proj_doc_freq"),
-        Index("idx_ngram_proj_freq", "project_id", "freq_abs", "ngram_id", postgresql_using="btree"),
+        Index(
+            "idx_ngram_proj_freq", "project_id", "freq_abs", "ngram_id", postgresql_using="btree"
+        ),
         Index("idx_ngram_stat_llr", "project_id", "llr_cache"),
         Index("idx_ngram_stat_dice", "project_id", "dice_cache"),
     )
@@ -507,20 +574,26 @@ class TermCard(Base):
     __tablename__ = "term_card"
 
     term_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     kind = Column(String, nullable=False)
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="CASCADE"))
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"))
     status = Column(String, nullable=False, default="auto")
     quality_score = Column(Integer)
     notes = Column(Text)
-    pinned_sentence_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    pinned_sentence_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
         CheckConstraint("kind IN ('lemma', 'ngram')", name="ck_term_card_kind"),
-        CheckConstraint("status IN ('auto','needs_review','approved','rejected')", name="ck_term_card_status"),
+        CheckConstraint(
+            "status IN ('auto','needs_review','approved','rejected')", name="ck_term_card_status"
+        ),
         CheckConstraint("quality_score BETWEEN 0 AND 100", name="ck_term_card_quality"),
         UniqueConstraint("project_id", "kind", "lemma_id", "ngram_id", name="uq_term_card"),
         Index("idx_term_card_status", "project_id", "status"),
@@ -531,7 +604,9 @@ class TranslationMemory(Base):
     __tablename__ = "translation_memory"
 
     tm_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="CASCADE"))
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"))
     translation = Column(Text, nullable=False)
@@ -544,8 +619,18 @@ class TranslationMemory(Base):
         CheckConstraint("source IN ('auto','user','import')", name="ck_tm_source"),
         CheckConstraint("is_override IN (0, 1)", name="ck_tm_is_override"),
         UniqueConstraint("project_id", "lemma_id", "ngram_id", name="uq_tm"),
-        Index("idx_tm_lookup_lemma", "project_id", "lemma_id", sqlite_where=text("lemma_id IS NOT NULL")),
-        Index("idx_tm_lookup_ngram", "project_id", "ngram_id", sqlite_where=text("ngram_id IS NOT NULL")),
+        Index(
+            "idx_tm_lookup_lemma",
+            "project_id",
+            "lemma_id",
+            sqlite_where=text("lemma_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_tm_lookup_ngram",
+            "project_id",
+            "ngram_id",
+            sqlite_where=text("ngram_id IS NOT NULL"),
+        ),
     )
 
 
@@ -558,7 +643,9 @@ class ProcessorRun(Base):
     __tablename__ = "processor_run"
 
     run_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     started_at = Column(String, nullable=False, default=utc_now)
     finished_at = Column(String)
     engine = Column(String, nullable=False)
@@ -601,7 +688,9 @@ class TaskQueue(Base):
     __tablename__ = "task_queue"
 
     task_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     doc_id = Column(Integer, ForeignKey("source_document.doc_id", ondelete="CASCADE"))
     op = Column(String, nullable=False)
     status = Column(String, nullable=False, default="queued")
@@ -613,7 +702,9 @@ class TaskQueue(Base):
 
     __table_args__ = (
         CheckConstraint("op IN ('add','update','remove')", name="ck_task_op"),
-        CheckConstraint("status IN ('queued','running','done','failed','canceled')", name="ck_task_status"),
+        CheckConstraint(
+            "status IN ('queued','running','done','failed','canceled')", name="ck_task_status"
+        ),
         Index("idx_task_queue_status", "project_id", "status", "priority", "created_at"),
     )
 
@@ -622,7 +713,9 @@ class ProjectSnapshot(Base):
     __tablename__ = "project_snapshot"
 
     snapshot_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     label = Column(String, nullable=False)
     note = Column(Text)
     created_at = Column(String, nullable=False, default=utc_now)
@@ -636,7 +729,9 @@ class TermExtractRun(Base):
     __tablename__ = "term_extract_run"
 
     run_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     status = Column(String, nullable=False, default="running")
     stage = Column(String)
     enable_ngrams = Column(Integer, nullable=False, default=1)
@@ -674,7 +769,9 @@ class TermExtractAccumulator(Base):
 
     __tablename__ = "term_extract_accumulator"
 
-    run_id = Column(Integer, ForeignKey("term_extract_run.run_id", ondelete="CASCADE"), primary_key=True)
+    run_id = Column(
+        Integer, ForeignKey("term_extract_run.run_id", ondelete="CASCADE"), primary_key=True
+    )
     source_kind = Column(String, primary_key=True)
     n = Column(Integer, primary_key=True)
     surface_text = Column(Text, primary_key=True)
@@ -702,7 +799,9 @@ class TermSearch(Base):
     __tablename__ = "term_search"
 
     term_rowid = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
     kind = Column(String, nullable=False)
     lemma_id = Column(Integer)
     ngram_id = Column(Integer)
@@ -724,7 +823,9 @@ class TermCluster(Base):
     __tablename__ = "term_cluster"
 
     cluster_id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="CASCADE"), nullable=False
+    )
 
     canonical_key = Column(String, nullable=False)
     representative_he = Column(Text, nullable=False)
@@ -747,10 +848,14 @@ class TermCluster(Base):
     updated_at = Column(String, nullable=False, default=utc_now)
 
     # M8: Term Curation fields
-    curation_status = Column(String, nullable=False, default='auto')  # auto/needs_review/approved/rejected
+    curation_status = Column(
+        String, nullable=False, default="auto"
+    )  # auto/needs_review/approved/rejected
     pinned_translation = Column(Text)
-    pinned_translation_lang = Column(String, default='ru')
-    pinned_example_sent_id = Column(Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL"))
+    pinned_translation_lang = Column(String, default="ru")
+    pinned_example_sent_id = Column(
+        Integer, ForeignKey("document_sentence.sentence_id", ondelete="SET NULL")
+    )
     curation_notes = Column(Text)
     curated_at = Column(String)
     curated_by = Column(String)
@@ -763,7 +868,10 @@ class TermCluster(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "canonical_key", name="uq_cluster_canonical"),
-        CheckConstraint("curation_status IN ('auto', 'needs_review', 'approved', 'rejected')", name="ck_curation_status"),
+        CheckConstraint(
+            "curation_status IN ('auto', 'needs_review', 'approved', 'rejected')",
+            name="ck_curation_status",
+        ),
     )
 
 
@@ -772,7 +880,9 @@ class TermClusterMember(Base):
 
     __tablename__ = "term_cluster_member"
 
-    cluster_id = Column(Integer, ForeignKey("term_cluster.cluster_id", ondelete="CASCADE"), primary_key=True)
+    cluster_id = Column(
+        Integer, ForeignKey("term_cluster.cluster_id", ondelete="CASCADE"), primary_key=True
+    )
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="CASCADE"), primary_key=True)
 
     member_freq_abs = Column(Integer, nullable=False, default=0)
@@ -820,13 +930,20 @@ class TMEntry(Base):
     tm_global_id = Column(Integer, ForeignKey("tm_global.tm_global_id", ondelete="SET NULL"))
 
     __table_args__ = (
-        UniqueConstraint("project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"),
-        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tm_kind"),
-        CheckConstraint("status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tm_status"),
-        CheckConstraint(
-            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')", name="ck_tm_origin"
+        UniqueConstraint(
+            "project_id", "kind", "src_lang", "tgt_lang", "src_norm", name="uq_tm_entry"
         ),
-        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_tm_confidence"),
+        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tm_kind"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tm_status"
+        ),
+        CheckConstraint(
+            "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')",
+            name="ck_tm_origin",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_tm_confidence"
+        ),
     )
 
 
@@ -854,8 +971,12 @@ class TMGlobal(Base):
 
     __table_args__ = (
         UniqueConstraint("src_lang", "tgt_lang", "kind", "src_norm", name="uq_tm_global"),
-        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tmg_kind"),
-        CheckConstraint("status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tmg_status"),
+        CheckConstraint(
+            "kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_tmg_kind"
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'rejected', 'deprecated')", name="ck_tmg_status"
+        ),
         CheckConstraint(
             "origin IN ('user_edit', 'import', 'mt_accept', 'mt_auto', 'merge', 'revert')",
             name="ck_tmg_origin",
@@ -876,7 +997,9 @@ class TMEntryHistory(Base):
     status = Column(String, nullable=False)
     origin = Column(String, nullable=False)
     changed_at = Column(String, nullable=False, default=utc_now)
-    change_kind = Column(String, nullable=False)  # edit|import|merge|revert|approve|reject|deprecate
+    change_kind = Column(
+        String, nullable=False
+    )  # edit|import|merge|revert|approve|reject|deprecate
 
     __table_args__ = (
         CheckConstraint(
@@ -926,9 +1049,7 @@ class UserDictionary(Base):
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 
-    __table_args__ = (
-        CheckConstraint("is_pinned IN (0, 1)", name="ck_user_dict_is_pinned"),
-    )
+    __table_args__ = (CheckConstraint("is_pinned IN (0, 1)", name="ck_user_dict_is_pinned"),)
 
 
 class UserDictionaryItem(Base):
@@ -937,7 +1058,9 @@ class UserDictionaryItem(Base):
     __tablename__ = "user_dictionary_item"
 
     item_id = Column(Integer, primary_key=True)
-    dictionary_id = Column(Integer, ForeignKey("user_dictionary.dictionary_id", ondelete="CASCADE"), nullable=False)
+    dictionary_id = Column(
+        Integer, ForeignKey("user_dictionary.dictionary_id", ondelete="CASCADE"), nullable=False
+    )
     kind = Column(String, nullable=False)  # lemma|ngram|term_cluster|surface
     src_lang = Column(String, nullable=False)
     tgt_lang = Column(String, nullable=False)
@@ -965,7 +1088,9 @@ class UserDictionaryItem(Base):
 
     __table_args__ = (
         UniqueConstraint("dictionary_id", "canonical_hash", name="uq_user_dict_item_hash"),
-        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_user_dict_item_kind"),
+        CheckConstraint(
+            "kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_user_dict_item_kind"
+        ),
         CheckConstraint("is_noise IN (0, 1)", name="ck_user_dict_item_noise"),
         CheckConstraint(
             "study_state IN ('new', 'learning', 'mastered', 'suspended')",
@@ -997,7 +1122,9 @@ class AudioAsset(Base):
     updated_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
-        CheckConstraint("asset_status IN ('missing', 'ready', 'failed')", name="ck_audio_asset_status"),
+        CheckConstraint(
+            "asset_status IN ('missing', 'ready', 'failed')", name="ck_audio_asset_status"
+        ),
         CheckConstraint(
             "audio_rel_path IS NULL OR ("
             "audio_rel_path NOT LIKE '/%' AND "
@@ -1053,7 +1180,9 @@ class AudioUsage(Base):
 
     __table_args__ = (
         UniqueConstraint("provider_id", "period_type", "period_key", name="uq_audio_usage_period"),
-        CheckConstraint("period_type IN ('minute', 'day', 'month')", name="ck_audio_usage_period_type"),
+        CheckConstraint(
+            "period_type IN ('minute', 'day', 'month')", name="ck_audio_usage_period_type"
+        ),
     )
 
 
@@ -1117,7 +1246,9 @@ class DictSource(Base):
     row_count = Column(Integer, nullable=False, default=0)
     notes = Column(Text)
 
-    __table_args__ = (CheckConstraint("format IN ('csv', 'xlsx', 'json')", name="ck_dict_source_format"),)
+    __table_args__ = (
+        CheckConstraint("format IN ('csv', 'xlsx', 'json')", name="ck_dict_source_format"),
+    )
 
 
 class DictEntry(Base):
@@ -1126,7 +1257,9 @@ class DictEntry(Base):
     __tablename__ = "dict_entry"
 
     dict_entry_id = Column(Integer, primary_key=True)
-    dict_source_id = Column(Integer, ForeignKey("dict_source.dict_source_id", ondelete="CASCADE"), nullable=False)
+    dict_source_id = Column(
+        Integer, ForeignKey("dict_source.dict_source_id", ondelete="CASCADE"), nullable=False
+    )
     kind = Column(String, nullable=False)  # lemma|ngram|term_cluster|surface
     src_lang = Column(String, nullable=False)
     tgt_lang = Column(String, nullable=False)
@@ -1141,9 +1274,17 @@ class DictEntry(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "dict_source_id", "kind", "src_lang", "tgt_lang", "src_norm", "translation", name="uq_dict_entry"
+            "dict_source_id",
+            "kind",
+            "src_lang",
+            "tgt_lang",
+            "src_norm",
+            "translation",
+            name="uq_dict_entry",
         ),
-        CheckConstraint("kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_dict_kind"),
+        CheckConstraint(
+            "kind IN ('lemma', 'ngram', 'term_cluster', 'surface')", name="ck_dict_kind"
+        ),
         CheckConstraint("status IN ('approved', 'draft', 'deprecated')", name="ck_dict_status"),
     )
 
@@ -1168,7 +1309,9 @@ class MTCache(Base):
     expires_at = Column(String)
 
     __table_args__ = (
-        UniqueConstraint("provider", "src_lang", "tgt_lang", "request_key", name="uq_mt_cache_request"),
+        UniqueConstraint(
+            "provider", "src_lang", "tgt_lang", "request_key", name="uq_mt_cache_request"
+        ),
     )
 
 
@@ -1201,7 +1344,9 @@ class AudioQueueItem(Base):
     created_at = Column(String, nullable=False, default=utc_now)
 
     __table_args__ = (
-        CheckConstraint("kind IN ('sentence', 'lemma', 'term', 'custom_text')", name="ck_aq_item_kind"),
+        CheckConstraint(
+            "kind IN ('sentence', 'lemma', 'term', 'custom_text')", name="ck_aq_item_kind"
+        ),
         CheckConstraint(
             "audio_status IN ('unknown', 'ready', 'missing', 'generating', 'failed')",
             name="ck_aq_item_audio_status",
@@ -1221,8 +1366,12 @@ class AudioPlaylist(Base):
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 
-    entries = relationship("AudioPlaylistEntry", back_populates="playlist",
-                           cascade="all, delete-orphan", order_by="AudioPlaylistEntry.position")
+    entries = relationship(
+        "AudioPlaylistEntry",
+        back_populates="playlist",
+        cascade="all, delete-orphan",
+        order_by="AudioPlaylistEntry.position",
+    )
 
 
 class AudioPlaylistEntry(Base):
@@ -1231,7 +1380,9 @@ class AudioPlaylistEntry(Base):
     __tablename__ = "audio_playlist_entry"
 
     entry_id = Column(Integer, primary_key=True)
-    playlist_id = Column(Integer, ForeignKey("audio_playlist.playlist_id", ondelete="CASCADE"), nullable=False)
+    playlist_id = Column(
+        Integer, ForeignKey("audio_playlist.playlist_id", ondelete="CASCADE"), nullable=False
+    )
     position = Column(Integer, nullable=False, default=0)
     kind = Column(String, nullable=False, default="sentence")
     source_id = Column(Integer)

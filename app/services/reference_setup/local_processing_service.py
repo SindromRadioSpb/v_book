@@ -3,18 +3,17 @@
 import logging
 import subprocess
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.infra.sa_models import DictProject, SourceDocument, SourceCorpus
+from app.infra.sa_models import DictProject, SourceCorpus, SourceDocument
 from app.services.db_service import DBService
 from app.services.process_service import ProcessService
 from app.services.term_extraction_service import TermExtractionService
-from .state import SetupState, SetupStage
+
+from .state import SetupStage, SetupState
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +39,13 @@ class LocalProcessingService:
         self.state = SetupState.load_from_file(state_file) or SetupState(mode="local_process")
 
         # Services (initialized on demand)
-        self.process_service: Optional[ProcessService] = None
-        self.term_service: Optional[TermExtractionService] = None
+        self.process_service: ProcessService | None = None
+        self.term_service: TermExtractionService | None = None
 
     def download_xml_dump(
         self,
         url: str,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ) -> Path:
         """
         Download Wikipedia XML dump.
@@ -89,7 +88,7 @@ class LocalProcessingService:
     def extract_to_jsonl(
         self,
         dump_path: Path,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ) -> Path:
         """
         Extract XML dump to JSONL shards.
@@ -114,13 +113,20 @@ class LocalProcessingService:
         self._save_state()
 
         # Run extraction script
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "ref_corpora" / "extract_hewiki_to_jsonl.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "ref_corpora"
+            / "extract_hewiki_to_jsonl.py"
+        )
 
         cmd = [
             sys.executable,
             str(script_path),
-            "--dump", str(dump_path),
-            "--out_dir", str(output_dir),
+            "--dump",
+            str(dump_path),
+            "--out_dir",
+            str(output_dir),
             "--overwrite",
         ]
 
@@ -138,7 +144,7 @@ class LocalProcessingService:
         jsonl_dir: Path,
         project_name: str = "Hebrew Wikipedia Baseline",
         corpus_name: str = "HEWiki-20260207",
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ) -> int:
         """
         Import JSONL to database.
@@ -157,7 +163,12 @@ class LocalProcessingService:
         self._save_state()
 
         # Run import script
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "ref_corpora" / "import_ref_jsonl_to_project.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "ref_corpora"
+            / "import_ref_jsonl_to_project.py"
+        )
 
         jsonl_files = list(jsonl_dir.glob("*.jsonl"))
         if not jsonl_files:
@@ -166,11 +177,16 @@ class LocalProcessingService:
         cmd = [
             sys.executable,
             str(script_path),
-            "--jsonl_files", *[str(f) for f in jsonl_files],
-            "--project_name", project_name,
-            "--corpus_name", corpus_name,
-            "--source_key", "hewiki",
-            "--db_path", str(self.db_path),
+            "--jsonl_files",
+            *[str(f) for f in jsonl_files],
+            "--project_name",
+            project_name,
+            "--corpus_name",
+            corpus_name,
+            "--source_key",
+            "hewiki",
+            "--db_path",
+            str(self.db_path),
         ]
 
         logger.info(f"Running: {' '.join(cmd[:5])}... ({len(jsonl_files)} files)")
@@ -198,7 +214,7 @@ class LocalProcessingService:
         self,
         project_id: int,
         use_gpu: bool = False,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ):
         """
         Process documents with NLP pipeline.
@@ -217,12 +233,16 @@ class LocalProcessingService:
 
         with db_service.get_session() as session:
             # Get all documents
-            docs = session.execute(
-                select(SourceDocument.doc_id)
-                .join(SourceCorpus)
-                .where(SourceCorpus.project_id == project_id)
-                .order_by(SourceDocument.doc_id)
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument.doc_id)
+                    .join(SourceCorpus)
+                    .where(SourceCorpus.project_id == project_id)
+                    .order_by(SourceDocument.doc_id)
+                )
+                .scalars()
+                .all()
+            )
 
             total_docs = len(docs)
             logger.info(f"Processing {total_docs:,} documents")
@@ -256,7 +276,7 @@ class LocalProcessingService:
     def extract_terms(
         self,
         project_id: int,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ):
         """
         Extract terms from processed documents.
@@ -275,7 +295,7 @@ class LocalProcessingService:
         with db_service.get_session() as session:
             report = self.term_service.extract_terms_for_project(session, project_id)
 
-            logger.info(f"Term extraction complete:")
+            logger.info("Term extraction complete:")
             logger.info(f"  N-grams: {report.ngrams_extracted:,}")
             logger.info(f"  Clusters: {report.clusters_created:,}")
 
@@ -287,7 +307,7 @@ class LocalProcessingService:
         xml_url: str,
         project_name: str = "Hebrew Wikipedia Baseline",
         use_gpu: bool = False,
-        progress_callback: Optional[Callable[[SetupState], None]] = None,
+        progress_callback: Callable[[SetupState], None] | None = None,
     ):
         """
         Run full pipeline: download → extract → import → NLP → terms.

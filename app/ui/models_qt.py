@@ -1,13 +1,13 @@
 """Qt models for tables and lists."""
 import logging
-from typing import List, Optional
 
-from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
+
 from app.domain.dto import (
     DocumentDTO,
-    ProjectStats,
     LemmaStats,
+    ProjectStats,
     SentenceDTO,
     UserDictionaryDTO,
     UserDictionaryItemDTO,
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class ProjectListModel(QAbstractTableModel):
     """Model for project list table."""
 
-    def __init__(self, projects: List[ProjectStats] = None):
+    def __init__(self, projects: list[ProjectStats] = None):
         super().__init__()
         self.projects = projects or []
         self.headers = ["ID", "Name", "Documents", "Processed", "Lemmas", "N-grams"]
@@ -111,7 +111,7 @@ class ProjectListModel(QAbstractTableModel):
 
         return False
 
-    def update_projects(self, projects: List[ProjectStats]):
+    def update_projects(self, projects: list[ProjectStats]):
         """Update the project list."""
         self.beginResetModel()
         self.projects = projects
@@ -121,7 +121,7 @@ class ProjectListModel(QAbstractTableModel):
 class LemmaTableModel(QAbstractTableModel):
     """Model for lemma/dictionary table with M7 translation support."""
 
-    def __init__(self, lemmas: List[LemmaStats] = None):
+    def __init__(self, lemmas: list[LemmaStats] = None):
         super().__init__()
         self.lemmas = lemmas or []
         # M7: Added Source column between Translation and Status
@@ -141,7 +141,6 @@ class LemmaTableModel(QAbstractTableModel):
             "Audio",
         ]
         # M7: Store full TranslationResult for each lemma (for Why dialog)
-        from app.services.translation_service import TranslationResult
         self.translation_results = {}  # row_index -> TranslationResult
 
     def rowCount(self, parent=QModelIndex()):
@@ -270,7 +269,7 @@ class LemmaTableModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def update_lemmas(self, lemmas: List[LemmaStats]):
+    def update_lemmas(self, lemmas: list[LemmaStats]):
         """Update the lemma list."""
         self.beginResetModel()
         self.lemmas = lemmas
@@ -314,10 +313,10 @@ class LemmaTableModel(QAbstractTableModel):
 class TermClusterTableModel(QAbstractTableModel):
     """Model for term cluster table with M7 translation support."""
 
-    def __init__(self, clusters: List = None):
+    def __init__(self, clusters: list = None):
         super().__init__()
         from app.domain.dto import ClusterStats
-        self.clusters: List[ClusterStats] = clusters or []
+        self.clusters: list[ClusterStats] = clusters or []
         # M7: Added Translation, Source, Status columns
         # Added Noise column for is_noise visualization
         self.headers = [
@@ -325,7 +324,6 @@ class TermClusterTableModel(QAbstractTableModel):
             "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise", "Last Review", "Niqqud", "Audio"
         ]
         # M7: Store full TranslationResult for each cluster
-        from app.services.translation_service import TranslationResult
         self.translation_results = {}  # row_index -> TranslationResult
 
     def rowCount(self, parent=QModelIndex()):
@@ -465,7 +463,7 @@ class TermClusterTableModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def update_clusters(self, clusters: List):
+    def update_clusters(self, clusters: list):
         """Update the cluster list."""
         self.beginResetModel()
         self.clusters = clusters
@@ -515,10 +513,10 @@ class TermClusterTableModel(QAbstractTableModel):
 class TranslationManagementTableModel(QAbstractTableModel):
     """P2: Model for Translation Management panel."""
 
-    def __init__(self, entries: List = None):
+    def __init__(self, entries: list = None):
         super().__init__()
         from app.domain.dto import TMEntryDTO
-        self.entries: List[TMEntryDTO] = entries or []
+        self.entries: list[TMEntryDTO] = entries or []
         # Added Noise column for is_noise visualization
         self.headers = [
             "UD", "ID", "Kind", "Source", "Translation", "Status",
@@ -647,7 +645,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
 
         return False
 
-    def update_entries(self, entries: List, total_count: int):
+    def update_entries(self, entries: list, total_count: int):
         """Update the entry list and total count."""
         self.beginResetModel()
         self.entries = entries
@@ -668,10 +666,10 @@ class TranslationManagementTableModel(QAbstractTableModel):
 class TermCardTableModel(QAbstractTableModel):
     """M8: Model for term card review queue."""
 
-    def __init__(self, cards: List = None):
+    def __init__(self, cards: list = None):
         super().__init__()
         from app.domain.dto import TermCardDTO
-        self.cards: List[TermCardDTO] = cards or []
+        self.cards: list[TermCardDTO] = cards or []
         self.headers = [
             "UD", "Term", "Lemma", "Freq", "DocFreq", "Status",
             "Pin Translation", "Aliases", "Stopword", "Last Review", "Niqqud", "Audio"
@@ -757,7 +755,7 @@ class TermCardTableModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def update_cards(self, cards: List):
+    def update_cards(self, cards: list):
         """Update the card list."""
         self.beginResetModel()
         self.cards = cards
@@ -817,9 +815,9 @@ class TermCardTableModel(QAbstractTableModel):
 class UserDictionaryListModel(QAbstractTableModel):
     """Model for user dictionaries list panel."""
 
-    def __init__(self, dictionaries: List[UserDictionaryDTO] = None):
+    def __init__(self, dictionaries: list[UserDictionaryDTO] = None):
         super().__init__()
-        self.dictionaries: List[UserDictionaryDTO] = dictionaries or []
+        self.dictionaries: list[UserDictionaryDTO] = dictionaries or []
         self.headers = ["Dictionary", "Items"]
 
     def rowCount(self, parent=QModelIndex()):
@@ -848,7 +846,7 @@ class UserDictionaryListModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def update_dictionaries(self, dictionaries: List[UserDictionaryDTO]):
+    def update_dictionaries(self, dictionaries: list[UserDictionaryDTO]):
         self.beginResetModel()
         self.dictionaries = dictionaries
         self.endResetModel()
@@ -862,9 +860,9 @@ class UserDictionaryListModel(QAbstractTableModel):
 class UserDictionaryItemsTableModel(QAbstractTableModel):
     """Model for user dictionary items table."""
 
-    def __init__(self, items: List[UserDictionaryItemDTO] = None):
+    def __init__(self, items: list[UserDictionaryItemDTO] = None):
         super().__init__()
-        self.items: List[UserDictionaryItemDTO] = items or []
+        self.items: list[UserDictionaryItemDTO] = items or []
         self.headers = [
             "Kind",
             "Source",
@@ -1003,7 +1001,7 @@ class UserDictionaryItemsTableModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def update_items(self, items: List[UserDictionaryItemDTO], total_count: int):
+    def update_items(self, items: list[UserDictionaryItemDTO], total_count: int):
         self.beginResetModel()
         self.items = items
         self.total_count = total_count
@@ -1049,7 +1047,7 @@ class DocumentsTableModel(QAbstractTableModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._rows: List[DocumentDTO] = []
+        self._rows: list[DocumentDTO] = []
         self._sort_col: int = -1
         self._sort_dir: str = "asc"
 
@@ -1057,7 +1055,7 @@ class DocumentsTableModel(QAbstractTableModel):
     # Public API
     # ------------------------------------------------------------------
 
-    def update_rows(self, dtos: List[DocumentDTO]) -> None:
+    def update_rows(self, dtos: list[DocumentDTO]) -> None:
         self.beginResetModel()
         self._rows = list(dtos)
         self.endResetModel()
@@ -1070,7 +1068,7 @@ class DocumentsTableModel(QAbstractTableModel):
             Qt.Orientation.Horizontal, 0, len(self.HEADERS) - 1
         )
 
-    def get_dto(self, row: int) -> Optional[DocumentDTO]:
+    def get_dto(self, row: int) -> DocumentDTO | None:
         if 0 <= row < len(self._rows):
             return self._rows[row]
         return None
@@ -1184,18 +1182,18 @@ class SentencesTableModel(QAbstractTableModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._rows: List[SentenceDTO] = []
+        self._rows: list[SentenceDTO] = []
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def update_rows(self, dtos: List[SentenceDTO]) -> None:
+    def update_rows(self, dtos: list[SentenceDTO]) -> None:
         self.beginResetModel()
         self._rows = list(dtos)
         self.endResetModel()
 
-    def get_dto(self, row: int) -> Optional[SentenceDTO]:
+    def get_dto(self, row: int) -> SentenceDTO | None:
         if 0 <= row < len(self._rows):
             return self._rows[row]
         return None
@@ -1250,11 +1248,12 @@ class SentencesTableModel(QAbstractTableModel):
                 cov = f"{dto.niqqud_coverage * 100:.0f}%" if dto.niqqud_coverage is not None else "\u2014"
                 conf = f"{dto.niqqud_confidence:.2f}" if dto.niqqud_confidence is not None else "\u2014"
                 override = "manual override" if dto.niqqud_is_override else "auto"
+                em = "\u2014"
                 return "\n".join([
-                    f"Source: {dto.niqqud_source or '\u2014'}  ({override})",
+                    f"Source: {dto.niqqud_source or em}  ({override})",
                     f"Confidence: {conf}",
                     f"Coverage: {cov}",
-                    f"QC: {dto.niqqud_qc or '\u2014'}",
+                    f"QC: {dto.niqqud_qc or em}",
                 ])
             if col == self.COL_QC and dto.niqqud_qc:
                 return f"QC status: {dto.niqqud_qc}"

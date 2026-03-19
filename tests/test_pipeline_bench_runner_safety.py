@@ -180,9 +180,15 @@ def test_cleanup_sandbox_deletes_prefixed_projects(monkeypatch, tmp_path: Path) 
         lib = Library(name="lib")
         session.add(lib)
         session.flush()
-        keep = DictProject(library_id=lib.library_id, name="KEEP_PROJECT", src_lang="he", tgt_lang="ru")
-        bench_a = DictProject(library_id=lib.library_id, name="BENCH_A", src_lang="he", tgt_lang="ru")
-        bench_b = DictProject(library_id=lib.library_id, name="BENCH_B", src_lang="he", tgt_lang="ru")
+        keep = DictProject(
+            library_id=lib.library_id, name="KEEP_PROJECT", src_lang="he", tgt_lang="ru"
+        )
+        bench_a = DictProject(
+            library_id=lib.library_id, name="BENCH_A", src_lang="he", tgt_lang="ru"
+        )
+        bench_b = DictProject(
+            library_id=lib.library_id, name="BENCH_B", src_lang="he", tgt_lang="ru"
+        )
         session.add_all([keep, bench_a, bench_b])
         session.commit()
         bench_ids = [bench_a.project_id, bench_b.project_id]
@@ -199,7 +205,10 @@ def test_cleanup_sandbox_deletes_prefixed_projects(monkeypatch, tmp_path: Path) 
 
     assert calls == bench_ids
     assert result["details"]["deleted_count"] == 2
-    assert [item["name"] for item in result["details"]["deleted_projects"]] == ["BENCH_A", "BENCH_B"]
+    assert [item["name"] for item in result["details"]["deleted_projects"]] == [
+        "BENCH_A",
+        "BENCH_B",
+    ]
     assert [project.name for project in remaining] == ["KEEP_PROJECT"]
 
 
@@ -229,9 +238,10 @@ def test_prepare_base_sandbox_replaces_db_and_removes_sidecars(tmp_path: Path) -
 
 
 def test_validate_runtime_contract_rejects_cycle_flags_without_reuse_working_db(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     mod = _load_module()
+    monkeypatch.setattr(mod, "_is_expected_j_path", lambda p: True)
     source_db = tmp_path / "source.db"
     db_path = tmp_path / "sandbox.db"
     source_db.write_bytes(b"stub")
@@ -258,9 +268,10 @@ def test_validate_runtime_contract_rejects_cycle_flags_without_reuse_working_db(
 
 
 def test_validate_runtime_contract_rejects_reuse_bench_slice_with_post_cleanup(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     mod = _load_module()
+    monkeypatch.setattr(mod, "_is_expected_j_path", lambda p: True)
     source_db = tmp_path / "source.db"
     db_path = tmp_path / "sandbox.db"
     source_db.write_bytes(b"stub")
@@ -302,9 +313,10 @@ def test_parse_bench_slice_description_roundtrip() -> None:
 
 
 def test_validate_runtime_contract_requires_prepared_source_for_reuse_bench_slice(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     mod = _load_module()
+    monkeypatch.setattr(mod, "_is_expected_j_path", lambda p: True)
     source_db = tmp_path / "source.db"
     db_path = tmp_path / "sandbox.db"
     source_db.write_bytes(b"stub")
@@ -334,9 +346,10 @@ def test_validate_runtime_contract_requires_prepared_source_for_reuse_bench_slic
 
 
 def test_validate_runtime_contract_requires_existing_fixture_for_verify(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     mod = _load_module()
+    monkeypatch.setattr(mod, "_is_expected_j_path", lambda p: True)
     source_db = tmp_path / "source.db"
     source_db.write_bytes(b"stub")
     missing_fixture = tmp_path / "fixture.db"
@@ -580,7 +593,9 @@ def test_run_verify_bench_fixture_accepts_matching_fixture(tmp_path: Path) -> No
         session.flush()
         for index, bench_doc in enumerate(bench_docs, 1):
             session.add(DocumentText(doc_id=bench_doc.doc_id, raw_text=f"doc {index}"))
-            session.add(DocumentSentence(doc_id=bench_doc.doc_id, sent_index=0, text=f"sent {index}"))
+            session.add(
+                DocumentSentence(doc_id=bench_doc.doc_id, sent_index=0, text=f"sent {index}")
+            )
         lemma = Lemma(project_id=bench.project_id, lemma_text="lemma", pos="NOUN")
         session.add(lemma)
         session.flush()
@@ -633,7 +648,9 @@ def test_run_verify_bench_fixture_rejects_schema_mismatch(tmp_path: Path) -> Non
             lib = Library(name="lib")
             session.add(lib)
             session.flush()
-            source = DictProject(library_id=lib.library_id, name="Source", src_lang="he", tgt_lang="ru")
+            source = DictProject(
+                library_id=lib.library_id, name="Source", src_lang="he", tgt_lang="ru"
+            )
             session.add(source)
             session.flush()
             source_corpus = SourceCorpus(project_id=source.project_id, name="source")

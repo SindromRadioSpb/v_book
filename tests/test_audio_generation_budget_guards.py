@@ -9,7 +9,11 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.infra.audio.base_provider import AudioGenerationRequest, AudioGenerationResult, BaseAudioProvider
+from app.infra.audio.base_provider import (
+    AudioGenerationRequest,
+    AudioGenerationResult,
+    BaseAudioProvider,
+)
 from app.infra.audio.providers_registry import AudioProvidersRegistry
 from app.infra.sa_models import AudioAsset
 from app.services.audio_generation_service import AudioGenerationService
@@ -96,7 +100,9 @@ def _workspace_temp_dir(prefix: str) -> Path:
 
 
 def _prepare(monkeypatch, temp_dir: Path):
-    monkeypatch.setattr("app.services.audio_generation_service.register_default_audio_providers", lambda: 0)
+    monkeypatch.setattr(
+        "app.services.audio_generation_service.register_default_audio_providers", lambda: 0
+    )
     monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_dir)
     AudioProvidersRegistry.reset()
     registry = AudioProvidersRegistry()
@@ -139,7 +145,10 @@ def test_budget_fail_closed_blocks_second_request(monkeypatch):
 
             assert first["ok"] is True
             assert second["ok"] is False
-            assert "budget" in str(second.get("error", "")).lower() or "rate" in str(second.get("error", "")).lower()
+            assert (
+                "budget" in str(second.get("error", "")).lower()
+                or "rate" in str(second.get("error", "")).lower()
+            )
             assert _BudgetProvider.calls == 1
     finally:
         engine.dispose()

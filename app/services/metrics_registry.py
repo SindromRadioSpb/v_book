@@ -6,25 +6,27 @@ Runtime enforcement of bounds, invariants, and deterministic ordering.
 See docs/METRICS_CATALOG.md for comprehensive metric definitions.
 """
 
+import logging
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, Callable, Any, Dict
-import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class MetricType(Enum):
     """Metric value types with specific validation rules."""
-    TEXT = auto()        # String identifier
-    COUNT = auto()       # Integer >= 0
-    RATE_0_100 = auto() # Float in [0.0, 100.0]
-    DENSITY = auto()     # Float >= 0.0, unbounded (can exceed 100%)
-    SEPARATOR = auto()   # Blank row for formatting
+
+    TEXT = auto()  # String identifier
+    COUNT = auto()  # Integer >= 0
+    RATE_0_100 = auto()  # Float in [0.0, 100.0]
+    DENSITY = auto()  # Float >= 0.0, unbounded (can exceed 100%)
+    SEPARATOR = auto()  # Blank row for formatting
 
 
 class MetricId(Enum):
     """Stable metric identifiers matching METRICS_CATALOG.md."""
+
     # Identifiers
     PROJECT_NAME = "M001"
     PROJECT_ID = "M002"
@@ -60,12 +62,13 @@ class MetricSpec:
     Immutable specification that defines how a metric is computed,
     validated, and rendered.
     """
+
     id: MetricId
-    key: str                          # Machine key (e.g., "lemma_count")
-    label: str                        # Display label for UI/XLSX
+    key: str  # Machine key (e.g., "lemma_count")
+    label: str  # Display label for UI/XLSX
     type: MetricType
-    bounds: Optional[tuple[float, float]] = None  # (min, max) for validation
-    doc: str = ""                     # Short definition
+    bounds: tuple[float, float] | None = None  # (min, max) for validation
+    doc: str = ""  # Short definition
 
     def validate_value(self, value: Any) -> None:
         """Validate value against metric type and bounds.
@@ -120,95 +123,114 @@ class MetricsRegistry:
     _ORDERED_SPECS = [
         # Identifiers
         MetricSpec(
-            MetricId.PROJECT_NAME, "project_name", "Project Name",
+            MetricId.PROJECT_NAME,
+            "project_name",
+            "Project Name",
             MetricType.TEXT,
-            doc="Project name from dict_project table"
+            doc="Project name from dict_project table",
         ),
         MetricSpec(
-            MetricId.PROJECT_ID, "project_id", "Project ID",
+            MetricId.PROJECT_ID,
+            "project_id",
+            "Project ID",
             MetricType.COUNT,
-            doc="Project ID (primary key)"
+            doc="Project ID (primary key)",
         ),
-
         # Separator
         MetricSpec(MetricId.SEP_1, "", "", MetricType.SEPARATOR),
-
         # Counts
         MetricSpec(
-            MetricId.DOCUMENT_COUNT, "document_count", "Documents",
+            MetricId.DOCUMENT_COUNT,
+            "document_count",
+            "Documents",
             MetricType.COUNT,
-            doc="Count of source documents in project corpora"
+            doc="Count of source documents in project corpora",
         ),
         MetricSpec(
-            MetricId.LEMMA_COUNT, "lemma_count", "Lemmas (Unique Words)",
+            MetricId.LEMMA_COUNT,
+            "lemma_count",
+            "Lemmas (Unique Words)",
             MetricType.COUNT,
-            doc="Count of distinct lemmas"
+            doc="Count of distinct lemmas",
         ),
         MetricSpec(
-            MetricId.LEMMAS_WITH_TRANSLATION, "lemmas_with_translation_count",
+            MetricId.LEMMAS_WITH_TRANSLATION,
+            "lemmas_with_translation_count",
             "Lemmas with Translation",
             MetricType.COUNT,
-            doc="Count of lemmas with >=1 approved TM entry"
+            doc="Count of lemmas with >=1 approved TM entry",
         ),
         MetricSpec(
-            MetricId.TERM_CLUSTER_COUNT, "term_cluster_count", "Term Clusters",
+            MetricId.TERM_CLUSTER_COUNT,
+            "term_cluster_count",
+            "Term Clusters",
             MetricType.COUNT,
-            doc="Count of term clusters (all statuses)"
+            doc="Count of term clusters (all statuses)",
         ),
         MetricSpec(
-            MetricId.TERM_APPROVED_COUNT, "term_approved_count", "Terms Approved",
+            MetricId.TERM_APPROVED_COUNT,
+            "term_approved_count",
+            "Terms Approved",
             MetricType.COUNT,
-            doc="Count of approved term clusters"
+            doc="Count of approved term clusters",
         ),
         MetricSpec(
-            MetricId.TM_ENTRY_COUNT, "tm_entry_count", "TM Entries",
+            MetricId.TM_ENTRY_COUNT,
+            "tm_entry_count",
+            "TM Entries",
             MetricType.COUNT,
-            doc="Count of TM entries (all statuses)"
+            doc="Count of TM entries (all statuses)",
         ),
         MetricSpec(
-            MetricId.TM_APPROVED_COUNT, "tm_approved_count", "TM Approved",
+            MetricId.TM_APPROVED_COUNT,
+            "tm_approved_count",
+            "TM Approved",
             MetricType.COUNT,
-            doc="Count of approved TM entries"
+            doc="Count of approved TM entries",
         ),
         MetricSpec(
-            MetricId.DICT_ENTRY_COUNT, "dict_entry_count", "Dictionary Entries",
+            MetricId.DICT_ENTRY_COUNT,
+            "dict_entry_count",
+            "Dictionary Entries",
             MetricType.COUNT,
-            doc="Count of static dictionary entries"
+            doc="Count of static dictionary entries",
         ),
-
         # Separator
         MetricSpec(MetricId.SEP_2, "", "", MetricType.SEPARATOR),
-
         # Coverage/Rate metrics
         MetricSpec(
-            MetricId.LEMMA_COVERAGE_PCT, "lemma_coverage_pct", "Lemma Coverage (%)",
+            MetricId.LEMMA_COVERAGE_PCT,
+            "lemma_coverage_pct",
+            "Lemma Coverage (%)",
             MetricType.RATE_0_100,
             bounds=(0.0, 100.0),
-            doc="Percentage of lemmas with >=1 approved translation"
+            doc="Percentage of lemmas with >=1 approved translation",
         ),
         MetricSpec(
-            MetricId.TM_APPROVAL_RATE_PCT, "tm_approval_rate_pct", "TM Approval Rate (%)",
+            MetricId.TM_APPROVAL_RATE_PCT,
+            "tm_approval_rate_pct",
+            "TM Approval Rate (%)",
             MetricType.RATE_0_100,
             bounds=(0.0, 100.0),
-            doc="Percentage of TM entries that are approved"
+            doc="Percentage of TM entries that are approved",
         ),
         MetricSpec(
-            MetricId.TERM_APPROVAL_RATE_PCT, "term_approval_rate_pct",
+            MetricId.TERM_APPROVAL_RATE_PCT,
+            "term_approval_rate_pct",
             "Term Approval Rate (%)",
             MetricType.RATE_0_100,
             bounds=(0.0, 100.0),
-            doc="Percentage of term clusters that are approved"
+            doc="Percentage of term clusters that are approved",
         ),
-
         # Separator
         MetricSpec(MetricId.SEP_3, "", "", MetricType.SEPARATOR),
-
         # Density metrics
         MetricSpec(
-            MetricId.TM_ENTRIES_PER_LEMMA_PCT, "tm_entries_per_lemma_pct",
+            MetricId.TM_ENTRIES_PER_LEMMA_PCT,
+            "tm_entries_per_lemma_pct",
             "TM Entries per Lemma (%)",
             MetricType.DENSITY,
-            doc="Average approved TM entries per lemma (can exceed 100%)"
+            doc="Average approved TM entries per lemma (can exceed 100%)",
         ),
     ]
 
@@ -225,11 +247,11 @@ class MetricsRegistry:
         """Get spec by metric ID."""
         return self._specs_by_id[metric_id]
 
-    def get_spec_by_key(self, key: str) -> Optional[MetricSpec]:
+    def get_spec_by_key(self, key: str) -> MetricSpec | None:
         """Get spec by machine key."""
         return self._specs_by_key.get(key)
 
-    def validate_bounds(self, metrics: Dict[str, Any]) -> None:
+    def validate_bounds(self, metrics: dict[str, Any]) -> None:
         """Validate all metric values against their specs.
 
         Args:
@@ -245,7 +267,7 @@ class MetricsRegistry:
             if spec:
                 spec.validate_value(value)
 
-    def validate_invariants(self, metrics: Dict[str, Any]) -> None:
+    def validate_invariants(self, metrics: dict[str, Any]) -> None:
         """Validate metric invariants (consistency rules).
 
         Args:
@@ -291,13 +313,12 @@ class MetricsRegistry:
         # If all lemmas covered, coverage should be 100%
         if lemma_count > 0 and lemmas_with_translation == lemma_count:
             if abs(lemma_coverage_pct - 100.0) > 0.1:  # tolerance for float
-                logger.warning(
-                    f"All lemmas covered but coverage={lemma_coverage_pct:.1f}% != 100%"
-                )
+                logger.warning(f"All lemmas covered but coverage={lemma_coverage_pct:.1f}% != 100%")
 
 
 # Global singleton instance
 _registry = None
+
 
 def get_registry() -> MetricsRegistry:
     """Get global MetricsRegistry singleton."""

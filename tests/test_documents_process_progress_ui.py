@@ -169,7 +169,9 @@ def test_process_worker_emits_structured_state_and_finished_report(monkeypatch):
     monkeypatch.setattr(ProcessService, "process_documents_batch", _fake_batch)
 
     worker = ProcessWorker(doc_ids=[11, 12], use_mock=True)
-    worker.progress.connect(lambda current, total, doc_name: progress_events.append((current, total, doc_name)))
+    worker.progress.connect(
+        lambda current, total, doc_name: progress_events.append((current, total, doc_name))
+    )
     worker.state_changed.connect(states.append)
     worker.finished.connect(finished_reports.append)
 

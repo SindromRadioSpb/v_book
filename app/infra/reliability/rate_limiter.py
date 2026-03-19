@@ -8,11 +8,11 @@ Strategy:
 - Tokens refill at configured rate (e.g., 60 req/min = 1 token/sec)
 - If no tokens available, wait (up to max_wait_seconds) or fail
 """
+
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class TokenBucket:
     tokens: float = 60.0  # Current available tokens
     capacity: float = 60.0  # Max tokens (burst size)
     refill_rate: float = 1.0  # Tokens per second
-    last_refill: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_refill: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class RateLimiter:
@@ -46,7 +46,7 @@ class RateLimiter:
 
     def __init__(self):
         """Initialize rate limiter."""
-        self._buckets: Dict[str, TokenBucket] = {}  # provider_id → bucket
+        self._buckets: dict[str, TokenBucket] = {}  # provider_id → bucket
 
     def configure_provider(
         self,
@@ -94,7 +94,7 @@ class RateLimiter:
             return True
 
         # Refill tokens based on time elapsed
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         elapsed = (now - bucket.last_refill).total_seconds()
         refill_amount = elapsed * bucket.refill_rate
         bucket.tokens = min(bucket.capacity, bucket.tokens + refill_amount)
@@ -115,7 +115,7 @@ class RateLimiter:
                 )
                 time.sleep(wait_time)
                 bucket.tokens = 0.0  # Consumed
-                bucket.last_refill = datetime.now(timezone.utc)
+                bucket.last_refill = datetime.now(UTC)
                 return True
 
         # Rate limit exceeded
@@ -126,7 +126,7 @@ class RateLimiter:
         )
         return False
 
-    def get_status(self, provider_id: str) -> Dict[str, float]:
+    def get_status(self, provider_id: str) -> dict[str, float]:
         """
         Get rate limiter status for provider (for debugging/monitoring).
 
@@ -141,7 +141,7 @@ class RateLimiter:
             return {"tokens": 0.0, "capacity": 0.0, "refill_rate": 0.0}
 
         # Update tokens before returning status
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         elapsed = (now - bucket.last_refill).total_seconds()
         refill_amount = elapsed * bucket.refill_rate
         current_tokens = min(bucket.capacity, bucket.tokens + refill_amount)
@@ -162,5 +162,5 @@ class RateLimiter:
         bucket = self._buckets.get(provider_id)
         if bucket:
             bucket.tokens = bucket.capacity
-            bucket.last_refill = datetime.now(timezone.utc)
+            bucket.last_refill = datetime.now(UTC)
             logger.info(f"Rate limiter {provider_id}: RESET (tokens refilled to {bucket.capacity})")

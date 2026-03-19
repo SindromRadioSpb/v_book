@@ -30,8 +30,7 @@ class TestSentencesWorkspaceServiceBatchOverlays:
         session = MagicMock()
         if execute_results is not None:
             session.execute.side_effect = [
-                MagicMock(**{"all.return_value": result})
-                for result in execute_results
+                MagicMock(**{"all.return_value": result}) for result in execute_results
             ]
         return session
 
@@ -90,9 +89,7 @@ class TestSentencesWorkspaceServiceBatchOverlays:
         session = MagicMock()
         with patch("app.services.audio_asset_service.AudioAssetService") as mock_cls:
             mock_svc = MagicMock()
-            mock_svc.bulk_get_status_for_items.return_value = {
-                ("he", "norm", "shalom"): "ready"
-            }
+            mock_svc.bulk_get_status_for_items.return_value = {("he", "norm", "shalom"): "ready"}
             mock_cls.return_value = mock_svc
             svc._batch_get_audio(session, "he", ["shalom"])
             mock_svc.bulk_get_status_for_items.assert_called_once()
@@ -159,12 +156,12 @@ class TestSentencesWorkspaceServiceIdHelpers:
         page_result.mappings.return_value.all.return_value = []
         session.execute.return_value = page_result
 
-        with patch.object(svc, "_get_project_corpus_ids", return_value=[1]), patch.object(
-            svc, "_get_project_src_lang", return_value="he"
-        ), patch.object(svc, "_batch_get_translations", return_value={}), patch.object(
-            svc, "_batch_get_sentence_niqqud", return_value={}
-        ), patch.object(
-            svc, "_batch_get_audio", return_value={}
+        with (
+            patch.object(svc, "_get_project_corpus_ids", return_value=[1]),
+            patch.object(svc, "_get_project_src_lang", return_value="he"),
+            patch.object(svc, "_batch_get_translations", return_value={}),
+            patch.object(svc, "_batch_get_sentence_niqqud", return_value={}),
+            patch.object(svc, "_batch_get_audio", return_value={}),
         ):
             result = svc.list_sentences(session, project_id=1, page=2, page_size=50)
 
@@ -194,12 +191,12 @@ class TestSentencesWorkspaceServiceIdHelpers:
         doc_result.all.return_value = [(11, "doc-11.txt")]
         session.execute.side_effect = [page_result, doc_result]
 
-        with patch.object(svc, "_get_project_corpus_ids", return_value=[1, 2]), patch.object(
-            svc, "_get_project_src_lang", return_value="he"
-        ), patch.object(svc, "_batch_get_translations", return_value={}), patch.object(
-            svc, "_batch_get_sentence_niqqud", return_value={}
-        ), patch.object(
-            svc, "_batch_get_audio", return_value={}
+        with (
+            patch.object(svc, "_get_project_corpus_ids", return_value=[1, 2]),
+            patch.object(svc, "_get_project_src_lang", return_value="he"),
+            patch.object(svc, "_batch_get_translations", return_value={}),
+            patch.object(svc, "_batch_get_sentence_niqqud", return_value={}),
+            patch.object(svc, "_batch_get_audio", return_value={}),
         ):
             result = svc.list_sentences(
                 session,
@@ -223,12 +220,12 @@ class TestSentencesWorkspaceServiceIdHelpers:
         session = MagicMock()
         session.execute.return_value.all.return_value = []
 
-        with patch.object(svc, "_get_project_corpus_ids", return_value=[1]), patch.object(
-            svc, "_get_project_src_lang", return_value="he"
-        ), patch.object(svc, "_batch_get_translations", return_value={}), patch.object(
-            svc, "_batch_get_sentence_niqqud", return_value={}
-        ), patch.object(
-            svc, "_batch_get_audio", return_value={}
+        with (
+            patch.object(svc, "_get_project_corpus_ids", return_value=[1]),
+            patch.object(svc, "_get_project_src_lang", return_value="he"),
+            patch.object(svc, "_batch_get_translations", return_value={}),
+            patch.object(svc, "_batch_get_sentence_niqqud", return_value={}),
+            patch.object(svc, "_batch_get_audio", return_value={}),
         ):
             result = svc.list_sentences(
                 session,

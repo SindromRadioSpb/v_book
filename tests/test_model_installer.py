@@ -6,6 +6,7 @@ Tests verify:
 - Model verification
 - Installation checks
 """
+
 import hashlib
 import json
 import sys
@@ -37,11 +38,7 @@ def installer(temp_models_root, monkeypatch):
     def mock_get_models_root(self):
         return temp_models_root
 
-    monkeypatch.setattr(
-        ModelResourceManager,
-        "get_models_root",
-        mock_get_models_root
-    )
+    monkeypatch.setattr(ModelResourceManager, "get_models_root", mock_get_models_root)
 
     return ModelInstaller()
 
@@ -149,6 +146,7 @@ def test_get_ct2_model_id_unknown(installer):
 def test_list_installed_models_empty(installer, caplog):
     """List installed models when none installed."""
     import logging
+
     caplog.set_level(logging.INFO)
     installer.list_installed_models()
     assert "No models installed" in caplog.text
@@ -219,10 +217,7 @@ def test_install_model_unknown_backend(installer, caplog):
 def test_install_model_already_installed(installer, temp_models_root):
     """Install model that's already installed."""
     # Create installed model
-    model_path = installer.manager.model_dir(
-        "facebook/nllb-200-distilled-1.3B",
-        "ctranslate2"
-    )
+    model_path = installer.manager.model_dir("facebook/nllb-200-distilled-1.3B", "ctranslate2")
     model_path.mkdir(parents=True)
 
     # Create model file

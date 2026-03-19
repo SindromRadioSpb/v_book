@@ -123,10 +123,14 @@ def check_db_corruption_probe(db_path: Path) -> CheckResult:
         return CheckResult(name="DB Corruption Probe", status=CHECK_PASSED)
 
     failing_objects = list(diagnosis.get("failing_objects") or [])
-    object_hint = ", ".join(str(value) for value in failing_objects[:3]) if failing_objects else "database"
+    object_hint = (
+        ", ".join(str(value) for value in failing_objects[:3]) if failing_objects else "database"
+    )
     quick_rows = list((diagnosis.get("quick_check") or {}).get("rows") or [])
     quick_error = str((diagnosis.get("quick_check") or {}).get("error") or "").strip()
-    detail_hint = str(quick_rows[0]).strip() if quick_rows else quick_error or "corruption probe failed"
+    detail_hint = (
+        str(quick_rows[0]).strip() if quick_rows else quick_error or "corruption probe failed"
+    )
     remediation = _repair_db_corruption_command(db_path)
 
     logger.error("  Corruption probe detected issues in: %s", object_hint)
@@ -590,9 +594,7 @@ def run_prebuild_validation(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Prebuild validation for HDLE Premium"
-    )
+    parser = argparse.ArgumentParser(description="Prebuild validation for HDLE Premium")
     parser.add_argument(
         "--db-path",
         type=Path,

@@ -1,4 +1,5 @@
 """Tests: bootstrap pipeline skip reason counters and dry_run semantics."""
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -8,7 +9,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.infra.sa_models import DocumentSentence, SentencePronunciation, SourceDocument, SourceCorpus
+from app.infra.sa_models import (
+    DocumentSentence,
+    SentencePronunciation,
+    SourceDocument,
+    SourceCorpus,
+)
 from app.services.sentence_pronunciation_bootstrap_service import (
     GuardParams,
     SentencePronunciationBootstrapService,
@@ -83,6 +89,7 @@ def _make_svc():
 class TestDryRunNoWrite:
     def test_dry_run_no_db_changes(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
             "get_sentence_texts_by_ids",
@@ -107,6 +114,7 @@ class TestDryRunNoWrite:
 class TestSkipReasonBuckets:
     def test_too_short_sentences_skipped(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
             "get_sentence_texts_by_ids",
@@ -117,8 +125,12 @@ class TestSkipReasonBuckets:
         guard = GuardParams(min_len=5)
         with Session(db_engine) as session:
             result = svc.run(
-                session, [1, 2, 3], lang="he", mode="fill_only",
-                phonikud_generator=_FakeGenerator(), guard_params=guard,
+                session,
+                [1, 2, 3],
+                lang="he",
+                mode="fill_only",
+                phonikud_generator=_FakeGenerator(),
+                guard_params=guard,
             )
             session.commit()
 
@@ -127,6 +139,7 @@ class TestSkipReasonBuckets:
 
     def test_non_hebrew_sentences_skipped(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
             "get_sentence_texts_by_ids",
@@ -136,7 +149,10 @@ class TestSkipReasonBuckets:
         svc = _make_svc()
         with Session(db_engine) as session:
             result = svc.run(
-                session, [1, 2], lang="he", mode="fill_only",
+                session,
+                [1, 2],
+                lang="he",
+                mode="fill_only",
                 phonikud_generator=_FakeGenerator(),
             )
             session.commit()
@@ -146,6 +162,7 @@ class TestSkipReasonBuckets:
 
     def test_happy_path_fill_inserts(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
             "get_sentence_texts_by_ids",
@@ -155,7 +172,10 @@ class TestSkipReasonBuckets:
         svc = _make_svc()
         with Session(db_engine) as session:
             result = svc.run(
-                session, [1, 2, 3], lang="he", mode="fill_only",
+                session,
+                [1, 2, 3],
+                lang="he",
+                mode="fill_only",
                 phonikud_generator=_FakeGenerator(),
             )
             session.commit()
@@ -165,6 +185,7 @@ class TestSkipReasonBuckets:
 
     def test_override_rows_skipped(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
             "get_sentence_texts_by_ids",
@@ -180,7 +201,10 @@ class TestSkipReasonBuckets:
 
             svc = _make_svc()
             result = svc.run(
-                session, [1, 2, 3], lang="he", mode="fill_only",
+                session,
+                [1, 2, 3],
+                lang="he",
+                mode="fill_only",
                 phonikud_generator=_FakeGenerator(),
             )
             session.commit()
@@ -190,6 +214,7 @@ class TestSkipReasonBuckets:
 
     def test_same_hash_second_run_skipped(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         texts = {i: f"בית הספר מספר {i}" for i in range(1, 4)}
         monkeypatch.setattr(
             ws_module.SentencesWorkspaceService,
@@ -199,13 +224,15 @@ class TestSkipReasonBuckets:
 
         svc = _make_svc()
         with Session(db_engine) as session:
-            r1 = svc.run(session, [1, 2, 3], lang="he", mode="fill_only",
-                         phonikud_generator=_FakeGenerator())
+            r1 = svc.run(
+                session, [1, 2, 3], lang="he", mode="fill_only", phonikud_generator=_FakeGenerator()
+            )
             session.commit()
             assert r1.inserted == 3
 
-            r2 = svc.run(session, [1, 2, 3], lang="he", mode="fill_only",
-                         phonikud_generator=_FakeGenerator())
+            r2 = svc.run(
+                session, [1, 2, 3], lang="he", mode="fill_only", phonikud_generator=_FakeGenerator()
+            )
             session.commit()
 
         assert r2.skipped_same_hash == 3
@@ -213,6 +240,7 @@ class TestSkipReasonBuckets:
 
     def test_generator_mode_updates_after_real_generation(self, db_engine, monkeypatch):
         from app.services import sentences_workspace_service as ws_module
+
         monkeypatch.setattr(
             SentencePronunciationService,
             "should_process",

@@ -97,9 +97,8 @@ def repair_lemma_fts(
                 summary["status"] = "REPAIRED"
             else:
                 summary["status"] = "FAILED"
-                summary["error"] = (
-                    "lemma_fts parity issues remain after repair: "
-                    + ", ".join(after["issues"])
+                summary["error"] = "lemma_fts parity issues remain after repair: " + ", ".join(
+                    after["issues"]
                 )
 
     summary["ended_at_utc"] = _utc_now()

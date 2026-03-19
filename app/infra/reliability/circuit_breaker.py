@@ -13,11 +13,11 @@ OPEN --[cooldown_period expired]--> HALF_OPEN
 HALF_OPEN --[test request succeeds]--> CLOSED
 HALF_OPEN --[test request fails]--> OPEN
 """
+
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,8 @@ class CircuitBreakerStatus:
 
     state: CircuitBreakerState = CircuitBreakerState.CLOSED
     failure_count: int = 0
-    last_failure_time: Optional[datetime] = None
-    last_state_change: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_failure_time: datetime | None = None
+    last_state_change: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class CircuitBreaker:
@@ -74,7 +74,7 @@ class CircuitBreaker:
         """
         self._failure_threshold = failure_threshold
         self._cooldown_seconds = cooldown_seconds
-        self._states: Dict[str, CircuitBreakerStatus] = {}  # provider_id → status
+        self._states: dict[str, CircuitBreakerStatus] = {}  # provider_id → status
 
     def get_state(self, provider_id: str) -> CircuitBreakerState:
         """
@@ -94,14 +94,12 @@ class CircuitBreaker:
 
         # Check if OPEN should transition to HALF_OPEN
         if status.state == CircuitBreakerState.OPEN:
-            time_since_change = datetime.now(timezone.utc) - status.last_state_change
+            time_since_change = datetime.now(UTC) - status.last_state_change
             if time_since_change > timedelta(seconds=self._cooldown_seconds):
                 # Cooldown expired → transition to HALF_OPEN
-                logger.info(
-                    f"Circuit breaker {provider_id}: OPEN → HALF_OPEN (cooldown expired)"
-                )
+                logger.info(f"Circuit breaker {provider_id}: OPEN → HALF_OPEN (cooldown expired)")
                 status.state = CircuitBreakerState.HALF_OPEN
-                status.last_state_change = datetime.now(timezone.utc)
+                status.last_state_change = datetime.now(UTC)
                 self._states[provider_id] = status
 
         return status.state
@@ -135,7 +133,7 @@ class CircuitBreaker:
             )
             status.state = CircuitBreakerState.CLOSED
             status.failure_count = 0
-            status.last_state_change = datetime.now(timezone.utc)
+            status.last_state_change = datetime.now(UTC)
         elif status.state == CircuitBreakerState.CLOSED:
             # Reset failure count on success
             if status.failure_count > 0:
@@ -157,15 +155,13 @@ class CircuitBreaker:
 
         if status.state == CircuitBreakerState.HALF_OPEN:
             # Test request failed → back to OPEN
-            logger.warning(
-                f"Circuit breaker {provider_id}: HALF_OPEN → OPEN (test request failed)"
-            )
+            logger.warning(f"Circuit breaker {provider_id}: HALF_OPEN → OPEN (test request failed)")
             status.state = CircuitBreakerState.OPEN
-            status.last_failure_time = datetime.now(timezone.utc)
-            status.last_state_change = datetime.now(timezone.utc)
+            status.last_failure_time = datetime.now(UTC)
+            status.last_state_change = datetime.now(UTC)
         elif status.state == CircuitBreakerState.CLOSED:
             status.failure_count += 1
-            status.last_failure_time = datetime.now(timezone.utc)
+            status.last_failure_time = datetime.now(UTC)
 
             logger.debug(
                 f"Circuit breaker {provider_id}: Failure count {status.failure_count}/{self._failure_threshold}"
@@ -178,7 +174,7 @@ class CircuitBreaker:
                     f"(failure threshold {self._failure_threshold} reached)"
                 )
                 status.state = CircuitBreakerState.OPEN
-                status.last_state_change = datetime.now(timezone.utc)
+                status.last_state_change = datetime.now(UTC)
 
         self._states[provider_id] = status
 

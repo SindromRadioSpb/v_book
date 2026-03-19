@@ -28,10 +28,11 @@ from app.services.user_dictionary_service import UserDictionaryService
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def temp_db():
     """Create temporary database with schema."""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
     engine = None
@@ -48,6 +49,7 @@ def temp_db():
             UserDictionary,
             UserDictionaryItem,
         )
+
         Library.__table__.create(engine, checkfirst=True)
         DictProject.__table__.create(engine, checkfirst=True)
         TMEntry.__table__.create(engine, checkfirst=True)
@@ -64,6 +66,7 @@ def temp_db():
 
         # Retry cleanup on Windows (file might be locked)
         import time
+
         for attempt in range(3):
             try:
                 Path(db_path).unlink(missing_ok=True)
@@ -83,6 +86,7 @@ def populated_db(temp_db):
     with Session(engine) as session:
         # Create a library first
         from app.infra.sa_models import Library
+
         library = Library(name="Test Library")
         session.add(library)
         session.flush()
@@ -102,78 +106,84 @@ def populated_db(temp_db):
         # Add TM entries across projects
         # Project Alpha: 10 lemma entries
         for i in range(10):
-            src = f'alpha_src_{i}'
-            trans = f'alpha_trans_{i}'
+            src = f"alpha_src_{i}"
+            trans = f"alpha_trans_{i}"
             entry = TMEntry(
-                kind='lemma',
-                src_lang='he',
-                tgt_lang='ru',
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
                 src_text=src,
                 src_norm=src.lower(),
                 translation=trans,
                 translation_norm=trans.lower(),
-                status='approved',
+                status="approved",
                 project_id=project_ids[0],
-                origin='user_edit',
+                origin="user_edit",
             )
             session.add(entry)
 
         # Project Beta: 5 term entries
         for i in range(5):
-            src = f'beta_src_{i}'
-            trans = f'beta_trans_{i}'
+            src = f"beta_src_{i}"
+            trans = f"beta_trans_{i}"
             entry = TMEntry(
-                kind='term_cluster',
-                src_lang='he',
-                tgt_lang='ru',
+                kind="term_cluster",
+                src_lang="he",
+                tgt_lang="ru",
                 src_text=src,
                 src_norm=src.lower(),
                 translation=trans,
                 translation_norm=trans.lower(),
-                status='draft',
+                status="draft",
                 project_id=project_ids[1],
-                origin='import',
+                origin="import",
             )
             session.add(entry)
 
         # Project Gamma: 3 deprecated entries
         for i in range(3):
-            src = f'gamma_src_{i}'
-            trans = f'gamma_trans_{i}'
+            src = f"gamma_src_{i}"
+            trans = f"gamma_trans_{i}"
             entry = TMEntry(
-                kind='lemma',
-                src_lang='he',
-                tgt_lang='ru',
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
                 src_text=src,
                 src_norm=src.lower(),
                 translation=trans,
                 translation_norm=trans.lower(),
-                status='deprecated',
+                status="deprecated",
                 project_id=project_ids[2],
-                origin='user_edit',
+                origin="user_edit",
             )
             session.add(entry)
 
         # Global entries (no project): 7 entries
         for i in range(7):
-            src = f'global_src_{i}'
-            trans = f'global_trans_{i}'
+            src = f"global_src_{i}"
+            trans = f"global_trans_{i}"
             entry = TMEntry(
-                kind='lemma',
-                src_lang='he',
-                tgt_lang='ru',
+                kind="lemma",
+                src_lang="he",
+                tgt_lang="ru",
                 src_text=src,
                 src_norm=src.lower(),
                 translation=trans,
                 translation_norm=trans.lower(),
-                status='approved',
+                status="approved",
                 project_id=None,
-                origin='user_edit',
+                origin="user_edit",
             )
             session.add(entry)
 
         # User dictionary overlays for sorting tests (UD + Last Review)
-        from app.infra.sa_models import AudioAsset, StudyProgress, UserDictionary, UserDictionaryItem
+        from app.infra.sa_models import (
+            AudioAsset,
+            StudyProgress,
+            UserDictionary,
+            UserDictionaryItem,
+        )
+
         ud_service = UserDictionaryService()
         deck = UserDictionary(name="Deck Sort")
         session.add(deck)
@@ -218,7 +228,9 @@ def populated_db(temp_db):
                     tgt_lang="ru",
                     src_text="alpha_src_0",
                     src_norm="alpha_src_0",
-                    canonical_hash=ud_service.build_canonical_hash("he", "ru", "lemma", "alpha_src_0"),
+                    canonical_hash=ud_service.build_canonical_hash(
+                        "he", "ru", "lemma", "alpha_src_0"
+                    ),
                     tags_json="[]",
                     is_noise=0,
                     study_state="learning",
@@ -231,7 +243,9 @@ def populated_db(temp_db):
                     tgt_lang="ru",
                     src_text="global_src_0",
                     src_norm="global_src_0",
-                    canonical_hash=ud_service.build_canonical_hash("he", "ru", "lemma", "global_src_0"),
+                    canonical_hash=ud_service.build_canonical_hash(
+                        "he", "ru", "lemma", "global_src_0"
+                    ),
                     tags_json="[]",
                     is_noise=0,
                     study_state="learning",
@@ -270,6 +284,7 @@ def populated_db(temp_db):
 # ============================================================================
 # Test 1: Pagination Math
 # ============================================================================
+
 
 def test_pagination_math_zero_results():
     """Test pagination with zero results."""
@@ -330,9 +345,9 @@ def test_pagination_offset_calculation():
     page_size = 100
 
     test_cases = [
-        (1, 0),      # Page 1 -> offset 0
-        (2, 100),    # Page 2 -> offset 100
-        (3, 200),    # Page 3 -> offset 200
+        (1, 0),  # Page 1 -> offset 0
+        (2, 100),  # Page 2 -> offset 100
+        (3, 200),  # Page 3 -> offset 200
         (50, 4900),  # Page 50 -> offset 4900
     ]
 
@@ -346,22 +361,24 @@ def test_pagination_with_different_page_sizes():
     total_count = 1000
 
     test_cases = [
-        (25, 40),    # 1000 / 25 = 40 pages
-        (50, 20),    # 1000 / 50 = 20 pages
-        (100, 10),   # 1000 / 100 = 10 pages
-        (250, 4),    # 1000 / 250 = 4 pages
-        (500, 2),    # 1000 / 500 = 2 pages
+        (25, 40),  # 1000 / 25 = 40 pages
+        (50, 20),  # 1000 / 50 = 20 pages
+        (100, 10),  # 1000 / 100 = 10 pages
+        (250, 4),  # 1000 / 250 = 4 pages
+        (500, 2),  # 1000 / 500 = 2 pages
     ]
 
     for page_size, expected_pages in test_cases:
         total_pages = max(1, (total_count + page_size - 1) // page_size)
-        assert total_pages == expected_pages, \
-            f"Page size {page_size} should result in {expected_pages} pages"
+        assert (
+            total_pages == expected_pages
+        ), f"Page size {page_size} should result in {expected_pages} pages"
 
 
 # ============================================================================
 # Test 2: Server-Side Sorting
 # ============================================================================
+
 
 def test_sort_column_validation(populated_db):
     """Test that sort column validation works (SQL injection prevention)."""
@@ -370,12 +387,7 @@ def test_sort_column_validation(populated_db):
 
     # Valid column should work
     results = service.search_tm_entries(
-        session=session,
-        filters={},
-        limit=10,
-        offset=0,
-        sort_column="tm_id",
-        sort_direction="asc"
+        session=session, filters={}, limit=10, offset=0, sort_column="tm_id", sort_direction="asc"
     )
     assert len(results) > 0
 
@@ -386,7 +398,7 @@ def test_sort_column_validation(populated_db):
         limit=10,
         offset=0,
         sort_column="malicious_column; DROP TABLE tm_entry;--",
-        sort_direction="asc"
+        sort_direction="asc",
     )
     assert len(results) > 0  # Should not crash, uses default sort
 
@@ -397,12 +409,7 @@ def test_sort_by_tm_id_asc(populated_db):
     service = TranslationAdminService()
 
     results = service.search_tm_entries(
-        session=session,
-        filters={},
-        limit=10,
-        offset=0,
-        sort_column="tm_id",
-        sort_direction="asc"
+        session=session, filters={}, limit=10, offset=0, sort_column="tm_id", sort_direction="asc"
     )
 
     # Verify ascending order
@@ -416,12 +423,7 @@ def test_sort_by_tm_id_desc(populated_db):
     service = TranslationAdminService()
 
     results = service.search_tm_entries(
-        session=session,
-        filters={},
-        limit=10,
-        offset=0,
-        sort_column="tm_id",
-        sort_direction="desc"
+        session=session, filters={}, limit=10, offset=0, sort_column="tm_id", sort_direction="desc"
     )
 
     # Verify descending order
@@ -436,12 +438,7 @@ def test_sort_by_kind(populated_db):
 
     # ASC: 'lemma' before 'term'
     results = service.search_tm_entries(
-        session=session,
-        filters={},
-        limit=100,
-        offset=0,
-        sort_column="kind",
-        sort_direction="asc"
+        session=session, filters={}, limit=100, offset=0, sort_column="kind", sort_direction="asc"
     )
 
     kinds = [entry.kind for entry in results]
@@ -456,30 +453,30 @@ def test_count_tm_ids_for_translation_respects_kinds(populated_db):
     session.add_all(
         [
             TMEntry(
-                kind='surface',
-                src_lang='he',
-                tgt_lang='ru',
-                src_text='sentence_alpha_1',
-                src_norm='sentence_alpha_1',
-                translation='',
+                kind="surface",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="sentence_alpha_1",
+                src_norm="sentence_alpha_1",
+                translation="",
                 translation_norm=None,
-                status='draft',
+                status="draft",
                 project_id=project_ids[0],
-                origin='mt_auto',
-                source_ref='sentence:1001',
+                origin="mt_auto",
+                source_ref="sentence:1001",
             ),
             TMEntry(
-                kind='surface',
-                src_lang='he',
-                tgt_lang='ru',
-                src_text='sentence_beta_1',
-                src_norm='sentence_beta_1',
-                translation='предложение',
-                translation_norm='предложение',
-                status='approved',
+                kind="surface",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="sentence_beta_1",
+                src_norm="sentence_beta_1",
+                translation="предложение",
+                translation_norm="предложение",
+                status="approved",
                 project_id=project_ids[1],
-                origin='mt_auto',
-                source_ref='sentence:2001',
+                origin="mt_auto",
+                source_ref="sentence:2001",
             ),
         ]
     )
@@ -508,30 +505,30 @@ def test_fetch_tm_ids_for_translation_respects_kinds(populated_db):
     session.add_all(
         [
             TMEntry(
-                kind='surface',
-                src_lang='he',
-                tgt_lang='ru',
-                src_text='sentence_alpha_1',
-                src_norm='sentence_alpha_1',
-                translation='',
+                kind="surface",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="sentence_alpha_1",
+                src_norm="sentence_alpha_1",
+                translation="",
                 translation_norm=None,
-                status='draft',
+                status="draft",
                 project_id=project_ids[0],
-                origin='mt_auto',
-                source_ref='sentence:1001',
+                origin="mt_auto",
+                source_ref="sentence:1001",
             ),
             TMEntry(
-                kind='surface',
-                src_lang='he',
-                tgt_lang='ru',
-                src_text='sentence_beta_1',
-                src_norm='sentence_beta_1',
-                translation='предложение',
-                translation_norm='предложение',
-                status='approved',
+                kind="surface",
+                src_lang="he",
+                tgt_lang="ru",
+                src_text="sentence_beta_1",
+                src_norm="sentence_beta_1",
+                translation="предложение",
+                translation_norm="предложение",
+                status="approved",
                 project_id=project_ids[1],
-                origin='mt_auto',
-                source_ref='sentence:2001',
+                origin="mt_auto",
+                source_ref="sentence:2001",
             ),
         ]
     )
@@ -560,7 +557,7 @@ def test_sort_by_status(populated_db):
         limit=100,
         offset=0,
         sort_column="status",
-        sort_direction="desc"
+        sort_direction="desc",
     )
 
     statuses = [entry.status for entry in results]
@@ -578,7 +575,7 @@ def test_sort_by_src_text(populated_db):
         limit=100,
         offset=0,
         sort_column="src_text",
-        sort_direction="asc"
+        sort_direction="asc",
     )
 
     src_texts = [entry.src_text for entry in results]
@@ -646,6 +643,7 @@ def test_sort_by_audio_status_desc(populated_db):
 # ============================================================================
 # Test 3: Multi-Project Filter
 # ============================================================================
+
 
 def test_filter_single_project(populated_db):
     """Test filtering by single project."""
@@ -751,6 +749,7 @@ def test_filter_empty_project_list(populated_db):
 # Test 4: Combined Filters + Sorting + Pagination
 # ============================================================================
 
+
 def test_combined_filter_sort_pagination(populated_db):
     """Test combination of filtering, sorting, and pagination."""
     session, project_ids = populated_db
@@ -763,7 +762,7 @@ def test_combined_filter_sort_pagination(populated_db):
         limit=5,
         offset=0,
         sort_column="src_text",
-        sort_direction="asc"
+        sort_direction="asc",
     )
 
     results_page2 = service.search_tm_entries(
@@ -772,7 +771,7 @@ def test_combined_filter_sort_pagination(populated_db):
         limit=5,
         offset=5,
         sort_column="src_text",
-        sort_direction="asc"
+        sort_direction="asc",
     )
 
     # Verify pages are different
@@ -780,8 +779,8 @@ def test_combined_filter_sort_pagination(populated_db):
     assert len(results_page2) == 5
 
     # Verify all are lemmas
-    assert all(e.kind == 'lemma' for e in results_page1)
-    assert all(e.kind == 'lemma' for e in results_page2)
+    assert all(e.kind == "lemma" for e in results_page1)
+    assert all(e.kind == "lemma" for e in results_page2)
 
     # Verify sorted order
     all_src_texts = [e.src_text for e in results_page1] + [e.src_text for e in results_page2]
@@ -798,10 +797,7 @@ def test_count_matches_filter(populated_db):
 
     count = service.count_tm_entries(session=session, filters=filters)
     results = service.search_tm_entries(
-        session=session,
-        filters=filters,
-        limit=1000,  # Large enough to get all
-        offset=0
+        session=session, filters=filters, limit=1000, offset=0  # Large enough to get all
     )
 
     assert len(results) == count, "Count should match actual results"
@@ -811,11 +807,12 @@ def test_count_matches_filter(populated_db):
 # Test 5: Excel Export with Filters
 # ============================================================================
 
+
 def test_export_with_filters(populated_db):
     """Test Excel export respects filters."""
     session, project_ids = populated_db
 
-    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         export_path = f.name
 
     try:
@@ -827,7 +824,7 @@ def test_export_with_filters(populated_db):
             path=export_path,
             filters={"project_ids": [project_ids[0]]},
             sort_column="tm_id",
-            sort_direction="asc"
+            sort_direction="asc",
         )
 
         assert count == 10, "Should export 10 entries from Project Alpha"
@@ -836,6 +833,7 @@ def test_export_with_filters(populated_db):
 
         # Verify it's a valid Excel file
         from openpyxl import load_workbook
+
         wb = load_workbook(export_path)
         assert "Translation Memory" in wb.sheetnames
         ws = wb["Translation Memory"]
@@ -858,7 +856,7 @@ def test_export_empty_results(temp_db):
     engine, db_path = temp_db
 
     with Session(engine) as session:
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
             export_path = f.name
 
         try:
@@ -870,7 +868,7 @@ def test_export_empty_results(temp_db):
                 path=export_path,
                 filters={"kind": "nonexistent"},
                 sort_column="tm_id",
-                sort_direction="asc"
+                sort_direction="asc",
             )
 
             assert count == 0, "Should export 0 entries"
@@ -878,6 +876,7 @@ def test_export_empty_results(temp_db):
 
             # Verify headers exist even with no data
             from openpyxl import load_workbook
+
             wb = load_workbook(export_path)
             ws = wb["Translation Memory"]
             assert ws.max_row == 1, "Should have only header row"
@@ -890,7 +889,7 @@ def test_export_respects_sorting(populated_db):
     """Test that Excel export respects sort order."""
     session, project_ids = populated_db
 
-    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         export_path = f.name
 
     try:
@@ -902,13 +901,14 @@ def test_export_respects_sorting(populated_db):
             path=export_path,
             filters={"kind": "lemma"},
             sort_column="src_text",
-            sort_direction="asc"
+            sort_direction="asc",
         )
 
         assert count > 0
 
         # Read exported data
         from openpyxl import load_workbook
+
         wb = load_workbook(export_path)
         ws = wb["Translation Memory"]
 
@@ -925,6 +925,7 @@ def test_export_respects_sorting(populated_db):
 # ============================================================================
 # Test 6: Settings Persistence
 # ============================================================================
+
 
 def test_settings_save_and_load():
     """Test that settings can be saved and loaded."""
@@ -964,6 +965,7 @@ def test_settings_default_values():
 # ============================================================================
 # Test 7: Edge Cases and Boundary Conditions
 # ============================================================================
+
 
 def test_large_offset_beyond_results(populated_db):
     """Test pagination with offset beyond available results."""
@@ -1011,13 +1013,14 @@ def test_filter_by_status_and_kind(populated_db):
         offset=0,
     )
 
-    assert all(e.kind == 'lemma' for e in results)
-    assert all(e.status == 'approved' for e in results)
+    assert all(e.kind == "lemma" for e in results)
+    assert all(e.status == "approved" for e in results)
 
 
 # ============================================================================
 # Summary
 # ============================================================================
+
 
 def test_summary():
     """Print test summary (not a real test, just for documentation)."""

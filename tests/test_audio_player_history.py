@@ -18,6 +18,7 @@ from app.ui.widgets.audio_player_panel import AudioQueueTableModel
 @pytest.fixture(scope="module")
 def qapp():
     from PyQt6.QtCore import QCoreApplication
+
     return QCoreApplication.instance() or QCoreApplication(sys.argv)
 
 
@@ -41,7 +42,7 @@ def tmp_wav(tmp_path):
 
 def test_model_empty(model):
     assert model.rowCount() == 0
-    assert model.columnCount() == 7
+    assert model.columnCount() == 10
 
 
 # -- 2. load rows ---------------------------------------------------------
@@ -124,7 +125,7 @@ def test_model_header_data(model):
 
 
 def test_model_column_count(model):
-    assert model.columnCount() == 7
+    assert model.columnCount() == 10
 
 
 # -- History via AudioQueueService ----------------------------------------

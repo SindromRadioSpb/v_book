@@ -9,10 +9,8 @@ Provides QSortFilterProxyModel with multi-column sorting:
 """
 
 import logging
-import re
-from typing import List, Tuple
 
-from PyQt6.QtCore import QSortFilterProxyModel, QModelIndex, Qt
+from PyQt6.QtCore import QModelIndex, QSortFilterProxyModel, Qt
 from PyQt6.QtWidgets import QApplication
 
 logger = logging.getLogger(__name__)
@@ -31,7 +29,7 @@ class MultiSortProxyModel(QSortFilterProxyModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._sort_keys: List[Tuple[int, Qt.SortOrder]] = []
+        self._sort_keys: list[tuple[int, Qt.SortOrder]] = []
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder):
         """
@@ -52,7 +50,7 @@ class MultiSortProxyModel(QSortFilterProxyModel):
         self.setSortRole(Qt.ItemDataRole.DisplayRole)
         QSortFilterProxyModel.sort(self, column, order)
 
-    def set_sort_keys(self, keys: List[Tuple[int, Qt.SortOrder]]):
+    def set_sort_keys(self, keys: list[tuple[int, Qt.SortOrder]]):
         """
         Set sort keys (replaces existing).
 
@@ -95,12 +93,10 @@ class MultiSortProxyModel(QSortFilterProxyModel):
         for column, order in self._sort_keys:
             # Get data from source model
             left_data = self.sourceModel().data(
-                self.sourceModel().index(left.row(), column),
-                Qt.ItemDataRole.DisplayRole
+                self.sourceModel().index(left.row(), column), Qt.ItemDataRole.DisplayRole
             )
             right_data = self.sourceModel().data(
-                self.sourceModel().index(right.row(), column),
-                Qt.ItemDataRole.DisplayRole
+                self.sourceModel().index(right.row(), column), Qt.ItemDataRole.DisplayRole
             )
 
             # Compare

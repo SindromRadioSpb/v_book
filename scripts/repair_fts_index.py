@@ -12,10 +12,7 @@ sys.path.insert(0, str(project_root))
 
 import sqlite3
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -35,9 +32,7 @@ def repair_fts_index(db_path: str) -> bool:
         cursor = conn.cursor()
 
         # Check if sentence_fts exists
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='sentence_fts'"
-        )
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sentence_fts'")
         if not cursor.fetchone():
             logger.error("sentence_fts table does not exist!")
             return False
@@ -63,12 +58,14 @@ def repair_fts_index(db_path: str) -> bool:
             logger.info("Cleared sentence_fts table")
 
             # Repopulate from document_sentence
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO sentence_fts(text, doc_id, sentence_id)
                 SELECT text, doc_id, sentence_id
                 FROM document_sentence
                 ORDER BY sentence_id
-            """)
+            """
+            )
             conn.commit()
             logger.info(f"✓ Repopulated sentence_fts with {sentence_count} rows")
 
@@ -103,13 +100,9 @@ def repair_fts_index(db_path: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Repair FTS5 index for sentence search"
-    )
+    parser = argparse.ArgumentParser(description="Repair FTS5 index for sentence search")
     parser.add_argument(
-        "--db-path",
-        default=str(project_root / "hdle_premium.db"),
-        help="Path to database file"
+        "--db-path", default=str(project_root / "hdle_premium.db"), help="Path to database file"
     )
 
     args = parser.parse_args()

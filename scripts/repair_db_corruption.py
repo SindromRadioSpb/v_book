@@ -290,7 +290,8 @@ def diagnose_db_corruption(db_path: Path, *, deep: bool = False) -> dict[str, An
                     {
                         "phase": "integrity_check",
                         "sql": integrity_check.get("sql"),
-                        "error": integrity_check.get("error") or "; ".join(integrity_check.get("rows", [])),
+                        "error": integrity_check.get("error")
+                        or "; ".join(integrity_check.get("rows", [])),
                     }
                 )
 
@@ -419,7 +420,9 @@ def restore_db_from_backup(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if db_path.exists():
             summary["removed_sidecars"] = _remove_sidecar_files(db_path)
-            corrupt_db_path = db_path.with_name(f"{db_path.stem}.corrupt_{timestamp}{db_path.suffix}")
+            corrupt_db_path = db_path.with_name(
+                f"{db_path.stem}.corrupt_{timestamp}{db_path.suffix}"
+            )
             shutil.move(str(db_path), str(corrupt_db_path))
             summary["corrupt_db_path"] = str(corrupt_db_path)
         else:
@@ -521,7 +524,11 @@ def _run_sqlite_recover_pipeline(
         "recovered_exists": recovered_exists,
         "recovered_size": recovered_size,
         "log_path": str(log_path),
-        "error": None if (recover_rc == 0 and recovered_exists and recovered_size > 0) else "sqlite3 .recover pipeline failed",
+        "error": (
+            None
+            if (recover_rc == 0 and recovered_exists and recovered_size > 0)
+            else "sqlite3 .recover pipeline failed"
+        ),
     }
 
 
@@ -803,8 +810,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     backup_group = parser.add_mutually_exclusive_group()
-    backup_group.add_argument("--backup", dest="backup", action="store_true", help="Create backup (default).")
-    backup_group.add_argument("--no-backup", dest="backup", action="store_false", help="Skip backup.")
+    backup_group.add_argument(
+        "--backup", dest="backup", action="store_true", help="Create backup (default)."
+    )
+    backup_group.add_argument(
+        "--no-backup", dest="backup", action="store_false", help="Skip backup."
+    )
     parser.set_defaults(backup=True)
     return parser.parse_args()
 
@@ -849,12 +860,17 @@ def main() -> int:
     summary["summary_path"] = str(summary_path)
     print(json.dumps(summary, ensure_ascii=False))
 
-    return 0 if summary.get("status") in {
-        "OK",
-        "SALVAGED_OK",
-        "SALVAGED_WITH_WARNINGS",
-        "RESTORED_OK",
-    } else 1
+    return (
+        0
+        if summary.get("status")
+        in {
+            "OK",
+            "SALVAGED_OK",
+            "SALVAGED_WITH_WARNINGS",
+            "RESTORED_OK",
+        }
+        else 1
+    )
 
 
 if __name__ == "__main__":

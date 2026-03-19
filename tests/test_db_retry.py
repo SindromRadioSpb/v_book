@@ -1,4 +1,5 @@
 """Tests for database retry mechanism."""
+
 import pytest
 from unittest.mock import Mock, call
 from sqlalchemy.exc import OperationalError
@@ -22,10 +23,9 @@ def test_retry_on_db_locked_success():
 
 def test_retry_on_db_locked_retry_once():
     """Test: Function fails once with database locked, then succeeds."""
-    mock_func = Mock(side_effect=[
-        OperationalError("statement", "params", "database is locked"),
-        "success"
-    ])
+    mock_func = Mock(
+        side_effect=[OperationalError("statement", "params", "database is locked"), "success"]
+    )
 
     @retry_on_db_locked(max_retries=3, initial_delay=0.01)
     def test_function():
@@ -94,10 +94,9 @@ def test_with_retry_on_locked_success():
 
 def test_with_retry_on_locked_retry_once():
     """Test: with_retry_on_locked retries once."""
-    mock_func = Mock(side_effect=[
-        OperationalError("statement", "params", "database is locked"),
-        "success"
-    ])
+    mock_func = Mock(
+        side_effect=[OperationalError("statement", "params", "database is locked"), "success"]
+    )
 
     result = with_retry_on_locked(mock_func, max_retries=3)
 

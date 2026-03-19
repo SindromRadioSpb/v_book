@@ -30,13 +30,14 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
 # PyQt6 may not be available in pure-Python tests; guard import.
 try:
-    from PyQt6.QtCore import QObject, pyqtSignal as _Signal
+    from PyQt6.QtCore import QObject
+    from PyQt6.QtCore import pyqtSignal as _Signal
 
     class _SignalHost(QObject):
         operation_registered = _Signal(str, str, str)  # op_id, name, category
@@ -89,11 +90,11 @@ HEAVY_CATEGORIES: frozenset[str] = frozenset(
 class OperationsCenter(_SignalHost):  # type: ignore[misc]
     """Singleton registry for heavy background operations."""
 
-    _instance: ClassVar[Optional["OperationsCenter"]] = None
+    _instance: ClassVar[OperationsCenter | None] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
-    def instance(cls) -> "OperationsCenter":
+    def instance(cls) -> OperationsCenter:
         """Return the process-wide singleton, creating it if necessary."""
         if cls._instance is None:
             with cls._lock:

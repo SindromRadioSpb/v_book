@@ -6,16 +6,16 @@ Tests CSV injection protection:
 - All text fields are protected
 """
 
-import unittest
-import tempfile
-import sqlite3
-import os
 import csv
 import json
+import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
-from app.services.export_service import ExportService
 from app.services.db_service import DBService
+from app.services.export_service import ExportService
 
 
 class TestExportCSVInjection(unittest.TestCase):
@@ -30,9 +30,11 @@ class TestExportCSVInjection(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -95,7 +97,9 @@ class TestExportCSVInjection(unittest.TestCase):
         export_service = ExportService()
 
         # Export to CSV
-        csv_file = tempfile.NamedTemporaryFile(delete=False, suffix='.csv', mode='w', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".csv", mode="w", encoding="utf-8"
+        )
         csv_file.close()
 
         try:
@@ -105,7 +109,7 @@ class TestExportCSVInjection(unittest.TestCase):
             self.assertEqual(count, 2)
 
             # Read CSV and check sanitization
-            with open(csv_file.name, 'r', encoding='utf-8', newline='') as f:
+            with open(csv_file.name, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
                 rows = list(reader)
 
@@ -141,7 +145,9 @@ class TestExportCSVInjection(unittest.TestCase):
         export_service = ExportService()
 
         # Export to JSON
-        json_file = tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8')
+        json_file = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".json", mode="w", encoding="utf-8"
+        )
         json_file.close()
 
         try:
@@ -151,20 +157,20 @@ class TestExportCSVInjection(unittest.TestCase):
             self.assertEqual(count, 2)
 
             # Read JSON
-            with open(json_file.name, 'r', encoding='utf-8') as f:
+            with open(json_file.name, encoding="utf-8") as f:
                 data = json.load(f)
 
             self.assertEqual(len(data), 2)
 
             # Check that values are NOT sanitized (original values)
-            self.assertEqual(data[0]['src_text'], "=2+2")  # NOT '=2+2
-            self.assertEqual(data[0]['translation'], "+危险")  # NOT '+危险
+            self.assertEqual(data[0]["src_text"], "=2+2")  # NOT '=2+2
+            self.assertEqual(data[0]["translation"], "+危险")  # NOT '+危险
 
-            self.assertEqual(data[1]['translation'], "-cmd|'/c calc'!A1")  # NOT sanitized
-            self.assertEqual(data[1]['pos'], "@NOUN")  # NOT sanitized
-            self.assertEqual(data[1]['domain'], "=domain")  # NOT sanitized
-            self.assertEqual(data[1]['notes'], "@note")  # NOT sanitized
-            self.assertEqual(data[1]['source_ref'], "+ref")  # NOT sanitized
+            self.assertEqual(data[1]["translation"], "-cmd|'/c calc'!A1")  # NOT sanitized
+            self.assertEqual(data[1]["pos"], "@NOUN")  # NOT sanitized
+            self.assertEqual(data[1]["domain"], "=domain")  # NOT sanitized
+            self.assertEqual(data[1]["notes"], "@note")  # NOT sanitized
+            self.assertEqual(data[1]["source_ref"], "+ref")  # NOT sanitized
 
         finally:
             os.unlink(json_file.name)

@@ -12,7 +12,9 @@ from scripts import repair_db_corruption as mod
 def _create_source_db(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("CREATE TABLE tm_entry (tm_id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT)")
+        conn.execute(
+            "CREATE TABLE tm_entry (tm_id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT)"
+        )
         conn.execute("INSERT INTO tm_entry(tm_id, project_id, kind) VALUES (1, 1, 'lemma')")
         conn.commit()
     finally:
@@ -32,7 +34,9 @@ def _create_recovered_db(db_path: Path) -> None:
             )
             """
         )
-        conn.execute("INSERT INTO tm_entry(tm_id, project_id, kind, src_norm) VALUES (1, 1, 'lemma', 'alpha')")
+        conn.execute(
+            "INSERT INTO tm_entry(tm_id, project_id, kind, src_norm) VALUES (1, 1, 'lemma', 'alpha')"
+        )
 
         conn.execute(
             """
@@ -113,7 +117,9 @@ def _create_target_db(db_path: Path) -> None:
         conn.close()
 
 
-def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(tmp_path: Path, monkeypatch) -> None:
+def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(
+    tmp_path: Path, monkeypatch
+) -> None:
     source_db = tmp_path / "source.db"
     recovered_db = tmp_path / "recovered.db"
     _create_source_db(source_db)
@@ -164,7 +170,9 @@ def test_repair_db_corruption_salvage_flow_success_with_mocked_recover(tmp_path:
     assert summary["validation_results"]["sentence_snapshot_probe"]["ok"] is True
 
 
-def test_restore_db_from_backup_moves_corrupt_target_aside_and_restores_backup(tmp_path: Path) -> None:
+def test_restore_db_from_backup_moves_corrupt_target_aside_and_restores_backup(
+    tmp_path: Path,
+) -> None:
     target_db = tmp_path / "target.db"
     backup_db = tmp_path / "backup.db"
     _create_target_db(target_db)
@@ -283,4 +291,4 @@ def test_main_allows_restore_to_missing_target_path(tmp_path: Path, monkeypatch,
 
     assert exit_code == 0
     assert target_db.exists()
-    assert "\"status\": \"RESTORED_OK\"" in captured.out
+    assert '"status": "RESTORED_OK"' in captured.out

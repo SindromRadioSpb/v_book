@@ -8,9 +8,10 @@ Tests verify:
 - Project vs global scope
 - Metadata tracking
 """
+
 import pytest
 from datetime import datetime
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infra.sa_models import TMEntry, TMAlias
@@ -35,47 +36,9 @@ def db_session():
     """Create in-memory database session for testing."""
     engine = create_engine("sqlite:///:memory:")
 
-    # Create minimal TM schema using raw SQL
-    with engine.connect() as conn:
-        # Disable foreign keys for testing (we don't have full schema)
-        conn.execute(text("PRAGMA foreign_keys = OFF"))
-
-        # Create TM tables directly (minimal schema for testing)
-        conn.execute(text("""
-            CREATE TABLE tm_entry (
-                tm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NULL,
-                kind TEXT NOT NULL,
-                src_lang TEXT NOT NULL,
-                tgt_lang TEXT NOT NULL,
-                src_text TEXT NOT NULL,
-                src_norm TEXT NOT NULL,
-                translation TEXT NOT NULL,
-                translation_norm TEXT NULL,
-                pos TEXT NULL,
-                domain TEXT NULL,
-                notes TEXT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                confidence REAL NULL,
-                origin TEXT NOT NULL,
-                source_ref TEXT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                approved_at TEXT NULL,
-                approved_by TEXT NULL
-            )
-        """))
-
-        conn.execute(text("""
-            CREATE TABLE tm_alias (
-                alias_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tm_id INTEGER NOT NULL,
-                alias_text TEXT NOT NULL,
-                alias_norm TEXT NOT NULL
-            )
-        """))
-
-        conn.commit()
+    # Use ORM metadata so the schema always matches the current models
+    TMEntry.__table__.create(engine, checkfirst=True)
+    TMAlias.__table__.create(engine, checkfirst=True)
 
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()

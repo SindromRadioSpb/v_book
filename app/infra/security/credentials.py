@@ -13,15 +13,14 @@ Security:
 """
 
 import base64
+
 import keyring
-from typing import Optional, Dict
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .crypto import generate_key, encrypt, decrypt
-from .policy import CREDENTIAL_KEY_MAX_LENGTH, CREDENTIAL_VALUE_MAX_LENGTH
+from .crypto import decrypt, encrypt, generate_key
 from .errors import CredentialStoreError, ValidationError
-
+from .policy import CREDENTIAL_KEY_MAX_LENGTH, CREDENTIAL_VALUE_MAX_LENGTH
 
 # Keyring service name for this application
 KEYRING_SERVICE = "HDLE_Premium"
@@ -45,13 +44,13 @@ class CredentialStore:
         store.set_credential("test_key", "value", storage=storage)
     """
 
-    def __init__(self, db_session: Optional[Session] = None):
+    def __init__(self, db_session: Session | None = None):
         """Initialize credential store and ensure master key exists.
 
         Args:
             db_session: Database session for DB storage (None for in-memory only)
         """
-        self._master_key: Optional[bytes] = None
+        self._master_key: bytes | None = None
         self._db_session = db_session
         self._ensure_master_key()
 
@@ -73,7 +72,7 @@ class CredentialStore:
                 self._master_key = generate_key()
 
                 # Store in OS keyring (base64 encoded for text storage)
-                key_b64 = base64.b64encode(self._master_key).decode('ascii')
+                key_b64 = base64.b64encode(self._master_key).decode("ascii")
                 keyring.set_password(KEYRING_SERVICE, KEYRING_MASTER_KEY, key_b64)
 
         except Exception as e:
@@ -124,10 +123,10 @@ class CredentialStore:
 
         # Encrypt
         master_key = self._get_master_key()
-        ciphertext = encrypt(plaintext.encode('utf-8'), master_key)
+        ciphertext = encrypt(plaintext.encode("utf-8"), master_key)
 
         # Return as base64 for text storage
-        return base64.b64encode(ciphertext).decode('ascii')
+        return base64.b64encode(ciphertext).decode("ascii")
 
     def decrypt_value(self, ciphertext_b64: str) -> str:
         """
@@ -150,7 +149,7 @@ class CredentialStore:
             master_key = self._get_master_key()
             plaintext_bytes = decrypt(ciphertext, master_key)
 
-            return plaintext_bytes.decode('utf-8')
+            return plaintext_bytes.decode("utf-8")
 
         except Exception as e:
             raise CredentialStoreError(
@@ -162,7 +161,7 @@ class CredentialStore:
         self,
         key: str,
         value: str,
-        storage: Optional[Dict[str, str]] = None,
+        storage: dict[str, str] | None = None,
     ) -> None:
         """
         Store encrypted credential.
@@ -201,18 +200,23 @@ class CredentialStore:
         elif self._db_session is not None:
             # Database storage (production)
             try:
-                sql = text("""
+                sql = text(
+                    """
                     INSERT INTO credentials (key, encrypted_value)
                     VALUES (:key, :encrypted_value)
                     ON CONFLICT(key) DO UPDATE SET
                         encrypted_value = :encrypted_value,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now')
-                """)
+                """
+                )
 
-                self._db_session.execute(sql, {
-                    'key': key,
-                    'encrypted_value': encrypted_value,
-                })
+                self._db_session.execute(
+                    sql,
+                    {
+                        "key": key,
+                        "encrypted_value": encrypted_value,
+                    },
+                )
                 self._db_session.commit()
 
             except Exception as e:
@@ -230,8 +234,8 @@ class CredentialStore:
     def get_credential(
         self,
         key: str,
-        storage: Optional[Dict[str, str]] = None,
-    ) -> Optional[str]:
+        storage: dict[str, str] | None = None,
+    ) -> str | None:
         """
         Retrieve and decrypt credential.
 
@@ -253,7 +257,7 @@ class CredentialStore:
             # Database storage (production)
             try:
                 sql = text("SELECT encrypted_value FROM credentials WHERE key = :key")
-                result = self._db_session.execute(sql, {'key': key}).fetchone()
+                result = self._db_session.execute(sql, {"key": key}).fetchone()
                 encrypted_value = result[0] if result else None
 
             except Exception as e:
@@ -276,7 +280,7 @@ class CredentialStore:
     def delete_credential(
         self,
         key: str,
-        storage: Optional[Dict[str, str]] = None,
+        storage: dict[str, str] | None = None,
     ) -> bool:
         """
         Delete credential.
@@ -298,7 +302,7 @@ class CredentialStore:
             # Database storage (production)
             try:
                 sql = text("DELETE FROM credentials WHERE key = :key")
-                result = self._db_session.execute(sql, {'key': key})
+                result = self._db_session.execute(sql, {"key": key})
                 self._db_session.commit()
                 return result.rowcount > 0
 

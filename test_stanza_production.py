@@ -1,20 +1,23 @@
 """Test Stanza engine in production environment."""
-import sys
+
 import io
 import logging
+import sys
 
 # Fix Unicode on Windows
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def test_stanza_import():
     """Test if Stanza can be imported."""
     try:
         import stanza
         import torch
+
         print("✅ Stanza imported successfully")
         print(f"   Stanza version: {stanza.__version__}")
         print(f"   PyTorch version: {torch.__version__}")
@@ -26,15 +29,17 @@ def test_stanza_import():
         print(f"❌ Failed to import Stanza: {e}")
         return False
 
+
 def test_stanza_engine():
     """Test StanzaEngine class."""
     try:
-        from app.infra.nlp_engines.stanza_engine import StanzaEngine
         import torch
 
-        print("\n" + "="*60)
+        from app.infra.nlp_engines.stanza_engine import StanzaEngine
+
+        print("\n" + "=" * 60)
         print("Testing StanzaEngine")
-        print("="*60)
+        print("=" * 60)
 
         use_gpu = torch.cuda.is_available()
         print(f"\nInitializing StanzaEngine (GPU: {use_gpu})...")
@@ -48,7 +53,7 @@ def test_stanza_engine():
         print(f"\nProcessing text: {test_text}")
         result = engine.process(test_text)
 
-        print(f"\n✅ Processed successfully")
+        print("\n✅ Processed successfully")
         print(f"   Sentences: {len(result)}")
         print(f"   Total tokens: {sum(len(s.tokens) for s in result)}")
 
@@ -65,19 +70,21 @@ def test_stanza_engine():
         print(f"❌ StanzaEngine test failed: {e}")
         return False
 
+
 def test_process_service_with_stanza():
     """Test ProcessService with real Stanza engine."""
     test_dir = None
     try:
-        from app.services.db_service import DBService
-        from app.services.project_service import ProjectService
-        from app.services.ingest_service import IngestService
-        from app.services.process_service import ProcessService
         from pathlib import Path
 
-        print("\n" + "="*60)
+        from app.services.db_service import DBService
+        from app.services.ingest_service import IngestService
+        from app.services.process_service import ProcessService
+        from app.services.project_service import ProjectService
+
+        print("\n" + "=" * 60)
         print("Testing ProcessService with Stanza")
-        print("="*60)
+        print("=" * 60)
 
         # Initialize DBService with test database
         test_db_path = Path("test_stanza.db")
@@ -100,15 +107,13 @@ def test_process_service_with_stanza():
             "הוא מכיל מספר משפטים. "
             "נבדוק את הלמטיזציה ותיוג חלקי הדיבור. "
             "בית ספר, בתי ספר, ביה\"ס - כל אלה צריכים להפוך ל'בית ספר'.",
-            encoding='utf-8'
+            encoding="utf-8",
         )
 
         with db_service.get_session() as session:
             # Create project
             project = project_service.create_project(
-                session,
-                "Stanza Test",
-                "Test project for Stanza engine"
+                session, "Stanza Test", "Test project for Stanza engine"
             )
             print(f"✅ Created project: {project.name} (ID: {project.project_id})")
 
@@ -118,71 +123,77 @@ def test_process_service_with_stanza():
 
             # Import document
             doc = ingest_service.import_document(
-                session,
-                corpus.corpus_id,
-                test_file,
-                use_ocr=False
+                session, corpus.corpus_id, test_file, use_ocr=False
             )
             print(f"✅ Imported document: {doc.file_name} (ID: {doc.doc_id})")
 
             # Process with Stanza (use_mock=False)
-            print(f"\n🔄 Processing with Stanza engine...")
+            print("\n🔄 Processing with Stanza engine...")
             success = process_service.process_document(
                 session,
                 doc.doc_id,
                 use_gpu=False,  # Set True if you want to use GPU
-                use_mock=False  # Use real Stanza
+                use_mock=False,  # Use real Stanza
             )
 
             if success:
-                print(f"✅ Document processed successfully")
+                print("✅ Document processed successfully")
 
                 # Get document stats
-                from app.infra.sa_models import SourceDocument, Lemma, LemmaProjectStat, DocumentSentence
-                from sqlalchemy import select, func
+                from sqlalchemy import func, select
+
+                from app.infra.sa_models import (
+                    DocumentSentence,
+                    Lemma,
+                    LemmaProjectStat,
+                    SourceDocument,
+                )
 
                 doc_updated = session.get(SourceDocument, doc.doc_id)
                 print(f"\n📊 Document status: {doc_updated.status}")
 
                 # Count sentences
                 sentence_count = session.execute(
-                    select(func.count()).select_from(DocumentSentence).where(
-                        DocumentSentence.doc_id == doc.doc_id
-                    )
+                    select(func.count())
+                    .select_from(DocumentSentence)
+                    .where(DocumentSentence.doc_id == doc.doc_id)
                 ).scalar()
                 print(f"   Sentences: {sentence_count}")
 
                 # Count lemmas for this project
                 lemma_count = session.execute(
-                    select(func.count()).select_from(Lemma).where(
-                        Lemma.project_id == project.project_id
-                    )
+                    select(func.count())
+                    .select_from(Lemma)
+                    .where(Lemma.project_id == project.project_id)
                 ).scalar()
                 print(f"   Unique lemmas: {lemma_count}")
 
                 # Get top lemmas
-                stmt = select(Lemma, LemmaProjectStat).join(
-                    LemmaProjectStat
-                ).where(
-                    Lemma.project_id == project.project_id
-                ).order_by(
-                    LemmaProjectStat.freq_abs.desc()
-                ).limit(10)
+                stmt = (
+                    select(Lemma, LemmaProjectStat)
+                    .join(LemmaProjectStat)
+                    .where(Lemma.project_id == project.project_id)
+                    .order_by(LemmaProjectStat.freq_abs.desc())
+                    .limit(10)
+                )
 
                 results = session.execute(stmt).all()
 
-                print(f"\n📚 Top 10 lemmas:")
+                print("\n📚 Top 10 lemmas:")
                 for lemma, stat in results:
-                    print(f"   {lemma.lemma_text:15s} | {lemma.pos:6s} | Freq: {stat.freq_abs:3d} | DocFreq: {stat.doc_freq}")
+                    print(
+                        f"   {lemma.lemma_text:15s} | {lemma.pos:6s} | Freq: {stat.freq_abs:3d} | DocFreq: {stat.doc_freq}"
+                    )
 
                 # Get processor run info
                 from app.infra.sa_models import ProcessorRun
+
                 run = session.execute(
                     select(ProcessorRun).order_by(ProcessorRun.run_id.desc()).limit(1)
                 ).scalar_one_or_none()
 
                 if run:
-                    print(f"\n🔧 Processor run:")
+                    print("\n🔧 Processor run:")
                     print(f"   Engine: {run.engine} v{run.engine_version}")
                     print(f"   Status: {run.status}")
                     print(f"   Docs processed: {run.docs_processed}")
@@ -191,7 +202,7 @@ def test_process_service_with_stanza():
 
                 return True
             else:
-                print(f"❌ Processing failed")
+                print("❌ Processing failed")
                 return False
 
     except Exception as e:
@@ -215,10 +226,11 @@ def test_process_service_with_stanza():
             except Exception:
                 pass
 
+
 if __name__ == "__main__":
-    print("="*60)
+    print("=" * 60)
     print("STANZA PRODUCTION TEST")
-    print("="*60)
+    print("=" * 60)
 
     # Test 1: Import
     if not test_stanza_import():
@@ -232,9 +244,9 @@ if __name__ == "__main__":
     if not test_process_service_with_stanza():
         sys.exit(1)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("✅ ALL TESTS PASSED - Stanza is working!")
-    print("="*60)
+    print("=" * 60)
     print("\nYou can now use Stanza in the GUI:")
     print("  1. Run: python -m app.main")
     print("  2. Import documents")

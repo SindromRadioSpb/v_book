@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -21,7 +20,6 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
-    QWidget,
 )
 
 from app.infra.resource_paths import ResourcePaths
@@ -49,7 +47,7 @@ class ResourcesManagerDialog(QDialog):
         self._download_worker = None
         self._health_worker = None
         self._import_worker = None
-        self._progress_dialog: Optional[QProgressDialog] = None
+        self._progress_dialog: QProgressDialog | None = None
 
         self._init_ui()
         self._load_data_root()
@@ -160,7 +158,9 @@ class ResourcesManagerDialog(QDialog):
         self.data_root_edit.setText(root)
 
     def _browse_data_root(self) -> None:
-        current = self.data_root_edit.text().strip() or str(ResourcePaths.resolve_data_root(create=True))
+        current = self.data_root_edit.text().strip() or str(
+            ResourcePaths.resolve_data_root(create=True)
+        )
         directory = QFileDialog.getExistingDirectory(self, "Select Data Folder", current)
         if directory:
             self.data_root_edit.setText(directory)
@@ -174,8 +174,8 @@ class ResourcesManagerDialog(QDialog):
         self.refresh_resources()
 
     def _open_data_root(self) -> None:
-        from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
 
         root = ResourcePaths.build(settings=self.settings, create=True).data_root
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
@@ -211,7 +211,7 @@ class ResourcesManagerDialog(QDialog):
         self.table.resizeColumnsToContents()
         self._set_status("Resources list refreshed.")
 
-    def _selected_entry_id(self) -> Optional[str]:
+    def _selected_entry_id(self) -> str | None:
         row = self.table.currentRow()
         if row < 0:
             return None
@@ -242,7 +242,9 @@ class ResourcesManagerDialog(QDialog):
             QMessageBox.information(self, "Resources", "Selected resource is not downloadable.")
             return
         if not entry.download_url:
-            QMessageBox.warning(self, "Resources", "Download URL is not configured for this resource.")
+            QMessageBox.warning(
+                self, "Resources", "Download URL is not configured for this resource."
+            )
             return
         install_paths = self.registry.resolve_install_paths(entry)
         if not install_paths:
@@ -306,7 +308,9 @@ class ResourcesManagerDialog(QDialog):
         if entry is None:
             QMessageBox.information(self, "Resources", "Select a resource first.")
             return
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import Resource File", "", "All Files (*)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Resource File", "", "All Files (*)"
+        )
         if not file_path:
             return
         try:
@@ -340,8 +344,8 @@ class ResourcesManagerDialog(QDialog):
         )
 
     def _open_selected_folder(self) -> None:
-        from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
 
         status = self._selected_status()
         if status is None or not status.install_paths:

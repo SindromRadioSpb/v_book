@@ -25,6 +25,7 @@ def test_export_tm_filtered_xlsx():
     # Initialize DBService
     print("\n[Setup] Initializing database connection")
     from app.main import get_app_dir
+
     app_dir = get_app_dir()
     db_path = app_dir / "hdle.db"
 
@@ -38,6 +39,7 @@ def test_export_tm_filtered_xlsx():
         # Test 1: Count TM entries
         print("\n[Test 1] Count TM entries in database")
         from sqlalchemy import select, func
+
         total_count = session.execute(select(func.count()).select_from(TMEntry)).scalar()
         print(f"  [OK] Total TM entries: {total_count:,}")
 
@@ -59,7 +61,7 @@ def test_export_tm_filtered_xlsx():
 
         # Test 2: Export with no filters (all entries)
         print("\n[Test 2] Export all TM entries to Excel")
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -68,7 +70,7 @@ def test_export_tm_filtered_xlsx():
                 tmp_path,
                 filters={},  # No filters
                 sort_column="updated_at",
-                sort_direction="desc"
+                sort_direction="desc",
             )
             print(f"  [OK] Exported {count:,} entries to: {tmp_path}")
 
@@ -83,13 +85,24 @@ def test_export_tm_filtered_xlsx():
             # Try to read with openpyxl
             try:
                 import openpyxl
+
                 wb = openpyxl.load_workbook(tmp_path)
                 ws = wb.active
                 print(f"  [OK] Workbook has {ws.max_row} rows, {ws.max_column} columns")
 
                 # Check headers
                 headers = [cell.value for cell in ws[1]]
-                expected_headers = ["ID", "Kind", "Source", "Translation", "Status", "Project", "Origin", "Source Ref", "Updated"]
+                expected_headers = [
+                    "ID",
+                    "Kind",
+                    "Source",
+                    "Translation",
+                    "Status",
+                    "Project",
+                    "Origin",
+                    "Source Ref",
+                    "Updated",
+                ]
                 if headers != expected_headers:
                     print(f"  [ERROR] Headers mismatch: {headers}")
                     return False
@@ -111,7 +124,7 @@ def test_export_tm_filtered_xlsx():
 
         # Test 3: Export with filters
         print("\n[Test 3] Export with filters (status=approved)")
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -120,7 +133,7 @@ def test_export_tm_filtered_xlsx():
                 tmp_path,
                 filters={"status": "approved"},
                 sort_column="src_text",
-                sort_direction="asc"
+                sort_direction="asc",
             )
             print(f"  [OK] Exported {count:,} approved entries")
 
@@ -134,7 +147,7 @@ def test_export_tm_filtered_xlsx():
 
         # Test 4: Export with multi-project filter
         print("\n[Test 4] Export with multi-project filter (global only)")
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -143,7 +156,7 @@ def test_export_tm_filtered_xlsx():
                 tmp_path,
                 filters={"project_ids": [-1]},  # Global only
                 sort_column="updated_at",
-                sort_direction="desc"
+                sort_direction="desc",
             )
             print(f"  [OK] Exported {count:,} global entries")
 

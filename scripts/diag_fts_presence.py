@@ -40,9 +40,7 @@ def check_fts_presence(db_path: str, schema: str = "main") -> dict:
 
     try:
         # Check schema version
-        cursor = conn.execute(
-            f"SELECT value FROM {schema}.schema_meta WHERE key='schema_version'"
-        )
+        cursor = conn.execute(f"SELECT value FROM {schema}.schema_meta WHERE key='schema_version'")
         row = cursor.fetchone()
         results["schema_version"] = int(row[0]) if row else None
 
@@ -121,8 +119,12 @@ def print_results(results: dict) -> None:
     print(f"  sentence_fts: {'[OK] EXISTS' if results['sentence_fts_exists'] else '[!!] MISSING'}")
     print(f"  term_fts:     {'[OK] EXISTS' if results['term_fts_exists'] else '[!!] MISSING'}")
     print(f"\nTriggers:")
-    print(f"  sentence: {', '.join(results['sentence_triggers']) if results['sentence_triggers'] else 'NONE'}")
-    print(f"  term:     {', '.join(results['term_triggers']) if results['term_triggers'] else 'NONE'}")
+    print(
+        f"  sentence: {', '.join(results['sentence_triggers']) if results['sentence_triggers'] else 'NONE'}"
+    )
+    print(
+        f"  term:     {', '.join(results['term_triggers']) if results['term_triggers'] else 'NONE'}"
+    )
 
     if results["issues"]:
         print(f"\n{'!'*70}")

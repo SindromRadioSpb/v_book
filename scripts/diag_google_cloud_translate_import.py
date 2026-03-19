@@ -32,15 +32,17 @@ def main():
         from google.cloud import translate_v3
 
         # Check if client class exists
-        assert hasattr(translate_v3, 'TranslationServiceClient'), \
-            "TranslationServiceClient not found"
+        assert hasattr(
+            translate_v3, "TranslationServiceClient"
+        ), "TranslationServiceClient not found"
 
         # Try to get version (may not be available, that's OK)
         try:
             import google.cloud.translate
-            version = getattr(google.cloud.translate, '__version__', 'unknown')
+
+            version = getattr(google.cloud.translate, "__version__", "unknown")
         except (ImportError, AttributeError):
-            version = 'unknown'
+            version = "unknown"
 
         print(f"[OK] google-cloud-translate: {version}")
         print(f"  - Module: {google.cloud.translate_v3.__file__}")
@@ -59,7 +61,7 @@ def main():
         from google.oauth2 import service_account
 
         # Check version
-        version = getattr(google.auth, '__version__', 'unknown')
+        version = getattr(google.auth, "__version__", "unknown")
 
         print(f"[OK] google-auth: {version}")
         print(f"  - Module: {google.auth.__file__}")
@@ -72,7 +74,8 @@ def main():
     # 3. Test grpc (transitive dependency, often causes packaging issues)
     try:
         import grpc
-        version = getattr(grpc, '__version__', 'unknown')
+
+        version = getattr(grpc, "__version__", "unknown")
         print(f"[OK] grpc: {version}")
         print(f"  - Module: {grpc.__file__}")
 
@@ -83,7 +86,8 @@ def main():
     # 4. Test google-api-core
     try:
         import google.api_core
-        version = getattr(google.api_core, '__version__', 'unknown')
+
+        version = getattr(google.api_core, "__version__", "unknown")
         print(f"[OK] google-api-core: {version}")
 
     except ImportError as e:
@@ -109,5 +113,5 @@ def main():
         sys.exit(0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

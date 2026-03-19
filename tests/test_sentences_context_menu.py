@@ -83,12 +83,22 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
         "bootstrap": 0,
     }
     view.on_batch_translate = lambda: state.__setitem__("translate", state["translate"] + 1)
-    view.on_edit_translation_selected = lambda: state.__setitem__("edit_translation", state["edit_translation"] + 1)
-    view.on_clear_translation_selected = lambda: state.__setitem__("clear_translation", state["clear_translation"] + 1)
-    view.on_generate_audio = lambda: state.__setitem__("generate_audio", state["generate_audio"] + 1)
+    view.on_edit_translation_selected = lambda: state.__setitem__(
+        "edit_translation", state["edit_translation"] + 1
+    )
+    view.on_clear_translation_selected = lambda: state.__setitem__(
+        "clear_translation", state["clear_translation"] + 1
+    )
+    view.on_generate_audio = lambda: state.__setitem__(
+        "generate_audio", state["generate_audio"] + 1
+    )
     view.on_play_audio = lambda: state.__setitem__("play_audio", state["play_audio"] + 1)
-    view.on_add_selected_to_playlist = lambda: state.__setitem__("add_playlist", state["add_playlist"] + 1)
-    view.on_add_selected_to_user_dictionary = lambda: state.__setitem__("add_user_dict", state["add_user_dict"] + 1)
+    view.on_add_selected_to_playlist = lambda: state.__setitem__(
+        "add_playlist", state["add_playlist"] + 1
+    )
+    view.on_add_selected_to_user_dictionary = lambda: state.__setitem__(
+        "add_user_dict", state["add_user_dict"] + 1
+    )
     view.on_pronunciation_bootstrap = lambda: state.__setitem__("bootstrap", state["bootstrap"] + 1)
     view.on_niqqud_bootstrap_selected = lambda: None
     view.on_edit_niqqud_selected = lambda: None
@@ -107,9 +117,15 @@ def test_sentences_context_menu_includes_add_selected_to_playlist(monkeypatch):
     next(a for a in FakeMenu.last.actions if a.text == "Clear Translation (2)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if a.text == "Generate Audio (2)...").triggered.emit()
     next(a for a in FakeMenu.last.actions if "Play Audio Selected (2)" in a.text).triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Add Selected to User Dictionary (2)...").triggered.emit()
-    next(a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2)...").triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Add Selected to Playlist (2)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Add Selected to User Dictionary (2)..."
+    ).triggered.emit()
+    next(
+        a for a in FakeMenu.last.actions if a.text == "Pronunciation Bootstrap Selected (2)..."
+    ).triggered.emit()
 
     assert state["translate"] == 1
     assert state["edit_translation"] == 1

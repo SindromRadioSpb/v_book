@@ -64,7 +64,7 @@ def _parse_timestamp_from_name(path: Path) -> dt.datetime:
     prefix = "import_concurrent_save_metrics_"
     if not stem.startswith(prefix):
         raise BudgetCheckError(f"Filename does not match expected pattern: {path.name}")
-    ts = stem[len(prefix):]
+    ts = stem[len(prefix) :]
     try:
         return dt.datetime.strptime(ts, "%Y%m%d_%H%M%S")
     except ValueError as exc:
@@ -301,7 +301,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--artifacts", nargs="+", help="Explicit artifact paths.")
     parser.add_argument("--glob", dest="glob", default=None, help="Glob pattern for artifacts.")
     parser.add_argument("--dir", dest="dir", default=None, help="Directory to scan for artifacts.")
-    parser.add_argument("--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts after sorting.")
+    parser.add_argument(
+        "--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts after sorting."
+    )
     parser.add_argument(
         "--report-path",
         default=str(DEFAULT_REPORT_PATH),
@@ -319,7 +321,10 @@ def run(argv: list[str] | None = None) -> int:
     try:
         artifacts = _discover_artifacts(args)
         payloads = [_load_artifact(path) for path in artifacts]
-        runs = [_extract_run_metrics(payload, artifact=path) for payload, path in zip(payloads, artifacts, strict=True)]
+        runs = [
+            _extract_run_metrics(payload, artifact=path)
+            for payload, path in zip(payloads, artifacts, strict=True)
+        ]
         aggregates = _aggregate(runs)
         budget_rows, overall_status = _evaluate_budget(aggregates)
         _write_markdown_report(
@@ -344,9 +349,7 @@ def run(argv: list[str] | None = None) -> int:
     except BudgetCheckError as exc:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
-            "# Write-Gate Budget Report\n\n"
-            f"- Overall status: **FAIL**\n"
-            f"- Error: `{exc}`\n",
+            "# Write-Gate Budget Report\n\n" f"- Overall status: **FAIL**\n" f"- Error: `{exc}`\n",
             encoding="utf-8",
         )
         print(f"FAIL: {exc}", file=sys.stderr)

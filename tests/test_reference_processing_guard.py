@@ -8,6 +8,7 @@ Covers:
 - CLI _get_unprocessed_doc_ids() query correctness
 - CLI _process_chunk() dry-run returns correct counts
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -122,6 +123,7 @@ def test_get_unprocessed_doc_ids():
             # Import the function
             import sys
             from pathlib import Path
+
             sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
             from process_reference_corpus import _get_unprocessed_doc_ids
 
@@ -149,6 +151,7 @@ def test_get_project_doc_ids_returns_full_deterministic_slice():
         with Session(engine) as session:
             import sys
             from pathlib import Path
+
             sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
             from process_reference_corpus import _get_project_doc_ids
 

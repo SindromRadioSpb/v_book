@@ -11,6 +11,7 @@ Tests Hebrew text normalization with 50+ test cases covering:
 """
 
 import unittest
+
 from app.domain.normalization import normalize_for_tm
 
 
@@ -352,7 +353,7 @@ class TestNormalizationRealWorldExamples(unittest.TestCase):
 
     def test_55_acronym_with_quotes(self):
         """Hebrew acronym with quotes: צה\"ל."""
-        result = normalize_for_tm("he", "צה\"ל", "lemma")
+        result = normalize_for_tm("he", 'צה"ל', "lemma")
         # Should preserve acronym structure
         self.assertIn("צה", result.norm)
 
@@ -411,7 +412,9 @@ if __name__ == "__main__":
     print(f"Tests run: {result.testsRun}")
     print(f"Failures: {len(result.failures)}")
     print(f"Errors: {len(result.errors)}")
-    print(f"Success rate: {(result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100:.1f}%")
+    print(
+        f"Success rate: {(result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100:.1f}%"
+    )
     print("=" * 70)
 
     # Exit with appropriate code

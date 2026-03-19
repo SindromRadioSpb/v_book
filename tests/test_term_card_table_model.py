@@ -73,8 +73,24 @@ def test_header_sorting_works_for_numeric_and_ud_columns():
 def test_tooltip_visible_only_for_ud_members():
     model = TermCardTableModel(
         cards=[
-            _card(cluster_id=1, term="saved", lemma="saved", freq=1, doc_freq=1, in_ud_count=1, tooltip="saved tooltip"),
-            _card(cluster_id=2, term="not_saved", lemma="not_saved", freq=1, doc_freq=1, in_ud_count=0, tooltip="hidden tooltip"),
+            _card(
+                cluster_id=1,
+                term="saved",
+                lemma="saved",
+                freq=1,
+                doc_freq=1,
+                in_ud_count=1,
+                tooltip="saved tooltip",
+            ),
+            _card(
+                cluster_id=2,
+                term="not_saved",
+                lemma="not_saved",
+                freq=1,
+                doc_freq=1,
+                in_ud_count=0,
+                tooltip="hidden tooltip",
+            ),
         ]
     )
 

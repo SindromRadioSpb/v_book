@@ -73,7 +73,9 @@ def _validate_sqlite_readable(db_path: Path) -> tuple[bool, str | None]:
         return False, str(exc)
 
 
-def _probe_target_db_corruption(db_path: Path, *, quick_check_timeout_sec: float = 10.0) -> dict[str, Any]:
+def _probe_target_db_corruption(
+    db_path: Path, *, quick_check_timeout_sec: float = 10.0
+) -> dict[str, Any]:
     probe: dict[str, Any] = {
         "ok": True,
         "quick_check_rows": [],
@@ -97,7 +99,9 @@ def _probe_target_db_corruption(db_path: Path, *, quick_check_timeout_sec: float
             conn.set_progress_handler(_progress_handler, 10_000)
             quick_rows: list[str] = []
             try:
-                quick_rows = [str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()]
+                quick_rows = [
+                    str(row[0]) for row in conn.execute("PRAGMA quick_check(10)").fetchall()
+                ]
             except sqlite3.OperationalError as exc:
                 msg = str(exc).lower()
                 if "interrupted" in msg and quick_check_timeout_sec > 0:
@@ -115,7 +119,9 @@ def _probe_target_db_corruption(db_path: Path, *, quick_check_timeout_sec: float
                 )
             elif not quick_rows or any(row.lower() != "ok" for row in quick_rows):
                 probe["ok"] = False
-                probe["quick_check_error"] = "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+                probe["quick_check_error"] = (
+                    "; ".join(quick_rows) if quick_rows else "empty quick_check output"
+                )
 
             try:
                 conn.execute("SELECT 1 FROM tm_entry LIMIT 1").fetchone()
@@ -140,14 +146,18 @@ def _build_source_db(db_path: Path, docs: int, lemmas: int) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
     try:
-        conn.execute("INSERT INTO library (library_id, name) VALUES (1, 'Benchmark Source Library')")
+        conn.execute(
+            "INSERT INTO library (library_id, name) VALUES (1, 'Benchmark Source Library')"
+        )
         conn.execute(
             """
             INSERT INTO dict_project (project_id, library_id, name, src_lang, tgt_lang, nlp_engine)
             VALUES (1, 1, 'Benchmark Source Project', 'he', 'ru', 'stanza')
             """
         )
-        conn.execute("INSERT INTO source_corpus (corpus_id, project_id, name) VALUES (1, 1, 'Benchmark Corpus')")
+        conn.execute(
+            "INSERT INTO source_corpus (corpus_id, project_id, name) VALUES (1, 1, 'Benchmark Corpus')"
+        )
 
         for doc_id in range(1, docs + 1):
             conn.execute(
@@ -188,9 +198,7 @@ def _ensure_probe_tm_entry(target_db_path: Path) -> int:
         next_project_id = conn.execute(
             "SELECT COALESCE(MAX(project_id), 0) + 1 FROM dict_project"
         ).fetchone()[0]
-        next_tm_id = conn.execute(
-            "SELECT COALESCE(MAX(tm_id), 0) + 1 FROM tm_entry"
-        ).fetchone()[0]
+        next_tm_id = conn.execute("SELECT COALESCE(MAX(tm_id), 0) + 1 FROM tm_entry").fetchone()[0]
 
         conn.execute(
             "INSERT INTO library (library_id, name) VALUES (?, ?)",
@@ -238,8 +246,12 @@ def _parse_gate_trace(trace_path: Path) -> dict[str, Any]:
             except json.JSONDecodeError:
                 continue
 
-    hold_events = [event for event in events if event.get("event") == "gate_release" and "hold_ms" in event]
-    top_holds = sorted(hold_events, key=lambda item: float(item.get("hold_ms", 0.0)), reverse=True)[:5]
+    hold_events = [
+        event for event in events if event.get("event") == "gate_release" and "hold_ms" in event
+    ]
+    top_holds = sorted(hold_events, key=lambda item: float(item.get("hold_ms", 0.0)), reverse=True)[
+        :5
+    ]
 
     max_by_phase: dict[str, float] = {}
     for event in hold_events:
@@ -251,12 +263,16 @@ def _parse_gate_trace(trace_path: Path) -> dict[str, Any]:
 
     top_phase_max_holds = [
         {"phase": phase, "max_hold_ms": round(hold_ms, 3)}
-        for phase, hold_ms in sorted(max_by_phase.items(), key=lambda item: item[1], reverse=True)[:5]
+        for phase, hold_ms in sorted(max_by_phase.items(), key=lambda item: item[1], reverse=True)[
+            :5
+        ]
     ]
 
     return {
         "event_count": len(events),
-        "max_hold_ms": round(max((float(item.get("hold_ms", 0.0)) for item in hold_events), default=0.0), 3),
+        "max_hold_ms": round(
+            max((float(item.get("hold_ms", 0.0)) for item in hold_events), default=0.0), 3
+        ),
         "top_holds": top_holds,
         "top_phase_max_holds": top_phase_max_holds,
     }
@@ -301,19 +317,19 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 raise RuntimeError(
                     "Target DB FTS schema is malformed. "
                     "Run scripts/repair_fts_schema.py --db-path "
-                    f"\"{target_work_db}\". Probe error: {target_err}"
+                    f'"{target_work_db}". Probe error: {target_err}'
                 )
-            if any(token in lowered for token in ("disk image is malformed", "database corrupt", "database corruption")):
+            if any(
+                token in lowered
+                for token in ("disk image is malformed", "database corrupt", "database corruption")
+            ):
                 raise RuntimeError(
                     "DB corruption detected during readability probe. Run: "
-                    f"python scripts/repair_db_corruption.py --db-path \"{target_work_db}\". "
+                    f'python scripts/repair_db_corruption.py --db-path "{target_work_db}". '
                     f"Probe error: {target_err}"
                 )
             if not args.allow_fallback:
-                raise RuntimeError(
-                    "Target DB is not readable. "
-                    f"Probe error: {target_err}"
-                )
+                raise RuntimeError("Target DB is not readable. " f"Probe error: {target_err}")
             target_fallback_reason = target_err
             target_work_db = temp_root / "target_fallback.db"
             _apply_migrations(target_work_db)
@@ -326,7 +342,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         if not corruption_probe["ok"]:
             raise RuntimeError(
                 "DB corruption detected. Run: "
-                f"python scripts/repair_db_corruption.py --db-path \"{target_work_db}\". "
+                f'python scripts/repair_db_corruption.py --db-path "{target_work_db}". '
                 f"quick_check={corruption_probe.get('quick_check_rows') or corruption_probe.get('quick_check_error')}; "
                 f"tm_entry_probe_error={corruption_probe.get('tm_entry_probe_error')}"
             )
@@ -466,7 +482,9 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "seed": {
                 "docs": int(args.seed_docs),
                 "lemmas": int(args.seed_lemmas),
-                "lemma_batch_size": int(os.environ.get("HDLE_IMPORT_LEMMA_BATCH_SIZE", "2000") or 2000),
+                "lemma_batch_size": int(
+                    os.environ.get("HDLE_IMPORT_LEMMA_BATCH_SIZE", "2000") or 2000
+                ),
                 "save_cadence_ms": int(args.save_cadence_ms),
                 "max_save_attempts": int(args.max_save_attempts),
             },
@@ -493,7 +511,9 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 "latency_during_import_ms": {
                     "p50": round(_percentile(during_import_latencies, 50), 3),
                     "p95": round(_percentile(during_import_latencies, 95), 3),
-                    "max": round(max(during_import_latencies), 3) if during_import_latencies else 0.0,
+                    "max": (
+                        round(max(during_import_latencies), 3) if during_import_latencies else 0.0
+                    ),
                 },
                 "count_gt_1000ms": int(sum(1 for value in save_latencies_ms if value > 1000.0)),
                 "count_gt_500ms": int(sum(1 for value in save_latencies_ms if value > 500.0)),

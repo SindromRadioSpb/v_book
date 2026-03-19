@@ -4,6 +4,7 @@ Tests IngestService blocks document operations on reference corpus:
 - import_document() raises ReferenceCorpusReadonlyError
 - delete_document() raises ReferenceCorpusReadonlyError
 """
+
 import pytest
 import tempfile
 import sqlite3
@@ -87,9 +88,7 @@ def test_file(tmp_path):
 # ============================================================================
 
 
-def test_import_document_blocks_reference_corpus(
-    ingest_service, session, library, test_file
-):
+def test_import_document_blocks_reference_corpus(ingest_service, session, library, test_file):
     """import_document() raises error when importing to reference corpus."""
     # Create reference corpus project
     ref_proj = DictProject(
@@ -125,14 +124,13 @@ def test_import_document_blocks_reference_corpus(
 
     # Verify no document was added
     from sqlalchemy import select
+
     stmt = select(SourceDocument).where(SourceDocument.corpus_id == ref_corpus.corpus_id)
     docs = session.execute(stmt).scalars().all()
     assert len(docs) == 0
 
 
-def test_import_document_allows_normal_project(
-    ingest_service, session, library, test_file
-):
+def test_import_document_allows_normal_project(ingest_service, session, library, test_file):
     """import_document() allows importing to normal projects."""
     # Create normal project
     proj = DictProject(
@@ -172,9 +170,7 @@ def test_import_document_allows_normal_project(
 # ============================================================================
 
 
-def test_delete_document_blocks_reference_corpus(
-    ingest_service, session, library
-):
+def test_delete_document_blocks_reference_corpus(ingest_service, session, library):
     """delete_document() raises error when deleting from reference corpus."""
     # Create reference corpus project
     ref_proj = DictProject(
@@ -222,9 +218,7 @@ def test_delete_document_blocks_reference_corpus(
     assert session.get(SourceDocument, doc.doc_id) is not None
 
 
-def test_delete_document_allows_normal_project(
-    ingest_service, session, library
-):
+def test_delete_document_allows_normal_project(ingest_service, session, library):
     """delete_document() allows deleting from normal projects."""
     # Create normal project
     proj = DictProject(

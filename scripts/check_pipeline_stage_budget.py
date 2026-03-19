@@ -177,13 +177,17 @@ def _extract_stage_snapshot(payload: dict[str, Any], artifact: Path) -> dict[str
 
     duration_sec = _safe_float(stage.get("duration_sec"))
     duration_ms = _ms(duration_sec)
-    rows_processed = stage.get("rows_processed") if isinstance(stage.get("rows_processed"), dict) else {}
+    rows_processed = (
+        stage.get("rows_processed") if isinstance(stage.get("rows_processed"), dict) else {}
+    )
     processed_count = _sum_rows(rows_processed)
     errors_count = max(0, _safe_int(stage.get("errors_count")))
     success_count = _success_count(stage, processed_count, errors_count)
     throughput = (processed_count / duration_sec) if duration_sec > 0 else 0.0
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-    overwrite = _safe_int(stage.get("overwrite"), default=_safe_int(config.get("overwrite"), default=0))
+    overwrite = _safe_int(
+        stage.get("overwrite"), default=_safe_int(config.get("overwrite"), default=0)
+    )
 
     details = stage.get("details") if isinstance(stage.get("details"), dict) else {}
     retry_count = 0
@@ -197,12 +201,21 @@ def _extract_stage_snapshot(payload: dict[str, Any], artifact: Path) -> dict[str
             if isinstance(block, dict):
                 retry_count += max(0, _safe_int(block.get("retry_count")))
                 rate_limit_hits += max(0, _safe_int(block.get("rate_limit_hits")))
-                api_calls_count += max(0, _safe_int(block.get("api_calls_count"), default=_safe_int(block.get("total"))))
+                api_calls_count += max(
+                    0,
+                    _safe_int(block.get("api_calls_count"), default=_safe_int(block.get("total"))),
+                )
 
     gate_trace = payload.get("gate_trace") if isinstance(payload.get("gate_trace"), dict) else {}
-    write_gate_overall_max_hold_ms = _safe_float(gate_trace.get("max_hold_ms"), default=0.0) if gate_trace else None
-    write_gate_overall_p95_hold_ms = _safe_float(gate_trace.get("p95_hold_ms"), default=0.0) if gate_trace else None
-    write_gate_wait_ms = _safe_float(gate_trace.get("total_wait_ms"), default=0.0) if gate_trace else None
+    write_gate_overall_max_hold_ms = (
+        _safe_float(gate_trace.get("max_hold_ms"), default=0.0) if gate_trace else None
+    )
+    write_gate_overall_p95_hold_ms = (
+        _safe_float(gate_trace.get("p95_hold_ms"), default=0.0) if gate_trace else None
+    )
+    write_gate_wait_ms = (
+        _safe_float(gate_trace.get("total_wait_ms"), default=0.0) if gate_trace else None
+    )
 
     db_info = payload.get("db") if isinstance(payload.get("db"), dict) else {}
     db_paths = {
@@ -226,7 +239,8 @@ def _extract_stage_snapshot(payload: dict[str, Any], artifact: Path) -> dict[str
         "error_count": errors_count,
         "overwrite_mode": overwrite,
         "rows_processed": rows_processed,
-        "chunk_size": _safe_int(config.get("pron_chunk_size"), default=0) or _safe_int(config.get("sentence_chunk_size"), default=0),
+        "chunk_size": _safe_int(config.get("pron_chunk_size"), default=0)
+        or _safe_int(config.get("sentence_chunk_size"), default=0),
         "batch_size": _safe_int(config.get("tts_commit_chunk"), default=0),
         "retry_count": retry_count,
         "rate_limit_hits": rate_limit_hits,
@@ -278,7 +292,9 @@ def _evaluate_required_stage(stage_name: str, snapshot: dict[str, Any]) -> dict[
             "observed": float(snapshot["duration_ms"]),
             "pass_threshold": pass_duration,
             "warn_threshold": warn_duration,
-            "status": _classify_upper_is_bad(float(snapshot["duration_ms"]), pass_duration, warn_duration),
+            "status": _classify_upper_is_bad(
+                float(snapshot["duration_ms"]), pass_duration, warn_duration
+            ),
         }
     )
     checks.append(
@@ -287,7 +303,9 @@ def _evaluate_required_stage(stage_name: str, snapshot: dict[str, Any]) -> dict[
             "observed": float(snapshot["throughput_rows_per_sec"]),
             "pass_threshold": pass_throughput,
             "warn_threshold": warn_throughput,
-            "status": _classify_lower_is_bad(float(snapshot["throughput_rows_per_sec"]), pass_throughput, warn_throughput),
+            "status": _classify_lower_is_bad(
+                float(snapshot["throughput_rows_per_sec"]), pass_throughput, warn_throughput
+            ),
         }
     )
     checks.append(
@@ -296,7 +314,9 @@ def _evaluate_required_stage(stage_name: str, snapshot: dict[str, Any]) -> dict[
             "observed": int(snapshot["processed_count"]),
             "pass_threshold": pass_processed,
             "warn_threshold": warn_processed,
-            "status": _classify_lower_is_bad(float(snapshot["processed_count"]), pass_processed, warn_processed),
+            "status": _classify_lower_is_bad(
+                float(snapshot["processed_count"]), pass_processed, warn_processed
+            ),
         }
     )
     checks.append(
@@ -341,8 +361,13 @@ def _evaluate_deferred_stage(stage_name: str, snapshot: dict[str, Any] | None) -
     }
 
 
-def _evaluate_pipeline(artifacts: list[Path], payloads: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str, list[Path]]:
-    snapshots = [_extract_stage_snapshot(payload, artifact) for payload, artifact in zip(payloads, artifacts, strict=True)]
+def _evaluate_pipeline(
+    artifacts: list[Path], payloads: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], str, list[Path]]:
+    snapshots = [
+        _extract_stage_snapshot(payload, artifact)
+        for payload, artifact in zip(payloads, artifacts, strict=True)
+    ]
 
     latest_by_stage: dict[str, dict[str, Any]] = {}
     for snap in snapshots:
@@ -470,7 +495,9 @@ def _write_markdown_report(
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _print_console_summary(*, stage_rows: list[dict[str, Any]], overall_status: str, report_path: Path) -> None:
+def _print_console_summary(
+    *, stage_rows: list[dict[str, Any]], overall_status: str, report_path: Path
+) -> None:
     print("Pipeline stage budget checker")
     for row in stage_rows:
         if row["deferred"]:
@@ -491,7 +518,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--artifacts", nargs="+", help="Explicit artifact paths.")
     parser.add_argument("--glob", dest="glob", default=None, help="Glob pattern for artifacts.")
     parser.add_argument("--dir", dest="dir", default=None, help="Directory to scan for artifacts.")
-    parser.add_argument("--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts after sorting.")
+    parser.add_argument(
+        "--take", type=int, default=DEFAULT_TAKE, help="Use N most recent artifacts after sorting."
+    )
     parser.add_argument(
         "--report-path",
         default=str(DEFAULT_REPORT_PATH),
@@ -516,7 +545,9 @@ def run(argv: list[str] | None = None) -> int:
             stage_rows=stage_rows,
             overall_status=overall_status,
         )
-        _print_console_summary(stage_rows=stage_rows, overall_status=overall_status, report_path=report_path)
+        _print_console_summary(
+            stage_rows=stage_rows, overall_status=overall_status, report_path=report_path
+        )
         if overall_status == "PASS":
             return 0
         if overall_status == "WARN":
@@ -541,4 +572,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

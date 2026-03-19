@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -31,10 +29,10 @@ class EditPronunciationDialog(QDialog):
         src_lang: str,
         src_norm: str,
         src_text: str,
-        niqqud_text: Optional[str],
-        ipa: Optional[str],
-        reading_text: Optional[str],
-        notes: Optional[str],
+        niqqud_text: str | None,
+        ipa: str | None,
+        reading_text: str | None,
+        notes: str | None,
         is_override: bool,
         parent=None,
     ):
@@ -45,7 +43,9 @@ class EditPronunciationDialog(QDialog):
         self.setMinimumWidth(520)
 
         root = QVBoxLayout(self)
-        head = QLabel(f"<b>Source:</b> {src_text}<br><b>Lang:</b> {src_lang}<br><b>Norm:</b> {src_norm}")
+        head = QLabel(
+            f"<b>Source:</b> {src_text}<br><b>Lang:</b> {src_lang}<br><b>Norm:</b> {src_norm}"
+        )
         head.setWordWrap(True)
         root.addWidget(head)
 
@@ -78,7 +78,9 @@ class EditPronunciationDialog(QDialog):
         controls.addStretch()
         root.addLayout(controls)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         save_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         save_btn.setText("Save")
         save_btn.setDefault(True)
@@ -117,15 +119,18 @@ class EditPronunciationDialog(QDialog):
         self.accept()
 
     def _refresh_preview(self):
-        candidate = (self.niqqud_edit.text() or "").strip() or (self.reading_edit.text() or "").strip() or self._source_text
+        candidate = (
+            (self.niqqud_edit.text() or "").strip()
+            or (self.reading_edit.text() or "").strip()
+            or self._source_text
+        )
         strict = self.override_checkbox.isChecked()
         result = PronunciationQualityService.normalize_field(candidate, strict=strict)
         if result.is_valid and result.value:
             self.preview_label.setText(f"<b>What will be spoken:</b> {result.value}")
             if result.qc_flag:
                 self.warning_label.setText(
-                    "Input was auto-fixed for playback safety "
-                    f"(qc={result.qc_flag})."
+                    "Input was auto-fixed for playback safety " f"(qc={result.qc_flag})."
                 )
             else:
                 self.warning_label.setText("")
@@ -146,7 +151,9 @@ def show_edit_pronunciation_dialog(
     src_norm_clean = (src_norm or "").strip()
     src_text_clean = (src_text or "").strip()
     if not src_lang_clean or not src_norm_clean:
-        QMessageBox.warning(parent, "Edit Pronunciation", "Cannot edit pronunciation: invalid source payload.")
+        QMessageBox.warning(
+            parent, "Edit Pronunciation", "Cannot edit pronunciation: invalid source payload."
+        )
         return False
 
     db_service = DBService.get_instance()

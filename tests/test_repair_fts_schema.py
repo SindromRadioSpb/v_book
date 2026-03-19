@@ -57,7 +57,9 @@ def _inject_sentence_fts_duplicates(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute("PRAGMA writable_schema=ON")
-        for name in ["sentence_fts"] + [f"sentence_fts{suffix}" for suffix in repair_mod.FTS_SHADOW_SUFFIXES]:
+        for name in ["sentence_fts"] + [
+            f"sentence_fts{suffix}" for suffix in repair_mod.FTS_SHADOW_SUFFIXES
+        ]:
             conn.execute(
                 """
                 INSERT INTO sqlite_master(type, name, tbl_name, rootpage, sql)
@@ -129,7 +131,9 @@ def test_repair_fts_schema_repairs_duplicate_sentence_fts_entries(tmp_path: Path
         term_fts_count = conn.execute("SELECT COUNT(*) FROM term_fts").fetchone()[0]
         assert term_count == term_fts_count
 
-        conn.execute("SELECT sentence_id FROM sentence_fts WHERE sentence_fts MATCH 'hello'").fetchall()
+        conn.execute(
+            "SELECT sentence_id FROM sentence_fts WHERE sentence_fts MATCH 'hello'"
+        ).fetchall()
         conn.execute("SELECT term_rowid FROM term_fts WHERE term_fts MATCH 'shalom'").fetchall()
     finally:
         conn.close()

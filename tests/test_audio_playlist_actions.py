@@ -85,7 +85,9 @@ def test_add_selected_items_to_playlist_refreshes_audio_panel(monkeypatch):
             return None
 
     monkeypatch.setattr("app.ui.widgets.audio_player_panel.AddQueueToPlaylistDialog", _Dialog)
-    monkeypatch.setattr("app.ui.audio_playlist_actions.QMessageBox.information", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.ui.audio_playlist_actions.QMessageBox.information", lambda *_a, **_k: None
+    )
     monkeypatch.setattr("app.ui.audio_playlist_actions.QMessageBox.warning", lambda *_a, **_k: None)
 
     ok = add_selected_items_to_playlist_dialog(

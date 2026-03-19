@@ -24,7 +24,9 @@ def in_memory_session():
 
     # Create mt_usage table
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE mt_usage (
                 usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider_id TEXT NOT NULL,
@@ -36,7 +38,9 @@ def in_memory_session():
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(provider_id, period_type, period_key)
             )
-        """))
+        """
+            )
+        )
         conn.commit()
 
     SessionLocal = sessionmaker(bind=engine)

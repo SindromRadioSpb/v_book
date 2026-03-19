@@ -64,7 +64,9 @@ def test_settings_persistence():
     settings.set_value("tm_panel/page_size", 100)
     settings.set_value("tm_panel/sort_column", "updated_at")
     settings.set_value("tm_panel/sort_direction", "desc")
-    print("  [OK] Reset to defaults: page_size=100, sort_column='updated_at', sort_direction='desc'")
+    print(
+        "  [OK] Reset to defaults: page_size=100, sort_column='updated_at', sort_direction='desc'"
+    )
 
     print("\n" + "=" * 60)
     print("[OK] ALL TESTS PASSED")

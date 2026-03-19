@@ -6,14 +6,14 @@ Tests conflict resolution policies:
 - keep_both_as_variants: Keep both as separate entries
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
-from app.services.dictionary_import_service import DictionaryImportService
 from app.services.db_service import DBService
+from app.services.dictionary_import_service import DictionaryImportService
 
 
 class TestConflictPolicies(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestConflictPolicies(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.close()
@@ -43,7 +43,7 @@ class TestConflictPolicies(unittest.TestCase):
 
     def setUp(self):
         """Clean tables."""
-        from app.infra.sa_models import DictSource, DictEntry
+        from app.infra.sa_models import DictEntry, DictSource
 
         with self.db_service.get_session() as session:
             session.query(DictEntry).delete()
@@ -53,12 +53,12 @@ class TestConflictPolicies(unittest.TestCase):
     def test_conflict_skip(self):
         """Test skip policy: conflicts are skipped."""
         # Create first import
-        csv1 = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv1 = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8")
         csv1.write("בית,дом\n")
         csv1.close()
 
         # Create second import with different translation
-        csv2 = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv2 = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8")
         csv2.write("בית,здание\n")  # Different translation
         csv2.close()
 
@@ -90,7 +90,9 @@ class TestConflictPolicies(unittest.TestCase):
     def test_conflict_skip_within_file(self):
         """Test skip policy with duplicates in same file."""
         # Create CSV with duplicate src_text (different translation)
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("src_text,translation\n")
         csv_file.write("בית,дом\n")
         csv_file.write("בית,здание\n")  # Duplicate with different translation
@@ -127,7 +129,9 @@ class TestConflictPolicies(unittest.TestCase):
 
     def test_conflict_overwrite(self):
         """Test overwrite policy: conflicts are overwritten."""
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("src_text,translation,pos\n")
         csv_file.write("בית,дом,NOUN\n")
         csv_file.write("בית,здание,NOUN\n")  # Overwrite with different translation
@@ -164,7 +168,9 @@ class TestConflictPolicies(unittest.TestCase):
 
     def test_conflict_keep_both(self):
         """Test keep_both_as_variants policy: both entries kept."""
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("src_text,translation\n")
         csv_file.write("בית,дом\n")
         csv_file.write("בית,здание\n")  # Keep both as variants
@@ -204,7 +210,9 @@ class TestConflictPolicies(unittest.TestCase):
 
     def test_duplicate_same_translation_skipped(self):
         """Test that duplicate with same translation is skipped."""
-        csv_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        csv_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
+        )
         csv_file.write("src_text,translation\n")
         csv_file.write("בית,дом\n")
         csv_file.write("בית,дом\n")  # Exact duplicate

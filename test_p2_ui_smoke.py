@@ -6,11 +6,12 @@ Quick smoke tests to ensure:
 - No import errors or missing dependencies
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
+
 from PyQt6.QtWidgets import QApplication
 
 # Ensure single QApplication instance
@@ -30,12 +31,15 @@ class TestP2UISmoke(unittest.TestCase):
 
         # Apply schema
         from app.services.db_service import DBService
+
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 + P2 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -46,7 +50,7 @@ class TestP2UISmoke(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -65,17 +69,20 @@ class TestP2UISmoke(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         os.unlink(cls.test_db.name)
 
     def test_import_translation_management_panel(self):
         """Test that TranslationManagementPanel can be imported."""
         from app.ui.translation_management_panel import TranslationManagementPanel
+
         self.assertIsNotNone(TranslationManagementPanel)
 
     def test_import_coverage_panel(self):
         """Test that CoveragePanel can be imported."""
         from app.ui.coverage_panel import CoveragePanel
+
         self.assertIsNotNone(CoveragePanel)
 
     def test_instantiate_translation_management_panel(self):

@@ -1,21 +1,22 @@
 """Test script for M3 - NLP Pipeline (requires Stanza)."""
-import sys
+
 import io
+import sys
 from pathlib import Path
 
 # Fix Windows console encoding
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
-from app.services.project_service import ProjectService
 from app.services.ingest_service import IngestService
 from app.services.process_service import ProcessService
+from app.services.project_service import ProjectService
 
 
 def create_sample_hebrew_file(test_dir: Path) -> Path:
@@ -34,7 +35,7 @@ def create_sample_hebrew_file(test_dir: Path) -> Path:
         "Hello world! This is a sample text in Hebrew.\n"
         "This text contains a few simple sentences.\n"
         "The school is located in the city.",
-        encoding='utf-8'
+        encoding="utf-8",
     )
 
     return txt_file
@@ -72,9 +73,7 @@ def test_m3():
 
     with project_service.db_service.get_session() as session:
         project = project_service.create_project(
-            session,
-            name="M3 NLP Test Project",
-            description="Testing NLP pipeline with Stanza"
+            session, name="M3 NLP Test Project", description="Testing NLP pipeline with Stanza"
         )
         print(f"   [+] Created project: {project.name} (ID: {project.project_id})")
 
@@ -92,10 +91,7 @@ def test_m3():
 
     with ingest_service.db_service.get_session() as session:
         doc = ingest_service.import_document(
-            session,
-            corpus_id=corpus.corpus_id,
-            file_path=sample_file,
-            use_ocr=False
+            session, corpus_id=corpus.corpus_id, file_path=sample_file, use_ocr=False
         )
         doc_id = doc.doc_id  # Save for later use
         print(f"   [+] Document imported (ID: {doc.doc_id})")
@@ -109,10 +105,7 @@ def test_m3():
 
     with process_service.db_service.get_session() as session:
         success = process_service.process_document(
-            session,
-            doc_id=doc.doc_id,
-            use_gpu=False,
-            use_mock=True  # Use mock engine for testing
+            session, doc_id=doc.doc_id, use_gpu=False, use_mock=True  # Use mock engine for testing
         )
 
         if success:
@@ -120,6 +113,7 @@ def test_m3():
 
             # Get updated document
             from app.infra.sa_models import SourceDocument
+
             doc = session.get(SourceDocument, doc.doc_id)
             print(f"       - New status: {doc.status}")
             print(f"       - Processed at: {doc.processed_at}\n")
@@ -137,22 +131,25 @@ def test_m3():
         if doc.sentence_count > 0:
             print(f"   [+] Sentence count: {doc.sentence_count}")
         else:
-            print(f"   [X] WARNING: sentence_count is 0 (expected > 0)")
+            print("   [X] WARNING: sentence_count is 0 (expected > 0)")
 
         if doc.token_count > 0:
             print(f"   [+] Token count: {doc.token_count}")
         else:
-            print(f"   [X] WARNING: token_count is 0 (expected > 0)")
+            print("   [X] WARNING: token_count is 0 (expected > 0)")
 
     # Check sentences
     print("\n6. Checking stored sentences...")
     with process_service.db_service.get_session() as session:
         from sqlalchemy import select
+
         from app.infra.sa_models import DocumentSentence
 
-        stmt = select(DocumentSentence).where(
-            DocumentSentence.doc_id == doc.doc_id
-        ).order_by(DocumentSentence.sent_index)
+        stmt = (
+            select(DocumentSentence)
+            .where(DocumentSentence.doc_id == doc.doc_id)
+            .order_by(DocumentSentence.sent_index)
+        )
 
         sentences = session.execute(stmt).scalars().all()
         print(f"   [+] Total sentences: {len(sentences)}")
@@ -167,19 +164,18 @@ def test_m3():
         from app.infra.sa_models import Lemma, LemmaProjectStat
 
         # Get top lemmas
-        stmt = select(Lemma, LemmaProjectStat).join(
-            LemmaProjectStat,
-            Lemma.lemma_id == LemmaProjectStat.lemma_id
-        ).where(
-            Lemma.project_id == project.project_id
-        ).order_by(
-            LemmaProjectStat.freq_abs.desc()
-        ).limit(10)
+        stmt = (
+            select(Lemma, LemmaProjectStat)
+            .join(LemmaProjectStat, Lemma.lemma_id == LemmaProjectStat.lemma_id)
+            .where(Lemma.project_id == project.project_id)
+            .order_by(LemmaProjectStat.freq_abs.desc())
+            .limit(10)
+        )
 
         results = session.execute(stmt).all()
 
         print(f"   [+] Total unique lemmas: {len(results)}")
-        print(f"   [+] Top 10 lemmas by frequency:\n")
+        print("   [+] Top 10 lemmas by frequency:\n")
 
         for lemma, stat in results:
             print(f"       {lemma.lemma_text:20s} | POS: {lemma.pos:6s} | Freq: {stat.freq_abs:3d}")
@@ -191,9 +187,12 @@ def test_m3():
     with process_service.db_service.get_session() as session:
         from app.infra.sa_models import ProcessorRun
 
-        stmt = select(ProcessorRun).where(
-            ProcessorRun.project_id == project.project_id
-        ).order_by(ProcessorRun.run_id.desc()).limit(1)
+        stmt = (
+            select(ProcessorRun)
+            .where(ProcessorRun.project_id == project.project_id)
+            .order_by(ProcessorRun.run_id.desc())
+            .limit(1)
+        )
 
         run = session.execute(stmt).scalar_one_or_none()
 
@@ -237,5 +236,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n[X] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

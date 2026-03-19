@@ -3,17 +3,16 @@
 Free, no API key required, but rate-limited.
 """
 
-import time
 import logging
-from typing import Optional
+import time
 
 from deep_translator import GoogleTranslator
 
 from ..base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 
 logger = logging.getLogger(__name__)

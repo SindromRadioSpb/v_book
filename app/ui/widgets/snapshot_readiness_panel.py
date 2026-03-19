@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
@@ -28,7 +27,7 @@ class SnapshotReadinessPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._summary: Optional[SnapshotReadinessSummaryDTO] = None
+        self._summary: SnapshotReadinessSummaryDTO | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -91,8 +90,12 @@ class SnapshotReadinessPanel(QWidget):
         metrics_layout.setHorizontalSpacing(24)
         metrics_layout.setVerticalSpacing(6)
         self.doc_coverage_value = self._make_metric_value(metrics_layout, 0, 0, "Doc coverage")
-        self.sentence_coverage_value = self._make_metric_value(metrics_layout, 0, 1, "Sentence coverage")
-        self.fully_covered_value = self._make_metric_value(metrics_layout, 1, 0, "Fully covered docs")
+        self.sentence_coverage_value = self._make_metric_value(
+            metrics_layout, 0, 1, "Sentence coverage"
+        )
+        self.fully_covered_value = self._make_metric_value(
+            metrics_layout, 1, 0, "Fully covered docs"
+        )
         self.remaining_value = self._make_metric_value(metrics_layout, 1, 1, "Remaining uncovered")
         card_layout.addLayout(metrics_layout)
 
@@ -201,7 +204,9 @@ class SnapshotReadinessPanel(QWidget):
         if summary.latest_backfill_last_doc_id is not None:
             latest_bits.append(f"last doc {summary.latest_backfill_last_doc_id}")
         if summary.latest_backfill_finished_at:
-            latest_bits.append(f"finished {self._format_timestamp(summary.latest_backfill_finished_at)}")
+            latest_bits.append(
+                f"finished {self._format_timestamp(summary.latest_backfill_finished_at)}"
+            )
         if summary.latest_backfill_docs_total:
             latest_bits.append(
                 f"docs {summary.latest_backfill_docs_processed:,}/{summary.latest_backfill_docs_total:,}"
@@ -218,29 +223,29 @@ class SnapshotReadinessPanel(QWidget):
         self.note_label.setText("\n".join(note_lines) if note_lines else "")
         self.refresh_staleness()
 
-    def refresh_staleness(self, now: Optional[datetime] = None) -> None:
+    def refresh_staleness(self, now: datetime | None = None) -> None:
         if self._summary is None:
             return
         refreshed_text = self._format_relative_refresh(self._summary.last_refreshed_at, now=now)
         self.status_label.setText(refreshed_text)
 
     @staticmethod
-    def _format_pct(value: Optional[float]) -> str:
+    def _format_pct(value: float | None) -> str:
         if value is None:
             return "—"
         return f"{float(value):.2f}%"
 
     @staticmethod
-    def _parse_utc_timestamp(value: Optional[str]) -> Optional[datetime]:
+    def _parse_utc_timestamp(value: str | None) -> datetime | None:
         if not value:
             return None
         try:
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(UTC)
         except Exception:
             return None
 
     @classmethod
-    def _format_timestamp(cls, value: Optional[str]) -> str:
+    def _format_timestamp(cls, value: str | None) -> str:
         parsed = cls._parse_utc_timestamp(value)
         if parsed is None:
             return str(value or "n/a")
@@ -249,14 +254,14 @@ class SnapshotReadinessPanel(QWidget):
     @classmethod
     def _format_relative_refresh(
         cls,
-        value: Optional[str],
+        value: str | None,
         *,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> str:
         parsed = cls._parse_utc_timestamp(value)
         if parsed is None:
             return "Refreshed: n/a"
-        current = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
+        current = now.astimezone(UTC) if now is not None else datetime.now(UTC)
         delta_seconds = max(int((current - parsed).total_seconds()), 0)
         if delta_seconds < 10:
             rel = "just now"

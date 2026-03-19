@@ -17,6 +17,7 @@ from datetime import datetime
 
 # Import functions from extraction script
 import sys
+
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root / "scripts" / "ref_corpora"))
 
@@ -224,16 +225,18 @@ class TestJSONLRecordFormat:
 
     def test_valid_jsonl_record(self):
         """Test parsing a valid JSONL record."""
-        record_str = json.dumps({
-            "doc_id": "test_123",
-            "title": "Test Article",
-            "url": "https://he.wikipedia.org/wiki?curid=123",
-            "language": "he",
-            "text": "Test content",
-            "source": "hewiki",
-            "dump": "hewiki-20260201.xml.bz2",
-            "extracted_at": "2026-02-07T05:00:00Z",
-        })
+        record_str = json.dumps(
+            {
+                "doc_id": "test_123",
+                "title": "Test Article",
+                "url": "https://he.wikipedia.org/wiki?curid=123",
+                "language": "he",
+                "text": "Test content",
+                "source": "hewiki",
+                "dump": "hewiki-20260201.xml.bz2",
+                "extracted_at": "2026-02-07T05:00:00Z",
+            }
+        )
 
         record = json.loads(record_str)
 
@@ -246,11 +249,14 @@ class TestJSONLRecordFormat:
 
     def test_jsonl_unicode_handling(self):
         """Test Unicode (Hebrew) in JSONL record."""
-        record_str = json.dumps({
-            "doc_id": "מתמטיקה",
-            "title": "מתמטיקה",
-            "text": "מָתֵמָטִיקָה היא תחום דעת",
-        }, ensure_ascii=False)
+        record_str = json.dumps(
+            {
+                "doc_id": "מתמטיקה",
+                "title": "מתמטיקה",
+                "text": "מָתֵמָטִיקָה היא תחום דעת",
+            },
+            ensure_ascii=False,
+        )
 
         record = json.loads(record_str)
 

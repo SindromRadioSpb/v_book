@@ -39,7 +39,7 @@ def main():
     cursor.execute(
         "SELECT lemma_id, lemma_text, norm_text, is_noise FROM lemma "
         "WHERE project_id=? AND lemma_text=?",
-        (project_id, "תתקש")
+        (project_id, "תתקש"),
     )
     lemma = cursor.fetchone()
 
@@ -55,7 +55,7 @@ def main():
         cursor.execute(
             "SELECT tm_id, src_text, src_norm, is_noise, lemma_id FROM tm_entry "
             "WHERE project_id=? AND kind='lemma' AND src_text=?",
-            (project_id, lemma_text)
+            (project_id, lemma_text),
         )
         tm_by_text = cursor.fetchall()
 
@@ -66,17 +66,20 @@ def main():
             print(f"    src_text: {src_text}")
             print(f"    src_norm: {src_norm}")
             print(f"    is_noise: {tm_is_noise} ({'NOISE' if tm_is_noise == 1 else 'VALID'})")
-            print(f"    lemma_id: {linked_lemma_id} ({'LINKED' if linked_lemma_id else 'NOT LINKED'})")
+            print(
+                f"    lemma_id: {linked_lemma_id} ({'LINKED' if linked_lemma_id else 'NOT LINKED'})"
+            )
 
             if tm_is_noise != is_noise:
-                print(f"    >>> SYNC ISSUE: Lemma is_noise={is_noise}, TMEntry is_noise={tm_is_noise}")
+                print(
+                    f"    >>> SYNC ISSUE: Lemma is_noise={is_noise}, TMEntry is_noise={tm_is_noise}"
+                )
             if not linked_lemma_id:
                 print(f"    >>> LINK ISSUE: TMEntry not linked to lemma (lemma_id is NULL)")
 
         # Check TMEntry by lemma_id
         cursor.execute(
-            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?",
-            (lemma_id,)
+            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,)
         )
         tm_by_id = cursor.fetchall()
 
@@ -94,7 +97,7 @@ def main():
     cursor.execute(
         "SELECT cluster_id, representative_he, norm_text, is_noise FROM term_cluster "
         "WHERE project_id=? AND representative_he=?",
-        (project_id, "תשובה ג")
+        (project_id, "תשובה ג"),
     )
     cluster = cursor.fetchone()
 
@@ -110,7 +113,7 @@ def main():
         cursor.execute(
             "SELECT tm_id, src_text, src_norm, is_noise, cluster_id FROM tm_entry "
             "WHERE project_id=? AND kind='term_cluster' AND src_text=?",
-            (project_id, repr_he)
+            (project_id, repr_he),
         )
         tm_by_text = cursor.fetchall()
 
@@ -121,17 +124,20 @@ def main():
             print(f"    src_text: {src_text}")
             print(f"    src_norm: {src_norm}")
             print(f"    is_noise: {tm_is_noise} ({'NOISE' if tm_is_noise == 1 else 'VALID'})")
-            print(f"    cluster_id: {linked_cluster_id} ({'LINKED' if linked_cluster_id else 'NOT LINKED'})")
+            print(
+                f"    cluster_id: {linked_cluster_id} ({'LINKED' if linked_cluster_id else 'NOT LINKED'})"
+            )
 
             if tm_is_noise != is_noise:
-                print(f"    >>> SYNC ISSUE: Cluster is_noise={is_noise}, TMEntry is_noise={tm_is_noise}")
+                print(
+                    f"    >>> SYNC ISSUE: Cluster is_noise={is_noise}, TMEntry is_noise={tm_is_noise}"
+                )
             if not linked_cluster_id:
                 print(f"    >>> LINK ISSUE: TMEntry not linked to cluster (cluster_id is NULL)")
 
         # Check TMEntry by cluster_id
         cursor.execute(
-            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE cluster_id=?",
-            (cluster_id,)
+            "SELECT tm_id, src_text, is_noise FROM tm_entry WHERE cluster_id=?", (cluster_id,)
         )
         tm_by_id = cursor.fetchall()
 
@@ -149,25 +155,23 @@ def main():
     # Count total unlinked TMEntry records
     cursor.execute(
         "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma' AND lemma_id IS NULL",
-        (project_id,)
+        (project_id,),
     )
     unlinked_lemmas = cursor.fetchone()[0]
 
     cursor.execute(
         "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster' AND cluster_id IS NULL",
-        (project_id,)
+        (project_id,),
     )
     unlinked_clusters = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma'",
-        (project_id,)
+        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='lemma'", (project_id,)
     )
     total_lemma_tm = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster'",
-        (project_id,)
+        "SELECT COUNT(*) FROM tm_entry WHERE project_id=? AND kind='term_cluster'", (project_id,)
     )
     total_cluster_tm = cursor.fetchone()[0]
 

@@ -1,4 +1,5 @@
 """Normalization rules (M3)."""
+
 import logging
 
 logger = logging.getLogger(__name__)

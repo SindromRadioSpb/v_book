@@ -9,10 +9,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
 
 from app.infra.resource_paths import ResourcePaths
 
@@ -44,10 +44,10 @@ class PhonikudHealthReport:
     latency_ms: int
     model_path: str
     details: str
-    samples: List[Dict[str, str]]
+    samples: list[dict[str, str]]
     cancelled: bool = False
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
@@ -62,7 +62,7 @@ class PhonikudAdapter:
     def __init__(
         self,
         *,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         enabled: bool = True,
         module_name: str = "phonikud",
     ):
@@ -86,21 +86,29 @@ class PhonikudAdapter:
         resolved = self._resolve_model_path()
         return resolved or ""
 
-    def _resolve_model_path(self) -> Optional[str]:
+    def _resolve_model_path(self) -> str | None:
         direct = self._first_existing_model_candidate([self.model_path])
         if direct:
             return direct
-        env_candidate = self._first_existing_model_candidate([os.getenv("PHONIKUD_MODEL_PATH") or ""])
+        env_candidate = self._first_existing_model_candidate(
+            [os.getenv("PHONIKUD_MODEL_PATH") or ""]
+        )
         if env_candidate:
             return env_candidate
-        settings_candidate = self._first_existing_model_candidate([self._load_settings_model_path()])
+        settings_candidate = self._first_existing_model_candidate(
+            [self._load_settings_model_path()]
+        )
         if settings_candidate:
             return settings_candidate
         discovered = self._discover_default_model_path()
         if discovered:
             return discovered
 
-        for fallback in (self.model_path, os.getenv("PHONIKUD_MODEL_PATH") or "", self._load_settings_model_path()):
+        for fallback in (
+            self.model_path,
+            os.getenv("PHONIKUD_MODEL_PATH") or "",
+            self._load_settings_model_path(),
+        ):
             cleaned = self._sanitize_model_path(fallback)
             if cleaned:
                 return cleaned
@@ -117,7 +125,7 @@ class PhonikudAdapter:
             return ""
 
     @staticmethod
-    def _resolve_models_root() -> Optional[Path]:
+    def _resolve_models_root() -> Path | None:
         try:
             from app.infra.settings import SettingsService
 
@@ -133,7 +141,7 @@ class PhonikudAdapter:
     def _resolve_bundled_models_root() -> Path:
         return ResourcePaths.resolve_bundled_resources_root() / "models"
 
-    def _discover_default_model_path(self) -> Optional[str]:
+    def _discover_default_model_path(self) -> str | None:
         for models_root in (self._resolve_models_root(), self._resolve_bundled_models_root()):
             if models_root is None:
                 continue
@@ -148,7 +156,7 @@ class PhonikudAdapter:
                 return str(regular[0])
         return None
 
-    def _first_existing_model_candidate(self, values: List[str]) -> Optional[str]:
+    def _first_existing_model_candidate(self, values: list[str]) -> str | None:
         for value in values:
             candidate = self._expand_model_candidate(value)
             if candidate and Path(candidate).exists():
@@ -178,7 +186,7 @@ class PhonikudAdapter:
             return ""
         return text.strip("\"'").rstrip(" .")
 
-    def _expand_model_candidate(self, value: str) -> Optional[str]:
+    def _expand_model_candidate(self, value: str) -> str | None:
         cleaned = self._sanitize_model_path(value)
         if not cleaned:
             return None
@@ -203,7 +211,9 @@ class PhonikudAdapter:
                 reset_fn()
                 return
             except Exception:
-                logger.debug("Phonikud module cache reset failed via reset_runtime_cache", exc_info=True)
+                logger.debug(
+                    "Phonikud module cache reset failed via reset_runtime_cache", exc_info=True
+                )
         cached_loader = getattr(self._module, "_load_model_bundle", None)
         cache_clear = getattr(cached_loader, "cache_clear", None)
         if callable(cache_clear):
@@ -286,7 +296,7 @@ class PhonikudAdapter:
         self._ensure_loaded()
         return self._callable is not None
 
-    def infer(self, texts: List[str]) -> Dict[str, str]:
+    def infer(self, texts: list[str]) -> dict[str, str]:
         if self._health_blocked:
             normalized = [str(text or "").strip() for text in (texts or [])]
             return {text: text for text in normalized if text}
@@ -300,7 +310,7 @@ class PhonikudAdapter:
             self._last_mode = PhonikudMode.ERROR
             return {text: text for text in normalized}
 
-        outputs: Dict[str, str] = {}
+        outputs: dict[str, str] = {}
         changed_any = False
         if self._batch_callable is not None:
             try:
@@ -315,7 +325,9 @@ class PhonikudAdapter:
                 else:
                     raise RuntimeError("batch output length mismatch")
             except Exception as exc:
-                logger.debug("Phonikud batch inference failed, falling back to single-call mode: %s", exc)
+                logger.debug(
+                    "Phonikud batch inference failed, falling back to single-call mode: %s", exc
+                )
                 outputs.clear()
                 changed_any = False
 
@@ -326,7 +338,9 @@ class PhonikudAdapter:
             elif module_mode == PhonikudMode.REAL_INFERENCE:
                 self._last_mode = PhonikudMode.REAL_INFERENCE
             else:
-                self._last_mode = PhonikudMode.REAL_INFERENCE if changed_any else PhonikudMode.FALLBACK
+                self._last_mode = (
+                    PhonikudMode.REAL_INFERENCE if changed_any else PhonikudMode.FALLBACK
+                )
             return outputs
 
         for text in normalized:
@@ -358,7 +372,7 @@ class PhonikudAdapter:
     def _is_frozen_windows_runtime() -> bool:
         return os.name == "nt" and bool(getattr(sys, "frozen", False))
 
-    def _resolve_frozen_probe_executable(self) -> Optional[Path]:
+    def _resolve_frozen_probe_executable(self) -> Path | None:
         if not self._is_frozen_windows_runtime():
             return None
         try:
@@ -379,8 +393,8 @@ class PhonikudAdapter:
         *,
         mode: str,
         timeout_ms: int,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, object]:
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
         helper_path = self._resolve_frozen_probe_executable()
         script_path = None if helper_path is not None else self._resolve_probe_script()
         if helper_path is not None:
@@ -462,7 +476,9 @@ class PhonikudAdapter:
                     payload.setdefault("mode", mode)
                     payload.setdefault("stage", "probe")
                     if proc.returncode != 0 and not str(payload.get("error") or "").strip():
-                        payload["error"] = payload["stderr"] or f"Helper exited with code {proc.returncode}"
+                        payload["error"] = (
+                            payload["stderr"] or f"Helper exited with code {proc.returncode}"
+                        )
                     return payload
 
                 elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -490,8 +506,8 @@ class PhonikudAdapter:
     def _health_from_probe_payload(
         self,
         *,
-        payload: Dict[str, object],
-        sample_texts: List[str],
+        payload: dict[str, object],
+        sample_texts: list[str],
         started_at: float,
         timeout_ms: int,
     ) -> PhonikudHealthReport:
@@ -501,7 +517,9 @@ class PhonikudAdapter:
         error_text = str(payload.get("error") or "").strip()
         details_text = str(payload.get("details") or "").strip()
         stderr_text = str(payload.get("stderr") or "").strip()
-        sample_output = str(payload.get("sample_output") or (sample_texts[0] if sample_texts else "")).strip()
+        sample_output = str(
+            payload.get("sample_output") or (sample_texts[0] if sample_texts else "")
+        ).strip()
         sample_input = sample_texts[0] if sample_texts else ""
         model_path = self.model_path_safe()
 
@@ -532,7 +550,9 @@ class PhonikudAdapter:
                 samples=[{"input": sample_input, "output": sample_output or sample_input}],
             )
 
-        merged_details = ". ".join(part for part in (error_text, details_text, stderr_text) if part).strip()
+        merged_details = ". ".join(
+            part for part in (error_text, details_text, stderr_text) if part
+        ).strip()
         if timed_out:
             self._last_mode = PhonikudMode.ERROR
             self._load_error = error_text or "Health check timed out"
@@ -566,16 +586,18 @@ class PhonikudAdapter:
 
     def health_check(
         self,
-        sample_texts: Optional[List[str]] = None,
+        sample_texts: list[str] | None = None,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
         timeout_ms: int = _HEALTH_TIMEOUT_MS,
     ) -> PhonikudHealthReport:
         samples = sample_texts or ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"]
         resolved_path = self._sanitize_model_path(self.model_path_effective)
         if resolved_path.lower().endswith(".onnx"):
             started_at = time.perf_counter()
-            payload = self._run_local_probe(mode="probe", timeout_ms=timeout_ms, cancel_check=cancel_check)
+            payload = self._run_local_probe(
+                mode="probe", timeout_ms=timeout_ms, cancel_check=cancel_check
+            )
             effective_timeout_ms = int(timeout_ms)
             if (
                 bool(payload.get("timed_out", False))
@@ -609,19 +631,21 @@ class PhonikudAdapter:
             details = self._read_module_details() or "Real inference active"
         elif mode == PhonikudMode.FALLBACK.value:
             status = PhonikudHealthStatus.FALLBACK.value
-            details = self._read_module_details() or "Fallback mode active; baseline quality may be degraded"
+            details = (
+                self._read_module_details()
+                or "Fallback mode active; baseline quality may be degraded"
+            )
         else:
             status = PhonikudHealthStatus.ERROR.value
-            details = self._read_module_details() or self._load_error or "Phonikud runtime unavailable"
+            details = (
+                self._read_module_details() or self._load_error or "Phonikud runtime unavailable"
+            )
         if mode != PhonikudMode.REAL_INFERENCE.value:
             expected_root = self._resolve_models_root()
             if expected_root is not None:
                 details = f"{details}. Expected model path: {expected_root / 'phonikud'}"
 
-        samples_payload = [
-            {"input": text, "output": outputs.get(text, text)}
-            for text in samples
-        ]
+        samples_payload = [{"input": text, "output": outputs.get(text, text)} for text in samples]
         return PhonikudHealthReport(
             mode=mode,
             status=status,

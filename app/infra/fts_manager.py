@@ -6,7 +6,7 @@ Ensures FTS5 virtual tables and triggers exist and are consistent.
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +159,7 @@ def ensure_document_name_fts_health(
         table_exists = cursor.fetchone() is not None
 
         if not table_exists:
-            logger.warning(
-                "document_name_fts missing in schema '%s', creating...", schema
-            )
+            logger.warning("document_name_fts missing in schema '%s', creating...", schema)
             conn.execute(
                 DOCUMENT_NAME_FTS_DDL.replace(
                     "document_name_fts", f"{prefix}document_name_fts"
@@ -169,16 +167,12 @@ def ensure_document_name_fts_health(
             )
             for trigger_ddl in DOCUMENT_NAME_FTS_TRIGGERS:
                 conn.execute(trigger_ddl)
-            logger.info(
-                "Created document_name_fts and triggers in schema '%s'", schema
-            )
+            logger.info("Created document_name_fts and triggers in schema '%s'", schema)
             created = True
             rebuild = True  # always rebuild after creation
 
         if rebuild:
-            row_count = conn.execute(
-                f"SELECT COUNT(*) FROM {prefix}source_document"
-            ).fetchone()[0]
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {prefix}source_document").fetchone()[0]
             if row_count > 0:
                 # Check if FTS index is already populated to avoid redundant rebuild.
                 fts_count = conn.execute(
@@ -194,9 +188,7 @@ def ensure_document_name_fts_health(
                         f"INSERT INTO {prefix}document_name_fts"
                         f"({prefix}document_name_fts) VALUES('rebuild')"
                     )
-                    logger.info(
-                        "Rebuilt document_name_fts in schema '%s'", schema
-                    )
+                    logger.info("Rebuilt document_name_fts in schema '%s'", schema)
                 else:
                     logger.debug(
                         "document_name_fts already populated (%d entries), skipping rebuild",
@@ -211,9 +203,7 @@ def ensure_document_name_fts_health(
         return {"document_name_fts": created}
 
     except Exception as e:
-        logger.error(
-            "Failed to ensure document_name_fts in schema '%s': %s", schema, e
-        )
+        logger.error("Failed to ensure document_name_fts in schema '%s': %s", schema, e)
         conn.rollback()
         raise
 
@@ -280,22 +270,21 @@ def inspect_lemma_fts_parity(
     prefix = f"{schema}." if schema != "main" else ""
     issues: list[str] = []
 
-    table_exists = conn.execute(
-        f"SELECT name FROM {schema}.sqlite_master"
-        " WHERE type='table' AND name='lemma_fts'"
-    ).fetchone() is not None
+    table_exists = (
+        conn.execute(
+            f"SELECT name FROM {schema}.sqlite_master" " WHERE type='table' AND name='lemma_fts'"
+        ).fetchone()
+        is not None
+    )
 
     trigger_rows = conn.execute(
-        f"SELECT name FROM {schema}.sqlite_master"
-        " WHERE type='trigger' AND name IN (?, ?, ?)",
+        f"SELECT name FROM {schema}.sqlite_master" " WHERE type='trigger' AND name IN (?, ?, ?)",
         LEMMA_FTS_TRIGGER_NAMES,
     ).fetchall()
     trigger_names = sorted(str(row[0]) for row in trigger_rows)
     missing_triggers = sorted(set(LEMMA_FTS_TRIGGER_NAMES) - set(trigger_names))
 
-    lemma_count = int(conn.execute(
-        f"SELECT COUNT(*) FROM {prefix}lemma"
-    ).fetchone()[0])
+    lemma_count = int(conn.execute(f"SELECT COUNT(*) FROM {prefix}lemma").fetchone()[0])
 
     lemma_fts_count: int | None
     missing_in_fts_count: int | None
@@ -306,11 +295,10 @@ def inspect_lemma_fts_parity(
     unsearchable_sample_ids: list[int] = []
 
     if table_exists:
-        lemma_fts_count = int(conn.execute(
-            f"SELECT COUNT(*) FROM {prefix}lemma_fts"
-        ).fetchone()[0])
-        missing_in_fts_count = int(conn.execute(
-            f"""
+        lemma_fts_count = int(conn.execute(f"SELECT COUNT(*) FROM {prefix}lemma_fts").fetchone()[0])
+        missing_in_fts_count = int(
+            conn.execute(
+                f"""
             SELECT COUNT(*)
             FROM {prefix}lemma AS l
             WHERE NOT EXISTS (
@@ -319,9 +307,11 @@ def inspect_lemma_fts_parity(
                 WHERE f.rowid = l.lemma_id
             )
             """
-        ).fetchone()[0])
-        extra_in_fts_count = int(conn.execute(
-            f"""
+            ).fetchone()[0]
+        )
+        extra_in_fts_count = int(
+            conn.execute(
+                f"""
             SELECT COUNT(*)
             FROM {prefix}lemma_fts AS f
             WHERE NOT EXISTS (
@@ -330,9 +320,11 @@ def inspect_lemma_fts_parity(
                 WHERE l.lemma_id = f.rowid
             )
             """
-        ).fetchone()[0])
+            ).fetchone()[0]
+        )
         sample_missing_ids = [
-            int(row[0]) for row in conn.execute(
+            int(row[0])
+            for row in conn.execute(
                 f"""
                 SELECT l.lemma_id
                 FROM {prefix}lemma AS l
@@ -348,7 +340,8 @@ def inspect_lemma_fts_parity(
             ).fetchall()
         ]
         sample_extra_rowids = [
-            int(row[0]) for row in conn.execute(
+            int(row[0])
+            for row in conn.execute(
                 f"""
                 SELECT f.rowid
                 FROM {prefix}lemma_fts AS f
@@ -398,9 +391,7 @@ def inspect_lemma_fts_parity(
     if missing_triggers:
         issues.append(f"missing_triggers:{missing_triggers}")
     if lemma_fts_count is not None and lemma_fts_count != lemma_count:
-        issues.append(
-            f"row_count_mismatch:lemma={lemma_count},lemma_fts={lemma_fts_count}"
-        )
+        issues.append(f"row_count_mismatch:lemma={lemma_count},lemma_fts={lemma_fts_count}")
     if missing_in_fts_count:
         issues.append(f"missing_rowids_in_fts:{missing_in_fts_count}")
     if extra_in_fts_count:
@@ -444,9 +435,7 @@ def rebuild_lemma_fts(
 
     try:
         for trigger_name in LEMMA_FTS_TRIGGER_NAMES:
-            qualified_trigger = (
-                f"{schema}.{trigger_name}" if schema != "main" else trigger_name
-            )
+            qualified_trigger = f"{schema}.{trigger_name}" if schema != "main" else trigger_name
             conn.execute(f"DROP TRIGGER IF EXISTS {qualified_trigger}")
 
         conn.execute(f"DROP TABLE IF EXISTS {prefix}lemma_fts")
@@ -458,19 +447,14 @@ def rebuild_lemma_fts(
         for trigger_ddl in LEMMA_FTS_TRIGGERS:
             conn.execute(trigger_ddl)
 
-        row_count = int(conn.execute(
-            f"SELECT COUNT(*) FROM {prefix}lemma"
-        ).fetchone()[0])
+        row_count = int(conn.execute(f"SELECT COUNT(*) FROM {prefix}lemma").fetchone()[0])
         if row_count > 0:
-            conn.execute(
-                f"INSERT INTO {prefix}lemma_fts(lemma_fts) VALUES('rebuild')"
-            )
+            conn.execute(f"INSERT INTO {prefix}lemma_fts(lemma_fts) VALUES('rebuild')")
 
         after = inspect_lemma_fts_parity(conn, schema=schema)
         if not after["healthy"]:
             raise RuntimeError(
-                "lemma_fts post-rebuild parity check failed: "
-                + ", ".join(after["issues"])
+                "lemma_fts post-rebuild parity check failed: " + ", ".join(after["issues"])
             )
 
         conn.commit()
@@ -503,16 +487,16 @@ def ensure_lemma_fts_health(
 
     try:
         cursor = conn.execute(
-            f"SELECT name FROM {schema}.sqlite_master"
-            " WHERE type='table' AND name='lemma_fts'"
+            f"SELECT name FROM {schema}.sqlite_master" " WHERE type='table' AND name='lemma_fts'"
         )
         table_exists = cursor.fetchone() is not None
 
         if not table_exists:
             logger.warning("lemma_fts missing in schema '%s', creating...", schema)
             conn.execute(
-                LEMMA_FTS_DDL.replace("lemma_fts", f"{prefix}lemma_fts")
-                             .replace("content=lemma", f"content={prefix}lemma")
+                LEMMA_FTS_DDL.replace("lemma_fts", f"{prefix}lemma_fts").replace(
+                    "content=lemma", f"content={prefix}lemma"
+                )
             )
             for trigger_ddl in LEMMA_FTS_TRIGGERS:
                 conn.execute(trigger_ddl)
@@ -521,13 +505,9 @@ def ensure_lemma_fts_health(
             rebuild = True
 
         if rebuild:
-            row_count = conn.execute(
-                f"SELECT COUNT(*) FROM {prefix}lemma"
-            ).fetchone()[0]
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {prefix}lemma").fetchone()[0]
             if row_count > 0:
-                fts_count = conn.execute(
-                    f"SELECT COUNT(*) FROM {prefix}lemma_fts"
-                ).fetchone()[0]
+                fts_count = conn.execute(f"SELECT COUNT(*) FROM {prefix}lemma_fts").fetchone()[0]
                 if fts_count == 0:
                     logger.info(
                         "Rebuilding lemma_fts for %d rows in schema '%s'...",
@@ -535,8 +515,7 @@ def ensure_lemma_fts_health(
                         schema,
                     )
                     conn.execute(
-                        f"INSERT INTO {prefix}lemma_fts"
-                        f"({prefix}lemma_fts) VALUES('rebuild')"
+                        f"INSERT INTO {prefix}lemma_fts" f"({prefix}lemma_fts) VALUES('rebuild')"
                     )
                     logger.info("Rebuilt lemma_fts in schema '%s'", schema)
                 else:
@@ -545,9 +524,7 @@ def ensure_lemma_fts_health(
                         fts_count,
                     )
             else:
-                logger.debug(
-                    "lemma table is empty in schema '%s', skipping FTS rebuild", schema
-                )
+                logger.debug("lemma table is empty in schema '%s', skipping FTS rebuild", schema)
 
         conn.commit()
         return {"lemma_fts": created}
@@ -654,9 +631,7 @@ def ensure_fts_tables(
             results.update(doc_fts_result)
         except Exception as doc_fts_err:
             # Non-fatal: log and continue; picker will fall back to LIKE search.
-            logger.warning(
-                "document_name_fts health check failed (non-fatal): %s", doc_fts_err
-            )
+            logger.warning("document_name_fts health check failed (non-fatal): %s", doc_fts_err)
 
         # PERF-SCALE PATCH-E: ensure lemma_fts health on every startup.
         try:
@@ -664,9 +639,7 @@ def ensure_fts_tables(
             results.update(lemma_fts_result)
         except Exception as lemma_fts_err:
             # Non-fatal: dictionary search falls back to LIKE.
-            logger.warning(
-                "lemma_fts health check failed (non-fatal): %s", lemma_fts_err
-            )
+            logger.warning("lemma_fts health check failed (non-fatal): %s", lemma_fts_err)
 
         conn.commit()
         return results
@@ -677,7 +650,9 @@ def ensure_fts_tables(
         raise
 
 
-def ensure_fts_for_db_path(db_path: str, schema: str = "main", rebuild: bool = False) -> dict[str, bool]:
+def ensure_fts_for_db_path(
+    db_path: str, schema: str = "main", rebuild: bool = False
+) -> dict[str, bool]:
     """Ensure FTS tables for a database file path.
 
     Args:

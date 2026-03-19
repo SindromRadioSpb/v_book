@@ -14,19 +14,19 @@ Glossary Support: Yes (via DeepL glossary API)
   - Requires glossary_id to be passed in request
   - For this implementation: NOT YET INTEGRATED (TODO in PATCH-P1-T05)
 """
+
 import json
 import logging
 import time
-import urllib.request
 import urllib.error
 import urllib.parse
-from typing import Optional
+import urllib.request
 
 from app.infra.translators.base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class DeepLProvider(BaseProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_url: str = "https://api-free.deepl.com/v2",
         timeout_seconds: float = 10.0,
         formality: str = "default",

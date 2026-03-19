@@ -160,15 +160,17 @@ class TestBudgetGuards:
                 max_chars_per_request=100,  # Small limit for testing
             ),
         )
-        config_mgr.get_credential.return_value = json.dumps({
-            "project_id": "test-project",
-            "private_key": "test",
-        })
+        config_mgr.get_credential.return_value = json.dumps(
+            {
+                "project_id": "test-project",
+                "private_key": "test",
+            }
+        )
 
         provider = GoogleCloudTranslateProvider(config_manager=config_mgr)
 
         # Mock client initialization
-        with patch.object(provider, '_initialize_client'):
+        with patch.object(provider, "_initialize_client"):
             provider._client = Mock()
             provider._project_id = "test-project"
 
@@ -206,10 +208,12 @@ class TestRetryPolicy:
                 use_jitter=False,  # Disable jitter for deterministic test
             ),
         )
-        config_mgr.get_credential.return_value = json.dumps({
-            "project_id": "test-project",
-            "private_key": "test",
-        })
+        config_mgr.get_credential.return_value = json.dumps(
+            {
+                "project_id": "test-project",
+                "private_key": "test",
+            }
+        )
 
         provider = GoogleCloudTranslateProvider(config_manager=config_mgr)
 
@@ -222,7 +226,7 @@ class TestRetryPolicy:
             Mock(translations=[Mock(translated_text="привет", detected_language_code="en")]),
         ]
 
-        with patch.object(provider, '_initialize_client'):
+        with patch.object(provider, "_initialize_client"):
             provider._client = mock_client
             provider._project_id = "test-project"
 
@@ -232,7 +236,7 @@ class TestRetryPolicy:
                 target_lang="ru",
             )
 
-            with patch('time.sleep'):  # Mock sleep to speed up test
+            with patch("time.sleep"):  # Mock sleep to speed up test
                 result = provider.translate(request)
 
         # Should succeed on third attempt
@@ -254,20 +258,20 @@ class TestRetryPolicy:
             ),
             retry=ProviderRetryPolicy(max_retries=1),  # Only 2 total attempts
         )
-        config_mgr.get_credential.return_value = json.dumps({
-            "project_id": "test-project",
-            "private_key": "test",
-        })
+        config_mgr.get_credential.return_value = json.dumps(
+            {
+                "project_id": "test-project",
+                "private_key": "test",
+            }
+        )
 
         provider = GoogleCloudTranslateProvider(config_manager=config_mgr)
 
         # Mock client - always return 429
         mock_client = Mock()
-        mock_client.translate_text.side_effect = google_exceptions.TooManyRequests(
-            "Rate limit"
-        )
+        mock_client.translate_text.side_effect = google_exceptions.TooManyRequests("Rate limit")
 
-        with patch.object(provider, '_initialize_client'):
+        with patch.object(provider, "_initialize_client"):
             provider._client = mock_client
             provider._project_id = "test-project"
 
@@ -277,7 +281,7 @@ class TestRetryPolicy:
                 target_lang="ru",
             )
 
-            with patch('time.sleep'):
+            with patch("time.sleep"):
                 result = provider.translate(request)
 
         assert result.is_error
@@ -307,20 +311,20 @@ class Test403Classification:
                 service_account_credential_id="test_cred_id",
             ),
         )
-        config_mgr.get_credential.return_value = json.dumps({
-            "project_id": "test-project",
-            "private_key": "test",
-        })
+        config_mgr.get_credential.return_value = json.dumps(
+            {
+                "project_id": "test-project",
+                "private_key": "test",
+            }
+        )
 
         provider = GoogleCloudTranslateProvider(config_manager=config_mgr)
 
         # Mock client - return 403
         mock_client = Mock()
-        mock_client.translate_text.side_effect = google_exceptions.PermissionDenied(
-            exception_msg
-        )
+        mock_client.translate_text.side_effect = google_exceptions.PermissionDenied(exception_msg)
 
-        with patch.object(provider, '_initialize_client'):
+        with patch.object(provider, "_initialize_client"):
             provider._client = mock_client
             provider._project_id = "test-project"
 
@@ -369,8 +373,7 @@ class TestBackoffCalculation:
         # With jitter, backoff should vary between 75% and 125% of base
         base_backoff = 1000
         backoffs = [
-            provider._calculate_backoff(0, base_backoff, 10000, use_jitter=True)
-            for _ in range(10)
+            provider._calculate_backoff(0, base_backoff, 10000, use_jitter=True) for _ in range(10)
         ]
 
         # All backoffs should be in range [750, 1250]
@@ -485,7 +488,9 @@ class TestUsageTrackingLockFallback:
 
         calls = {"flush": 0, "current": 0}
 
-        def record_spend_for_keys(self, provider_id, minute_key, day_key, month_key, char_count, request_count, commit):
+        def record_spend_for_keys(
+            self, provider_id, minute_key, day_key, month_key, char_count, request_count, commit
+        ):
             calls["flush"] += 1
             assert provider_id == "google_cloud_translate"
             assert minute_key == "2026-02-16T23:30"
@@ -494,7 +499,9 @@ class TestUsageTrackingLockFallback:
             assert char_count == 9
             assert request_count == 1
 
-        def record_spend(self, provider_id, char_count, request_count=1, timestamp_utc=None, commit=True):
+        def record_spend(
+            self, provider_id, char_count, request_count=1, timestamp_utc=None, commit=True
+        ):
             calls["current"] += 1
             assert provider_id == "google_cloud_translate"
             assert char_count == 5
@@ -548,9 +555,7 @@ class TestUsageTrackingLockFallback:
             provider._record_usage_with_fallback("trace-a", char_count=8, request_count=1)
             provider._record_usage_with_fallback("trace-b", char_count=9, request_count=1)
 
-        lock_warnings = [
-            r for r in caplog.records if "Usage DB locked; queued" in r.message
-        ]
+        lock_warnings = [r for r in caplog.records if "Usage DB locked; queued" in r.message]
         assert len(lock_warnings) == 1
         assert "8 chars" in lock_warnings[0].message
 
@@ -631,7 +636,9 @@ class TestUsageTrackingLockFallback:
 
             flushed = {"calls": 0}
 
-            def record_spend_for_keys(self, provider_id, minute_key, day_key, month_key, char_count, request_count, commit):
+            def record_spend_for_keys(
+                self, provider_id, minute_key, day_key, month_key, char_count, request_count, commit
+            ):
                 flushed["calls"] += 1
                 assert provider_id == "google_cloud_translate"
                 assert char_count == 11

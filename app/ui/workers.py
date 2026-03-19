@@ -1,10 +1,10 @@
 """Background worker threads."""
-import logging
+
 import json
+import logging
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
-from datetime import datetime
+from typing import Any, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -28,7 +28,9 @@ def _flush_mt_usage_queue(reason: str) -> None:
 def _format_heavy_operation_busy_error(operation_label: str, error: Exception) -> str:
     """Build a user-facing busy message from OperationsCenterBusyError."""
     active_ops = list(getattr(error, "active_ops", []) or [])
-    active_names = [str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)]
+    active_names = [
+        str(getattr(op, "name", "")).strip() for op in active_ops if getattr(op, "name", None)
+    ]
     active_names = [name for name in active_names if name]
     if active_names:
         details = "\n".join(f"- {name}" for name in active_names[:5])
@@ -74,7 +76,7 @@ class IngestWorker(QThread):
     finished = pyqtSignal(object)  # results list
     error = pyqtSignal(str)
 
-    def __init__(self, corpus_id: int, file_paths: List[Path], use_ocr: bool = False):
+    def __init__(self, corpus_id: int, file_paths: list[Path], use_ocr: bool = False):
         super().__init__()
         self.corpus_id = corpus_id
         self.file_paths = file_paths
@@ -105,10 +107,7 @@ class IngestWorker(QThread):
 
                     try:
                         doc = ingest_service.import_document(
-                            session,
-                            self.corpus_id,
-                            file_path,
-                            use_ocr=self.use_ocr
+                            session, self.corpus_id, file_path, use_ocr=self.use_ocr
                         )
                         results.append((file_path, doc, None))
                     except Exception as e:
@@ -137,7 +136,13 @@ class ProcessWorker(QThread):
     paused = pyqtSignal()
     resumed = pyqtSignal()
 
-    def __init__(self, doc_ids: List[int], use_mock: bool = True, use_gpu: bool = False, is_reprocess: bool = False):
+    def __init__(
+        self,
+        doc_ids: list[int],
+        use_mock: bool = True,
+        use_gpu: bool = False,
+        is_reprocess: bool = False,
+    ):
         super().__init__()
         self.doc_ids = doc_ids
         self.use_mock = use_mock
@@ -174,7 +179,7 @@ class ProcessWorker(QThread):
             db_service = DBService.get_instance()
             process_service = ProcessService()
 
-            last_state: Dict[str, Any] = {}
+            last_state: dict[str, Any] = {}
 
             with db_service.get_session() as session:
                 success_count, error_count = process_service.process_documents_batch(
@@ -223,7 +228,7 @@ class ProcessWorker(QThread):
             if op_id:
                 OperationsCenter.instance().unregister(op_id)
 
-    def _on_state_changed(self, state: Dict[str, Any], sink: Dict[str, Any]) -> None:
+    def _on_state_changed(self, state: dict[str, Any], sink: dict[str, Any]) -> None:
         sink.clear()
         sink.update(state)
         self.state_changed.emit(dict(state))
@@ -397,7 +402,7 @@ class ConcordanceSearchWorker(QThread):
         limit: int = 100,
         offset: int = 0,
         is_phrase: bool = False,
-        normalize: bool = True
+        normalize: bool = True,
     ):
         super().__init__()
         self.project_id = project_id
@@ -410,8 +415,8 @@ class ConcordanceSearchWorker(QThread):
     def run(self):
         """Run the concordance search."""
         try:
-            from app.services.db_service import DBService
             from app.services.concordance_service import ConcordanceService
+            from app.services.db_service import DBService
 
             db_service = DBService.get_instance()
             concordance_service = ConcordanceService()
@@ -424,7 +429,7 @@ class ConcordanceSearchWorker(QThread):
                     limit=self.limit,
                     offset=self.offset,
                     is_phrase=self.is_phrase,
-                    normalize=self.normalize
+                    normalize=self.normalize,
                 )
 
             self.results_ready.emit(results)
@@ -442,7 +447,7 @@ class ConcordanceSearchWorker(QThread):
             return (
                 "Search query syntax error.\n\n"
                 "Please check your search query and try again.\n"
-                "For phrases, use quotes: \"exact phrase\""
+                'For phrases, use quotes: "exact phrase"'
             )
         elif "database" in error_lower or "locked" in error_lower:
             return (
@@ -466,8 +471,8 @@ class TranslationResolveWorker(QThread):
 
     def __init__(
         self,
-        items: List[Tuple[str, str]],  # [(src_text, kind), ...]
-        project_id: Optional[int] = None,
+        items: list[tuple[str, str]],  # [(src_text, kind), ...]
+        project_id: int | None = None,
         src_lang: str = "he",
         tgt_lang: str = "ru",
         allow_draft: bool = False,
@@ -547,8 +552,8 @@ class P1VerificationWorker(QThread):
     def __init__(
         self,
         db_path: str,
-        project_id: Optional[int] = None,
-        out_dir: Optional[str] = None,
+        project_id: int | None = None,
+        out_dir: str | None = None,
     ):
         super().__init__()
         self.db_path = db_path
@@ -559,8 +564,11 @@ class P1VerificationWorker(QThread):
     def run(self):
         """Run P1 verification."""
         try:
-            from app.services.p1_verification_service import P1VerificationService, P1VerificationReport
             from app.services.db_service import DBService
+            from app.services.p1_verification_service import (
+                P1VerificationReport,
+                P1VerificationService,
+            )
 
             service = P1VerificationService()
             start_time = time.time()
@@ -629,7 +637,9 @@ class P1VerificationWorker(QThread):
 
                 phase_pre = service.verify_resolve(session, seeded_tm, self.project_id)
                 phase_pre.phase_name = "pre_extraction"
-                self.log.emit(f"  ✓ Verified: {phase_pre.items_passed}/{phase_pre.items_checked} PASS")
+                self.log.emit(
+                    f"  ✓ Verified: {phase_pre.items_passed}/{phase_pre.items_checked} PASS"
+                )
 
                 # Phase 6: Post-extraction verification (stub - re-extraction not implemented)
                 self.log.emit("\nPhase 6/7: Post-extraction verification...")
@@ -644,7 +654,9 @@ class P1VerificationWorker(QThread):
 
                 phase_post = service.verify_resolve(session, seeded_tm, self.project_id)
                 phase_post.phase_name = "post_extraction"
-                self.log.emit(f"  ✓ Verified: {phase_post.items_passed}/{phase_post.items_checked} PASS")
+                self.log.emit(
+                    f"  ✓ Verified: {phase_post.items_passed}/{phase_post.items_checked} PASS"
+                )
 
             # Phase 7: Post-restart verification
             self.log.emit("\nPhase 7/7: Post-restart verification...")
@@ -656,7 +668,9 @@ class P1VerificationWorker(QThread):
             session_restart = service.simulate_restart(snapshot_info.snapshot_path)
             phase_restart = service.verify_resolve(session_restart, seeded_tm, self.project_id)
             phase_restart.phase_name = "post_restart"
-            self.log.emit(f"  ✓ Verified: {phase_restart.items_passed}/{phase_restart.items_checked} PASS")
+            self.log.emit(
+                f"  ✓ Verified: {phase_restart.items_passed}/{phase_restart.items_checked} PASS"
+            )
             session_restart.close()
 
             # Determine status
@@ -732,7 +746,7 @@ class P1VerificationWorker(QThread):
             error_summary="No processed data (lemmas/term_clusters) found in project",
         )
 
-    def _save_reports(self, report: "P1VerificationReport", timestamp: str) -> Tuple[str, str]:
+    def _save_reports(self, report: "P1VerificationReport", timestamp: str) -> tuple[str, str]:
         """Save MD and JSON reports."""
         out_dir = self.out_dir or f"runtime/verifications/p1/{timestamp}"
         Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -795,8 +809,12 @@ class P1VerificationWorker(QThread):
                     md.append("\n**Failures:**")
                     for fail in phase.failures:
                         md.append(f"  - {fail['item']} ({fail['kind']})")
-                        md.append(f"    - Expected: `{fail['expected_translation']}` from `{fail['expected_source']}`")
-                        md.append(f"    - Actual: `{fail['actual_translation']}` from `{fail['actual_source']}`")
+                        md.append(
+                            f"    - Expected: `{fail['expected_translation']}` from `{fail['expected_source']}`"
+                        )
+                        md.append(
+                            f"    - Actual: `{fail['actual_translation']}` from `{fail['actual_source']}`"
+                        )
                 md.append("")
 
         md.append("## Summary\n")
@@ -817,21 +835,22 @@ class P1VerificationWorker(QThread):
 # P2: Translation Management & Coverage Workers
 # ============================================================================
 
+
 class TMSearchWorker(QThread):
     """P2: Worker for searching TM entries (non-blocking).
 
     Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
     """
 
-    page_ready = pyqtSignal(list)          # stage 1: rows
-    count_ready = pyqtSignal(int)          # stage 2: exact total
+    page_ready = pyqtSignal(list)  # stage 1: rows
+    count_ready = pyqtSignal(int)  # stage 2: exact total
     results_ready = pyqtSignal(list, int)  # legacy compat: full result after count
     error = pyqtSignal(str)
     progress = pyqtSignal(str)  # status message
 
     def __init__(
         self,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
         limit: int = 100,
         offset: int = 0,
         sort_column: str = "updated_at",
@@ -962,15 +981,15 @@ class DocumentsPageWorker(QThread):
     """
 
     page_loaded = pyqtSignal(int, int, list)  # request_id, total_count, rows(List[DocumentDTO])
-    error = pyqtSignal(int, str)              # request_id, message
-    status = pyqtSignal(int, str)             # request_id, status text
+    error = pyqtSignal(int, str)  # request_id, message
+    status = pyqtSignal(int, str)  # request_id, status text
 
     def __init__(
         self,
         *,
         request_id: int,
         corpus_id: int,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
         sort_column: str,
         sort_direction: str,
         page_size: int,
@@ -1046,24 +1065,24 @@ class ProjectDocumentsPageWorker(QThread):
     Uses the read engine (PERF-SCALE PATCH-C) — pure SELECT, no writes.
     """
 
-    rows_loaded = pyqtSignal(int, list)           # request_id, rows(List[DocumentDTO])
-    count_loaded = pyqtSignal(int, int)           # request_id, total_count
+    rows_loaded = pyqtSignal(int, list)  # request_id, rows(List[DocumentDTO])
+    count_loaded = pyqtSignal(int, int)  # request_id, total_count
     frequent_tags_loaded = pyqtSignal(int, list)  # request_id, tags(List[str])
-    error = pyqtSignal(int, str)              # request_id, message
-    status = pyqtSignal(int, str)             # request_id, status text
+    error = pyqtSignal(int, str)  # request_id, message
+    status = pyqtSignal(int, str)  # request_id, status text
 
     def __init__(
         self,
         *,
         request_id: int,
         project_id: int,
-        search_query: Optional[str],
-        document_filter: Optional[str] = None,
-        document_id: Optional[int] = None,
-        tag_filter: Optional[str] = None,
-        topic_filter: Optional[str] = None,
-        level_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        search_query: str | None,
+        document_filter: str | None = None,
+        document_id: int | None = None,
+        tag_filter: str | None = None,
+        topic_filter: str | None = None,
+        level_filter: str | None = None,
+        status_filter: str | None = None,
         tag_match_mode: str = "any",
         page_size: int,
         page_index: int,
@@ -1283,7 +1302,7 @@ class DocumentDeleteWorker(QThread):
     finished = pyqtSignal(dict)  # {deleted, failed, total}
     error = pyqtSignal(str)
 
-    def __init__(self, doc_ids: List[int]):
+    def __init__(self, doc_ids: list[int]):
         super().__init__()
         self.doc_ids = [int(doc_id) for doc_id in doc_ids]
 
@@ -1336,13 +1355,13 @@ class DictionarySearchWorker(QThread):
     """
 
     results_ready = pyqtSignal(list)  # rows: List[Tuple[Lemma, LemmaProjectStat]]
-    count_ready = pyqtSignal(int)     # total_count
+    count_ready = pyqtSignal(int)  # total_count
     error = pyqtSignal(str)
 
     def __init__(
         self,
         project_id: int,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
         limit: int = 100,
         offset: int = 0,
         sort_column: str = "freq_abs",
@@ -1415,13 +1434,13 @@ class TermsSearchWorker(QThread):
     """
 
     results_ready = pyqtSignal(list)  # clusters: List[TermCluster]
-    count_ready = pyqtSignal(int)     # total_count
+    count_ready = pyqtSignal(int)  # total_count
     error = pyqtSignal(str)
 
     def __init__(
         self,
         project_id: int,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
         limit: int = 100,
         offset: int = 0,
         sort_column: str = "freq_abs",  # preset name, actually
@@ -1499,7 +1518,7 @@ class CrossViewOverlayWorker(QThread):
     results_ready = pyqtSignal(dict)  # {item_id: overlay_payload}
     error = pyqtSignal(str)
 
-    def __init__(self, rows: List[Dict[str, Any]]):
+    def __init__(self, rows: list[dict[str, Any]]):
         super().__init__()
         self.rows = list(rows or [])
         self._cancelled = False
@@ -1512,9 +1531,9 @@ class CrossViewOverlayWorker(QThread):
             db_service = DBService.get_instance()
             user_dict_service = UserDictionaryService()
 
-            prepared_rows: List[Dict[str, Any]] = []
-            payloads: List[Dict[str, Any]] = []
-            raw_norm_pairs: List[Tuple[str, str]] = []
+            prepared_rows: list[dict[str, Any]] = []
+            payloads: list[dict[str, Any]] = []
+            raw_norm_pairs: list[tuple[str, str]] = []
 
             for raw in self.rows:
                 if self._cancelled:
@@ -1567,9 +1586,11 @@ class CrossViewOverlayWorker(QThread):
 
             with db_service.get_read_session() as session:
                 overlay_map = user_dict_service.resolve_cross_view_status(session, payloads)
-                pronunciation_map = user_dict_service._resolve_pronunciation_overlay(session, raw_norm_pairs)
+                pronunciation_map = user_dict_service._resolve_pronunciation_overlay(
+                    session, raw_norm_pairs
+                )
 
-            results: Dict[int, Dict[str, Any]] = {}
+            results: dict[int, dict[str, Any]] = {}
             for row in prepared_rows:
                 if self._cancelled:
                     return
@@ -1617,7 +1638,9 @@ class CrossViewOverlayWorker(QThread):
 class CoverageWorker(QThread):
     """P2: Worker for computing coverage metrics (non-blocking)."""
 
-    partial_ready = pyqtSignal(dict)  # {cluster_metrics, untranslated_lemmas, untranslated_clusters}
+    partial_ready = pyqtSignal(
+        dict
+    )  # {cluster_metrics, untranslated_lemmas, untranslated_clusters}
     lemma_metrics_ready = pyqtSignal(object)  # CoverageMetrics
     results_ready = pyqtSignal(dict)  # {metrics, untranslated_lemmas, untranslated_clusters}
     error = pyqtSignal(str)
@@ -1642,8 +1665,8 @@ class CoverageWorker(QThread):
     def run(self):
         """Execute coverage calculation."""
         try:
-            from app.services.db_service import DBService
             from app.services.coverage_service import CoverageService
+            from app.services.db_service import DBService
 
             self.progress.emit("Computing coverage metrics...")
 
@@ -1740,7 +1763,7 @@ class ImportWorker(QThread):
     def __init__(
         self,
         file_path: str,
-        project_id: Optional[int],
+        project_id: int | None,
         scope: str,
         on_conflict: str,
         normalize_mode: str,
@@ -1832,7 +1855,7 @@ class ExportWorker(QThread):
         project_id: int,
         file_path: str,
         format_type: str,  # "csv", "json", "xlsx", "tbx", "tmx"
-        **export_options
+        **export_options,
     ):
         super().__init__()
         self.project_id = project_id
@@ -2002,8 +2025,8 @@ class BulkNoiseUpdateWorker(QThread):
     def __init__(
         self,
         model_class: str,  # "Lemma" or "TermCluster" or "TMEntry"
-        item_ids: list,    # List of lemma_id, cluster_id, or tm_id
-        is_noise: bool,    # True = mark as noise, False = mark as valid
+        item_ids: list,  # List of lemma_id, cluster_id, or tm_id
+        is_noise: bool,  # True = mark as noise, False = mark as valid
     ):
         """Initialize bulk noise update worker.
 
@@ -2021,9 +2044,10 @@ class BulkNoiseUpdateWorker(QThread):
     def run(self):
         """Run bulk update in chunks with progress reporting."""
         try:
-            from app.services.db_service import DBService
-            from app.infra.sa_models import Lemma, TermCluster, TMEntry
             from sqlalchemy import update
+
+            from app.infra.sa_models import Lemma, TermCluster, TMEntry
+            from app.services.db_service import DBService
 
             db_service = DBService.get_instance()
 
@@ -2052,13 +2076,13 @@ class BulkNoiseUpdateWorker(QThread):
                         return
 
                     # Get chunk of IDs
-                    chunk_ids = self.item_ids[i:i + chunk_size]
+                    chunk_ids = self.item_ids[i : i + chunk_size]
 
                     # Update chunk
-                    stmt = update(Model).where(
-                        id_column.in_(chunk_ids)
-                    ).values(
-                        is_noise=1 if self.is_noise else 0
+                    stmt = (
+                        update(Model)
+                        .where(id_column.in_(chunk_ids))
+                        .values(is_noise=1 if self.is_noise else 0)
                     )
                     result = session.execute(stmt)
 
@@ -2101,7 +2125,7 @@ class SingleTextTranslateWorker(QThread):
         text: str,
         src_lang: str = "en",
         tgt_lang: str = "he",
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
     ):
         """Initialize worker.
 
@@ -2221,7 +2245,7 @@ class BatchTranslateWorker(QThread):
 
     def __init__(
         self,
-        items: List,  # List[BatchTranslateItem]
+        items: list,  # List[BatchTranslateItem]
         options,  # BatchTranslateOptions
         tab_type: str,  # "dictionary" | "terms" | "tm"
     ):
@@ -2261,13 +2285,17 @@ class BatchTranslateWorker(QThread):
                 self.stage_updated.emit("No targets found")
                 _flush_mt_usage_queue(f"batch_translate:{self.tab_type}:empty")
                 self.finished.emit(
-                    type("EmptyResult", (), {
-                        "total": 0,
-                        "succeeded": 0,
-                        "skipped": 0,
-                        "failed": 0,
-                        "row_results": [],
-                    })()
+                    type(
+                        "EmptyResult",
+                        (),
+                        {
+                            "total": 0,
+                            "succeeded": 0,
+                            "skipped": 0,
+                            "failed": 0,
+                            "row_results": [],
+                        },
+                    )()
                 )
                 return
 
@@ -2397,25 +2425,27 @@ class TranslateAllFilteredWorker(QThread):
     this worker fetches IDs from DB in chunks and translates all matching records.
     """
 
-    progress = pyqtSignal(int, int)        # (completed, total)
+    progress = pyqtSignal(int, int)  # (completed, total)
     stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed) - real-time stats
     row_completed = pyqtSignal(str, bool)  # (entity_id, success)
-    row_translated = pyqtSignal(str, str, bool)  # (entity_id, translation, success) - for activity log
-    stage_updated = pyqtSignal(str)        # PATCH-16-02: Current stage description
-    finished = pyqtSignal(object)          # BatchTranslateResult
+    row_translated = pyqtSignal(
+        str, str, bool
+    )  # (entity_id, translation, success) - for activity log
+    stage_updated = pyqtSignal(str)  # PATCH-16-02: Current stage description
+    finished = pyqtSignal(object)  # BatchTranslateResult
     error = pyqtSignal(str)
     paused = pyqtSignal()
     resumed = pyqtSignal()
 
     def __init__(
         self,
-        entity_type: str,           # "lemma" | "term_cluster" | "tm_entry"
-        project_id: Optional[int],
-        filters: dict,              # Same dict as passed to search/count
-        provider_mode: str,         # "chain" | "force:<provider_id>"
-        write_mode: str,            # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
+        entity_type: str,  # "lemma" | "term_cluster" | "tm_entry"
+        project_id: int | None,
+        filters: dict,  # Same dict as passed to search/count
+        provider_mode: str,  # "chain" | "force:<provider_id>"
+        write_mode: str,  # "FILL_EMPTY" | "OVERWRITE" | "SKIP_NON_EMPTY"
         id_fetch_chunk: int = 200,  # How many IDs to fetch from DB per iteration (efficiency)
-        translation_chunk: int = 25, # How many items to translate before commit (UX + safety)
+        translation_chunk: int = 25,  # How many items to translate before commit (UX + safety)
         src_lang: str = "he",
         tgt_lang: str = "ru",
     ):
@@ -2492,19 +2522,20 @@ class TranslateAllFilteredWorker(QThread):
 
     def run(self):
         """Execute chunked translation."""
-        from app.services.db_service import DBService
-        from app.services.dictionary_service import DictionaryService
-        from app.services.term_extraction_service import TermExtractionService
-        from app.services.translation_admin_service import TranslationAdminService
+        from sqlalchemy import select
+
+        from app.infra.sa_models import Lemma, TermCluster, TMEntry
         from app.services.batch_mt_translate_service import (
             BatchMTTranslateService,
             BatchTranslateItem,
             BatchTranslateOptions,
             BatchTranslateResult,
         )
+        from app.services.db_service import DBService
+        from app.services.dictionary_service import DictionaryService
+        from app.services.term_extraction_service import TermExtractionService
+        from app.services.translation_admin_service import TranslationAdminService
         from app.services.translation_service import TranslationService
-        from app.infra.sa_models import Lemma, TermCluster, TMEntry
-        from sqlalchemy import select
 
         try:
             # PATCH-16-02: Emit initial stage
@@ -2561,7 +2592,9 @@ class TranslateAllFilteredWorker(QThread):
 
                 # PATCH-16-02: Emit stage with total count
                 self.stage_updated.emit(f"Found {total} items to translate")
-                logger.info(f"TranslateAllFilteredWorker: translating {total} {self.entity_type} records")
+                logger.info(
+                    f"TranslateAllFilteredWorker: translating {total} {self.entity_type} records"
+                )
 
                 # Step 2: Process in chunks
                 completed = 0
@@ -2585,7 +2618,9 @@ class TranslateAllFilteredWorker(QThread):
                             trace_id="cancelled",
                             elapsed_ms=0,
                         )
-                        _flush_mt_usage_queue(f"translate_all_filtered:{self.entity_type}:cancelled")
+                        _flush_mt_usage_queue(
+                            f"translate_all_filtered:{self.entity_type}:cancelled"
+                        )
                         self.finished.emit(result)
                         return
 
@@ -2597,18 +2632,29 @@ class TranslateAllFilteredWorker(QThread):
                     # Fetch IDs for this chunk
                     if self.entity_type == "lemma":
                         ids = dict_service.fetch_lemma_ids_for_translation(
-                            session, self.project_id, self.filters, self.write_mode,
-                            limit=self.id_fetch_chunk, offset=offset
+                            session,
+                            self.project_id,
+                            self.filters,
+                            self.write_mode,
+                            limit=self.id_fetch_chunk,
+                            offset=offset,
                         )
                     elif self.entity_type == "term_cluster":
                         ids = term_service.fetch_cluster_ids_for_translation(
-                            session, self.project_id, self.filters, self.write_mode,
-                            limit=self.id_fetch_chunk, offset=offset
+                            session,
+                            self.project_id,
+                            self.filters,
+                            self.write_mode,
+                            limit=self.id_fetch_chunk,
+                            offset=offset,
                         )
                     else:  # tm_entry
                         ids = admin_service.fetch_tm_ids_for_translation(
-                            session, self.filters, self.write_mode,
-                            limit=self.id_fetch_chunk, offset=offset
+                            session,
+                            self.filters,
+                            self.write_mode,
+                            limit=self.id_fetch_chunk,
+                            offset=offset,
                         )
 
                     if not ids:
@@ -2621,47 +2667,59 @@ class TranslateAllFilteredWorker(QThread):
                     items = []
                     if self.entity_type == "lemma":
                         # Load lemmas + their current translations via LEFT JOIN to TMEntry
-                        stmt = select(Lemma, TMEntry).outerjoin(
-                            TMEntry,
-                            (TMEntry.lemma_id == Lemma.lemma_id) &
-                            (TMEntry.kind == "lemma") &
-                            (TMEntry.project_id == self.project_id)
-                        ).where(Lemma.lemma_id.in_(ids))
+                        stmt = (
+                            select(Lemma, TMEntry)
+                            .outerjoin(
+                                TMEntry,
+                                (TMEntry.lemma_id == Lemma.lemma_id)
+                                & (TMEntry.kind == "lemma")
+                                & (TMEntry.project_id == self.project_id),
+                            )
+                            .where(Lemma.lemma_id.in_(ids))
+                        )
 
                         results = session.execute(stmt).all()
                         for lemma, tm_entry in results:
                             current_translation = tm_entry.translation if tm_entry else None
-                            items.append(BatchTranslateItem(
-                                entity_type="lemma",
-                                entity_id=lemma.lemma_text,
-                                source_text=lemma.lemma_text,
-                                src_lang=self.src_lang,
-                                tgt_lang=self.tgt_lang,
-                                current_translation=current_translation,
-                                project_id=self.project_id,
-                            ))
+                            items.append(
+                                BatchTranslateItem(
+                                    entity_type="lemma",
+                                    entity_id=lemma.lemma_text,
+                                    source_text=lemma.lemma_text,
+                                    src_lang=self.src_lang,
+                                    tgt_lang=self.tgt_lang,
+                                    current_translation=current_translation,
+                                    project_id=self.project_id,
+                                )
+                            )
 
                     elif self.entity_type == "term_cluster":
                         # Load clusters + their current translations
-                        stmt = select(TermCluster, TMEntry).outerjoin(
-                            TMEntry,
-                            (TMEntry.cluster_id == TermCluster.cluster_id) &
-                            (TMEntry.kind == "term_cluster") &
-                            (TMEntry.project_id == self.project_id)
-                        ).where(TermCluster.cluster_id.in_(ids))
+                        stmt = (
+                            select(TermCluster, TMEntry)
+                            .outerjoin(
+                                TMEntry,
+                                (TMEntry.cluster_id == TermCluster.cluster_id)
+                                & (TMEntry.kind == "term_cluster")
+                                & (TMEntry.project_id == self.project_id),
+                            )
+                            .where(TermCluster.cluster_id.in_(ids))
+                        )
 
                         results = session.execute(stmt).all()
                         for cluster, tm_entry in results:
                             current_translation = tm_entry.translation if tm_entry else None
-                            items.append(BatchTranslateItem(
-                                entity_type="term_cluster",
-                                entity_id=cluster.representative_he,
-                                source_text=cluster.representative_he,
-                                src_lang=self.src_lang,
-                                tgt_lang=self.tgt_lang,
-                                current_translation=current_translation,
-                                project_id=self.project_id,
-                            ))
+                            items.append(
+                                BatchTranslateItem(
+                                    entity_type="term_cluster",
+                                    entity_id=cluster.representative_he,
+                                    source_text=cluster.representative_he,
+                                    src_lang=self.src_lang,
+                                    tgt_lang=self.tgt_lang,
+                                    current_translation=current_translation,
+                                    project_id=self.project_id,
+                                )
+                            )
                     else:  # tm_entry
                         stmt = (
                             select(TMEntry)
@@ -2670,21 +2728,25 @@ class TranslateAllFilteredWorker(QThread):
                         )
 
                         for entry in session.execute(stmt).scalars().all():
-                            items.append(BatchTranslateItem(
-                                entity_type="tm_entry",
-                                entity_id=str(entry.tm_id),
-                                source_text=entry.src_text,
-                                src_lang=entry.src_lang or self.src_lang,
-                                tgt_lang=entry.tgt_lang or self.tgt_lang,
-                                current_translation=entry.translation,
-                                project_id=entry.project_id,
-                            ))
+                            items.append(
+                                BatchTranslateItem(
+                                    entity_type="tm_entry",
+                                    entity_id=str(entry.tm_id),
+                                    source_text=entry.src_text,
+                                    src_lang=entry.src_lang or self.src_lang,
+                                    tgt_lang=entry.tgt_lang or self.tgt_lang,
+                                    current_translation=entry.translation,
+                                    project_id=entry.project_id,
+                                )
+                            )
 
                     if not items:
                         break
 
                     # PATCH-16-02: Emit translating stage
-                    self.stage_updated.emit(f"Translating batch {batch_num}/{total_batches} ({len(items)} items)...")
+                    self.stage_updated.emit(
+                        f"Translating batch {batch_num}/{total_batches} ({len(items)} items)..."
+                    )
 
                     # Translate this chunk using existing batch service
                     # Use translation_chunk for granular progress updates + commit safety
@@ -2744,10 +2806,14 @@ class TranslateAllFilteredWorker(QThread):
                     # PATCH-17-03: Activity events now emitted via item_callback (real-time)
                     # Old post-batch emission code removed - events now come during translation
 
-                    logger.debug(f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded")
+                    logger.debug(
+                        f"Chunk {offset}-{offset+len(items)} complete: {chunk_result.succeeded} succeeded"
+                    )
 
                 # Done
-                self.stage_updated.emit(f"Completed: {total_succeeded} succeeded, {total_skipped} skipped, {total_failed} failed")  # PATCH-16-02
+                self.stage_updated.emit(
+                    f"Completed: {total_succeeded} succeeded, {total_skipped} skipped, {total_failed} failed"
+                )  # PATCH-16-02
                 final_result = BatchTranslateResult(
                     total=completed,
                     succeeded=total_succeeded,
@@ -2779,15 +2845,15 @@ class UserDictItemsPageWorker(QThread):
         error(request_id, message)
     """
 
-    page_loaded = pyqtSignal(int, list, int)   # request_id, items, total_count
-    error = pyqtSignal(int, str)               # request_id, message
+    page_loaded = pyqtSignal(int, list, int)  # request_id, items, total_count
+    error = pyqtSignal(int, str)  # request_id, message
 
     def __init__(
         self,
         *,
         request_id: int,
         dictionary_id: int,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
         limit: int,
         offset: int,
         sort_column: str,
@@ -2804,9 +2870,9 @@ class UserDictItemsPageWorker(QThread):
 
     def run(self):
         try:
+            from app.services.audio_asset_service import AudioAssetService
             from app.services.db_service import DBService
             from app.services.user_dictionary_service import UserDictionaryService
-            from app.services.audio_asset_service import AudioAssetService
 
             db = DBService.get_instance()
             svc = UserDictionaryService()
@@ -2850,13 +2916,13 @@ class UserDictionaryBulkAddWorker(QThread):
     """Background worker for adding many rows to a user dictionary."""
 
     progress = pyqtSignal(int, int)  # (processed, total)
-    finished = pyqtSignal(dict)      # {added, skipped, failed, ...}
+    finished = pyqtSignal(dict)  # {added, skipped, failed, ...}
     error = pyqtSignal(str)
 
     def __init__(
         self,
         dictionary_id: int,
-        items: List[Dict[str, Any]],
+        items: list[dict[str, Any]],
         *,
         include_noise: bool = False,
         skip_duplicates: bool = True,
@@ -2906,10 +2972,10 @@ class UserDictionaryBulkRemoveWorker(QThread):
     """Background worker for removing many user dictionary items."""
 
     progress = pyqtSignal(int, int)  # (processed, total)
-    finished = pyqtSignal(dict)      # {removed, processed, total, cancelled}
+    finished = pyqtSignal(dict)  # {removed, processed, total, cancelled}
     error = pyqtSignal(str)
 
-    def __init__(self, item_ids: List[int], *, chunk_size: int = 500):
+    def __init__(self, item_ids: list[int], *, chunk_size: int = 500):
         super().__init__()
         self.item_ids = item_ids
         self.chunk_size = chunk_size
@@ -2947,11 +3013,11 @@ class UserDictionaryBulkRemoveWorker(QThread):
 class UserDictTranslateWorker(QThread):
     """Translate user dictionary items via canonical tm_global write path."""
 
-    progress = pyqtSignal(int, int)        # (completed, total)
+    progress = pyqtSignal(int, int)  # (completed, total)
     stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
     row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
     stage_updated = pyqtSignal(str)
-    finished = pyqtSignal(object)          # BatchTranslateResult
+    finished = pyqtSignal(object)  # BatchTranslateResult
     error = pyqtSignal(str)
     paused = pyqtSignal()
     resumed = pyqtSignal()
@@ -2960,8 +3026,8 @@ class UserDictTranslateWorker(QThread):
         self,
         dictionary_id: int,
         scope: str,  # "current_page" | "all_filtered"
-        selected_item_ids: List[int],
-        filters: Dict[str, Any],
+        selected_item_ids: list[int],
+        filters: dict[str, Any],
         provider_mode: str,
         write_mode: str,
         *,
@@ -3000,7 +3066,7 @@ class UserDictTranslateWorker(QThread):
             time.sleep(0.1)
 
     @staticmethod
-    def _is_non_empty(text_value: Optional[str]) -> bool:
+    def _is_non_empty(text_value: str | None) -> bool:
         return bool(text_value and str(text_value).strip())
 
     @staticmethod
@@ -3018,6 +3084,7 @@ class UserDictTranslateWorker(QThread):
 
     def _fetch_current_global(self, session, item) -> Optional["TMGlobal"]:
         from sqlalchemy import select
+
         from app.infra.sa_models import TMGlobal
 
         src_norm = self._canonical_item_norm(item)
@@ -3038,8 +3105,8 @@ class UserDictTranslateWorker(QThread):
 
         if self.provider_mode.startswith("force:"):
             force_provider_id = self.provider_mode.split(":", 1)[1]
-            from app.infra.translators.providers_registry import ProvidersRegistry
             from app.infra.translators.base_provider import TranslationRequest
+            from app.infra.translators.providers_registry import ProvidersRegistry
 
             provider = ProvidersRegistry().get(force_provider_id)
             if not provider:
@@ -3083,7 +3150,7 @@ class UserDictTranslateWorker(QThread):
         session,
         item,
         translation: str,
-        confidence: Optional[float],
+        confidence: float | None,
         force_global_update: bool = False,
     ) -> None:
         from app.services.tm_global_service import TMGlobalService
@@ -3114,9 +3181,12 @@ class UserDictTranslateWorker(QThread):
         )
 
     def run(self):
+        from app.services.batch_mt_translate_service import (
+            BatchTranslateResult,
+            BatchTranslateRowResult,
+        )
         from app.services.db_service import DBService
         from app.services.user_dictionary_service import UserDictionaryService
-        from app.services.batch_mt_translate_service import BatchTranslateResult, BatchTranslateRowResult
 
         try:
             self.stage_updated.emit("Initializing...")
@@ -3188,7 +3258,9 @@ class UserDictTranslateWorker(QThread):
 
                     chunk_offset += len(batch_ids)
                     batch_num = ((chunk_offset - 1) // self.id_fetch_chunk) + 1
-                    self.stage_updated.emit(f"Translating batch {batch_num}/{max(total_batches, 1)}...")
+                    self.stage_updated.emit(
+                        f"Translating batch {batch_num}/{max(total_batches, 1)}..."
+                    )
 
                     items = user_dict_service.get_items_by_ids(session, batch_ids)
                     for item in items:
@@ -3200,7 +3272,10 @@ class UserDictTranslateWorker(QThread):
                         current_global = self._fetch_current_global(session, item)
                         current_translation = current_global.translation if current_global else None
 
-                        if self.write_mode in ("FILL_EMPTY", "SKIP_NON_EMPTY") and self._is_non_empty(current_translation):
+                        if self.write_mode in (
+                            "FILL_EMPTY",
+                            "SKIP_NON_EMPTY",
+                        ) and self._is_non_empty(current_translation):
                             skipped += 1
                             completed += 1
                             row_results.append(
@@ -3312,11 +3387,11 @@ class UserDictTranslateWorker(QThread):
 class UserDictGenerateAudioWorker(QThread):
     """Generate source-audio for user dictionary rows in background."""
 
-    progress = pyqtSignal(int, int)        # (completed, total)
+    progress = pyqtSignal(int, int)  # (completed, total)
     stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
     row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
     stage_updated = pyqtSignal(str)
-    finished = pyqtSignal(dict)            # {total, succeeded, skipped, failed}
+    finished = pyqtSignal(dict)  # {total, succeeded, skipped, failed}
     error = pyqtSignal(str)
     paused = pyqtSignal()
     resumed = pyqtSignal()
@@ -3325,8 +3400,8 @@ class UserDictGenerateAudioWorker(QThread):
         self,
         dictionary_id: int,
         scope: str,  # "current_page" | "all_filtered"
-        selected_item_ids: List[int],
-        filters: Dict[str, Any],
+        selected_item_ids: list[int],
+        filters: dict[str, Any],
         provider_mode: str,
         write_mode: str,  # "MISSING_ONLY" | "REGENERATE_ALL"
         *,
@@ -3435,7 +3510,9 @@ class UserDictGenerateAudioWorker(QThread):
 
                     chunk_offset += len(batch_ids)
                     batch_num = ((chunk_offset - 1) // self.id_fetch_chunk) + 1
-                    self.stage_updated.emit(f"Generating audio batch {batch_num}/{max(total_batches, 1)}...")
+                    self.stage_updated.emit(
+                        f"Generating audio batch {batch_num}/{max(total_batches, 1)}..."
+                    )
                     items = user_dict_service.get_items_by_ids(session, batch_ids)
 
                     for item in items:
@@ -3448,13 +3525,18 @@ class UserDictGenerateAudioWorker(QThread):
                             if self.write_mode == "MISSING_ONLY":
                                 current = asset_service.bulk_get_status_for_items(
                                     session=session,
-                                    items=[{
-                                        "lang": item.src_lang,
-                                        "norm_text": item.src_norm,
-                                        "source_text": item.src_text,
-                                    }],
+                                    items=[
+                                        {
+                                            "lang": item.src_lang,
+                                            "norm_text": item.src_norm,
+                                            "source_text": item.src_text,
+                                        }
+                                    ],
                                 )
-                                if current.get((item.src_lang, item.src_norm, item.src_text)) == "ready":
+                                if (
+                                    current.get((item.src_lang, item.src_norm, item.src_text))
+                                    == "ready"
+                                ):
                                     skipped += 1
                                     completed += 1
                                     self.row_translated.emit(row_id, "audio already exists", False)
@@ -3483,7 +3565,9 @@ class UserDictGenerateAudioWorker(QThread):
                                 else:
                                     succeeded += 1
                                     provider_id = str(result.get("provider_id") or "provider")
-                                    self.row_translated.emit(row_id, f"ready via {provider_id}", True)
+                                    self.row_translated.emit(
+                                        row_id, f"ready via {provider_id}", True
+                                    )
                             else:
                                 failed += 1
                                 err_msg = str(result.get("error") or "audio generation failed")
@@ -3525,18 +3609,18 @@ class UserDictGenerateAudioWorker(QThread):
 class BatchGenerateAudioWorker(QThread):
     """Generate source-audio for explicit selected rows in background."""
 
-    progress = pyqtSignal(int, int)        # (completed, total)
+    progress = pyqtSignal(int, int)  # (completed, total)
     stats_updated = pyqtSignal(int, int, int)  # (succeeded, skipped, failed)
     row_translated = pyqtSignal(str, str, bool)  # (entity_id, message, success)
     stage_updated = pyqtSignal(str)
-    finished = pyqtSignal(dict)            # {total, succeeded, skipped, failed, cancelled}
+    finished = pyqtSignal(dict)  # {total, succeeded, skipped, failed, cancelled}
     error = pyqtSignal(str)
     paused = pyqtSignal()
     resumed = pyqtSignal()
 
     def __init__(
         self,
-        items: List[Dict[str, Any]],
+        items: list[dict[str, Any]],
         provider_mode: str,
         write_mode: str,  # "MISSING_ONLY" | "REGENERATE_ALL"
         *,
@@ -3577,7 +3661,7 @@ class BatchGenerateAudioWorker(QThread):
             audio_service = AudioGenerationService()
             asset_service = AudioAssetService()
 
-            normalized_items: List[Dict[str, str]] = []
+            normalized_items: list[dict[str, str]] = []
             for item in self.items:
                 src_text = str(item.get("src_text") or "").strip()
                 src_lang = str(item.get("src_lang") or "").strip()
@@ -3629,11 +3713,13 @@ class BatchGenerateAudioWorker(QThread):
                         if self.write_mode == "MISSING_ONLY":
                             current = asset_service.bulk_get_status_for_items(
                                 session=session,
-                                items=[{
-                                    "lang": src_lang,
-                                    "norm_text": src_norm,
-                                    "source_text": src_text,
-                                }],
+                                items=[
+                                    {
+                                        "lang": src_lang,
+                                        "norm_text": src_norm,
+                                        "source_text": src_text,
+                                    }
+                                ],
                             )
                             if current.get((src_lang, src_norm, src_text)) == "ready":
                                 skipped += 1
@@ -3706,7 +3792,7 @@ class PhonikudHealthCheckWorker(QThread):
     finished = pyqtSignal(dict)  # {mode,status,latency_ms,model_path,details,samples}
     error = pyqtSignal(str)
 
-    def __init__(self, *, model_path: str, enabled: bool, sample_texts: Optional[List[str]] = None):
+    def __init__(self, *, model_path: str, enabled: bool, sample_texts: list[str] | None = None):
         super().__init__()
         self.model_path = model_path
         self.enabled = enabled
@@ -3721,7 +3807,9 @@ class PhonikudHealthCheckWorker(QThread):
             from app.infra.pronunciation import PhonikudAdapter
 
             adapter = PhonikudAdapter(model_path=self.model_path, enabled=self.enabled)
-            report = adapter.health_check(self.sample_texts, cancel_check=lambda: bool(self._cancel_requested))
+            report = adapter.health_check(
+                self.sample_texts, cancel_check=lambda: bool(self._cancel_requested)
+            )
             self.finished.emit(report.to_dict())
         except Exception as exc:
             logger.error("PhonikudHealthCheckWorker error: %s", exc, exc_info=True)
@@ -3748,13 +3836,13 @@ class PronunciationBootstrapWorker(QThread):
         enabled: bool,
         chunk_size: int = 500,
         rebuild_auto: bool = False,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         dry_run: bool = False,
         include_lemmas: bool = True,
         include_terms: bool = True,
         include_user_dictionary: bool = True,
         include_sentences: bool = False,
-        selected_items: Optional[List[Dict[str, str]]] = None,
+        selected_items: list[dict[str, str]] | None = None,
     ):
         super().__init__()
         self.lang = (lang or "he").strip() or "he"
@@ -3817,7 +3905,15 @@ class PronunciationBootstrapWorker(QThread):
                 enabled=self.enabled,
             )
             if self._cancel_requested:
-                self.finished.emit({"cancelled": True, "updated": 0, "skipped": 0, "failed": 0, "dry_run": bool(self.dry_run)})
+                self.finished.emit(
+                    {
+                        "cancelled": True,
+                        "updated": 0,
+                        "skipped": 0,
+                        "failed": 0,
+                        "dry_run": bool(self.dry_run),
+                    }
+                )
                 return
             health = generator.health_check(
                 ["\u05e9\u05dc\u05d5\u05dd", "\u05ea\u05d7\u05e0\u05d4"],
@@ -3841,7 +3937,9 @@ class PronunciationBootstrapWorker(QThread):
                     }
                 )
                 return
-            self.row_translated.emit("health", f"{health.mode} ({health.status})", health.status == "ok")
+            self.row_translated.emit(
+                "health", f"{health.mode} ({health.status})", health.status == "ok"
+            )
             self.stage_updated.emit(f"Mode: {health.mode} ({health.status})")
 
             bootstrap_service = PronunciationBootstrapService(generator=generator)
@@ -3914,9 +4012,9 @@ class SentenceNiqqudBootstrapWorker(QThread):
       paused / resumed
     """
 
-    progress = pyqtSignal(int, int)                    # (completed, total)
-    stats_updated = pyqtSignal(int, int, int, int)     # (inserted, updated, skipped, failed)
-    row_translated = pyqtSignal(str, str, bool)        # (id_str, message, success)
+    progress = pyqtSignal(int, int)  # (completed, total)
+    stats_updated = pyqtSignal(int, int, int, int)  # (inserted, updated, skipped, failed)
+    row_translated = pyqtSignal(str, str, bool)  # (id_str, message, success)
     stage_updated = pyqtSignal(str)
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
@@ -3926,9 +4024,9 @@ class SentenceNiqqudBootstrapWorker(QThread):
     def __init__(
         self,
         *,
-        sentence_ids: List[int],
+        sentence_ids: list[int],
         lang: str,
-        mode: str = "fill_only",          # "dry_run" | "fill_only" | "rebuild"
+        mode: str = "fill_only",  # "dry_run" | "fill_only" | "rebuild"
         model_path: str = "",
         enabled: bool = True,
         chunk_size: int = 200,
@@ -3976,8 +4074,8 @@ class SentenceNiqqudBootstrapWorker(QThread):
             from app.services.db_service import DBService
             from app.services.pronunciation_bootstrap_service import PhonikudPronunciationGenerator
             from app.services.sentence_pronunciation_bootstrap_service import (
-                SentencePronunciationBootstrapService,
                 GuardParams,
+                SentencePronunciationBootstrapService,
             )
 
             db = DBService.get_instance()
@@ -4062,25 +4160,27 @@ class SentenceNiqqudBootstrapWorker(QThread):
             )
             self.stage_updated.emit("Done" if not result.cancelled else "Cancelled")
 
-            self.finished.emit({
-                "total_candidates": result.total_candidates,
-                "inserted": result.inserted,
-                "updated": result.updated,
-                "skipped_same_hash": result.skipped_same_hash,
-                "skipped_has_override": result.skipped_has_override,
-                "skipped_too_short": result.skipped_too_short,
-                "skipped_too_long": result.skipped_too_long,
-                "skipped_non_hebrew_ratio": result.skipped_non_hebrew_ratio,
-                "skipped_invalid_after_qc": result.skipped_invalid_after_qc,
-                "failed": result.failed,
-                "rejected_qc": result.rejected_qc,
-                "partial_qc": result.partial_qc,
-                "dry_run": result.dry_run,
-                "cancelled": result.cancelled,
-                "generator_mode": result.generator_mode,
-                "elapsed_seconds": result.elapsed_seconds,
-                "summary_lines": result.summary_lines(),
-            })
+            self.finished.emit(
+                {
+                    "total_candidates": result.total_candidates,
+                    "inserted": result.inserted,
+                    "updated": result.updated,
+                    "skipped_same_hash": result.skipped_same_hash,
+                    "skipped_has_override": result.skipped_has_override,
+                    "skipped_too_short": result.skipped_too_short,
+                    "skipped_too_long": result.skipped_too_long,
+                    "skipped_non_hebrew_ratio": result.skipped_non_hebrew_ratio,
+                    "skipped_invalid_after_qc": result.skipped_invalid_after_qc,
+                    "failed": result.failed,
+                    "rejected_qc": result.rejected_qc,
+                    "partial_qc": result.partial_qc,
+                    "dry_run": result.dry_run,
+                    "cancelled": result.cancelled,
+                    "generator_mode": result.generator_mode,
+                    "elapsed_seconds": result.elapsed_seconds,
+                    "summary_lines": result.summary_lines(),
+                }
+            )
         except OperationsCenterBusyError as exc:
             self.error.emit(_format_heavy_operation_busy_error("Sentence Niqqud Bootstrap", exc))
         except Exception as exc:
@@ -4118,11 +4218,11 @@ class AudioQueuePopulateWorker(QThread):
     def __init__(
         self,
         *,
-        kind: str = "sentence",          # "sentence" | "lemma" | "term"
+        kind: str = "sentence",  # "sentence" | "lemma" | "term"
         project_id: int,
-        doc_ids: Optional[List[int]] = None,   # None or [] = all docs (sentences only)
-        text_search: Optional[str] = None,
-        add_mode: str = "append",        # "append" | "prepend" | "after_current"
+        doc_ids: list[int] | None = None,  # None or [] = all docs (sentences only)
+        text_search: str | None = None,
+        add_mode: str = "append",  # "append" | "prepend" | "after_current"
         current_position: int = 0,
     ) -> None:
         super().__init__()
@@ -4149,8 +4249,8 @@ class AudioQueuePopulateWorker(QThread):
             self.error.emit(str(exc))
 
     def _run_inner(self) -> None:
+        from app.services.audio_queue_service import AudioQueueService
         from app.services.db_service import DBService
-        from app.services.audio_queue_service import AudioQueueService, AudioItemSpec
 
         db = DBService.get_instance()
         aq_svc = AudioQueueService()
@@ -4163,7 +4263,16 @@ class AudioQueuePopulateWorker(QThread):
         total = len(ids)
         if total == 0:
             self.stage_updated.emit("No matching items found.")
-            self.finished.emit({"added": 0, "skipped": 0, "failed": 0, "total": 0, "cancelled": False, "new_item_ids": []})
+            self.finished.emit(
+                {
+                    "added": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "total": 0,
+                    "cancelled": False,
+                    "new_item_ids": [],
+                }
+            )
             return
 
         self.stage_updated.emit(f"Adding {total} items to queue…")
@@ -4172,11 +4281,11 @@ class AudioQueuePopulateWorker(QThread):
         # ── Step 2: process in chunks ──────────────────────────────────
         added = 0
         failed = 0
-        all_new_item_ids: List[int] = []  # track exact DB rows inserted this run
+        all_new_item_ids: list[int] = []  # track exact DB rows inserted this run
         for chunk_start in range(0, total, self.CHUNK_SIZE):
             if self._cancel_requested:
                 break
-            chunk_ids = ids[chunk_start: chunk_start + self.CHUNK_SIZE]
+            chunk_ids = ids[chunk_start : chunk_start + self.CHUNK_SIZE]
             try:
                 with db.get_session() as session:
                     specs = self._build_specs(session, chunk_ids)
@@ -4191,7 +4300,11 @@ class AudioQueuePopulateWorker(QThread):
                 all_new_item_ids.extend(new_ids)
                 # Emit row signals for recent-activity display (first 5 in chunk)
                 for spec in specs[:5]:
-                    label = spec.snapshot_hebrew or spec.snapshot_source_label or str(spec.source_id or "")
+                    label = (
+                        spec.snapshot_hebrew
+                        or spec.snapshot_source_label
+                        or str(spec.source_id or "")
+                    )
                     self.row_translated.emit(str(spec.source_id or ""), label, True)
                 added += len(specs)
             except Exception as exc:
@@ -4206,26 +4319,29 @@ class AudioQueuePopulateWorker(QThread):
         cancelled = self._cancel_requested
         self.stage_updated.emit("Cancelled" if cancelled else "Done")
         self.stats_updated.emit(added, 0, 0, failed)
-        self.finished.emit({
-            "added": added,
-            "skipped": 0,
-            "failed": failed,
-            "total": total,
-            "cancelled": cancelled,
-            "add_mode": self.add_mode,
-            "new_item_ids": all_new_item_ids,  # exact rows inserted this run
-        })
+        self.finished.emit(
+            {
+                "added": added,
+                "skipped": 0,
+                "failed": failed,
+                "total": total,
+                "cancelled": cancelled,
+                "add_mode": self.add_mode,
+                "new_item_ids": all_new_item_ids,  # exact rows inserted this run
+            }
+        )
 
     # ------------------------------------------------------------------
     # Kind-specific helpers (run inside session)
     # ------------------------------------------------------------------
 
-    def _fetch_ids(self, session) -> List[int]:
+    def _fetch_ids(self, session) -> list[int]:
         """Return ordered list of IDs to process (no snapshots yet)."""
         from sqlalchemy import select
 
         if self.kind == "sentence":
             from app.infra.sa_models import DocumentSentence, SourceCorpus, SourceDocument
+
             stmt = (
                 select(DocumentSentence.sentence_id)
                 .join(SourceDocument, DocumentSentence.doc_id == SourceDocument.doc_id)
@@ -4241,6 +4357,7 @@ class AudioQueuePopulateWorker(QThread):
 
         elif self.kind == "lemma":
             from app.infra.sa_models import Lemma
+
             stmt = (
                 select(Lemma.lemma_id)
                 .where(Lemma.project_id == self.project_id)
@@ -4253,6 +4370,7 @@ class AudioQueuePopulateWorker(QThread):
 
         else:  # term
             from app.infra.sa_models import TermCluster
+
             stmt = (
                 select(TermCluster.cluster_id)
                 .where(TermCluster.project_id == self.project_id)
@@ -4264,7 +4382,7 @@ class AudioQueuePopulateWorker(QThread):
                 stmt = stmt.where(TermCluster.representative_he.ilike(f"%{self.text_search}%"))
             return [row[0] for row in session.execute(stmt).all()]
 
-    def _build_specs(self, session, ids: List[int]) -> List:
+    def _build_specs(self, session, ids: list[int]) -> list:
         """Resolve snapshots for a chunk of IDs → AudioItemSpec list."""
         if self.kind == "sentence":
             return self._build_sentence_specs(session, ids)
@@ -4273,40 +4391,42 @@ class AudioQueuePopulateWorker(QThread):
         else:
             return self._build_term_specs(session, ids)
 
-    def _build_sentence_specs(self, session, sentence_ids: List[int]) -> List:
+    def _build_sentence_specs(self, session, sentence_ids: list[int]) -> list:
         from sqlalchemy import select
+
         from app.infra.sa_models import DocumentSentence
         from app.services.audio_queue_service import AudioItemSpec
 
         # Fetch text + doc_id (for source label)
-        stmt = select(DocumentSentence.sentence_id, DocumentSentence.text, DocumentSentence.doc_id).where(
-            DocumentSentence.sentence_id.in_(sentence_ids)
-        )
-        texts: Dict[int, str] = {}
-        sid_to_docid: Dict[int, int] = {}
+        stmt = select(
+            DocumentSentence.sentence_id, DocumentSentence.text, DocumentSentence.doc_id
+        ).where(DocumentSentence.sentence_id.in_(sentence_ids))
+        texts: dict[int, str] = {}
+        sid_to_docid: dict[int, int] = {}
         for sid, txt, did in session.execute(stmt).all():
             texts[sid] = txt
             if did is not None:
                 sid_to_docid[sid] = did
 
         # Batch-resolve document filenames for source label (best-effort)
-        doc_filenames: Dict[int, str] = {}
+        doc_filenames: dict[int, str] = {}
         try:
             from app.infra.sa_models import SourceDocument as _SD
+
             unique_doc_ids = list(set(sid_to_docid.values()))
             if unique_doc_ids:
                 dn_rows = session.execute(
-                    select(_SD.doc_id, _SD.file_name)
-                    .where(_SD.doc_id.in_(unique_doc_ids))
+                    select(_SD.doc_id, _SD.file_name).where(_SD.doc_id.in_(unique_doc_ids))
                 ).all()
                 doc_filenames = {did: fname for did, fname in dn_rows if fname}
         except Exception:
             pass
 
         # Fetch niqqud overlay (best-effort)
-        niqqud_map: Dict[int, str] = {}
+        niqqud_map: dict[int, str] = {}
         try:
             from app.services.sentence_pronunciation_service import SentencePronunciationService
+
             overlays = SentencePronunciationService().bulk_get_niqqud(session, sentence_ids)
             for sid, overlay in overlays.items():
                 if overlay and overlay.niqqud_text:
@@ -4315,9 +4435,10 @@ class AudioQueuePopulateWorker(QThread):
             pass
 
         # Fetch translation overlay (best-effort)
-        transl_map: Dict[str, str] = {}
+        transl_map: dict[str, str] = {}
         try:
             from app.services.sentences_workspace_service import SentencesWorkspaceService
+
             svc = SentencesWorkspaceService()
             text_list = list(texts.values())
             raw = svc._batch_get_translations(session, self.project_id, "he", text_list)
@@ -4336,32 +4457,34 @@ class AudioQueuePopulateWorker(QThread):
             source_label = doc_filenames.get(did, "") if did else ""
             if not source_label:
                 source_label = f"sentence:{sid}"
-            specs.append(AudioItemSpec(
-                kind="sentence",
-                source_id=sid,
-                project_id=self.project_id,
-                snapshot_hebrew=text,
-                snapshot_niqqud=niqqud_map.get(sid) or None,
-                snapshot_translation=transl_map.get(text) or None,
-                snapshot_source_label=source_label,
-                audio_status="unknown",
-            ))
+            specs.append(
+                AudioItemSpec(
+                    kind="sentence",
+                    source_id=sid,
+                    project_id=self.project_id,
+                    snapshot_hebrew=text,
+                    snapshot_niqqud=niqqud_map.get(sid) or None,
+                    snapshot_translation=transl_map.get(text) or None,
+                    snapshot_source_label=source_label,
+                    audio_status="unknown",
+                )
+            )
         return specs
 
-    def _build_lemma_specs(self, session, lemma_ids: List[int]) -> List:
+    def _build_lemma_specs(self, session, lemma_ids: list[int]) -> list:
         from sqlalchemy import select
+
         from app.infra.sa_models import Lemma
         from app.services.audio_queue_service import AudioItemSpec
 
-        stmt = select(Lemma.lemma_id, Lemma.lemma_text).where(
-            Lemma.lemma_id.in_(lemma_ids)
-        )
-        rows: Dict[int, str] = {lid: txt for lid, txt in session.execute(stmt).all()}
+        stmt = select(Lemma.lemma_id, Lemma.lemma_text).where(Lemma.lemma_id.in_(lemma_ids))
+        rows: dict[int, str] = {lid: txt for lid, txt in session.execute(stmt).all()}
 
         # Compute norms for batch lookups
-        lid_to_norm: Dict[int, str] = {}
+        lid_to_norm: dict[int, str] = {}
         try:
             from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+
             for lid in lemma_ids:
                 text = rows.get(lid, "")
                 if text:
@@ -4373,20 +4496,24 @@ class AudioQueuePopulateWorker(QThread):
             pass
 
         # Batch niqqud from pronunciation_entry (best-effort)
-        norm_to_niqqud: Dict[str, str] = {}
+        norm_to_niqqud: dict[str, str] = {}
         try:
             from app.services.pronunciation_service import PronunciationService
+
             all_norms = list(lid_to_norm.values())
             if all_norms:
                 bulk = PronunciationService().bulk_lookup(session, lang="he", src_norms=all_norms)
-                norm_to_niqqud = {norm: dto.niqqud_text for norm, dto in bulk.items() if dto.niqqud_text}
+                norm_to_niqqud = {
+                    norm: dto.niqqud_text for norm, dto in bulk.items() if dto.niqqud_text
+                }
         except Exception:
             pass
 
         # Batch translation from TMEntry kind="lemma" (best-effort)
-        norm_to_transl: Dict[str, str] = {}
+        norm_to_transl: dict[str, str] = {}
         try:
             from app.infra.sa_models import TMEntry as _TM
+
             all_norms = list(lid_to_norm.values())
             if all_norms:
                 tm_rows = session.execute(
@@ -4408,20 +4535,23 @@ class AudioQueuePopulateWorker(QThread):
         for lid in lemma_ids:
             lemma_text = rows.get(lid, "")
             norm = lid_to_norm.get(lid, "")
-            specs.append(AudioItemSpec(
-                kind="lemma",
-                source_id=lid,
-                project_id=self.project_id,
-                snapshot_hebrew=lemma_text,
-                snapshot_niqqud=norm_to_niqqud.get(norm) or None,
-                snapshot_translation=norm_to_transl.get(norm) or None,
-                snapshot_source_label="Dictionary",
-                audio_status="unknown",
-            ))
+            specs.append(
+                AudioItemSpec(
+                    kind="lemma",
+                    source_id=lid,
+                    project_id=self.project_id,
+                    snapshot_hebrew=lemma_text,
+                    snapshot_niqqud=norm_to_niqqud.get(norm) or None,
+                    snapshot_translation=norm_to_transl.get(norm) or None,
+                    snapshot_source_label="Dictionary",
+                    audio_status="unknown",
+                )
+            )
         return specs
 
-    def _build_term_specs(self, session, cluster_ids: List[int]) -> List:
+    def _build_term_specs(self, session, cluster_ids: list[int]) -> list:
         from sqlalchemy import select
+
         from app.infra.sa_models import TermCluster
         from app.services.audio_queue_service import AudioItemSpec
 
@@ -4430,26 +4560,27 @@ class AudioQueuePopulateWorker(QThread):
             TermCluster.representative_he,
             TermCluster.pinned_translation,
         ).where(TermCluster.cluster_id.in_(cluster_ids))
-        rows: Dict[int, tuple] = {
-            cid: (rep_he, transl)
-            for cid, rep_he, transl in session.execute(stmt).all()
+        rows: dict[int, tuple] = {
+            cid: (rep_he, transl) for cid, rep_he, transl in session.execute(stmt).all()
         }
 
         specs = []
         for cid in cluster_ids:
             rep_he, transl = rows.get(cid, ("", None))
-            specs.append(AudioItemSpec(
-                kind="term",
-                source_id=cid,
-                project_id=self.project_id,
-                snapshot_hebrew=rep_he or "",
-                snapshot_translation=transl or None,
-                snapshot_source_label="Terms",
-                audio_status="unknown",
-            ))
+            specs.append(
+                AudioItemSpec(
+                    kind="term",
+                    source_id=cid,
+                    project_id=self.project_id,
+                    snapshot_hebrew=rep_he or "",
+                    snapshot_translation=transl or None,
+                    snapshot_source_label="Terms",
+                    audio_status="unknown",
+                )
+            )
         return specs
 
-    def _resolve_audio_assets(self, session, specs: List) -> None:
+    def _resolve_audio_assets(self, session, specs: list) -> None:
         """Batch-lookup AudioAsset for specs and fill audio_asset_id + audio_status.
 
         Uses the same normalize_for_tm normalization as the audio generation pipeline
@@ -4457,13 +4588,15 @@ class AudioQueuePopulateWorker(QThread):
         Non-fatal: any exception is logged at DEBUG level and silently ignored.
         """
         try:
-            from sqlalchemy import select as _sel, desc as _desc
-            from app.infra.sa_models import AudioAsset as _AA
+            from sqlalchemy import desc as _desc
+            from sqlalchemy import select as _sel
+
             from app.domain.normalization.normalizer import normalize_for_tm as _ntm
+            from app.infra.sa_models import AudioAsset as _AA
             from app.services.audio_cache_key_service import AudioCacheKeyService
 
             _kind_map = {"lemma": "lemma", "term": "term_cluster", "sentence": "sentence"}
-            speech_hash_to_specs: Dict[str, List] = {}
+            speech_hash_to_specs: dict[str, list] = {}
             cache_keys = AudioCacheKeyService()
             for spec in specs:
                 if not spec.snapshot_hebrew or spec.audio_asset_id is not None:
@@ -4511,7 +4644,8 @@ class AudioQueuePopulateWorker(QThread):
             log_fn = logger.warning if resolved == 0 and specs else logger.debug
             log_fn(
                 "_resolve_audio_assets: %d/%d specs resolved to ready AudioAsset",
-                resolved, len(specs),
+                resolved,
+                len(specs),
             )
         except Exception as exc:
             logger.warning("_resolve_audio_assets: non-fatal exception: %s", exc, exc_info=True)

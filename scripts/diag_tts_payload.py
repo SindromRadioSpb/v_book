@@ -79,19 +79,27 @@ def _print_removed(removed: Iterable[RemovedCodepoint]) -> None:
 
 def main() -> int:
     _configure_console_output()
-    parser = argparse.ArgumentParser(description="Inspect exact TTS payload and Unicode codepoints.")
+    parser = argparse.ArgumentParser(
+        description="Inspect exact TTS payload and Unicode codepoints."
+    )
     parser.add_argument("--db-path", required=True, help="Path to SQLite DB.")
     parser.add_argument("--lang", default="he", help="Source language (default: he).")
     parser.add_argument("--src-text", help="Source text to inspect.")
-    parser.add_argument("--src-norm", help="Canonical source norm. If omitted, computed from src-text.")
+    parser.add_argument(
+        "--src-norm", help="Canonical source norm. If omitted, computed from src-text."
+    )
     parser.add_argument(
         "--kind",
         default="surface",
         choices=["surface", "lemma", "term_cluster", "ngram"],
         help="Normalization kind when src-norm is not provided.",
     )
-    parser.add_argument("--provider", default="google_cloud_tts", help="Provider label for output only.")
-    parser.add_argument("--ssml", action="store_true", help="Also print final SSML payload candidate.")
+    parser.add_argument(
+        "--provider", default="google_cloud_tts", help="Provider label for output only."
+    )
+    parser.add_argument(
+        "--ssml", action="store_true", help="Also print final SSML payload candidate."
+    )
     args = parser.parse_args()
 
     source_text = (args.src_text or "").strip() or (args.src_norm or "").strip()
@@ -114,11 +122,15 @@ def main() -> int:
         )
 
     effective_text = applied.token_text or source_text
-    sanitized_text, removed = PronunciationQualityService.sanitize_tts_text_with_meta(effective_text)
+    sanitized_text, removed = PronunciationQualityService.sanitize_tts_text_with_meta(
+        effective_text
+    )
     src_sanitized = PronunciationQualityService.sanitize_tts_text(source_text)
     if not sanitized_text:
         sanitized_text = src_sanitized
-        print("\nqc fallback: effective text became empty after sanitization; using sanitized source text")
+        print(
+            "\nqc fallback: effective text became empty after sanitization; using sanitized source text"
+        )
 
     print(f"provider: {args.provider}")
     print(f"mode: {applied.mode}")
@@ -134,7 +146,9 @@ def main() -> int:
         if applied.ssml and applied.is_valid:
             ssml_payload = applied.ssml
         else:
-            ssml_payload = f"<speak version='1.0'>{html.escape(sanitized_text, quote=False)}</speak>"
+            ssml_payload = (
+                f"<speak version='1.0'>{html.escape(sanitized_text, quote=False)}</speak>"
+            )
         print(f"\nssml_payload: {ssml_payload}")
 
     return 0

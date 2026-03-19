@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 class TranslationErrorKind(Enum):
@@ -28,9 +28,9 @@ class TranslationRequest:
     target_lang: str  # ISO 639-1 (e.g., "ru", "en", "he")
 
     # Optional fields
-    glossary: Optional[Any] = None  # Provider-specific glossary payload
+    glossary: Any | None = None  # Provider-specific glossary payload
     glossary_hash: str = ""  # SHA256 hex of canonical glossary (for cache key)
-    options: Dict[str, Any] = field(default_factory=dict)  # Provider-specific options
+    options: dict[str, Any] = field(default_factory=dict)  # Provider-specific options
     trace_id: str = ""  # For logging and debugging
     allow_fallback: bool = True
     timeout_seconds: float = 10.0
@@ -47,11 +47,11 @@ class TranslationResult:
     latency_ms: int = 0
 
     # Error fields (mutually exclusive with successful translation)
-    error_kind: Optional[TranslationErrorKind] = None
-    error_message: Optional[str] = None
+    error_kind: TranslationErrorKind | None = None
+    error_message: str | None = None
 
     # Metadata (provider-specific)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_success(self) -> bool:

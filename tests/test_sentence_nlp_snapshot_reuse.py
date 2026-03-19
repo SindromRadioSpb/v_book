@@ -85,12 +85,7 @@ class _Sentence:
 
 class _ProcessEngine:
     def process(self, text: str):
-        normalized = (
-            str(text or "")
-            .strip()
-            .lower()
-            .replace(".", " ")
-        )
+        normalized = str(text or "").strip().lower().replace(".", " ")
         words = [word for word in normalized.split() if word]
         if not words:
             return []
@@ -105,7 +100,9 @@ class _ProcessEngine:
 
 class _FailingEngine:
     def process(self, text: str):
-        raise AssertionError(f"term extraction should have reused snapshots instead of reparsing: {text}")
+        raise AssertionError(
+            f"term extraction should have reused snapshots instead of reparsing: {text}"
+        )
 
     def get_name(self):
         return "failing"
@@ -127,12 +124,22 @@ def test_process_document_persists_sentence_nlp_snapshots(monkeypatch) -> None:
         with db.get_session() as session:
             _project_id, doc_id = _seed_doc(session)
             assert service.process_document(session, doc_id, use_mock=True) is True
-            snapshots = session.execute(
-                select(SentenceNLPSnapshot).order_by(SentenceNLPSnapshot.sentence_id.asc())
-            ).scalars().all()
-            sentences = session.execute(
-                select(DocumentSentence).where(DocumentSentence.doc_id == doc_id).order_by(DocumentSentence.sent_index.asc())
-            ).scalars().all()
+            snapshots = (
+                session.execute(
+                    select(SentenceNLPSnapshot).order_by(SentenceNLPSnapshot.sentence_id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            sentences = (
+                session.execute(
+                    select(DocumentSentence)
+                    .where(DocumentSentence.doc_id == doc_id)
+                    .order_by(DocumentSentence.sent_index.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         assert len(sentences) == 2
         assert len(snapshots) == 2

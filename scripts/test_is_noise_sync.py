@@ -58,7 +58,9 @@ def test_migration_013():
         logger.info(f"✅ PASS: All source_id columns exist: {required_columns}")
 
         # Check indexes exist
-        result = session.execute(text("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tm_entry'"))
+        result = session.execute(
+            text("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tm_entry'")
+        )
         indexes = {row[0] for row in result.fetchall()}
 
         required_indexes = {"idx_tm_entry_lemma", "idx_tm_entry_cluster", "idx_tm_entry_ngram"}
@@ -83,9 +85,7 @@ def test_source_to_tm_sync():
 
     with db_service.get_session() as session:
         # Find a lemma with linked TMEntry
-        stmt = select(Lemma).join(
-            TMEntry, TMEntry.lemma_id == Lemma.lemma_id
-        ).limit(1)
+        stmt = select(Lemma).join(TMEntry, TMEntry.lemma_id == Lemma.lemma_id).limit(1)
         lemma = session.execute(stmt).scalar()
 
         if not lemma:
@@ -104,11 +104,11 @@ def test_source_to_tm_sync():
 
         # Trigger sync via BulkNoiseUpdateWorker logic (simulated)
         from sqlalchemy import update
-        sync_stmt = update(TMEntry).where(
-            TMEntry.lemma_id == lemma.lemma_id
-        ).values(
-            is_noise=1,
-            noise_reason="TEST_NOISE"
+
+        sync_stmt = (
+            update(TMEntry)
+            .where(TMEntry.lemma_id == lemma.lemma_id)
+            .values(is_noise=1, noise_reason="TEST_NOISE")
         )
         session.execute(sync_stmt)
         session.commit()
@@ -124,7 +124,9 @@ def test_source_to_tm_sync():
         all_synced = all(e.is_noise == 1 and e.noise_reason == "TEST_NOISE" for e in tm_entries)
 
         if not all_synced:
-            logger.error(f"❌ FAIL: TMEntry not synced. Found: {[(e.tm_id, e.is_noise, e.noise_reason) for e in tm_entries]}")
+            logger.error(
+                f"❌ FAIL: TMEntry not synced. Found: {[(e.tm_id, e.is_noise, e.noise_reason) for e in tm_entries]}"
+            )
             # Rollback
             lemma.is_noise = original_is_noise
             lemma.noise_reason = None
@@ -155,17 +157,16 @@ def test_tm_to_source_sync():
 
     with db_service.get_session() as session:
         # Find a TMEntry with linked lemma
-        stmt = select(TMEntry).where(
-            TMEntry.kind == "lemma",
-            TMEntry.lemma_id.isnot(None)
-        ).limit(1)
+        stmt = select(TMEntry).where(TMEntry.kind == "lemma", TMEntry.lemma_id.isnot(None)).limit(1)
         tm_entry = session.execute(stmt).scalar()
 
         if not tm_entry:
             logger.warning("⚠️ SKIP: No TMEntry with linked lemma found")
             return True
 
-        logger.info(f"Test TMEntry: {tm_entry.src_text} (tm_id={tm_entry.tm_id}, lemma_id={tm_entry.lemma_id})")
+        logger.info(
+            f"Test TMEntry: {tm_entry.src_text} (tm_id={tm_entry.tm_id}, lemma_id={tm_entry.lemma_id})"
+        )
 
         # Get linked lemma
         lemma = session.get(Lemma, tm_entry.lemma_id)
@@ -178,10 +179,7 @@ def test_tm_to_source_sync():
         original_lemma_is_noise = lemma.is_noise
 
         count = admin_service.set_noise_status_bulk(
-            session=session,
-            tm_ids=[tm_entry.tm_id],
-            is_noise=True,
-            noise_reason="TEST_TM_NOISE"
+            session=session, tm_ids=[tm_entry.tm_id], is_noise=True, noise_reason="TEST_TM_NOISE"
         )
 
         logger.info(f"Marked {count} TMEntry as noise")
@@ -192,14 +190,18 @@ def test_tm_to_source_sync():
 
         # Verify TMEntry is updated
         if tm_entry.is_noise != 1 or tm_entry.noise_reason != "TEST_TM_NOISE":
-            logger.error(f"❌ FAIL: TMEntry not updated. is_noise={tm_entry.is_noise}, noise_reason={tm_entry.noise_reason}")
+            logger.error(
+                f"❌ FAIL: TMEntry not updated. is_noise={tm_entry.is_noise}, noise_reason={tm_entry.noise_reason}"
+            )
             return False
 
         logger.info(f"✅ TMEntry updated: is_noise={tm_entry.is_noise}")
 
         # Verify Lemma is updated (bidirectional sync)
         if lemma.is_noise != 1 or lemma.noise_reason != "TEST_TM_NOISE":
-            logger.error(f"❌ FAIL: Lemma not synced. is_noise={lemma.is_noise}, noise_reason={lemma.noise_reason}")
+            logger.error(
+                f"❌ FAIL: Lemma not synced. is_noise={lemma.is_noise}, noise_reason={lemma.noise_reason}"
+            )
             # Restore
             tm_entry.is_noise = original_is_noise
             tm_entry.noise_reason = None
@@ -235,7 +237,9 @@ def test_tmentry_creation_captures_source():
             logger.warning("⚠️ SKIP: No lemma found for testing")
             return True
 
-        logger.info(f"Test lemma: {lemma.lemma_text} (lemma_id={lemma.lemma_id}, is_noise={lemma.is_noise})")
+        logger.info(
+            f"Test lemma: {lemma.lemma_text} (lemma_id={lemma.lemma_id}, is_noise={lemma.is_noise})"
+        )
 
         # Check if TMEntry exists for this lemma (simulating dictionary_view.py inline edit)
         normalized = normalize_for_tm("he", lemma.lemma_text, "lemma")
@@ -273,22 +277,30 @@ def test_tmentry_creation_captures_source():
 
         # Verify TMEntry has correct source_id and is_noise
         if tm_entry.lemma_id != lemma.lemma_id:
-            logger.error(f"❌ FAIL: lemma_id not captured. Expected {lemma.lemma_id}, got {tm_entry.lemma_id}")
+            logger.error(
+                f"❌ FAIL: lemma_id not captured. Expected {lemma.lemma_id}, got {tm_entry.lemma_id}"
+            )
             session.rollback()
             return False
 
         expected_is_noise = lemma.is_noise if lemma.is_noise is not None else 0
         if tm_entry.is_noise != expected_is_noise:
-            logger.error(f"❌ FAIL: is_noise not synced. Expected {expected_is_noise}, got {tm_entry.is_noise}")
+            logger.error(
+                f"❌ FAIL: is_noise not synced. Expected {expected_is_noise}, got {tm_entry.is_noise}"
+            )
             session.rollback()
             return False
 
         if tm_entry.noise_reason != lemma.noise_reason:
-            logger.error(f"❌ FAIL: noise_reason not synced. Expected {lemma.noise_reason}, got {tm_entry.noise_reason}")
+            logger.error(
+                f"❌ FAIL: noise_reason not synced. Expected {lemma.noise_reason}, got {tm_entry.noise_reason}"
+            )
             session.rollback()
             return False
 
-        logger.info(f"✅ PASS: TMEntry created with lemma_id={tm_entry.lemma_id}, is_noise={tm_entry.is_noise}, noise_reason={tm_entry.noise_reason}")
+        logger.info(
+            f"✅ PASS: TMEntry created with lemma_id={tm_entry.lemma_id}, is_noise={tm_entry.is_noise}, noise_reason={tm_entry.noise_reason}"
+        )
 
         # Cleanup
         session.rollback()

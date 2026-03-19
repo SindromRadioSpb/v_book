@@ -7,38 +7,38 @@ Allows users to configure:
 - Advanced settings (auth, budget guards, retry policy) - PATCH-06
 - Usage tracking display - PATCH-06
 """
-from PyQt6.QtCore import Qt, QSettings
+
+from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
+    QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
-    QSpinBox,
-    QCheckBox,
-    QPushButton,
-    QTabWidget,
-    QWidget,
     QListWidget,
     QListWidgetItem,
-    QDialogButtonBox,
     QMessageBox,
-    QTextEdit,
-    QFileDialog,
-    QComboBox,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
+from app.infra.security import CredentialStore
+from app.infra.settings import SettingsService
 from app.infra.translators.provider_config import (
-    ProviderAuthMode,
     ProviderAuthConfig,
+    ProviderAuthMode,
     ProviderLimitsConfig,
     ProviderRetryPolicy,
 )
 from app.infra.translators.provider_config_manager import ProviderConfigManager
-from app.infra.settings import SettingsService
 from app.services.db_service import DBService
-from app.infra.security import CredentialStore
 from app.services.mt_usage_tracker import MTUsageTracker
 
 
@@ -204,9 +204,7 @@ class ProviderSettingsDialog(QDialog):
             rate_limit_spin.setMaximum(10000)
             rate_limit_spin.setValue(provider_info["default_rate_limit"])
             rate_limit_spin.setSuffix(" req/min")
-            rate_limit_spin.setToolTip(
-                f"Maximum requests per minute for {provider_info['name']}"
-            )
+            rate_limit_spin.setToolTip(f"Maximum requests per minute for {provider_info['name']}")
 
             # Add to layout
             group_layout.addRow("Status:", enabled_cb)
@@ -308,12 +306,8 @@ class ProviderSettingsDialog(QDialog):
         self.advanced_provider_combo = QComboBox()
         for provider_id, provider_info in self.PROVIDERS.items():
             if provider_info.get("supports_advanced", False):
-                self.advanced_provider_combo.addItem(
-                    provider_info["name"], userData=provider_id
-                )
-        self.advanced_provider_combo.currentIndexChanged.connect(
-            self._on_advanced_provider_changed
-        )
+                self.advanced_provider_combo.addItem(provider_info["name"], userData=provider_id)
+        self.advanced_provider_combo.currentIndexChanged.connect(self._on_advanced_provider_changed)
         selector_layout.addWidget(self.advanced_provider_combo)
         selector_layout.addStretch()
         layout.addLayout(selector_layout)
@@ -495,11 +489,12 @@ class ProviderSettingsDialog(QDialog):
 
         if file_path:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     sa_json = f.read()
 
                 # Validate JSON
                 import json
+
                 sa_info = json.loads(sa_json)
 
                 # Check required fields
@@ -535,13 +530,9 @@ class ProviderSettingsDialog(QDialog):
                 )
 
             except json.JSONDecodeError as e:
-                QMessageBox.warning(
-                    self, "Invalid JSON", f"Failed to parse JSON: {e}"
-                )
+                QMessageBox.warning(self, "Invalid JSON", f"Failed to parse JSON: {e}")
             except Exception as e:
-                QMessageBox.critical(
-                    self, "Error", f"Failed to load Service Account JSON: {e}"
-                )
+                QMessageBox.critical(self, "Error", f"Failed to load Service Account JSON: {e}")
 
     def _clear_gcp_sa_json(self):
         """Clear Service Account JSON."""
@@ -568,14 +559,10 @@ class ProviderSettingsDialog(QDialog):
                 self.gcp_sa_preview.setText("No Service Account JSON configured")
                 self.gcp_sa_preview.setStyleSheet("color: gray; font-style: italic;")
 
-                QMessageBox.information(
-                    self, "Success", "Service Account JSON cleared."
-                )
+                QMessageBox.information(self, "Success", "Service Account JSON cleared.")
 
             except Exception as e:
-                QMessageBox.critical(
-                    self, "Error", f"Failed to clear credentials: {e}"
-                )
+                QMessageBox.critical(self, "Error", f"Failed to clear credentials: {e}")
 
     def _refresh_gcp_usage(self):
         """Refresh Google Cloud Translate usage statistics."""
@@ -603,8 +590,8 @@ class ProviderSettingsDialog(QDialog):
         """Test Google Cloud Translate API connection."""
         try:
             # Get provider from registry
-            from app.infra.translators.providers_registry import ProvidersRegistry
             from app.infra.translators.base_provider import TranslationRequest
+            from app.infra.translators.providers_registry import ProvidersRegistry
 
             registry = ProvidersRegistry()
             provider = registry.get("google_cloud_translate")
@@ -627,8 +614,8 @@ class ProviderSettingsDialog(QDialog):
             )
 
             # Show progress dialog
-            from PyQt6.QtWidgets import QProgressDialog
             from PyQt6.QtCore import Qt
+            from PyQt6.QtWidgets import QProgressDialog
 
             progress = QProgressDialog(
                 "Testing API connection...\nTranslating test phrase...",
@@ -655,7 +642,7 @@ class ProviderSettingsDialog(QDialog):
                     "Connection Successful",
                     f"✓ Google Cloud Translate API connection successful!\n\n"
                     f"Test translation:\n"
-                    f"  \"Hello\" (en) → \"{result.translated_text}\" (ru)\n\n"
+                    f'  "Hello" (en) → "{result.translated_text}" (ru)\n\n'
                     f"Latency: {result.latency_ms}ms\n"
                     f"Provider: {result.provider_id}",
                 )
@@ -741,6 +728,7 @@ class ProviderSettingsDialog(QDialog):
 
                     if sa_json:
                         import json
+
                         sa_info = json.loads(sa_json)
                         project_id = sa_info.get("project_id", "unknown")
                         self.gcp_sa_preview.setText(
@@ -791,10 +779,6 @@ class ProviderSettingsDialog(QDialog):
         """Save Google Cloud Translate advanced settings."""
         from app.infra.translators.provider_config import (
             ProviderConfig,
-            ProviderAuthConfig,
-            ProviderAuthMode,
-            ProviderLimitsConfig,
-            ProviderRetryPolicy,
             get_service_account_credential_id,
         )
 

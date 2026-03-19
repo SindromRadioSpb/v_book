@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -12,6 +11,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
-    QDoubleSpinBox,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -34,14 +33,16 @@ from PyQt6.QtWidgets import (
 
 from app.infra.audio.audio_provider_config import (
     AudioProviderAuthMode,
-    AudioProviderConfig,
     get_api_key_credential_id,
     get_service_account_credential_id,
 )
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
 from app.infra.settings import SettingsService
 from app.services.audio_usage_tracker import AudioUsageTracker
-from app.ui.dialogs.mms_license_gate_dialog import MMS_LICENSE_ACCEPTED_KEY, ensure_mms_license_accepted
+from app.ui.dialogs.mms_license_gate_dialog import (
+    MMS_LICENSE_ACCEPTED_KEY,
+    ensure_mms_license_accepted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +91,8 @@ class AudioProviderSettingsDialog(QDialog):
 
         self.settings = SettingsService.get_instance()
         self.config_manager = AudioProviderConfigManager(settings=self.settings)
-        self.provider_widgets: Dict[str, Dict[str, object]] = {}
-        self.advanced_pages: Dict[str, QWidget] = {}
+        self.provider_widgets: dict[str, dict[str, object]] = {}
+        self.advanced_pages: dict[str, QWidget] = {}
 
         self._init_ui()
         self._load_settings()
@@ -130,7 +131,9 @@ class AudioProviderSettingsDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(self._restore_defaults)
+        buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(
+            self._restore_defaults
+        )
         root.addWidget(buttons)
 
     def _create_rate_limits_tab(self) -> QWidget:
@@ -307,9 +310,7 @@ class AudioProviderSettingsDialog(QDialog):
 
         auth_group = QGroupBox("Authentication")
         auth_layout = QVBoxLayout(auth_group)
-        auth_layout.addWidget(
-            QLabel("Google Cloud TTS uses Service Account JSON credentials.")
-        )
+        auth_layout.addWidget(QLabel("Google Cloud TTS uses Service Account JSON credentials."))
 
         row = QHBoxLayout()
         self.google_sa_load_btn = QPushButton("Load from File...")
@@ -573,7 +574,9 @@ class AudioProviderSettingsDialog(QDialog):
         group = QGroupBox("Diagnostics")
         layout = QHBoxLayout(group)
         test_btn = QPushButton("Test API Connection")
-        test_btn.clicked.connect(lambda _=False, pid=provider_id: self._test_provider_connection(pid))
+        test_btn.clicked.connect(
+            lambda _=False, pid=provider_id: self._test_provider_connection(pid)
+        )
         layout.addWidget(test_btn)
         layout.addStretch()
         root_layout.addWidget(group)
@@ -625,7 +628,9 @@ class AudioProviderSettingsDialog(QDialog):
             self.playback_mode_combo.setCurrentIndex(idx)
 
     def _load_settings(self):
-        self.master_enable_checkbox.setChecked(self.settings.get_bool("audio/providers/enabled", True))
+        self.master_enable_checkbox.setChecked(
+            self.settings.get_bool("audio/providers/enabled", True)
+        )
 
         for provider_id, widgets in self.provider_widgets.items():
             config = self.config_manager.load_config(provider_id)
@@ -665,16 +670,22 @@ class AudioProviderSettingsDialog(QDialog):
         self.google_max_retries.setValue(int(config.retry_max_attempts))
         self.google_backoff_ms.setValue(int(config.retry_backoff_base_ms))
 
-        sa_cred_id = config.service_account_credential_id or get_service_account_credential_id("google_cloud_tts")
+        sa_cred_id = config.service_account_credential_id or get_service_account_credential_id(
+            "google_cloud_tts"
+        )
         sa_json = self.config_manager.get_credential(sa_cred_id)
         if sa_json:
             try:
                 info = json.loads(sa_json)
                 project_id = info.get("project_id", "unknown")
-                self.google_sa_preview.setText(f"✓ Service Account configured (project: {project_id})")
+                self.google_sa_preview.setText(
+                    f"✓ Service Account configured (project: {project_id})"
+                )
                 self.google_sa_preview.setStyleSheet("color: #2e7d32;")
             except Exception:
-                self.google_sa_preview.setText("Service Account credential exists (invalid JSON preview)")
+                self.google_sa_preview.setText(
+                    "Service Account credential exists (invalid JSON preview)"
+                )
                 self.google_sa_preview.setStyleSheet("color: #f57c00;")
         else:
             self.google_sa_preview.setText("No Service Account JSON configured")
@@ -716,17 +727,29 @@ class AudioProviderSettingsDialog(QDialog):
         self.mms_license_state.setStyleSheet("color: #2e7d32;" if accepted else "color: #d32f2f;")
 
     def _load_playback_settings(self):
-        self.playback_pre_roll_spin.setValue(self.settings.get_int("audio/playback/pre_roll_ms", 200))
+        self.playback_pre_roll_spin.setValue(
+            self.settings.get_int("audio/playback/pre_roll_ms", 200)
+        )
         self.playback_gap_spin.setValue(self.settings.get_int("audio/playback/gap_ms", 550))
-        self.playback_post_roll_spin.setValue(self.settings.get_int("audio/playback/post_roll_ms", 300))
-        mode = (self.settings.get_string("audio/playback/play_mode", "interrupt") or "interrupt").strip().lower()
+        self.playback_post_roll_spin.setValue(
+            self.settings.get_int("audio/playback/post_roll_ms", 300)
+        )
+        mode = (
+            (self.settings.get_string("audio/playback/play_mode", "interrupt") or "interrupt")
+            .strip()
+            .lower()
+        )
         idx = self.playback_mode_combo.findData("enqueue" if mode == "enqueue" else "interrupt")
         self.playback_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     def _save_playback_settings(self):
-        self.settings.set_value("audio/playback/pre_roll_ms", int(self.playback_pre_roll_spin.value()))
+        self.settings.set_value(
+            "audio/playback/pre_roll_ms", int(self.playback_pre_roll_spin.value())
+        )
         self.settings.set_value("audio/playback/gap_ms", int(self.playback_gap_spin.value()))
-        self.settings.set_value("audio/playback/post_roll_ms", int(self.playback_post_roll_spin.value()))
+        self.settings.set_value(
+            "audio/playback/post_roll_ms", int(self.playback_post_roll_spin.value())
+        )
         mode = self.playback_mode_combo.currentData() or "interrupt"
         self.settings.set_value("audio/playback/play_mode", str(mode))
         try:
@@ -819,16 +842,20 @@ class AudioProviderSettingsDialog(QDialog):
             return
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 payload = f.read()
             data = json.loads(payload)
             if "project_id" not in data:
-                QMessageBox.warning(self, "Invalid JSON", "Service Account JSON must include project_id.")
+                QMessageBox.warning(
+                    self, "Invalid JSON", "Service Account JSON must include project_id."
+                )
                 return
 
             cred_id = get_service_account_credential_id("google_cloud_tts")
             self.config_manager.set_credential(cred_id, payload)
-            self.google_sa_preview.setText(f"✓ Service Account configured (project: {data.get('project_id')})")
+            self.google_sa_preview.setText(
+                f"✓ Service Account configured (project: {data.get('project_id')})"
+            )
             self.google_sa_preview.setStyleSheet("color: #2e7d32;")
             QMessageBox.information(self, "Success", "Service Account JSON loaded.")
         except json.JSONDecodeError as e:
@@ -1104,7 +1131,9 @@ class AudioProviderSettingsDialog(QDialog):
         self._load_mms_advanced_settings()
 
     def _open_pronunciation_bootstrap(self):
-        from app.ui.dialogs.pronunciation_bootstrap_dialog import show_pronunciation_bootstrap_dialog
+        from app.ui.dialogs.pronunciation_bootstrap_dialog import (
+            show_pronunciation_bootstrap_dialog,
+        )
 
         show_pronunciation_bootstrap_dialog(parent=self)
 

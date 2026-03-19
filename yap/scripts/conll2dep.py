@@ -15,4 +15,3 @@ if __name__ == "__main__":
       line = line.split("\t")
       print "\t".join([line[1], line[4], getIdx(line[6]), line[7]])
    file.close()
-

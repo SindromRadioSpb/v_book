@@ -1,13 +1,13 @@
 """Local MT services (segmentation, glossary postprocess)."""
 
-from .segmentation import segment_text, reassemble_text, TextSegment
 from .glossary_postprocess import (
-    apply_glossary,
-    apply_glossary_to_text,
     AppliedTerm,
     PostprocessResult,
+    apply_glossary,
+    apply_glossary_to_text,
     normalize_text,
 )
+from .segmentation import TextSegment, reassemble_text, segment_text
 
 __all__ = [
     # Segmentation

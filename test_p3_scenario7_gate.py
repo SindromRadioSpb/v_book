@@ -9,10 +9,10 @@ This verifies that P3 dictionary import can create valid data
 that passes P1 verification requirements.
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
 from app.services.db_service import DBService
@@ -34,9 +34,11 @@ class TestScenario7Gate(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -47,7 +49,7 @@ class TestScenario7Gate(unittest.TestCase):
 
         # Create test library and project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -68,7 +70,7 @@ class TestScenario7Gate(unittest.TestCase):
     @classmethod
     def _create_fixture_data(cls):
         """Create fixture data: term_clusters with proper coverage."""
-        from app.infra.sa_models import TMEntry, DictEntry, DictSource
+        from app.infra.sa_models import DictEntry, DictSource, TMEntry
 
         with cls.db_service.get_session() as session:
             # Create dict source
@@ -159,19 +161,15 @@ class TestScenario7Gate(unittest.TestCase):
 
     def test_scenario7_data_structure_valid(self):
         """Test that fixture data has valid structure for P1 verification."""
-        from app.infra.sa_models import DictEntry, TMEntry, DictSource
+        from app.infra.sa_models import DictEntry, DictSource, TMEntry
 
         with self.db_service.get_session() as session:
             # Verify dict_source exists
-            dict_sources = session.query(DictSource).filter(
-                DictSource.project_id == 1
-            ).all()
+            dict_sources = session.query(DictSource).filter(DictSource.project_id == 1).all()
             self.assertGreater(len(dict_sources), 0, "No dict_source found for project")
 
             # Verify term_clusters have required fields
-            term_clusters = session.query(DictEntry).filter(
-                DictEntry.kind == "term_cluster"
-            ).all()
+            term_clusters = session.query(DictEntry).filter(DictEntry.kind == "term_cluster").all()
 
             self.assertGreaterEqual(len(term_clusters), 3, "Expected at least 3 term_clusters")
 
@@ -184,9 +182,7 @@ class TestScenario7Gate(unittest.TestCase):
                 self.assertEqual(tc.status, "approved", "status should be approved")
 
             # Verify TM entries exist
-            tm_entries = session.query(TMEntry).filter(
-                TMEntry.project_id == 1
-            ).all()
+            tm_entries = session.query(TMEntry).filter(TMEntry.project_id == 1).all()
             self.assertGreater(len(tm_entries), 0, "No TM entries found")
 
     def test_scenario7_term_clusters_exist(self):
@@ -194,9 +190,7 @@ class TestScenario7Gate(unittest.TestCase):
         from app.infra.sa_models import DictEntry
 
         with self.db_service.get_session() as session:
-            term_clusters = session.query(DictEntry).filter(
-                DictEntry.kind == "term_cluster"
-            ).all()
+            term_clusters = session.query(DictEntry).filter(DictEntry.kind == "term_cluster").all()
 
             # Should have at least 3 term_clusters from fixture
             self.assertGreaterEqual(len(term_clusters), 3)

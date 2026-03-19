@@ -4,10 +4,17 @@ Confirm dialog for batch translation with provider and write mode selection.
 """
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QRadioButton, QComboBox, QButtonGroup, QGroupBox, QCheckBox
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt
 
 from app.infra.settings import SettingsService
 
@@ -22,7 +29,13 @@ class BatchTranslateDialog(QDialog):
     - Remember choices checkbox
     """
 
-    def __init__(self, parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0):
+    def __init__(
+        self,
+        parent=None,
+        selected_count: int = 0,
+        scope_enabled: bool = False,
+        filtered_count: int = 0,
+    ):
         """Initialize dialog.
 
         Args:
@@ -68,8 +81,12 @@ class BatchTranslateDialog(QDialog):
             scope_layout.addWidget(self.all_pages_radio)
 
             # Count label below "All pages"
-            self.filtered_count_label = QLabel(f"   → Will translate ~{self.filtered_count} items matching current filters")
-            self.filtered_count_label.setStyleSheet("color: #666; font-size: 11px; padding-left: 20px;")
+            self.filtered_count_label = QLabel(
+                f"   → Will translate ~{self.filtered_count} items matching current filters"
+            )
+            self.filtered_count_label.setStyleSheet(
+                "color: #666; font-size: 11px; padding-left: 20px;"
+            )
             scope_layout.addWidget(self.filtered_count_label)
 
             scope_group.setLayout(scope_layout)
@@ -93,14 +110,16 @@ class BatchTranslateDialog(QDialog):
         force_layout.addWidget(self.force_radio)
 
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems([
-            "google_translate",
-            "google_cloud_translate",
-            "local_nllb",
-            "deepl",
-            "microsoft",
-            "libretranslate",
-        ])
+        self.provider_combo.addItems(
+            [
+                "google_translate",
+                "google_cloud_translate",
+                "local_nllb",
+                "deepl",
+                "microsoft",
+                "libretranslate",
+            ]
+        )
         self.provider_combo.setEnabled(False)
         force_layout.addWidget(self.provider_combo)
         force_layout.addStretch()
@@ -253,6 +272,7 @@ class BatchTranslateDialog(QDialog):
     def open_settings(self):
         """Open MT provider settings dialog."""
         from app.ui.provider_settings_dialog import show_provider_settings
+
         show_provider_settings(parent=self)
 
     def accept(self):
@@ -261,7 +281,9 @@ class BatchTranslateDialog(QDialog):
         super().accept()
 
 
-def show_batch_translate_dialog(parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0) -> tuple[bool, str, str, str]:
+def show_batch_translate_dialog(
+    parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0
+) -> tuple[bool, str, str, str]:
     """Show batch translate dialog and return user choices.
 
     Args:

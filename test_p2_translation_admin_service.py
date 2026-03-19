@@ -7,12 +7,12 @@ Tests all service operations for TM entry management:
 - Bulk operations
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
-from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
 from datetime import datetime
+from pathlib import Path
 
 
 class TestTranslationAdminService(unittest.TestCase):
@@ -26,12 +26,17 @@ class TestTranslationAdminService(unittest.TestCase):
 
         # Apply schema
         from app.services.db_service import DBService
+
         DBService.initialize(cls.test_db.name)
 
         # Apply M7 + P2 migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2_revert_origin = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2_revert_origin = Path("schema/006_p2_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -42,7 +47,7 @@ class TestTranslationAdminService(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -61,12 +66,14 @@ class TestTranslationAdminService(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         from app.services.db_service import DBService
+
         DBService.shutdown()
         os.unlink(cls.test_db.name)
 
     def setUp(self):
         """Clean TM entries before each test."""
         from app.infra.sa_models import TMEntry, TMEntryHistory
+
         with self.db_service.get_session() as session:
             session.query(TMEntryHistory).delete()
             session.query(TMEntry).delete()
@@ -74,8 +81,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_search_filters_origin_and_source_ref(self):
         """Test search with origin and source_ref filters."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -131,8 +138,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_scope_filter_project_vs_global(self):
         """Test scope filter for project vs global TM entries."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -186,8 +193,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_set_status_approve_sets_approved_at(self):
         """Test that approve sets approved_at and approved_by."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -221,8 +228,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_set_status_reject_clears_approved_at(self):
         """Test that reject/deprecate clears approved_at and approved_by."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -258,8 +265,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_update_translation_creates_history(self):
         """Test that update_translation creates history entry."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry, TMEntryHistory
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -286,9 +293,7 @@ class TestTranslationAdminService(unittest.TestCase):
 
         # Check history created
         with self.db_service.get_session() as session:
-            history = session.query(TMEntryHistory).filter(
-                TMEntryHistory.tm_id == tm_id
-            ).all()
+            history = session.query(TMEntryHistory).filter(TMEntryHistory.tm_id == tm_id).all()
             self.assertGreater(len(history), 0)
             self.assertEqual(history[0].change_kind, "edit")
 
@@ -300,8 +305,8 @@ class TestTranslationAdminService(unittest.TestCase):
 
     def test_revert_sets_origin_revert_and_restores_translation(self):
         """Test that revert restores translation and sets origin='revert'."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry, TMEntryHistory
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -338,20 +343,23 @@ class TestTranslationAdminService(unittest.TestCase):
         with self.db_service.get_session() as session:
             entry = session.query(TMEntry).filter(TMEntry.tm_id == tm_id).one()
             self.assertEqual(entry.translation, "новый дом")  # Version 2 translation
-            self.assertEqual(entry.origin, "user_edit")  # P2 FIX: origin uses 'user_edit' (history tracks revert)
+            self.assertEqual(
+                entry.origin, "user_edit"
+            )  # P2 FIX: origin uses 'user_edit' (history tracks revert)
 
         # Check history has revert entry
         with self.db_service.get_session() as session:
-            history = session.query(TMEntryHistory).filter(
-                TMEntryHistory.tm_id == tm_id,
-                TMEntryHistory.change_kind == "revert"
-            ).all()
+            history = (
+                session.query(TMEntryHistory)
+                .filter(TMEntryHistory.tm_id == tm_id, TMEntryHistory.change_kind == "revert")
+                .all()
+            )
             self.assertGreater(len(history), 0)
 
     def test_bulk_set_status_transactional(self):
         """Test that bulk_set_status is transactional."""
-        from app.services.translation_admin_service import TranslationAdminService
         from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -378,12 +386,7 @@ class TestTranslationAdminService(unittest.TestCase):
 
         # Bulk approve
         with self.db_service.get_session() as session:
-            count = service.bulk_set_status(
-                session,
-                tm_ids,
-                "approved",
-                approved_by="bulk_test"
-            )
+            count = service.bulk_set_status(session, tm_ids, "approved", approved_by="bulk_test")
             self.assertEqual(count, 3)
 
         # Verify all approved

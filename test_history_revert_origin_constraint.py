@@ -9,12 +9,11 @@ Bug: Code was setting origin='revert' which violates CHECK constraint.
 Fix: Use origin='user_edit' instead (history still tracks revert via change_kind).
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
-from datetime import datetime
 
 from app.services.db_service import DBService
 
@@ -32,9 +31,11 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -45,7 +46,7 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -72,9 +73,10 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
         Regression test for IntegrityError bug where code tried to set
         origin='revert' which violates CHECK constraint.
         """
-        from app.services.translation_admin_service import TranslationAdminService
-        from app.infra.sa_models import TMEntry, TMEntryHistory
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry
+        from app.services.translation_admin_service import TranslationAdminService
 
         service = TranslationAdminService()
 
@@ -97,19 +99,11 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
 
         # Edit translation (creates history)
         with self.db_service.get_session() as session:
-            service.update_translation(
-                session,
-                tm_id,
-                "новая книга"
-            )
+            service.update_translation(session, tm_id, "новая книга")
 
         # Edit again (creates second version)
         with self.db_service.get_session() as session:
-            service.update_translation(
-                session,
-                tm_id,
-                "другая книга"
-            )
+            service.update_translation(session, tm_id, "другая книга")
 
         # Get history to find version to revert to
         with self.db_service.get_session() as session:
@@ -130,10 +124,7 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
         try:
             with self.db_service.get_session() as session:
                 service.revert(
-                    session,
-                    tm_id=tm_id,
-                    version=target_version,
-                    approved_by="test_user"
+                    session, tm_id=tm_id, version=target_version, approved_by="test_user"
                 )
         except sqlite3.IntegrityError as e:
             self.fail(f"Revert crashed with IntegrityError: {e}")
@@ -146,16 +137,12 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
             self.assertIsNotNone(entry)
             # P2 FIX: Should be 'user_edit', not 'revert'
             self.assertEqual(
-                entry.origin,
-                "user_edit",
-                "Reverted entry should have valid origin 'user_edit'"
+                entry.origin, "user_edit", "Reverted entry should have valid origin 'user_edit'"
             )
 
             # Verify translation was reverted
             self.assertEqual(
-                entry.translation,
-                "новая книга",
-                "Translation should be reverted to target version"
+                entry.translation, "новая книга", "Translation should be reverted to target version"
             )
 
         # Verify history correctly records revert action
@@ -164,18 +151,12 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
 
             # Find revert entry in history
             revert_entries = [h for h in history if h.change_kind == "revert"]
-            self.assertGreater(
-                len(revert_entries),
-                0,
-                "History should contain revert action"
-            )
+            self.assertGreater(len(revert_entries), 0, "History should contain revert action")
 
             # Latest entry should be the revert
             latest = history[0]  # Assuming newest first
             self.assertEqual(
-                latest.change_kind,
-                "revert",
-                "Latest history entry should be revert action"
+                latest.change_kind, "revert", "Latest history entry should be revert action"
             )
 
     def test_revert_tm_entry_uses_valid_origin(self):
@@ -183,9 +164,10 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
 
         Tests the second revert method location.
         """
-        from app.services.translation_service import TranslationService
-        from app.infra.sa_models import TMEntry, TMEntryHistory
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry, TMEntryHistory
+        from app.services.translation_service import TranslationService
 
         service = TranslationService()
 
@@ -229,10 +211,7 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
         try:
             with self.db_service.get_session() as session:
                 success = service.revert_tm_entry(
-                    session,
-                    tm_id=tm_id,
-                    target_version=1,
-                    actor="test_user"
+                    session, tm_id=tm_id, target_version=1, actor="test_user"
                 )
                 self.assertTrue(success, "Revert should succeed")
         except sqlite3.IntegrityError as e:
@@ -245,31 +224,22 @@ class TestHistoryRevertOriginConstraint(unittest.TestCase):
 
             self.assertIsNotNone(entry)
             self.assertEqual(
-                entry.origin,
-                "user_edit",
-                "Reverted entry should have valid origin 'user_edit'"
+                entry.origin, "user_edit", "Reverted entry should have valid origin 'user_edit'"
             )
 
             # Verify translation was reverted
             self.assertEqual(
-                entry.translation,
-                "школа",
-                "Translation should be reverted to version 1"
+                entry.translation, "школа", "Translation should be reverted to version 1"
             )
 
         # Verify history contains revert action
         with self.db_service.get_session() as session:
             stmt = select(TMEntryHistory).where(
-                TMEntryHistory.tm_id == tm_id,
-                TMEntryHistory.change_kind == "revert"
+                TMEntryHistory.tm_id == tm_id, TMEntryHistory.change_kind == "revert"
             )
             revert_history = session.execute(stmt).scalars().all()
 
-            self.assertGreater(
-                len(revert_history),
-                0,
-                "History should contain revert action"
-            )
+            self.assertGreater(len(revert_history), 0, "History should contain revert action")
 
 
 if __name__ == "__main__":

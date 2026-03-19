@@ -105,12 +105,14 @@ class ShardWriter:
 
         file_size = self.current_path.stat().st_size
 
-        self.shards.append({
-            "filename": self.current_path.name,
-            "lines": self.current_lines,
-            "bytes": file_size,
-            "sha256": sha256.hexdigest(),
-        })
+        self.shards.append(
+            {
+                "filename": self.current_path.name,
+                "lines": self.current_lines,
+                "bytes": file_size,
+                "sha256": sha256.hexdigest(),
+            }
+        )
 
         logging.info(
             f"Closed shard: {self.current_path.name} "
@@ -126,8 +128,7 @@ class ShardWriter:
 
         # Check if we need to rotate
         if self.current_file and (
-            self.current_lines >= self.max_lines or
-            self.current_bytes + line_size > self.max_bytes
+            self.current_lines >= self.max_lines or self.current_bytes + line_size > self.max_bytes
         ):
             self._close_current_shard()
 
@@ -181,9 +182,7 @@ def load_wikiextractor_module(wx_path: Path) -> Tuple[Any, str]:
         WikiExtractorNotFoundError: If module cannot be loaded
     """
     if not wx_path.exists():
-        raise WikiExtractorNotFoundError(
-            f"Wikiextractor-V2 path does not exist: {wx_path}"
-        )
+        raise WikiExtractorNotFoundError(f"Wikiextractor-V2 path does not exist: {wx_path}")
 
     # Add to sys.path
     if str(wx_path) not in sys.path:
@@ -292,7 +291,8 @@ def extract_to_jsonl(
         str(dump_path),
         "--generator",
         "--json",
-        "-ns", namespaces,
+        "-ns",
+        namespaces,
     ]
 
     if discard_sections:
@@ -377,7 +377,9 @@ def extract_to_jsonl(
     ended_at = datetime.now(timezone.utc)
     duration_ms = int((ended_at - started_at).total_seconds() * 1000)
 
-    logging.info(f"Extraction complete: {summary['total_docs']:,} documents in {summary['num_shards']} shards")
+    logging.info(
+        f"Extraction complete: {summary['total_docs']:,} documents in {summary['num_shards']} shards"
+    )
 
     # Build metadata
     metadata = {
@@ -387,7 +389,9 @@ def extract_to_jsonl(
         "dump_file": dump_path.name,
         "dump_path": str(dump_path),
         "wikiextractor_path": wx_path,
-        "wikiextractor_commit": get_git_commit(Path(wx_path).parent.parent) if ".git" in str(wx_path) else None,
+        "wikiextractor_commit": (
+            get_git_commit(Path(wx_path).parent.parent) if ".git" in str(wx_path) else None
+        ),
         "args": {
             "namespaces": namespaces,
             "limit_docs": limit_docs,
@@ -404,7 +408,7 @@ def extract_to_jsonl(
             "total_docs": summary["total_docs"],
             "total_bytes": summary["total_bytes"],
             "num_shards": summary["num_shards"],
-        }
+        },
     }
 
     return metadata
@@ -534,8 +538,7 @@ def main() -> int:
     # Check output directory
     if args.out_dir.exists() and not args.overwrite:
         logging.error(
-            f"Output directory already exists: {args.out_dir}\n"
-            "Use --overwrite to overwrite"
+            f"Output directory already exists: {args.out_dir}\n" "Use --overwrite to overwrite"
         )
         return 1
 

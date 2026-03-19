@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -19,9 +18,9 @@ class AudioBudgetLimits:
 
     max_chars_per_request: int = 10000
     max_requests_per_minute: int = 60
-    max_chars_per_day: Optional[int] = None
-    max_chars_per_month: Optional[int] = None
-    max_requests_per_day: Optional[int] = None
+    max_chars_per_day: int | None = None
+    max_chars_per_month: int | None = None
+    max_requests_per_day: int | None = None
     fail_closed: bool = True
 
     def has_budget_guards(self) -> bool:
@@ -41,14 +40,14 @@ class AudioUsageTracker:
 
     @staticmethod
     def _now_utc() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     def can_spend(
         self,
         provider_id: str,
         char_count: int,
         limits: AudioBudgetLimits,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         now = self._now_utc()
         minute_key = now.strftime("%Y-%m-%dT%H:%M")
         day_key = now.strftime("%Y-%m-%d")
@@ -93,7 +92,7 @@ class AudioUsageTracker:
         provider_id: str,
         char_count: int,
         request_count: int = 1,
-        timestamp_utc: Optional[datetime] = None,
+        timestamp_utc: datetime | None = None,
         commit: bool = True,
     ) -> None:
         now = timestamp_utc or self._now_utc()

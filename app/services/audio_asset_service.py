@@ -9,9 +9,9 @@ P0 scope:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
@@ -69,7 +69,7 @@ class AudioAssetService:
         speed: float = 1.0,
         provider: str = "none",
         input_hash: str | None = None,
-    ) -> Optional[AudioAsset]:
+    ) -> AudioAsset | None:
         """Resolve the canonical metadata row for upsert/update purposes.
 
         New rows are identified by `(lang, input_hash)` when the exact request hash
@@ -100,22 +100,19 @@ class AudioAssetService:
         voice_id: str = "default",
         speed: float = 1.0,
         provider: str = "none",
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Resolve audio status for norm_text list with default `missing`."""
         norm_list = [n for n in norm_texts if n]
         if not norm_list:
             return {}
 
-        status_map = {norm: "missing" for norm in norm_list}
-        stmt = (
-            select(AudioAsset.norm_text, AudioAsset.asset_status)
-            .where(
-                AudioAsset.lang == lang,
-                AudioAsset.voice_id == voice_id,
-                AudioAsset.speed == speed,
-                AudioAsset.provider == provider,
-                AudioAsset.norm_text.in_(norm_list),
-            )
+        status_map = dict.fromkeys(norm_list, "missing")
+        stmt = select(AudioAsset.norm_text, AudioAsset.asset_status).where(
+            AudioAsset.lang == lang,
+            AudioAsset.voice_id == voice_id,
+            AudioAsset.speed == speed,
+            AudioAsset.provider == provider,
+            AudioAsset.norm_text.in_(norm_list),
         )
         for norm_text, status in session.execute(stmt).all():
             current = status_map.get(norm_text, "missing")
@@ -130,19 +127,16 @@ class AudioAssetService:
         *,
         lang: str,
         norm_texts: Iterable[str],
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Resolve status across all provider/voice variants for given source norms."""
         norm_list = [n for n in norm_texts if n]
         if not norm_list:
             return {}
 
-        status_map = {norm: "missing" for norm in norm_list}
-        stmt = (
-            select(AudioAsset.norm_text, AudioAsset.asset_status)
-            .where(
-                AudioAsset.lang == lang,
-                AudioAsset.norm_text.in_(norm_list),
-            )
+        status_map = dict.fromkeys(norm_list, "missing")
+        stmt = select(AudioAsset.norm_text, AudioAsset.asset_status).where(
+            AudioAsset.lang == lang,
+            AudioAsset.norm_text.in_(norm_list),
         )
         for norm_text, status in session.execute(stmt).all():
             current = status_map.get(norm_text, "missing")
@@ -156,7 +150,7 @@ class AudioAssetService:
         session: Session,
         *,
         items: Iterable[dict],
-    ) -> Dict[tuple[str, str, str], str]:
+    ) -> dict[tuple[str, str, str], str]:
         """Resolve audio status for current pronunciation-aware source items.
 
         Each input item must provide:
@@ -167,8 +161,8 @@ class AudioAssetService:
         Returns:
         - `{(lang, norm_text, source_text): status}`
         """
-        prepared: Dict[tuple[str, str, str], str] = {}
-        speech_hashes_by_lang: Dict[str, Dict[str, List[tuple[str, str, str]]]] = {}
+        prepared: dict[tuple[str, str, str], str] = {}
+        speech_hashes_by_lang: dict[str, dict[str, list[tuple[str, str, str]]]] = {}
 
         for raw in items:
             lang = str(raw.get("lang") or "").strip()
@@ -195,21 +189,20 @@ class AudioAssetService:
             speech_hashes_by_lang.setdefault(lang, {}).setdefault(speech_hash, []).append(key)
 
         for lang, hash_map in speech_hashes_by_lang.items():
-            stmt = (
-                select(AudioAsset.speech_hash, AudioAsset.asset_status)
-                .where(
-                    AudioAsset.lang == lang,
-                    AudioAsset.speech_hash.in_(list(hash_map.keys())),
-                )
+            stmt = select(AudioAsset.speech_hash, AudioAsset.asset_status).where(
+                AudioAsset.lang == lang,
+                AudioAsset.speech_hash.in_(list(hash_map.keys())),
             )
             for speech_hash, status in session.execute(stmt).all():
                 candidate = status if status in self.VALID_STATUSES else "failed"
                 for key in hash_map.get(str(speech_hash or ""), []):
                     current = prepared.get(key, "missing")
-                    if self.STATUS_PRIORITY.get(candidate, 0) >= self.STATUS_PRIORITY.get(current, 0):
+                    if self.STATUS_PRIORITY.get(candidate, 0) >= self.STATUS_PRIORITY.get(
+                        current, 0
+                    ):
                         prepared[key] = candidate
 
-        unresolved_by_lang: Dict[str, Dict[str, List[tuple[str, str, str]]]] = {}
+        unresolved_by_lang: dict[str, dict[str, list[tuple[str, str, str]]]] = {}
         for key, status in prepared.items():
             if status != "missing":
                 continue
@@ -219,13 +212,10 @@ class AudioAssetService:
             unresolved_by_lang.setdefault(lang, {}).setdefault(norm_text, []).append(key)
 
         for lang, norm_map in unresolved_by_lang.items():
-            stmt = (
-                select(AudioAsset.norm_text, AudioAsset.asset_status)
-                .where(
-                    AudioAsset.lang == lang,
-                    AudioAsset.norm_text.in_(list(norm_map.keys())),
-                    AudioAsset.asset_status == "failed",
-                )
+            stmt = select(AudioAsset.norm_text, AudioAsset.asset_status).where(
+                AudioAsset.lang == lang,
+                AudioAsset.norm_text.in_(list(norm_map.keys())),
+                AudioAsset.asset_status == "failed",
             )
             for norm_text, _status in session.execute(stmt).all():
                 for key in norm_map.get(str(norm_text or ""), []):
@@ -304,15 +294,20 @@ class AudioAssetService:
     ) -> bool:
         if not input_hash:
             return False
-        stmt = select(AudioAsset.asset_id).where(
-            and_(
-                AudioAsset.lang == lang,
-                AudioAsset.input_hash == input_hash,
-                AudioAsset.asset_status == "ready",
-                AudioAsset.audio_rel_path.is_not(None),
+        stmt = (
+            select(AudioAsset.asset_id)
+            .where(
+                and_(
+                    AudioAsset.lang == lang,
+                    AudioAsset.input_hash == input_hash,
+                    AudioAsset.asset_status == "ready",
+                    AudioAsset.audio_rel_path.is_not(None),
+                )
             )
-        ).limit(1)
+            .limit(1)
+        )
         return session.execute(stmt).scalar_one_or_none() is not None
+
     @staticmethod
     def _now_str() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")

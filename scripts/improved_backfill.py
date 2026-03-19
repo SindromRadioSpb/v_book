@@ -59,7 +59,7 @@ def main():
         cursor.execute(
             "SELECT lemma_id, is_noise, noise_reason FROM lemma "
             "WHERE project_id=? AND norm_text=?",
-            (project_id, src_norm)
+            (project_id, src_norm),
         )
         match = cursor.fetchone()
 
@@ -68,7 +68,7 @@ def main():
             cursor.execute(
                 "SELECT lemma_id, is_noise, noise_reason FROM lemma "
                 "WHERE project_id=? AND lemma_text=?",
-                (project_id, src_text)
+                (project_id, src_text),
             )
             match = cursor.fetchone()
 
@@ -77,7 +77,7 @@ def main():
             # Update TMEntry
             cursor.execute(
                 "UPDATE tm_entry SET lemma_id=?, is_noise=?, noise_reason=? WHERE tm_id=?",
-                (lemma_id, is_noise, noise_reason, tm_id)
+                (lemma_id, is_noise, noise_reason, tm_id),
             )
             linked_count += 1
 
@@ -102,7 +102,7 @@ def main():
         cursor.execute(
             "SELECT cluster_id, is_noise, noise_reason FROM term_cluster "
             "WHERE project_id=? AND norm_text=?",
-            (project_id, src_norm)
+            (project_id, src_norm),
         )
         match = cursor.fetchone()
 
@@ -111,7 +111,7 @@ def main():
             cursor.execute(
                 "SELECT cluster_id, is_noise, noise_reason FROM term_cluster "
                 "WHERE project_id=? AND representative_he=?",
-                (project_id, src_text)
+                (project_id, src_text),
             )
             match = cursor.fetchone()
 
@@ -122,7 +122,7 @@ def main():
             cursor.execute(
                 "SELECT cluster_id, is_noise, noise_reason FROM term_cluster "
                 "WHERE project_id=? AND representative_he=?",
-                (project_id, src_text_normalized)
+                (project_id, src_text_normalized),
             )
             match = cursor.fetchone()
 
@@ -131,7 +131,7 @@ def main():
             # Update TMEntry
             cursor.execute(
                 "UPDATE tm_entry SET cluster_id=?, is_noise=?, noise_reason=? WHERE tm_id=?",
-                (cluster_id, is_noise, noise_reason, tm_id)
+                (cluster_id, is_noise, noise_reason, tm_id),
             )
             linked_count += 1
 
@@ -169,19 +169,25 @@ def main():
     cursor.execute("SELECT COUNT(*) FROM tm_entry WHERE kind='lemma'")
     total_lemmas = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM tm_entry WHERE kind='term_cluster' AND cluster_id IS NOT NULL")
+    cursor.execute(
+        "SELECT COUNT(*) FROM tm_entry WHERE kind='term_cluster' AND cluster_id IS NOT NULL"
+    )
     linked_clusters_total = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM tm_entry WHERE kind='term_cluster'")
     total_clusters = cursor.fetchone()[0]
 
     print(f"\nLemma TMEntry:")
     print(f"  Total: {total_lemmas}")
-    print(f"  Linked: {linked_lemmas_total} ({100*linked_lemmas_total/total_lemmas if total_lemmas > 0 else 0:.1f}%)")
+    print(
+        f"  Linked: {linked_lemmas_total} ({100*linked_lemmas_total/total_lemmas if total_lemmas > 0 else 0:.1f}%)"
+    )
     print(f"  Unlinked: {total_lemmas - linked_lemmas_total}")
 
     print(f"\nCluster TMEntry:")
     print(f"  Total: {total_clusters}")
-    print(f"  Linked: {linked_clusters_total} ({100*linked_clusters_total/total_clusters if total_clusters > 0 else 0:.1f}%)")
+    print(
+        f"  Linked: {linked_clusters_total} ({100*linked_clusters_total/total_clusters if total_clusters > 0 else 0:.1f}%)"
+    )
     print(f"  Unlinked: {total_clusters - linked_clusters_total}")
 
     conn.close()

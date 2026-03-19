@@ -38,7 +38,9 @@ def test_review_persists_last_grade_and_last_graded_at():
             summary = study_service.apply_review(session, progress_id, "good", now=now)
             session.commit()
 
-            row = session.execute(select(StudyProgress).where(StudyProgress.id == progress_id)).scalar_one()
+            row = session.execute(
+                select(StudyProgress).where(StudyProgress.id == progress_id)
+            ).scalar_one()
             assert row.last_grade == "good"
             assert row.last_graded_at == _iso(now)
             assert summary.last_grade == "good"

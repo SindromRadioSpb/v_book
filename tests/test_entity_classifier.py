@@ -98,14 +98,22 @@ def test_classify_lemma_golden_vectors(text, expected_class, expected_is_noise, 
     """Test classification against golden vectors."""
     result = classify_text(text)
 
-    assert result.entity_class == expected_class, f"Failed for '{text}': expected {expected_class}, got {result.entity_class}"
-    assert result.is_noise == expected_is_noise, f"Failed for '{text}': expected is_noise={expected_is_noise}, got {result.is_noise}"
+    assert (
+        result.entity_class == expected_class
+    ), f"Failed for '{text}': expected {expected_class}, got {result.entity_class}"
+    assert (
+        result.is_noise == expected_is_noise
+    ), f"Failed for '{text}': expected is_noise={expected_is_noise}, got {result.is_noise}"
 
     if expected_reason is None:
-        assert result.noise_reason is None, f"Failed for '{text}': expected no reason, got {result.noise_reason}"
+        assert (
+            result.noise_reason is None
+        ), f"Failed for '{text}': expected no reason, got {result.noise_reason}"
     else:
         # Allow multiple valid reasons for some cases (edge cases can have overlapping reasons)
-        assert result.noise_reason is not None, f"Failed for '{text}': expected reason {expected_reason}, got None"
+        assert (
+            result.noise_reason is not None
+        ), f"Failed for '{text}': expected reason {expected_reason}, got None"
 
 
 # ==============================================================================
@@ -149,7 +157,7 @@ def test_hebrew_single_letter():
         ("0.25 הערה", True),  # QUANTITY_UNIT
         ("0.25 מ'", True),  # QUANTITY_UNIT
         ("0.6 מטר", True),  # QUANTITY_UNIT (0.6 + meter)
-        ("0.8 ק\"מ", True),  # QUANTITY_UNIT (0.8 + km)
+        ('0.8 ק"מ', True),  # QUANTITY_UNIT (0.8 + km)
         ("10 מ'", True),  # QUANTITY_UNIT
         ("10kN שאלה", True),  # MIXED
         ("10kN שאלה 6.8", True),  # MIXED
@@ -163,7 +171,9 @@ def test_hebrew_single_letter():
 def test_classify_phrase_golden_vectors(phrase, expected_is_noise):
     """Test phrase classification."""
     result = classify_phrase(phrase)
-    assert result.is_noise == expected_is_noise, f"Failed for '{phrase}': expected is_noise={expected_is_noise}, got {result.is_noise}"
+    assert (
+        result.is_noise == expected_is_noise
+    ), f"Failed for '{phrase}': expected is_noise={expected_is_noise}, got {result.is_noise}"
 
 
 def test_classify_single_word_phrase():
@@ -213,7 +223,10 @@ def test_classify_mixed_scripts():
     # Not Hebrew or Latin, should be OTHER or classified based on script
     # Current implementation may classify as OTHER or handle differently
     # This is an edge case - the spec says OTHER for unrecognized scripts
-    assert result.entity_class in (EntityClass.OTHER, EntityClass.WORD_LATIN)  # Cyrillic might be OTHER
+    assert result.entity_class in (
+        EntityClass.OTHER,
+        EntityClass.WORD_LATIN,
+    )  # Cyrillic might be OTHER
 
 
 def test_classify_url():
@@ -254,4 +267,6 @@ def test_classify_performance():
 
     print(f"Average classification time: {avg_per_call:.3f} ms")
     # Target: < 1ms per call
-    assert avg_per_call < 10, f"Classification too slow: {avg_per_call:.3f} ms (target < 10ms for safety margin)"
+    assert (
+        avg_per_call < 10
+    ), f"Classification too slow: {avg_per_call:.3f} ms (target < 10ms for safety margin)"

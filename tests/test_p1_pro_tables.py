@@ -99,10 +99,7 @@ class TestMultiSortProxy:
         proxy.setSourceModel(model)
 
         # Sort by name (column 0) ascending, then age (column 1) ascending
-        proxy.set_sort_keys([
-            (0, Qt.SortOrder.AscendingOrder),
-            (1, Qt.SortOrder.AscendingOrder)
-        ])
+        proxy.set_sort_keys([(0, Qt.SortOrder.AscendingOrder), (1, Qt.SortOrder.AscendingOrder)])
         # Trigger sort (use first key for base sort)
         QSortFilterProxyModel.sort(proxy, 0, Qt.SortOrder.AscendingOrder)
 
@@ -238,8 +235,11 @@ class TestMultiSortProxy:
         try:
             # Mock keyboard modifiers
             from unittest.mock import patch
-            with patch('app.ui.multi_sort_proxy.QApplication.keyboardModifiers',
-                      return_value=Qt.KeyboardModifier.ShiftModifier):
+
+            with patch(
+                "app.ui.multi_sort_proxy.QApplication.keyboardModifiers",
+                return_value=Qt.KeyboardModifier.ShiftModifier,
+            ):
                 proxy.sort(1, Qt.SortOrder.AscendingOrder)
         finally:
             QApplication.restoreOverrideCursor()

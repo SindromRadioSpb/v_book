@@ -8,7 +8,9 @@ from pathlib import Path
 import scripts.prebuild_validate as pv
 
 
-def test_build_validation_report_includes_checks_and_build_meta(tmp_path: Path, monkeypatch) -> None:
+def test_build_validation_report_includes_checks_and_build_meta(
+    tmp_path: Path, monkeypatch
+) -> None:
     db_path = tmp_path / "candidate.db"
     db_path.write_bytes(b"sqlite")
 

@@ -2,13 +2,12 @@
 
 import hashlib
 import time
-from typing import Optional
 
 from ..base_provider import (
     BaseProvider,
+    TranslationErrorKind,
     TranslationRequest,
     TranslationResult,
-    TranslationErrorKind,
 )
 
 
@@ -26,7 +25,7 @@ class MockProvider(BaseProvider):
     def __init__(
         self,
         simulate_latency_ms: int = 0,
-        simulate_error: Optional[TranslationErrorKind] = None,
+        simulate_error: TranslationErrorKind | None = None,
         error_probability: float = 0.0,
     ):
         """

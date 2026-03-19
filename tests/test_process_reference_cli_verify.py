@@ -87,7 +87,9 @@ def _seed_reference_docs(session, count: int = 3) -> tuple[int, list[int]]:
     return int(project.project_id), doc_ids
 
 
-def _seed_processed_reference_docs_without_snapshots(session, count: int = 3) -> tuple[int, list[int]]:
+def _seed_processed_reference_docs_without_snapshots(
+    session, count: int = 3
+) -> tuple[int, list[int]]:
     lib = Library(name="L")
     session.add(lib)
     session.flush()
@@ -190,13 +192,17 @@ def _create_cancelled_reference_run(db_path: Path, monkeypatch) -> tuple[int, in
                 resume_latest=True,
                 source_label="reference_cli",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
             return int(project_id), int(run.run_id), doc_ids
     finally:
         _reset_db_service()
 
 
-def _create_cancelled_snapshot_backfill_run(db_path: Path, monkeypatch) -> tuple[int, int, list[int]]:
+def _create_cancelled_snapshot_backfill_run(
+    db_path: Path, monkeypatch
+) -> tuple[int, int, list[int]]:
     _reset_db_service()
     DBService.initialize(db_path)
     db = DBService.get_instance()
@@ -223,7 +229,9 @@ def _create_cancelled_snapshot_backfill_run(db_path: Path, monkeypatch) -> tuple
                 resume_latest=True,
                 source_label="snapshot_backfill_cli",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
             return int(project_id), int(run.run_id), doc_ids
     finally:
         _reset_db_service()
@@ -257,7 +265,9 @@ def _create_cancelled_reprocess_run(db_path: Path, monkeypatch) -> tuple[int, in
                 resume_latest=True,
                 source_label="reference_cli_reprocess",
             )
-            run = session.execute(select(ProcessorRun).order_by(ProcessorRun.run_id.desc())).scalar_one()
+            run = session.execute(
+                select(ProcessorRun).order_by(ProcessorRun.run_id.desc())
+            ).scalar_one()
             return int(project_id), int(run.run_id), doc_ids
     finally:
         _reset_db_service()
@@ -495,7 +505,9 @@ def test_cli_reprocess_all_dry_run_skips_snapshot_coverage_queries(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=3)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=3
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -542,7 +554,9 @@ def test_cli_verify_snapshot_stats_exits_three_on_missing_stats(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=3)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=3
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -574,7 +588,9 @@ def test_cli_rebuild_snapshot_stats_requires_backup_path(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -633,9 +649,15 @@ def test_cli_rebuild_snapshot_stats_populates_doc_stats(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            docs = session.execute(
-                select(SourceDocument).where(SourceDocument.doc_id.in_(doc_ids)).order_by(SourceDocument.doc_id.asc())
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument)
+                    .where(SourceDocument.doc_id.in_(doc_ids))
+                    .order_by(SourceDocument.doc_id.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         assert [str(doc.snapshot_stats_state or "") for doc in docs] == ["valid", "valid"]
         assert [int(doc.snapshot_sentence_count or 0) for doc in docs] == [0, 0]
@@ -654,7 +676,9 @@ def test_cli_verify_only_snapshot_backfill_run_exits_zero_without_processing(mon
         def _unexpected_backfill(*args, **kwargs):
             raise AssertionError("verify-only must not call backfill_sentence_snapshots_batch")
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -684,7 +708,9 @@ def test_cli_coverage_only_snapshot_backfill_is_read_only(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -723,7 +749,9 @@ def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -731,7 +759,9 @@ def test_cli_snapshot_backfill_exits_two_on_integrity_failure(monkeypatch):
         def _raise_integrity_failure(*args, **kwargs):
             raise RuntimeError("database disk image is malformed")
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _raise_integrity_failure)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _raise_integrity_failure
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -765,7 +795,9 @@ def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -795,7 +827,11 @@ def test_cli_snapshot_backfill_probe_writes_jsonl(monkeypatch, tmp_path: Path):
 
         module.main()
 
-        lines = [json.loads(line) for line in probe_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        lines = [
+            json.loads(line)
+            for line in probe_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         phases = {str(line.get("phase")) for line in lines}
         assert probe_path.exists()
         assert {"started", "chunk_complete", "verifying_integrity", "completed"}.issubset(phases)
@@ -927,7 +963,9 @@ def test_cli_doc_offset_and_max_docs_select_snapshot_backfill_slice(monkeypatch)
             captured["segment_quick_check_timeout"] = kwargs.get("segment_quick_check_timeout")
             return len(doc_ids), 0
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1047,7 +1085,9 @@ def test_cli_snapshot_backfill_defaults_integrity_checkpoint_mode_to_none(monkey
             captured["segment_quick_check_timeout"] = kwargs.get("segment_quick_check_timeout")
             return len(doc_ids), 0
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1082,15 +1122,21 @@ def test_cli_snapshot_backfill_requires_backup_db_path_for_heavy_write(monkeypat
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
 
         def _unexpected_backfill(*args, **kwargs):
-            raise AssertionError("heavy snapshot backfill must not start without preflight backup path")
+            raise AssertionError(
+                "heavy snapshot backfill must not start without preflight backup path"
+            )
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1120,7 +1166,9 @@ def test_cli_snapshot_backfill_preflight_only_is_read_only(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -1128,7 +1176,9 @@ def test_cli_snapshot_backfill_preflight_only_is_read_only(monkeypatch):
         def _unexpected_backfill(*args, **kwargs):
             raise AssertionError("preflight-only must not call backfill_sentence_snapshots_batch")
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1167,7 +1217,9 @@ def test_cli_snapshot_backfill_rejects_protected_db_without_override(monkeypatch
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -1175,16 +1227,22 @@ def test_cli_snapshot_backfill_rejects_protected_db_without_override(monkeypatch
         def _unexpected_backfill(*args, **kwargs):
             raise AssertionError("protected DB heavy write must be blocked before backfill starts")
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill)
-        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
-            "ok": False,
-            "project_id": project_id,
-            "db_profile": "Baseline (dev)",
-            "protected_target": True,
-            "selected_doc_count": 2,
-            "operation_label": "snapshot backfill",
-            "error": "Heavy snapshot backfill is blocked on the protected baseline/main reference DB.",
-        })
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _unexpected_backfill
+        )
+        monkeypatch.setattr(
+            module,
+            "_run_reference_heavy_write_preflight",
+            lambda **kwargs: {
+                "ok": False,
+                "project_id": project_id,
+                "db_profile": "Baseline (dev)",
+                "protected_target": True,
+                "selected_doc_count": 2,
+                "operation_label": "snapshot backfill",
+                "error": "Heavy snapshot backfill is blocked on the protected baseline/main reference DB.",
+            },
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1232,17 +1290,23 @@ def test_cli_snapshot_backfill_allows_protected_db_with_override(monkeypatch):
             captured["doc_ids"] = list(doc_ids)
             return len(doc_ids), 0
 
-        monkeypatch.setattr(ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch)
-        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
-            "ok": True,
-            "project_id": project_id,
-            "db_profile": "Baseline (dev)",
-            "protected_target": True,
-            "selected_doc_count": len(doc_ids),
-            "operation_label": "snapshot backfill",
-            "target_probe": {"schema_version": 40},
-            "backup_probe": {"schema_version": 40},
-        })
+        monkeypatch.setattr(
+            ProcessService, "backfill_sentence_snapshots_batch", _fake_backfill_batch
+        )
+        monkeypatch.setattr(
+            module,
+            "_run_reference_heavy_write_preflight",
+            lambda **kwargs: {
+                "ok": True,
+                "project_id": project_id,
+                "db_profile": "Baseline (dev)",
+                "protected_target": True,
+                "selected_doc_count": len(doc_ids),
+                "operation_label": "snapshot backfill",
+                "target_probe": {"schema_version": 40},
+                "backup_probe": {"schema_version": 40},
+            },
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1275,7 +1339,9 @@ def test_cli_reprocess_all_requires_backup_db_path_for_heavy_write(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -1313,7 +1379,9 @@ def test_cli_reprocess_all_preflight_only_is_read_only(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -1353,7 +1421,9 @@ def test_cli_reprocess_all_rejects_protected_db_without_override(monkeypatch):
         DBService.initialize(db_path)
         db = DBService.get_instance()
         with db.get_session() as session:
-            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(session, count=2)
+            project_id, _doc_ids = _seed_processed_reference_docs_without_snapshots(
+                session, count=2
+            )
         _reset_db_service()
 
         module = _load_script_module()
@@ -1362,15 +1432,19 @@ def test_cli_reprocess_all_rejects_protected_db_without_override(monkeypatch):
             raise AssertionError("protected DB heavy reprocess must be blocked before batch starts")
 
         monkeypatch.setattr(ProcessService, "process_documents_batch", _unexpected_process_batch)
-        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
-            "ok": False,
-            "project_id": project_id,
-            "db_profile": "Baseline (dev)",
-            "protected_target": True,
-            "selected_doc_count": 2,
-            "operation_label": "reference reprocess",
-            "error": "Heavy reference reprocess is blocked on the protected baseline/main reference DB.",
-        })
+        monkeypatch.setattr(
+            module,
+            "_run_reference_heavy_write_preflight",
+            lambda **kwargs: {
+                "ok": False,
+                "project_id": project_id,
+                "db_profile": "Baseline (dev)",
+                "protected_target": True,
+                "selected_doc_count": 2,
+                "operation_label": "reference reprocess",
+                "error": "Heavy reference reprocess is blocked on the protected baseline/main reference DB.",
+            },
+        )
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1420,16 +1494,20 @@ def test_cli_reprocess_all_allows_protected_db_with_override(monkeypatch):
             return len(doc_ids), 0
 
         monkeypatch.setattr(ProcessService, "process_documents_batch", _fake_process_batch)
-        monkeypatch.setattr(module, "_run_reference_heavy_write_preflight", lambda **kwargs: {
-            "ok": True,
-            "project_id": project_id,
-            "db_profile": "Baseline (dev)",
-            "protected_target": True,
-            "selected_doc_count": len(doc_ids),
-            "operation_label": "reference reprocess",
-            "target_probe": {"schema_version": 41},
-            "backup_probe": {"schema_version": 41},
-        })
+        monkeypatch.setattr(
+            module,
+            "_run_reference_heavy_write_preflight",
+            lambda **kwargs: {
+                "ok": True,
+                "project_id": project_id,
+                "db_profile": "Baseline (dev)",
+                "protected_target": True,
+                "selected_doc_count": len(doc_ids),
+                "operation_label": "reference reprocess",
+                "target_probe": {"schema_version": 41},
+                "backup_probe": {"schema_version": 41},
+            },
+        )
         monkeypatch.setattr(
             sys,
             "argv",

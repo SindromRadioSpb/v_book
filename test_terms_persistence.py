@@ -9,14 +9,14 @@ Reproduces bug:
 This test verifies that inline TM overrides persist after refresh.
 """
 
-import unittest
-import tempfile
-import sqlite3
 import os
+import sqlite3
+import tempfile
+import unittest
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
 
 from app.services.db_service import DBService
 
@@ -34,9 +34,11 @@ class TestTermsTranslationPersistence(unittest.TestCase):
         DBService.initialize(cls.test_db.name)
 
         # Apply migrations
-        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding='utf-8')
-        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(encoding='utf-8')
-        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding='utf-8')
+        migration_m7 = Path("schema/004_m7_translation_memory.sql").read_text(encoding="utf-8")
+        migration_m7_revert = Path("schema/005_m7_add_revert_origin.sql").read_text(
+            encoding="utf-8"
+        )
+        migration_p2 = Path("schema/006_p2_add_revert_origin.sql").read_text(encoding="utf-8")
         con = sqlite3.connect(cls.test_db.name)
         con.executescript(migration_m7)
         con.executescript(migration_m7_revert)
@@ -47,7 +49,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
 
         # Create test project
         with cls.db_service.get_session() as session:
-            from app.infra.sa_models import Library, DictProject
+            from app.infra.sa_models import DictProject, Library
 
             library = Library(library_id=1, name="Test Library")
             session.add(library)
@@ -105,15 +107,15 @@ class TestTermsTranslationPersistence(unittest.TestCase):
         - User clicks Refresh
         - Translation disappears (BUG!)
         """
-        from app.ui.terms_view import TermsView
-        from app.infra.sa_models import TMEntry
         from sqlalchemy import select
+
+        from app.infra.sa_models import TMEntry
+        from app.ui.terms_view import TermsView
 
         # Create TermsView for project 1
         terms_view = TermsView(project_id=1)
 
         # Simulate loading clusters (as Extract Terms does)
-        from app.services.term_extraction_service import TermExtractionService
         from app.domain.dto import ClusterStats
         from app.infra.sa_models import TermCluster
 
@@ -153,14 +155,13 @@ class TestTermsTranslationPersistence(unittest.TestCase):
         # Set translation value (simulates user typing "Книга большая")
         translation_value = "Книга большая"
         success = terms_view.terms_model.setData(
-            model_index,
-            translation_value,
-            Qt.ItemDataRole.EditRole
+            model_index, translation_value, Qt.ItemDataRole.EditRole
         )
         self.assertTrue(success, "setData should succeed")
 
         # CRITICAL: Process Qt events to ensure signal handlers execute
         from PyQt6.QtWidgets import QApplication
+
         QApplication.processEvents()
 
         # STEP 2: Verify TM entry was created in DB with correct project_id
@@ -173,10 +174,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
             tm_entry = session.execute(stmt).scalar()
 
             # This is the KEY assertion - TM entry must exist after inline edit
-            self.assertIsNotNone(
-                tm_entry,
-                "TM entry should be created after inline edit"
-            )
+            self.assertIsNotNone(tm_entry, "TM entry should be created after inline edit")
 
             # Verify fields are correct
             self.assertEqual(tm_entry.project_id, 1, "TM entry should be project-scoped")
@@ -187,6 +185,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
 
             # Verify src_norm matches what load will use
             from app.domain.normalization.normalizer import normalize_for_tm
+
             expected_norm = normalize_for_tm("he", cluster_stats.representative_he, "term_cluster")
 
             # DEBUG: Write to file instead of print (encoding issues)
@@ -199,9 +198,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
                 f.write(f"  tm_entry.src_text: {tm_entry.src_text}\n")
 
             self.assertEqual(
-                tm_entry.src_norm,
-                expected_norm.norm,
-                "src_norm should match load normalization"
+                tm_entry.src_norm, expected_norm.norm, "src_norm should match load normalization"
             )
 
         # DEBUG: Check TM entry exists before refresh
@@ -216,7 +213,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
                 f.write("\nDEBUG TM entries before refresh:\n")
                 f.write(f"  count: {len(all_tm_entries)}\n")
                 for tm in all_tm_entries:
-                    f.write(f"  TM entry:\n")
+                    f.write("  TM entry:\n")
                     f.write(f"    src_text: {tm.src_text}\n")
                     f.write(f"    src_norm: {tm.src_norm}\n")
                     f.write(f"    translation: {tm.translation}\n")
@@ -229,6 +226,7 @@ class TestTermsTranslationPersistence(unittest.TestCase):
 
         # DEBUG: Test bulk_resolve directly
         from app.services.translation_service import TranslationService
+
         translation_service = TranslationService()
 
         with self.db_service.get_session() as session:
@@ -264,11 +262,15 @@ class TestTermsTranslationPersistence(unittest.TestCase):
         # STEP 3b: Call bulk_resolve directly and update model
         # This tests our fix in models_qt.py without QThread complications
         from app.services.translation_service import TranslationService
+
         translation_svc = TranslationService()
 
         with self.db_service.get_session() as session:
             # Build items list (same way worker does) - get clusters from model!
-            items = [(cluster.representative_he, "term_cluster") for cluster in terms_view.terms_model.clusters]
+            items = [
+                (cluster.representative_he, "term_cluster")
+                for cluster in terms_view.terms_model.clusters
+            ]
 
             # Call bulk_resolve
             results = translation_svc.bulk_resolve(
@@ -284,7 +286,9 @@ class TestTermsTranslationPersistence(unittest.TestCase):
             with open("debug_terms_test.txt", "a", encoding="utf-8") as f:
                 f.write("\nDEBUG calling update_translations:\n")
                 f.write(f"  results keys: {list(results.keys())}\n")
-                f.write(f"  model.clusters[0].representative_he: {terms_view.terms_model.clusters[0].representative_he}\n")
+                f.write(
+                    f"  model.clusters[0].representative_he: {terms_view.terms_model.clusters[0].representative_he}\n"
+                )
                 for key, value in results.items():
                     f.write(f"  result key: {key}\n")
                     f.write(f"    translation: {value.translation}\n")
@@ -295,8 +299,12 @@ class TestTermsTranslationPersistence(unittest.TestCase):
             # DEBUG: Check if model was updated
             with open("debug_terms_test.txt", "a", encoding="utf-8") as f:
                 f.write("\nDEBUG after update_translations:\n")
-                f.write(f"  cluster.translation: {terms_view.terms_model.clusters[0].translation}\n")
-                f.write(f"  cluster.translation_status: {terms_view.terms_model.clusters[0].translation_status}\n")
+                f.write(
+                    f"  cluster.translation: {terms_view.terms_model.clusters[0].translation}\n"
+                )
+                f.write(
+                    f"  cluster.translation_status: {terms_view.terms_model.clusters[0].translation_status}\n"
+                )
 
         # STEP 4: Verify translation is still present after refresh
         refreshed_cluster = terms_view.terms_model.clusters[0]
@@ -313,13 +321,13 @@ class TestTermsTranslationPersistence(unittest.TestCase):
         self.assertEqual(
             refreshed_cluster.translation,
             translation_value,
-            "Translation should persist after Refresh (BUG: it disappears!)"
+            "Translation should persist after Refresh (BUG: it disappears!)",
         )
 
         self.assertEqual(
             refreshed_cluster.translation_status,
             "approved",
-            "Status should remain 'approved' after Refresh (BUG: returns to None!)"
+            "Status should remain 'approved' after Refresh (BUG: returns to None!)",
         )
 
         # Clean up

@@ -91,11 +91,30 @@ def _seed_project(session) -> int:
 
     session.add_all(
         [
-            LemmaDocStat(project_id=project.project_id, doc_id=docs[0].doc_id, lemma_id=lemma_a.lemma_id, freq_abs=2),
-            LemmaDocStat(project_id=project.project_id, doc_id=docs[0].doc_id, lemma_id=lemma_b.lemma_id, freq_abs=1),
-            LemmaDocStat(project_id=project.project_id, doc_id=docs[1].doc_id, lemma_id=lemma_b.lemma_id, freq_abs=3),
-            LemmaProjectStat(project_id=project.project_id, lemma_id=lemma_a.lemma_id, freq_abs=2, doc_freq=1),
-            LemmaProjectStat(project_id=project.project_id, lemma_id=lemma_b.lemma_id, freq_abs=4, doc_freq=2),
+            LemmaDocStat(
+                project_id=project.project_id,
+                doc_id=docs[0].doc_id,
+                lemma_id=lemma_a.lemma_id,
+                freq_abs=2,
+            ),
+            LemmaDocStat(
+                project_id=project.project_id,
+                doc_id=docs[0].doc_id,
+                lemma_id=lemma_b.lemma_id,
+                freq_abs=1,
+            ),
+            LemmaDocStat(
+                project_id=project.project_id,
+                doc_id=docs[1].doc_id,
+                lemma_id=lemma_b.lemma_id,
+                freq_abs=3,
+            ),
+            LemmaProjectStat(
+                project_id=project.project_id, lemma_id=lemma_a.lemma_id, freq_abs=2, doc_freq=1
+            ),
+            LemmaProjectStat(
+                project_id=project.project_id, lemma_id=lemma_b.lemma_id, freq_abs=4, doc_freq=2
+            ),
         ]
     )
 
@@ -178,7 +197,10 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert "Snapshot volume reuses the existing readiness aggregate" in summary.storage_note
 
         assert metrics["lemma_doc_stat"].quantity_value == 3
-        assert metrics["lemma_doc_stat"].quantity_basis == "exact count derived from lemma_project_stat.doc_freq"
+        assert (
+            metrics["lemma_doc_stat"].quantity_basis
+            == "exact count derived from lemma_project_stat.doc_freq"
+        )
         assert metrics["lemma_doc_stat"].status == "expected_large"
         assert metrics["lemma_doc_stat"].maintenance_mode == "reset_rebuild_only"
         assert "--reprocess-all" in str(metrics["lemma_doc_stat"].maintenance_cli_hint)
@@ -194,16 +216,23 @@ def test_derived_artifact_governance_service_reports_project_owned_growth() -> N
         assert metrics["sentence_nlp_snapshot"].status == "stats_rebuild_required"
         assert metrics["sentence_nlp_snapshot"].maintenance_mode == "reset_rebuild_only"
         assert "Sentence coverage 66.67%" in metrics["sentence_nlp_snapshot"].summary
-        assert any("unknown snapshot stats: 1" in line.lower() for line in metrics["sentence_nlp_snapshot"].detail_lines)
+        assert any(
+            "unknown snapshot stats: 1" in line.lower()
+            for line in metrics["sentence_nlp_snapshot"].detail_lines
+        )
         assert "--reprocess-all" in str(metrics["sentence_nlp_snapshot"].maintenance_cli_hint)
         assert "--dry-run" in str(metrics["sentence_nlp_snapshot"].maintenance_cli_hint)
-        assert "--preflight-only" in str(metrics["sentence_nlp_snapshot"].maintenance_preflight_hint)
+        assert "--preflight-only" in str(
+            metrics["sentence_nlp_snapshot"].maintenance_preflight_hint
+        )
         assert metrics["processor_run"].quantity_value == 2
         assert metrics["processor_run"].maintenance_mode == "retention_available"
         assert "prune_project_telemetry.py" in str(metrics["processor_run"].maintenance_cli_hint)
         assert "--preflight-only" in str(metrics["processor_run"].maintenance_preflight_hint)
         assert "--backup-db-path" in str(metrics["processor_run"].maintenance_preflight_hint)
-        assert any("ok=1" in line and "failed=1" in line for line in metrics["processor_run"].detail_lines)
+        assert any(
+            "ok=1" in line and "failed=1" in line for line in metrics["processor_run"].detail_lines
+        )
         assert metrics["run_error"].quantity_value == 1
         assert metrics["run_error"].maintenance_mode == "retention_with_parent_runs"
         assert any("processing=1" in line for line in metrics["run_error"].detail_lines)
@@ -255,7 +284,9 @@ def test_derived_artifact_governance_service_uses_read_only_session_without_comm
 
         service = DerivedArtifactGovernanceService()
         with db.get_read_session() as session:
-            session.commit = lambda: (_ for _ in ()).throw(AssertionError("commit should not be called"))
+            session.commit = lambda: (_ for _ in ()).throw(
+                AssertionError("commit should not be called")
+            )
             summary = service.get_project_summary(session, project_id)
 
         assert summary.project_id == project_id

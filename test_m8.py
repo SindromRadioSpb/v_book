@@ -11,11 +11,14 @@ import os
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
+from app.infra.sa_models import (
+    DocumentSentence,
+    SourceDocument,
+    TermCluster,
+)
 from app.services.db_service import DBService
 from app.services.term_card_service import TermCardService
-from app.infra.sa_models import TermCluster, TermAlias, StopwordSet, StopwordItem, DocumentSentence, SourceDocument
 
 
 class TestM8TermCuration(unittest.TestCase):
@@ -24,7 +27,7 @@ class TestM8TermCuration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test database."""
-        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        cls.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         cls.temp_db.close()
         cls.db_path = cls.temp_db.name
 
@@ -35,6 +38,7 @@ class TestM8TermCuration(unittest.TestCase):
         # Create test project
         with cls.db_service.get_session() as session:
             from app.services.project_service import ProjectService
+
             project_service = ProjectService()
             project = project_service.create_project(
                 session,
@@ -47,10 +51,9 @@ class TestM8TermCuration(unittest.TestCase):
             # Create test document for sentence references
             # Note: SourceDocument requires corpus_id, so we need to create a corpus first
             from app.infra.sa_models import SourceCorpus
+
             corpus = SourceCorpus(
-                project_id=cls.project_id,
-                name="test_corpus",
-                description="Test corpus for M8"
+                project_id=cls.project_id, name="test_corpus", description="Test corpus for M8"
             )
             session.add(corpus)
             session.flush()
@@ -97,7 +100,9 @@ class TestM8TermCuration(unittest.TestCase):
 
         with self.db_service.get_session() as session:
             # Check schema version
-            result = session.execute(text("SELECT value FROM schema_meta WHERE key='schema_version'"))
+            result = session.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            )
             version = result.scalar()
             self.assertIsNotNone(version)
             version_int = int(version)
@@ -108,13 +113,13 @@ class TestM8TermCuration(unittest.TestCase):
             columns = {row[1] for row in result.fetchall()}
 
             required_columns = {
-                'curation_status',
-                'pinned_translation',
-                'pinned_translation_lang',
-                'pinned_example_sent_id',
-                'curation_notes',
-                'curated_at',
-                'curated_by',
+                "curation_status",
+                "pinned_translation",
+                "pinned_translation_lang",
+                "pinned_example_sent_id",
+                "curation_notes",
+                "curated_at",
+                "curated_by",
             }
 
             missing = required_columns - columns
@@ -299,9 +304,7 @@ class TestM8TermCuration(unittest.TestCase):
 
         # Bulk approve
         with self.db_service.get_session() as session:
-            count = self.service.bulk_set_status(
-                session, cluster_ids, "approved", "bulk_curator"
-            )
+            count = self.service.bulk_set_status(session, cluster_ids, "approved", "bulk_curator")
             self.assertEqual(count, 5)
             session.commit()
 
@@ -337,8 +340,12 @@ class TestM8TermCuration(unittest.TestCase):
 
         # Add aliases
         with self.db_service.get_session() as session:
-            result1 = self.service.add_alias(session, self.project_id, canonical, "בְּדִיקָה", "With nikud")
-            result2 = self.service.add_alias(session, self.project_id, canonical, "בדיקות", "Plural")
+            result1 = self.service.add_alias(
+                session, self.project_id, canonical, "בְּדִיקָה", "With nikud"
+            )
+            result2 = self.service.add_alias(
+                session, self.project_id, canonical, "בדיקות", "Plural"
+            )
             self.assertTrue(result1)
             self.assertTrue(result2)
             session.commit()
@@ -393,7 +400,9 @@ class TestM8TermCuration(unittest.TestCase):
 
         # Try to add same alias again
         with self.db_service.get_session() as session:
-            result2 = self.service.add_alias(session, self.project_id, canonical, "וריאנט", "Duplicate")
+            result2 = self.service.add_alias(
+                session, self.project_id, canonical, "וריאנט", "Duplicate"
+            )
             self.assertFalse(result2, "Duplicate alias should be rejected")
             session.commit()
 
@@ -699,9 +708,8 @@ class TestM8TermCuration(unittest.TestCase):
             session.commit()
             cluster_id = cluster.cluster_id
 
-        with self.db_service.get_session() as session:
-            with self.assertRaises(ValueError):
-                self.service.set_status(session, cluster_id, "invalid_status", "user", "note")
+        with self.db_service.get_session() as session, self.assertRaises(ValueError):
+            self.service.set_status(session, cluster_id, "invalid_status", "user", "note")
 
         # Remove non-existent alias
         with self.db_service.get_session() as session:

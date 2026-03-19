@@ -18,10 +18,12 @@ class TestCodeImports:
         from app.infra.db import DatabaseManager
 
         # Verify method exists
-        assert hasattr(DatabaseManager, '_ensure_fts_health'), \
-            "DatabaseManager should have _ensure_fts_health method"
-        assert hasattr(DatabaseManager, 'apply_migrations'), \
-            "DatabaseManager should have apply_migrations method"
+        assert hasattr(
+            DatabaseManager, "_ensure_fts_health"
+        ), "DatabaseManager should have _ensure_fts_health method"
+        assert hasattr(
+            DatabaseManager, "apply_migrations"
+        ), "DatabaseManager should have apply_migrations method"
 
     def test_fts_manager_imports(self):
         """Test FTS manager functions."""
@@ -36,19 +38,22 @@ class TestCodeImports:
         from app.services.process_service import ProcessService
 
         # Verify class exists and has process_document method
-        assert hasattr(ProcessService, 'process_document'), \
-            "ProcessService should have process_document method"
+        assert hasattr(
+            ProcessService, "process_document"
+        ), "ProcessService should have process_document method"
 
     def test_workers_import(self):
         """Test ProcessWorker staged/batch signals exist."""
         from app.ui.workers import ProcessWorker
 
         # Verify class exists
-        assert hasattr(ProcessWorker, 'run'), "ProcessWorker should have run method"
-        assert hasattr(ProcessWorker, 'state_changed'), "ProcessWorker should expose structured state"
-        assert hasattr(ProcessWorker, 'pause'), "ProcessWorker should support pause"
-        assert hasattr(ProcessWorker, 'resume'), "ProcessWorker should support resume"
-        assert hasattr(ProcessWorker, 'cancel'), "ProcessWorker should support cancel"
+        assert hasattr(ProcessWorker, "run"), "ProcessWorker should have run method"
+        assert hasattr(
+            ProcessWorker, "state_changed"
+        ), "ProcessWorker should expose structured state"
+        assert hasattr(ProcessWorker, "pause"), "ProcessWorker should support pause"
+        assert hasattr(ProcessWorker, "resume"), "ProcessWorker should support resume"
+        assert hasattr(ProcessWorker, "cancel"), "ProcessWorker should support cancel"
 
 
 class TestFTSManagerBasics:
@@ -77,15 +82,18 @@ class TestFTSManagerBasics:
         conn = sqlite3.connect(":memory:")
         try:
             # Create base tables
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE document_sentence (
                     sentence_id INTEGER PRIMARY KEY,
                     doc_id INTEGER NOT NULL,
                     sent_index INTEGER NOT NULL,
                     text TEXT NOT NULL
                 )
-            """)
-            conn.execute("""
+            """
+            )
+            conn.execute(
+                """
                 CREATE TABLE term_search (
                     term_rowid INTEGER PRIMARY KEY,
                     he_term TEXT NOT NULL,
@@ -96,7 +104,8 @@ class TestFTSManagerBasics:
                     lemma_id INTEGER,
                     ngram_id INTEGER
                 )
-            """)
+            """
+            )
             conn.commit()
 
             # Ensure FTS tables
@@ -130,12 +139,15 @@ class TestProcessRollbackPattern:
         source = inspect.getsource(ProcessService.process_document)
 
         # Verify critical patterns exist in code
-        assert "session.rollback()" in source, \
-            "process_document should call session.rollback() on error"
-        assert "run_id = run.run_id" in source, \
-            "process_document should save run_id before try block"
-        assert "session.get(ProcessorRun, run_id)" in source, \
-            "process_document should re-fetch run using saved run_id"
+        assert (
+            "session.rollback()" in source
+        ), "process_document should call session.rollback() on error"
+        assert (
+            "run_id = run.run_id" in source
+        ), "process_document should save run_id before try block"
+        assert (
+            "session.get(ProcessorRun, run_id)" in source
+        ), "process_document should re-fetch run using saved run_id"
 
 
 class TestWorkerBatchContract:
@@ -149,12 +161,15 @@ class TestWorkerBatchContract:
         # Get run method source
         source = inspect.getsource(ProcessWorker.run)
 
-        assert "process_documents_batch(" in source, \
-            "ProcessWorker should route through ProcessService.process_documents_batch"
-        assert "resume_latest=True" in source, \
-            "ProcessWorker should auto-resume the latest matching batch run"
-        assert "state_callback=lambda state: self._on_state_changed(state, last_state)" in source, \
-            "ProcessWorker should forward structured state from the batch service"
+        assert (
+            "process_documents_batch(" in source
+        ), "ProcessWorker should route through ProcessService.process_documents_batch"
+        assert (
+            "resume_latest=True" in source
+        ), "ProcessWorker should auto-resume the latest matching batch run"
+        assert (
+            "state_callback=lambda state: self._on_state_changed(state, last_state)" in source
+        ), "ProcessWorker should forward structured state from the batch service"
 
 
 class TestDiagnosticScript:
@@ -168,12 +183,15 @@ class TestDiagnosticScript:
     def test_diag_script_has_checker(self):
         """Test that diag script has DBHealthChecker class."""
         import sys
+
         sys.path.insert(0, str(Path("scripts")))
 
         try:
             from diag_db_health import DBHealthChecker
-            assert hasattr(DBHealthChecker, 'check_all'), \
-                "DBHealthChecker should have check_all method"
+
+            assert hasattr(
+                DBHealthChecker, "check_all"
+            ), "DBHealthChecker should have check_all method"
         finally:
             sys.path.pop(0)
 

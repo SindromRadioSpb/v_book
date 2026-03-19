@@ -1,20 +1,20 @@
 """Test script for M1 - Foundation & Storage (no GUI required)."""
-import sys
+
 import io
+import sys
 from pathlib import Path
 
 # Fix Windows console encoding
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.infra.db import DatabaseManager
+from app.infra.util.logging import setup_logging
 from app.services.db_service import DBService
 from app.services.project_service import ProjectService
-from app.infra.util.logging import setup_logging
 
 
 def test_m1():
@@ -42,7 +42,7 @@ def test_m1():
     print("\n1. Initializing database...")
     DBService.initialize(db_path)
     print(f"   [+] Database created: {db_path}")
-    print(f"   [+] Migrations applied")
+    print("   [+] Migrations applied")
 
     # Test project service
     print("\n2. Testing ProjectService...")
@@ -72,8 +72,7 @@ def test_m1():
 
     # Test database queries
     print("\n3. Testing database queries...")
-    from sqlalchemy import select, text
-    from app.infra.sa_models import DictProject, SourceCorpus
+    from sqlalchemy import text
 
     with project_service.db_service.get_session() as session:
         # Check schema version

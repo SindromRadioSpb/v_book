@@ -9,36 +9,35 @@ Minimal wizard for importing dictionaries from CSV/XLSX with:
 """
 
 import logging
-from typing import Optional
 from pathlib import Path
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QLabel,
-    QPushButton,
-    QLineEdit,
-    QComboBox,
-    QRadioButton,
     QButtonGroup,
-    QProgressBar,
-    QPlainTextEdit,
+    QComboBox,
     QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
 
-from app.services.db_service import DBService
-from app.ui.workers import ImportWorker
 from app.infra.security import (
+    MAX_DICTIONARY_SIZE,
+    PathSecurityError,
+    ValidationError,
     validate_file_size,
     validate_path_security,
-    MAX_DICTIONARY_SIZE,
-    ValidationError,
-    PathSecurityError,
 )
+from app.services.db_service import DBService
+from app.ui.workers import ImportWorker
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class ImportWizard(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.worker: Optional[ImportWorker] = None
+        self.worker: ImportWorker | None = None
         self.init_ui()
 
     def init_ui(self):
@@ -111,7 +110,9 @@ class ImportWizard(QWidget):
         settings_layout.addLayout(scope_layout)
 
         # Connect scope radio to enable/disable project combo
-        self.scope_global_radio.toggled.connect(lambda checked: self.project_combo.setEnabled(not checked))
+        self.scope_global_radio.toggled.connect(
+            lambda checked: self.project_combo.setEnabled(not checked)
+        )
 
         # Default kind
         kind_layout = QHBoxLayout()
@@ -147,7 +148,9 @@ class ImportWizard(QWidget):
         controls_layout = QHBoxLayout()
 
         self.run_btn = QPushButton("▶ Run Import")
-        self.run_btn.setStyleSheet("QPushButton { background: #4caf50; color: white; font-weight: bold; padding: 8px 16px; }")
+        self.run_btn.setStyleSheet(
+            "QPushButton { background: #4caf50; color: white; font-weight: bold; padding: 8px 16px; }"
+        )
         self.run_btn.clicked.connect(self.on_run_import)
         controls_layout.addWidget(self.run_btn)
 
@@ -238,10 +241,7 @@ class ImportWizard(QWidget):
                 "RESOLVE_FAILED": f"Cannot access file path.\n\n{str(e)}",
             }
 
-            error_msg = error_messages.get(
-                e.reason,
-                f"File path security check failed: {e.reason}"
-            )
+            error_msg = error_messages.get(e.reason, f"File path security check failed: {e.reason}")
 
             QMessageBox.critical(self, "Path Security Error", error_msg)
             logger.warning(f"Path security check failed: {e.reason}, path={file_path}")
@@ -250,7 +250,7 @@ class ImportWizard(QWidget):
         try:
             # Validate file size (10 MB limit for dictionaries)
             validate_file_size(safe_path, MAX_DICTIONARY_SIZE, file_type="dictionary")
-        except ValidationError as e:
+        except ValidationError:
             file_size_mb = safe_path.stat().st_size / 1024 / 1024
             max_size_mb = MAX_DICTIONARY_SIZE / 1024 / 1024
 
@@ -259,13 +259,15 @@ class ImportWizard(QWidget):
                 "File Too Large",
                 f"Dictionary file is too large: {file_size_mb:.1f} MB\n\n"
                 f"Maximum allowed size: {max_size_mb:.0f} MB\n\n"
-                f"Please reduce the file size or split it into smaller files."
+                f"Please reduce the file size or split it into smaller files.",
             )
-            logger.warning(f"File size limit exceeded: {file_size_mb:.1f} MB > {max_size_mb:.0f} MB")
+            logger.warning(
+                f"File size limit exceeded: {file_size_mb:.1f} MB > {max_size_mb:.0f} MB"
+            )
             return
 
         # Log validation success
-        self.log_output.appendPlainText(f"✓ File path validated")
+        self.log_output.appendPlainText("✓ File path validated")
         self.log_output.appendPlainText(f"✓ File size: {safe_path.stat().st_size / 1024:.1f} KB")
 
         # Get scope
@@ -276,7 +278,9 @@ class ImportWizard(QWidget):
             scope = "project"
             project_id = self.project_combo.currentData()
             if project_id is None:
-                QMessageBox.warning(self, "No Project", "Please select a project for project scope.")
+                QMessageBox.warning(
+                    self, "No Project", "Please select a project for project scope."
+                )
                 return
 
         # Get settings

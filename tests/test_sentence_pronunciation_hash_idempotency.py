@@ -1,4 +1,5 @@
 """Tests: src_hash idempotency and fill_only/rebuild semantics."""
+
 from __future__ import annotations
 
 import shutil
@@ -114,10 +115,17 @@ class TestFillOnlyIdempotency:
         with Session(db_engine) as session:
             svc.upsert_auto(
                 session,
-                sentence_id=1, lang=lang, src_hash=hash_v,
-                src_preprocessed=preprocessed, niqqud_text=niqqud_v1,
-                confidence=0.9, qc_status="ok", qc_reason=None,
-                niqqud_coverage=0.9, phonikud_version="v1", mode="fill_only",
+                sentence_id=1,
+                lang=lang,
+                src_hash=hash_v,
+                src_preprocessed=preprocessed,
+                niqqud_text=niqqud_v1,
+                confidence=0.9,
+                qc_status="ok",
+                qc_reason=None,
+                niqqud_coverage=0.9,
+                phonikud_version="v1",
+                mode="fill_only",
             )
             session.commit()
 
@@ -128,10 +136,17 @@ class TestFillOnlyIdempotency:
             hash_v2 = svc.compute_src_hash(lang, preprocessed, "v2")
             action = svc.upsert_auto(
                 session,
-                sentence_id=1, lang=lang, src_hash=hash_v2,
-                src_preprocessed=preprocessed, niqqud_text=niqqud_v2,
-                confidence=0.95, qc_status="ok", qc_reason=None,
-                niqqud_coverage=0.95, phonikud_version="v2", mode="rebuild",
+                sentence_id=1,
+                lang=lang,
+                src_hash=hash_v2,
+                src_preprocessed=preprocessed,
+                niqqud_text=niqqud_v2,
+                confidence=0.95,
+                qc_status="ok",
+                qc_reason=None,
+                niqqud_coverage=0.95,
+                phonikud_version="v2",
+                mode="rebuild",
             )
             session.commit()
             assert action == "updated"

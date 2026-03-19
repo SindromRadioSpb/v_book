@@ -29,8 +29,12 @@ def _item(*, grade: str | None, review_count: int, graded_at: str | None = None)
 
 
 def test_last_review_column_label_and_values():
-    model = UserDictionaryItemsTableModel(items=[_item(grade=None, review_count=0), _item(grade="good", review_count=3)])
-    assert model.headerData(6, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Last Review"
+    model = UserDictionaryItemsTableModel(
+        items=[_item(grade=None, review_count=0), _item(grade="good", review_count=3)]
+    )
+    assert (
+        model.headerData(6, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Last Review"
+    )
     assert model.data(model.index(0, 6), Qt.ItemDataRole.DisplayRole) == "Added"
     assert model.data(model.index(1, 6), Qt.ItemDataRole.DisplayRole) == "Good"
 

@@ -54,7 +54,9 @@ def test_generate_one_creates_ready_asset_and_skips_when_exists(monkeypatch):
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         AudioAsset.__table__.create(engine, checkfirst=True)
-        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr(
+            "app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir
+        )
 
         service = AudioGenerationService(settings=_DummySettings())
         with Session(engine) as session:
@@ -73,7 +75,9 @@ def test_generate_one_creates_ready_asset_and_skips_when_exists(monkeypatch):
             assert result["status"] == "ready"
             assert result["provider_id"] == "mock_local_audio"
 
-            row = session.execute(select(AudioAsset).where(AudioAsset.norm_text == "shalom")).scalar_one()
+            row = session.execute(
+                select(AudioAsset).where(AudioAsset.norm_text == "shalom")
+            ).scalar_one()
             assert row.asset_status == "ready"
             assert row.input_hash
             assert row.audio_rel_path
@@ -110,7 +114,9 @@ def test_generate_one_rejects_invalid_source_payload(monkeypatch):
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         AudioAsset.__table__.create(engine, checkfirst=True)
-        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr(
+            "app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir
+        )
 
         service = AudioGenerationService(settings=_DummySettings())
         with Session(engine) as session:
@@ -140,7 +146,9 @@ def test_generate_one_records_failed_status_when_provider_chain_unavailable(monk
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         AudioAsset.__table__.create(engine, checkfirst=True)
-        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr(
+            "app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir
+        )
 
         service = AudioGenerationService(settings=_AudioDisabledSettings())
         with Session(engine) as session:
@@ -159,7 +167,9 @@ def test_generate_one_records_failed_status_when_provider_chain_unavailable(monk
             assert result["status"] == "failed"
             assert "No audio provider available" in str(result["error"])
 
-            row = session.execute(select(AudioAsset).where(AudioAsset.norm_text == "shalom")).scalar_one()
+            row = session.execute(
+                select(AudioAsset).where(AudioAsset.norm_text == "shalom")
+            ).scalar_one()
             assert row.asset_status == "failed"
             assert "No audio provider available" in str(row.error_text)
     finally:
@@ -174,8 +184,12 @@ def test_force_regenerate_same_provider_rewrites_asset_path(monkeypatch):
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         AudioAsset.__table__.create(engine, checkfirst=True)
-        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
-        monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr(
+            "app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir
+        )
+        monkeypatch.setattr(
+            "app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir
+        )
 
         service = AudioGenerationService(settings=_DummySettings())
         with Session(engine) as session:
@@ -257,8 +271,12 @@ def test_pronunciation_change_invalidates_audio_cache_without_force_regenerate(m
     try:
         AudioAsset.__table__.create(engine, checkfirst=True)
         PronunciationEntry.__table__.create(engine, checkfirst=True)
-        monkeypatch.setattr("app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir)
-        monkeypatch.setattr("app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir)
+        monkeypatch.setattr(
+            "app.services.audio_generation_service._get_app_dir", lambda: temp_audio_dir
+        )
+        monkeypatch.setattr(
+            "app.services.audio_playback_service._get_app_dir", lambda: temp_audio_dir
+        )
 
         service = AudioGenerationService(settings=_DummySettings())
         pron = PronunciationService()
@@ -315,16 +333,22 @@ def test_pronunciation_change_invalidates_audio_cache_without_force_regenerate(m
             assert second["ok"] is True
             assert second["status"] == "ready"
 
-            rows_after = session.execute(
-                select(AudioAsset).where(
-                    AudioAsset.lang == "he",
-                    AudioAsset.norm_text == source_norm,
-                    AudioAsset.provider == "mock_local_audio",
+            rows_after = (
+                session.execute(
+                    select(AudioAsset).where(
+                        AudioAsset.lang == "he",
+                        AudioAsset.norm_text == source_norm,
+                        AudioAsset.provider == "mock_local_audio",
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(rows_after) == 2
 
-            row_second = max(rows_after, key=lambda row: (str(row.updated_at or ""), int(row.asset_id or 0)))
+            row_second = max(
+                rows_after, key=lambda row: (str(row.updated_at or ""), int(row.asset_id or 0))
+            )
             assert row_second.speech_hash
             assert row_second.input_hash
             assert row_second.speech_hash != first_hash

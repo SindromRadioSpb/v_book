@@ -36,7 +36,9 @@ def test_check_db_corruption_probe_returns_actionable_failure(monkeypatch, tmp_p
     assert "repair_db_corruption.py" in result.details
 
 
-def test_run_prebuild_validation_skips_following_checks_when_corruption_detected(monkeypatch, tmp_path: Path):
+def test_run_prebuild_validation_skips_following_checks_when_corruption_detected(
+    monkeypatch, tmp_path: Path
+):
     db_path = tmp_path / "corrupt.db"
     db_path.write_text("", encoding="utf-8")
 
@@ -50,13 +52,21 @@ def test_run_prebuild_validation_skips_following_checks_when_corruption_detected
             details='repair: python scripts/repair_db_corruption.py --db-path "broken.db"',
         ),
     )
-    monkeypatch.setattr(pv, "check_fts_presence", lambda _db: (_ for _ in ()).throw(AssertionError("should skip")))
     monkeypatch.setattr(
-        pv, "check_project_lifecycle", lambda _db: (_ for _ in ()).throw(AssertionError("should skip"))
+        pv, "check_fts_presence", lambda _db: (_ for _ in ()).throw(AssertionError("should skip"))
     )
-    monkeypatch.setattr(pv, "check_export_import", lambda _db: (_ for _ in ()).throw(AssertionError("should skip")))
     monkeypatch.setattr(
-        pv, "check_database_integrity", lambda _db: (_ for _ in ()).throw(AssertionError("should skip"))
+        pv,
+        "check_project_lifecycle",
+        lambda _db: (_ for _ in ()).throw(AssertionError("should skip")),
+    )
+    monkeypatch.setattr(
+        pv, "check_export_import", lambda _db: (_ for _ in ()).throw(AssertionError("should skip"))
+    )
+    monkeypatch.setattr(
+        pv,
+        "check_database_integrity",
+        lambda _db: (_ for _ in ()).throw(AssertionError("should skip")),
     )
 
     final_status, results = pv.run_prebuild_validation(db_path)

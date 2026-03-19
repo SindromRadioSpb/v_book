@@ -25,27 +25,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Import HDLE Premium project from .hdleproj bundle"
     )
-    parser.add_argument(
-        "--db-path",
-        type=str,
-        required=True,
-        help="Path to SQLite database file"
-    )
-    parser.add_argument(
-        "--bundle",
-        type=str,
-        required=True,
-        help="Path to .hdleproj bundle file"
-    )
-    parser.add_argument(
-        "--name",
-        type=str,
-        help="Override project name (optional)"
-    )
+    parser.add_argument("--db-path", type=str, required=True, help="Path to SQLite database file")
+    parser.add_argument("--bundle", type=str, required=True, help="Path to .hdleproj bundle file")
+    parser.add_argument("--name", type=str, help="Override project name (optional)")
     parser.add_argument(
         "--no-auto-rename",
         action="store_true",
-        help="Fail if project name conflicts (instead of auto-rename)"
+        help="Fail if project name conflicts (instead of auto-rename)",
     )
 
     args = parser.parse_args()

@@ -1,4 +1,5 @@
 """Tests for TM Kind multi-select filter and persistence (Task 22 / PATCH-07)."""
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,7 @@ class TestKindFilterPersistence:
     def test_kind_filter_saved_to_settings(self):
         """Verify selected_kinds is persisted via SettingsService.set_value."""
         from app.infra.settings import SettingsService
+
         settings = SettingsService.get_instance()
         # Save a kind list
         settings.set_value("tm_panel/kind_filter", ["lemma", "surface"])
@@ -19,6 +21,7 @@ class TestKindFilterPersistence:
     def test_kind_filter_none_saved_as_none(self):
         """None (= All) stored cleanly."""
         from app.infra.settings import SettingsService
+
         settings = SettingsService.get_instance()
         settings.set_value("tm_panel/kind_filter", None)
         saved = settings.get_json("tm_panel/kind_filter", None)
@@ -27,6 +30,7 @@ class TestKindFilterPersistence:
     def test_kind_filter_restored_as_list(self):
         """JSON round-trip preserves list type."""
         from app.infra.settings import SettingsService
+
         settings = SettingsService.get_instance()
         kinds = ["term_cluster", "ngram"]
         settings.set_value("tm_panel/kind_filter", kinds)
@@ -60,6 +64,7 @@ class TestTranslationAdminServiceKindFilter:
     def test_kinds_filter_applied_single(self):
         """Single kind in kinds list → filter to that kind only."""
         from app.services.translation_admin_service import TranslationAdminService
+
         svc = TranslationAdminService()
         session = MagicMock()
 
@@ -76,6 +81,7 @@ class TestTranslationAdminServiceKindFilter:
     def test_kinds_filter_empty_list_treated_as_all(self):
         """Empty list → no kind filter applied (same as All)."""
         from app.services.translation_admin_service import TranslationAdminService
+
         svc = TranslationAdminService()
         session = MagicMock()
 
@@ -90,6 +96,7 @@ class TestTranslationAdminServiceKindFilter:
     def test_legacy_kind_still_works(self):
         """Backward compat: old single 'kind' key still works."""
         from app.services.translation_admin_service import TranslationAdminService
+
         svc = TranslationAdminService()
         session = MagicMock()
 
@@ -103,6 +110,7 @@ class TestTranslationAdminServiceKindFilter:
     def test_kinds_filter_multi(self):
         """Multiple kinds in list → both included."""
         from app.services.translation_admin_service import TranslationAdminService
+
         svc = TranslationAdminService()
         session = MagicMock()
 
@@ -149,5 +157,4 @@ class TestKindFilterDefaults:
     def test_tm_default_kind_filter_keeps_sentences_off(self):
         from app.ui.translation_management_panel import TranslationManagementPanel
 
-        assert 'surface' not in TranslationManagementPanel.DEFAULT_KIND_FILTER
-
+        assert "surface" not in TranslationManagementPanel.DEFAULT_KIND_FILTER

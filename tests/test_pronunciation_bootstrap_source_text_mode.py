@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import PronunciationEntry
-from app.services.pronunciation_bootstrap_service import PronunciationBootstrapService, PronunciationGenerator
+from app.services.pronunciation_bootstrap_service import (
+    PronunciationBootstrapService,
+    PronunciationGenerator,
+)
 
 
 def _workspace_temp_dir(prefix: str) -> Path:
@@ -83,7 +86,11 @@ def test_bootstrap_uses_surface_text_and_sanitizes_generated_value():
             assert generator.calls, "Generator must be invoked"
             assert source_text in generator.calls[0]
 
-            row = session.query(PronunciationEntry).filter_by(lang=src_lang, src_norm=surface_norm).one()
+            row = (
+                session.query(PronunciationEntry)
+                .filter_by(lang=src_lang, src_norm=surface_norm)
+                .one()
+            )
             assert row.source == "auto_phonikud"
             assert row.niqqud_text is not None
             assert "_" not in row.niqqud_text

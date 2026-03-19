@@ -1,14 +1,13 @@
 """Dialog for manually editing (overriding) the niqqud for a single sentence."""
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -30,7 +29,7 @@ class EditSentenceNiqqudDialog(QDialog):
         *,
         sentence_id: int,
         sentence_text: str,
-        current_niqqud: Optional[str] = None,
+        current_niqqud: str | None = None,
     ):
         super().__init__(parent)
         self.sentence_id = sentence_id
@@ -40,7 +39,7 @@ class EditSentenceNiqqudDialog(QDialog):
         self._changed = False
         self._init_ui(current_niqqud)
 
-    def _init_ui(self, current_niqqud: Optional[str]) -> None:
+    def _init_ui(self, current_niqqud: str | None) -> None:
         layout = QVBoxLayout(self)
 
         # Source text (read-only)
@@ -70,7 +69,9 @@ class EditSentenceNiqqudDialog(QDialog):
         self._preview.setWordWrap(True)
         self._preview.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._preview.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        self._preview.setStyleSheet("font-size: 14px; color: #333; border: 1px solid #ccc; padding: 4px;")
+        self._preview.setStyleSheet(
+            "font-size: 14px; color: #333; border: 1px solid #ccc; padding: 4px;"
+        )
         layout.addWidget(self._preview)
 
         self.edit.textChanged.connect(self._update_preview)
@@ -93,6 +94,7 @@ class EditSentenceNiqqudDialog(QDialog):
         try:
             from app.services.db_service import DBService
             from app.services.sentence_pronunciation_service import SentencePronunciationService
+
             db = DBService.get_instance()
             svc = SentencePronunciationService()
             with db.get_session() as session:
@@ -118,7 +120,7 @@ def show_edit_sentence_niqqud_dialog(
     *,
     sentence_id: int,
     sentence_text: str,
-    current_niqqud: Optional[str] = None,
+    current_niqqud: str | None = None,
 ) -> bool:
     """Show dialog; return True if niqqud was saved."""
     dlg = EditSentenceNiqqudDialog(

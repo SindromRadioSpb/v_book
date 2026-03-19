@@ -1,4 +1,5 @@
 """Test bulk_resolve to check if it finds TM entries."""
+
 import sys
 import io
 from pathlib import Path
@@ -6,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # Set UTF-8 encoding
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from app.services.translation_service import TranslationService
 

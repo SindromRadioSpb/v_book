@@ -2,10 +2,10 @@
 
 from .worker_process import (
     LocalMTWorker,
-    start_worker,
     WorkerError,
     WorkerRequest,
     WorkerResult,
+    start_worker,
 )
 
 __all__ = [

@@ -8,26 +8,27 @@ import sqlite3
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable, Any
+from typing import Any
 
+from app.infra.fts_manager import ensure_fts_tables
+from app.infra.write_gate import get_waiting_writer_count, run_serialized_db_write
 from app.services.db_service import DBService
 from app.services.project_exchange import bundle_format
 from app.services.project_exchange.constants import (
+    BUNDLE_FORMAT_VERSION,
+    NULLABLE_FK_COLUMNS,
+    PRONUNCIATION_METADATA_FILENAME,
     TABLE_INSERT_ORDER,
     TABLE_SCHEMA,
-    NULLABLE_FK_COLUMNS,
-    BUNDLE_FORMAT_VERSION,
-    PRONUNCIATION_METADATA_FILENAME,
 )
 from app.services.project_exchange.dto import (
     ImportOptions,
-    ImportReport,
     ImportPreflightReport,
+    ImportReport,
 )
-from app.infra.fts_manager import ensure_fts_tables
-from app.infra.write_gate import run_serialized_db_write, get_waiting_writer_count
 from app.services.pronunciation_import_export_service import PronunciationImportExportService
 
 logger = logging.getLogger(__name__)
@@ -53,16 +54,16 @@ class ProjectImportEngine:
         self.db_service = DBService.get_instance()
         self._lemma_batch_size = self._DEFAULT_LEMMA_BATCH_SIZE
         self._lemma_gate_batch_cap = self._DEFAULT_LEMMA_GATE_BATCH_CAP
-        self._gate_trace_path: Optional[Path] = None
+        self._gate_trace_path: Path | None = None
         self._gate_trace_lock = threading.Lock()
 
     def import_project(
         self,
         bundle_path: Path,
         options: ImportOptions = ImportOptions(),
-        progress_callback: Optional[Callable[[str, int, int], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        gate_trace_path: Optional[Path] = None,
+        progress_callback: Callable[[str, int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        gate_trace_path: Path | None = None,
     ) -> ImportReport:
         """Import a project from a .hdleproj bundle.
 
@@ -234,7 +235,7 @@ class ProjectImportEngine:
         )
 
     @staticmethod
-    def _check_cancelled(cancel_check: Optional[Callable[[], bool]]) -> None:
+    def _check_cancelled(cancel_check: Callable[[], bool] | None) -> None:
         if cancel_check and bool(cancel_check()):
             raise ImportCancelledError("Import cancelled by user")
 
@@ -289,8 +290,8 @@ class ProjectImportEngine:
             )
         return clamped
 
-    def _configure_gate_trace(self, gate_trace_path: Optional[Path]) -> None:
-        resolved: Optional[Path] = None
+    def _configure_gate_trace(self, gate_trace_path: Path | None) -> None:
+        resolved: Path | None = None
         if gate_trace_path:
             resolved = Path(gate_trace_path)
         else:
@@ -314,11 +315,11 @@ class ProjectImportEngine:
         *,
         event: str,
         phase: str,
-        batch_idx: Optional[int] = None,
-        rows_in_batch: Optional[int] = None,
-        wait_ms: Optional[float] = None,
-        hold_ms: Optional[float] = None,
-        waiters: Optional[int] = None,
+        batch_idx: int | None = None,
+        rows_in_batch: int | None = None,
+        wait_ms: float | None = None,
+        hold_ms: float | None = None,
+        waiters: int | None = None,
     ) -> None:
         if self._gate_trace_path is None:
             return
@@ -363,9 +364,9 @@ class ProjectImportEngine:
         *,
         operation: str,
         action: Callable[[], None],
-        batch_idx: Optional[int] = None,
-        rows_in_batch: Optional[int] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        batch_idx: int | None = None,
+        rows_in_batch: int | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         """Execute a write transaction through the shared process-local write gate."""
 
@@ -418,12 +419,13 @@ class ProjectImportEngine:
         pron_path: Path,
         warnings: list[str],
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         """Import optional pronunciation metadata sidecar."""
         self._check_cancelled(cancel_check)
         service = PronunciationImportExportService()
         try:
+
             def _import_metadata() -> dict:
                 with self.db_service.get_session() as session:
                     self._check_cancelled(cancel_check)
@@ -524,7 +526,9 @@ class ProjectImportEngine:
             if options.rename_if_conflict:
                 timestamp = datetime.now().strftime("%Y-%m-%d")
                 new_name = f"{original_name} (imported {timestamp})"
-                warnings.append(f"Project name '{original_name}' already exists, renamed to '{new_name}'")
+                warnings.append(
+                    f"Project name '{original_name}' already exists, renamed to '{new_name}'"
+                )
                 return new_name
             else:
                 raise ValueError(f"Project name '{original_name}' already exists")
@@ -591,7 +595,7 @@ class ProjectImportEngine:
         host_conn: sqlite3.Connection,
         payload_conn: sqlite3.Connection,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> dict[str, int]:
         """Compute ID offsets for each table.
 
@@ -656,9 +660,9 @@ class ProjectImportEngine:
         offsets: dict[str, int],
         final_project_name: str,
         warnings: list[str],
-        progress_callback: Optional[Callable[[str, int, int], None]],
+        progress_callback: Callable[[str, int, int], None] | None,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> tuple[int, dict[str, int]]:
         """Import all tables with bounded write-lock windows.
 
@@ -782,6 +786,7 @@ class ProjectImportEngine:
 
             # Fix self-referencing FK on dict_project.general_corpus_id
             if new_project_id:
+
                 def _fix_self_ref() -> None:
                     self._fix_general_corpus_self_ref(
                         host_conn, payload_conn, offsets, new_project_id, warnings
@@ -820,19 +825,16 @@ class ProjectImportEngine:
         self,
         host_conn: sqlite3.Connection,
         *,
-        new_project_id: Optional[int],
+        new_project_id: int | None,
         inserted_library_ids: list[int],
         inserted_tm_global_ids: list[int],
     ) -> None:
         """Best-effort cleanup for partially imported rows after cancel/failure."""
-        if (
-            new_project_id is None
-            and not inserted_library_ids
-            and not inserted_tm_global_ids
-        ):
+        if new_project_id is None and not inserted_library_ids and not inserted_tm_global_ids:
             return
 
         try:
+
             def _cleanup_action() -> None:
                 if new_project_id is not None:
                     host_conn.execute(
@@ -885,7 +887,7 @@ class ProjectImportEngine:
         host_conn: sqlite3.Connection,
         payload_conn: sqlite3.Connection,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> tuple[int, dict[int, int], list[int]]:
         """Merge payload tm_global rows into host by natural key and build ID map."""
         try:
@@ -964,15 +966,15 @@ class ProjectImportEngine:
         payload_conn: sqlite3.Connection,
         table_name: str,
         offsets: dict[str, int],
-        override_name: Optional[str],
+        override_name: str | None,
         warnings: list[str],
-        tm_global_id_map: Optional[dict[int, int]] = None,
+        tm_global_id_map: dict[int, int] | None = None,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
+        cancel_check: Callable[[], bool] | None = None,
         batch_size: int,
-        progress_callback: Optional[Callable[[str, int, int], None]] = None,
-        progress_start: Optional[int] = None,
-        progress_end: Optional[int] = None,
+        progress_callback: Callable[[str, int, int], None] | None = None,
+        progress_start: int | None = None,
+        progress_end: int | None = None,
     ) -> int:
         """Import a table in multiple short write-gate transactions."""
         self._check_cancelled(cancel_check)
@@ -1010,7 +1012,7 @@ class ProjectImportEngine:
         else:
             read_chunk_size = max(batch_size, 2048)
 
-        last_progress_value: Optional[int] = None
+        last_progress_value: int | None = None
 
         while True:
             self._check_cancelled(cancel_check)
@@ -1035,7 +1037,7 @@ class ProjectImportEngine:
 
             for offset in range(0, len(remapped_rows), table_batch_size):
                 self._check_cancelled(cancel_check)
-                batch_rows = remapped_rows[offset:offset + table_batch_size]
+                batch_rows = remapped_rows[offset : offset + table_batch_size]
                 rows_in_batch = len(batch_rows)
 
                 def _insert_batch() -> None:
@@ -1092,12 +1094,12 @@ class ProjectImportEngine:
         payload_conn: sqlite3.Connection,
         table_name: str,
         offsets: dict[str, int],
-        override_name: Optional[str],
+        override_name: str | None,
         warnings: list[str],
-        tm_global_id_map: Optional[dict[int, int]] = None,
+        tm_global_id_map: dict[int, int] | None = None,
         *,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        inserted_pk_values: Optional[list[int]] = None,
+        cancel_check: Callable[[], bool] | None = None,
+        inserted_pk_values: list[int] | None = None,
     ) -> int:
         """Import a single table with ID remapping.
 
@@ -1161,11 +1163,13 @@ class ProjectImportEngine:
         chunk_size = 200
         for i in range(0, len(remapped_rows), chunk_size):
             self._check_cancelled(cancel_check)
-            chunk = remapped_rows[i:i+chunk_size]
+            chunk = remapped_rows[i : i + chunk_size]
             try:
                 host_conn.executemany(insert_sql, chunk)
-            except sqlite3.IntegrityError as e:
-                logger.error(f"FK constraint failed on table {table_name}, chunk {i}-{i+len(chunk)}")
+            except sqlite3.IntegrityError:
+                logger.error(
+                    f"FK constraint failed on table {table_name}, chunk {i}-{i+len(chunk)}"
+                )
                 logger.error(f"First row in chunk: {chunk[0] if chunk else 'empty'}")
                 logger.error(f"SQL: {insert_sql}")
                 raise
@@ -1178,8 +1182,8 @@ class ProjectImportEngine:
         col_names: list[str],
         row: tuple,
         offsets: dict[str, int],
-        override_name: Optional[str],
-        tm_global_id_map: Optional[dict[int, int]] = None,
+        override_name: str | None,
+        tm_global_id_map: dict[int, int] | None = None,
     ) -> tuple:
         """Remap a single row's PK and FK values.
 

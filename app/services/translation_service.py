@@ -10,27 +10,29 @@ Order of precedence (strict):
 
 All lookups use exact match on src_norm (normalized key).
 """
+
 import hashlib
 import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple, Any
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.normalization import normalize_for_tm
-from app.infra.sa_models import TMEntry, TMAlias, TMGlobal, DictEntry, DictSource, MTCache, utc_now
+from app.infra.reliability import CircuitBreaker, RateLimiter
+from app.infra.sa_models import DictEntry, DictSource, MTCache, TMAlias, TMEntry, TMGlobal, utc_now
 from app.infra.settings import SettingsService
 from app.infra.translators.base_provider import (
     TranslationRequest,
+)
+from app.infra.translators.base_provider import (
     TranslationResult as ProviderTranslationResult,
-    TranslationErrorKind,
 )
 from app.infra.translators.providers_registry import ProvidersRegistry
-from app.infra.reliability import CircuitBreaker, RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +41,17 @@ logger = logging.getLogger(__name__)
 class TranslationResult:
     """Result of translation lookup with explainability."""
 
-    translation: Optional[str] = None
+    translation: str | None = None
     source: str = "none"  # tm|dict|mt_cache|mt|none
-    status: Optional[str] = None
-    confidence: Optional[float] = None
-    origin: Optional[str] = None
-    matched_on: Optional[str] = None  # src_norm|alias_norm|variant_norm
-    match_key_used: Optional[str] = None
-    provider: Optional[str] = None  # MT provider name
-    dict_source_name: Optional[str] = None
-    tm_id: Optional[int] = None
-    notes: Optional[str] = None
+    status: str | None = None
+    confidence: float | None = None
+    origin: str | None = None
+    matched_on: str | None = None  # src_norm|alias_norm|variant_norm
+    match_key_used: str | None = None
+    provider: str | None = None  # MT provider name
+    dict_source_name: str | None = None
+    tm_id: int | None = None
+    notes: str | None = None
 
 
 class TranslationService:
@@ -81,7 +83,7 @@ class TranslationService:
         kind: str,
         src_lang: str = "he",
         tgt_lang: str = "ru",
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
         allow_draft: bool = False,
         use_mt: bool = False,
     ) -> TranslationResult:
@@ -109,12 +111,16 @@ class TranslationService:
             return TranslationResult()
 
         # 1. TM override lookup (project-scoped first, then global)
-        result = self._lookup_tm(session, normalized.norm, kind, src_lang, tgt_lang, project_id, allow_draft)
+        result = self._lookup_tm(
+            session, normalized.norm, kind, src_lang, tgt_lang, project_id, allow_draft
+        )
         if result.translation:
             return result
 
         # 2. TM aliases lookup
-        result = self._lookup_tm_aliases(session, normalized.norm, kind, src_lang, tgt_lang, project_id, allow_draft)
+        result = self._lookup_tm_aliases(
+            session, normalized.norm, kind, src_lang, tgt_lang, project_id, allow_draft
+        )
         if result.translation:
             return result
 
@@ -152,7 +158,7 @@ class TranslationService:
         kind: str,
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
+        project_id: int | None,
         allow_draft: bool,
     ) -> TranslationResult:
         """Lookup TM entries (project-scoped first, then global)."""
@@ -267,7 +273,7 @@ class TranslationService:
         kind: str,
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
+        project_id: int | None,
         allow_draft: bool,
     ) -> TranslationResult:
         """Lookup TM entries via aliases."""
@@ -328,7 +334,7 @@ class TranslationService:
         kind: str,
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
+        project_id: int | None,
     ) -> TranslationResult:
         """Lookup offline dictionary entries."""
         # Query dict entries with source info
@@ -379,7 +385,7 @@ class TranslationService:
         src_norm: str,
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
+        project_id: int | None,
     ) -> TranslationResult:
         """Lookup MT cache."""
         stmt = (
@@ -411,12 +417,12 @@ class TranslationService:
     def bulk_resolve(
         self,
         session: Session,
-        items: List[Tuple[str, str]],  # [(src_text, kind), ...]
+        items: list[tuple[str, str]],  # [(src_text, kind), ...]
         src_lang: str = "he",
         tgt_lang: str = "ru",
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
         allow_draft: bool = False,
-    ) -> Dict[Tuple[str, str], TranslationResult]:
+    ) -> dict[tuple[str, str], TranslationResult]:
         """
         Bulk resolve translations for multiple items.
 
@@ -448,7 +454,9 @@ class TranslationService:
 
         # Batch lookup from TM
         norm_keys = list(set(normalized_map.values()))
-        tm_results = self._batch_lookup_tm(session, norm_keys, src_lang, tgt_lang, project_id, allow_draft)
+        tm_results = self._batch_lookup_tm(
+            session, norm_keys, src_lang, tgt_lang, project_id, allow_draft
+        )
 
         # Batch lookup from dict
         dict_results = self._batch_lookup_dict(session, norm_keys, src_lang, tgt_lang, project_id)
@@ -483,17 +491,21 @@ class TranslationService:
     def _batch_lookup_tm(
         self,
         session: Session,
-        norm_keys: List[str],
+        norm_keys: list[str],
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
+        project_id: int | None,
         allow_draft: bool,
-    ) -> Dict[Tuple[str, str], TranslationResult]:
+    ) -> dict[tuple[str, str], TranslationResult]:
         """Batch lookup TM entries."""
         if not norm_keys:
             return {}
 
-        status_filter = TMEntry.status.in_(["approved", "draft"]) if allow_draft else TMEntry.status == "approved"
+        status_filter = (
+            TMEntry.status.in_(["approved", "draft"])
+            if allow_draft
+            else TMEntry.status == "approved"
+        )
 
         stmt = select(TMEntry).where(
             and_(
@@ -533,9 +545,19 @@ class TranslationService:
                 )
 
         # PATCH-19-03: Fallback to tm_global for keys not found in tm_entry
-        missing_keys = [k for k in norm_keys if not any((k, kind) in results for kind in ["lemma", "term_cluster", "ngram", "surface"])]
+        missing_keys = [
+            k
+            for k in norm_keys
+            if not any(
+                (k, kind) in results for kind in ["lemma", "term_cluster", "ngram", "surface"]
+            )
+        ]
         if missing_keys:
-            global_status_filter = TMGlobal.status.in_(["approved", "draft"]) if allow_draft else TMGlobal.status == "approved"
+            global_status_filter = (
+                TMGlobal.status.in_(["approved", "draft"])
+                if allow_draft
+                else TMGlobal.status == "approved"
+            )
             global_stmt = select(TMGlobal).where(
                 and_(
                     TMGlobal.src_norm.in_(missing_keys),
@@ -564,11 +586,11 @@ class TranslationService:
     def _batch_lookup_dict(
         self,
         session: Session,
-        norm_keys: List[str],
+        norm_keys: list[str],
         src_lang: str,
         tgt_lang: str,
-        project_id: Optional[int],
-    ) -> Dict[Tuple[str, str], TranslationResult]:
+        project_id: int | None,
+    ) -> dict[tuple[str, str], TranslationResult]:
         """Batch lookup dict entries."""
         if not norm_keys:
             return {}
@@ -587,7 +609,9 @@ class TranslationService:
         )
 
         if project_id is not None:
-            stmt = stmt.where(or_(DictSource.project_id == project_id, DictSource.project_id.is_(None)))
+            stmt = stmt.where(
+                or_(DictSource.project_id == project_id, DictSource.project_id.is_(None))
+            )
 
         stmt = stmt.order_by(
             DictSource.project_id.isnot(None).desc(),  # project-scoped first
@@ -632,7 +656,8 @@ class TranslationService:
         Returns:
             True if revert successful, False otherwise
         """
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
+
         from app.infra.sa_models import TMEntry, TMEntryHistory
 
         # Get current entry
@@ -643,8 +668,7 @@ class TranslationService:
 
         # Get target version from history
         stmt = select(TMEntryHistory).where(
-            TMEntryHistory.tm_id == tm_id,
-            TMEntryHistory.version == target_version
+            TMEntryHistory.tm_id == tm_id, TMEntryHistory.version == target_version
         )
         target_history = session.execute(stmt).scalar()
 
@@ -674,7 +698,9 @@ class TranslationService:
         # Revert entry to target version
         entry.translation = target_history.translation
         entry.status = target_history.status
-        entry.origin = "user_edit"  # P2 FIX: Use allowed origin (history tracks revert via change_kind)
+        entry.origin = (
+            "user_edit"  # P2 FIX: Use allowed origin (history tracks revert via change_kind)
+        )
         entry.notes = target_history.notes or f"Reverted to v{target_version}"
         entry.updated_at = utc_now()
 
@@ -693,7 +719,7 @@ class TranslationService:
         src_text: str,
         src_lang: str,
         tgt_lang: str,
-        glossary: Optional[Any] = None,
+        glossary: Any | None = None,
         allow_fallback: bool = True,
         trace_id: str = "",
     ) -> TranslationResult:
@@ -720,14 +746,12 @@ class TranslationService:
         # Feature-safe default: MT disabled or no providers configured
         if not enabled:
             return TranslationResult(
-                source="none",
-                notes="MT providers disabled (mt/providers/enabled=False)"
+                source="none", notes="MT providers disabled (mt/providers/enabled=False)"
             )
 
         if not chain or not isinstance(chain, list):
             return TranslationResult(
-                source="none",
-                notes="No MT providers configured (mt/providers/chain is empty)"
+                source="none", notes="No MT providers configured (mt/providers/chain is empty)"
             )
 
         # Generate trace_id if missing
@@ -741,7 +765,7 @@ class TranslationService:
         canonical_glossary = glossary_service.build_canonical_glossary(
             src_lang=src_lang,
             tgt_lang=tgt_lang,
-            project_id=None  # TODO: Get from context/args if needed
+            project_id=None,  # TODO: Get from context/args if needed
         )
         glossary_hash = canonical_glossary.glossary_hash
 
@@ -764,7 +788,7 @@ class TranslationService:
         # Get registry
         registry = ProvidersRegistry()
         total_latency_ms = 0
-        last_result: Optional[ProviderTranslationResult] = None
+        last_result: ProviderTranslationResult | None = None
 
         # Iterate provider chain
         for index, provider_id in enumerate(chain, start=1):
@@ -783,21 +807,27 @@ class TranslationService:
                     logger.warning(f"Lazy initialization failed for {provider_id}")
 
             if not provider:
-                self._log_provider_attempt({
-                    "trace_id": trace_id,
-                    "provider_id": provider_id,
-                    "attempt_index": index,
-                    "chain_total": len(chain),
-                    "src_lang": src_lang,
-                    "tgt_lang": tgt_lang,
-                    "decision": "SKIP_MISSING",
-                    "fallback_reason": "PROVIDER_NOT_REGISTERED",
-                })
+                self._log_provider_attempt(
+                    {
+                        "trace_id": trace_id,
+                        "provider_id": provider_id,
+                        "attempt_index": index,
+                        "chain_total": len(chain),
+                        "src_lang": src_lang,
+                        "tgt_lang": tgt_lang,
+                        "decision": "SKIP_MISSING",
+                        "fallback_reason": "PROVIDER_NOT_REGISTERED",
+                    }
+                )
                 continue
 
             # PATCH-P1-T04: Configure rate limiter for provider (if not already configured)
-            requests_per_min = settings.get_int(f"mt/provider/{provider_id}/requests_per_min", default=60)
-            max_wait_seconds = settings.get_int(f"mt/provider/{provider_id}/max_wait_seconds", default=5)
+            requests_per_min = settings.get_int(
+                f"mt/provider/{provider_id}/requests_per_min", default=60
+            )
+            max_wait_seconds = settings.get_int(
+                f"mt/provider/{provider_id}/max_wait_seconds", default=5
+            )
             if self._rate_limiter.get_status(provider_id)["capacity"] == 0.0:
                 self._rate_limiter.configure_provider(provider_id, requests_per_min)
 
@@ -805,47 +835,8 @@ class TranslationService:
             if self._circuit_breaker and not self._circuit_breaker.is_request_allowed(provider_id):
                 # Circuit breaker OPEN → skip provider
                 breaker_state = self._circuit_breaker.get_state(provider_id)
-                self._log_provider_attempt({
-                    "trace_id": trace_id,
-                    "provider_id": provider_id,
-                    "display_name": provider.display_name,
-                    "attempt_index": index,
-                    "chain_total": len(chain),
-                    "src_lang": src_lang,
-                    "tgt_lang": tgt_lang,
-                    "decision": "SKIP_CIRCUIT_BREAKER_OPEN",
-                    "fallback_reason": f"CIRCUIT_BREAKER_{breaker_state.value.upper()}",
-                    "circuit_breaker_state": breaker_state.value,
-                })
-                continue
-
-            # PATCH-P1-T04: Check rate limiter
-            if not self._rate_limiter.acquire(provider_id, max_wait_seconds=max_wait_seconds):
-                # Rate limit exceeded → skip provider
-                self._log_provider_attempt({
-                    "trace_id": trace_id,
-                    "provider_id": provider_id,
-                    "display_name": provider.display_name,
-                    "attempt_index": index,
-                    "chain_total": len(chain),
-                    "src_lang": src_lang,
-                    "tgt_lang": tgt_lang,
-                    "decision": "SKIP_RATE_LIMIT",
-                    "fallback_reason": "RATE_LIMIT_EXCEEDED",
-                })
-                continue
-
-            # PATCH-P1-T04: Check cache first (if enabled)
-            cache_enabled = settings.get_bool("mt/cache_enabled", default=True)
-
-            # PATCH-09: Get model version for cache keying
-            model_version = provider.get_model_version() if hasattr(provider, 'get_model_version') else ""
-
-            if cache_enabled:
-                cached_result = self._lookup_provider_cache(session, request, provider_id, model_version)
-                if cached_result:
-                    # Cache hit!
-                    self._log_provider_attempt({
+                self._log_provider_attempt(
+                    {
                         "trace_id": trace_id,
                         "provider_id": provider_id,
                         "display_name": provider.display_name,
@@ -853,23 +844,71 @@ class TranslationService:
                         "chain_total": len(chain),
                         "src_lang": src_lang,
                         "tgt_lang": tgt_lang,
-                        "latency_ms": 0,
-                        "used_glossary": bool(request.glossary),
-                        "glossary_hash_present": bool(request.glossary_hash),
-                        "cache_hit": True,
-                        "error_kind": None,
-                        "error_message": None,
-                        "decision": "STOP_SUCCESS",
-                        "fallback_reason": None,
-                    })
+                        "decision": "SKIP_CIRCUIT_BREAKER_OPEN",
+                        "fallback_reason": f"CIRCUIT_BREAKER_{breaker_state.value.upper()}",
+                        "circuit_breaker_state": breaker_state.value,
+                    }
+                )
+                continue
+
+            # PATCH-P1-T04: Check rate limiter
+            if not self._rate_limiter.acquire(provider_id, max_wait_seconds=max_wait_seconds):
+                # Rate limit exceeded → skip provider
+                self._log_provider_attempt(
+                    {
+                        "trace_id": trace_id,
+                        "provider_id": provider_id,
+                        "display_name": provider.display_name,
+                        "attempt_index": index,
+                        "chain_total": len(chain),
+                        "src_lang": src_lang,
+                        "tgt_lang": tgt_lang,
+                        "decision": "SKIP_RATE_LIMIT",
+                        "fallback_reason": "RATE_LIMIT_EXCEEDED",
+                    }
+                )
+                continue
+
+            # PATCH-P1-T04: Check cache first (if enabled)
+            cache_enabled = settings.get_bool("mt/cache_enabled", default=True)
+
+            # PATCH-09: Get model version for cache keying
+            model_version = (
+                provider.get_model_version() if hasattr(provider, "get_model_version") else ""
+            )
+
+            if cache_enabled:
+                cached_result = self._lookup_provider_cache(
+                    session, request, provider_id, model_version
+                )
+                if cached_result:
+                    # Cache hit!
+                    self._log_provider_attempt(
+                        {
+                            "trace_id": trace_id,
+                            "provider_id": provider_id,
+                            "display_name": provider.display_name,
+                            "attempt_index": index,
+                            "chain_total": len(chain),
+                            "src_lang": src_lang,
+                            "tgt_lang": tgt_lang,
+                            "latency_ms": 0,
+                            "used_glossary": bool(request.glossary),
+                            "glossary_hash_present": bool(request.glossary_hash),
+                            "cache_hit": True,
+                            "error_kind": None,
+                            "error_message": None,
+                            "decision": "STOP_SUCCESS",
+                            "fallback_reason": None,
+                        }
+                    )
                     self._log_translation_completed(trace_id, index, 0, provider_id)
                     return self._map_provider_result_to_service(cached_result)
 
             # PATCH-P1-T05: Convert canonical glossary to provider-specific format
             if canonical_glossary.total_entries > 0:
                 provider_glossary = glossary_service.to_provider_format(
-                    canonical_glossary,
-                    provider_id=provider_id
+                    canonical_glossary, provider_id=provider_id
                 )
                 if provider_glossary:
                     request.glossary = provider_glossary
@@ -893,7 +932,9 @@ class TranslationService:
             # PATCH-P1-T04: Store successful result in cache
             # PATCH-09: Include model_version for cache isolation
             if cache_enabled and result.is_success:
-                self._store_in_cache(session, request, result, project_id=None, model_version=model_version)
+                self._store_in_cache(
+                    session, request, result, project_id=None, model_version=model_version
+                )
 
             # PATCH-P1-T04: Record result in circuit breaker
             if self._circuit_breaker:
@@ -914,23 +955,25 @@ class TranslationService:
                 fallback_reason = result.error_kind.value if result.error_kind else "UNKNOWN"
 
             # Log attempt
-            self._log_provider_attempt({
-                "trace_id": trace_id,
-                "provider_id": provider_id,
-                "display_name": provider.display_name,
-                "attempt_index": index,
-                "chain_total": len(chain),
-                "src_lang": src_lang,
-                "tgt_lang": tgt_lang,
-                "latency_ms": latency_ms,
-                "used_glossary": result.used_glossary,
-                "glossary_hash_present": bool(request.glossary_hash),
-                "cache_hit": result.cache_hit,
-                "error_kind": result.error_kind.value if result.error_kind else None,
-                "error_message": result.error_message,
-                "decision": decision,
-                "fallback_reason": fallback_reason,
-            })
+            self._log_provider_attempt(
+                {
+                    "trace_id": trace_id,
+                    "provider_id": provider_id,
+                    "display_name": provider.display_name,
+                    "attempt_index": index,
+                    "chain_total": len(chain),
+                    "src_lang": src_lang,
+                    "tgt_lang": tgt_lang,
+                    "latency_ms": latency_ms,
+                    "used_glossary": result.used_glossary,
+                    "glossary_hash_present": bool(request.glossary_hash),
+                    "cache_hit": result.cache_hit,
+                    "error_kind": result.error_kind.value if result.error_kind else None,
+                    "error_message": result.error_message,
+                    "decision": decision,
+                    "fallback_reason": fallback_reason,
+                }
+            )
 
             # Success → return immediately
             if result.is_success:
@@ -954,14 +997,10 @@ class TranslationService:
         if last_result:
             return self._map_provider_result_to_service(last_result)
         else:
-            return TranslationResult(
-                source="none",
-                notes="All MT providers failed or unavailable"
-            )
+            return TranslationResult(source="none", notes="All MT providers failed or unavailable")
 
     def _map_provider_result_to_service(
-        self,
-        provider_result: ProviderTranslationResult
+        self, provider_result: ProviderTranslationResult
     ) -> TranslationResult:
         """
         Map provider TranslationResult to service TranslationResult.
@@ -981,7 +1020,7 @@ class TranslationService:
             notes=provider_result.error_message if provider_result.is_error else None,
         )
 
-    def _log_provider_attempt(self, event: Dict[str, Any]) -> None:
+    def _log_provider_attempt(self, event: dict[str, Any]) -> None:
         """
         Log provider attempt event (structured logging).
 
@@ -1011,11 +1050,7 @@ class TranslationService:
         self.logger.log(log_level, msg)
 
     def _log_translation_completed(
-        self,
-        trace_id: str,
-        total_attempts: int,
-        total_latency_ms: int,
-        final_provider: str
+        self, trace_id: str, total_attempts: int, total_latency_ms: int, final_provider: str
     ) -> None:
         """
         Log translation completed event.
@@ -1032,10 +1067,7 @@ class TranslationService:
         )
 
     def _log_translation_failed(
-        self,
-        trace_id: str,
-        total_attempts: int,
-        failure_reason: str
+        self, trace_id: str, total_attempts: int, failure_reason: str
     ) -> None:
         """
         Log translation failed event.
@@ -1060,7 +1092,7 @@ class TranslationService:
         request: TranslationRequest,
         provider_id: str,
         model_version: str = "",
-    ) -> Optional[ProviderTranslationResult]:
+    ) -> ProviderTranslationResult | None:
         """
         Lookup MT cache for given request.
 
@@ -1094,8 +1126,8 @@ class TranslationService:
             # Check expiration
             if entry.expires_at:
                 try:
-                    expires_at = datetime.fromisoformat(entry.expires_at.replace('Z', '+00:00'))
-                    if datetime.now(timezone.utc) > expires_at:
+                    expires_at = datetime.fromisoformat(entry.expires_at.replace("Z", "+00:00"))
+                    if datetime.now(UTC) > expires_at:
                         return None  # Expired
                 except (ValueError, AttributeError):
                     # Invalid expires_at format → treat as expired
@@ -1119,7 +1151,7 @@ class TranslationService:
         session: Session,
         request: TranslationRequest,
         result: ProviderTranslationResult,
-        project_id: Optional[int] = None,
+        project_id: int | None = None,
         model_version: str = "",
     ) -> None:
         """
@@ -1142,7 +1174,7 @@ class TranslationService:
             ttl_days = settings.get_int("mt/cache_ttl_days", default=7)
 
             # Calculate expiration
-            expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+            expires_at = (datetime.now(UTC) + timedelta(days=ttl_days)).isoformat()
 
             # Build cache key (PATCH-09: include model_version)
             cache_key = self._build_cache_key(request, result.provider_id, model_version)
@@ -1221,7 +1253,7 @@ class TranslationService:
 
         # Join and hash
         key_string = "|".join(components)
-        return hashlib.sha256(key_string.encode('utf-8')).hexdigest()
+        return hashlib.sha256(key_string.encode("utf-8")).hexdigest()
 
     def _normalize_for_cache(self, text: str) -> str:
         """

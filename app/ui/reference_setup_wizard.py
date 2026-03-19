@@ -3,26 +3,26 @@
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QDialog,
-    QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QRadioButton,
-    QButtonGroup,
-    QProgressBar,
-    QTextEdit,
-    QWidget,
     QStackedWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.services.reference_setup import (
-    ReferenceDownloadService,
     LocalProcessingService,
-    SetupState,
+    ReferenceDownloadService,
     SetupStage,
+    SetupState,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,9 @@ class SetupWorker(QThread):
         service = LocalProcessingService(self.work_dir, state_file, self.db_path)
 
         # Wikipedia dump URL (hardcoded for now)
-        xml_url = "https://dumps.wikimedia.org/hewiki/20260201/hewiki-20260201-pages-articles.xml.bz2"
+        xml_url = (
+            "https://dumps.wikimedia.org/hewiki/20260201/hewiki-20260201-pages-articles.xml.bz2"
+        )
 
         try:
             service.run_full_pipeline(
@@ -341,15 +343,12 @@ class ReferenceSetupWizard(QDialog):
         elif state.mode == "local_process":
             if state.total_docs > 0:
                 self.lbl_details.setText(
-                    f"{state.docs_processed:,} / {state.total_docs:,} documents | "
-                    f"{pct:.1f}%"
+                    f"{state.docs_processed:,} / {state.total_docs:,} documents | " f"{pct:.1f}%"
                 )
 
         # Log
         self.log_output.append(f"[{state.stage.value}] {pct:.1f}%")
-        self.log_output.verticalScrollBar().setValue(
-            self.log_output.verticalScrollBar().maximum()
-        )
+        self.log_output.verticalScrollBar().setValue(self.log_output.verticalScrollBar().maximum())
 
     def _on_finished(self, success: bool, message: str):
         """Handle setup completion."""

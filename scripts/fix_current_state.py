@@ -29,7 +29,8 @@ def main():
 
     # Sync all lemmas to tm_entry
     print("\n[Step 1] Syncing lemma -> tm_entry...")
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE tm_entry
         SET is_noise = (
             SELECT lemma.is_noise
@@ -37,13 +38,15 @@ def main():
             WHERE lemma.lemma_id = tm_entry.lemma_id
         )
         WHERE kind = 'lemma' AND lemma_id IS NOT NULL
-    """)
+    """
+    )
     lemma_synced = cursor.rowcount
     print(f"  Synced {lemma_synced} lemma TMEntry records")
 
     # Sync all clusters to tm_entry
     print("\n[Step 2] Syncing cluster -> tm_entry...")
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE tm_entry
         SET is_noise = (
             SELECT term_cluster.is_noise
@@ -51,7 +54,8 @@ def main():
             WHERE term_cluster.cluster_id = tm_entry.cluster_id
         )
         WHERE kind = 'term_cluster' AND cluster_id IS NOT NULL
-    """)
+    """
+    )
     cluster_synced = cursor.rowcount
     print(f"  Synced {cluster_synced} cluster TMEntry records")
 
@@ -63,16 +67,13 @@ def main():
 
     cursor.execute(
         "SELECT lemma_id, is_noise FROM lemma WHERE project_id=? AND lemma_text=?",
-        (project_id, lemma_text)
+        (project_id, lemma_text),
     )
     lemma = cursor.fetchone()
 
     if lemma:
         lemma_id, lemma_is_noise = lemma
-        cursor.execute(
-            "SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?",
-            (lemma_id,)
-        )
+        cursor.execute("SELECT tm_id, is_noise FROM tm_entry WHERE lemma_id=?", (lemma_id,))
         tm_entry = cursor.fetchone()
 
         if tm_entry:

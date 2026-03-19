@@ -35,9 +35,7 @@ from sqlalchemy import select, func
 logger = logging.getLogger(__name__)
 
 
-def process_document_no_run(
-    session, doc_id, engine, project_id
-) -> tuple[bool, int, int]:
+def process_document_no_run(session, doc_id, engine, project_id) -> tuple[bool, int, int]:
     """
     Process a single document WITHOUT creating a ProcessorRun.
 
@@ -52,7 +50,7 @@ def process_document_no_run(
 
     try:
         # Update status
-        doc.status = 'processing'
+        doc.status = "processing"
         session.flush()  # Don't commit yet
 
         # Get raw text
@@ -87,9 +85,11 @@ def process_document_no_run(
         lemma_sample_sentences: Dict[str, int] = {}
 
         # Get all sentences back with IDs
-        stmt = select(DocumentSentence).where(
-            DocumentSentence.doc_id == doc_id
-        ).order_by(DocumentSentence.sent_index)
+        stmt = (
+            select(DocumentSentence)
+            .where(DocumentSentence.doc_id == doc_id)
+            .order_by(DocumentSentence.sent_index)
+        )
         sentences = session.execute(stmt).scalars().all()
 
         total_tokens = 0
@@ -126,7 +126,7 @@ def process_document_no_run(
             lemma = session.execute(stmt).scalar_one_or_none()
 
             if not lemma:
-                pos = lemma_pos_map.get(lemma_text, 'X')
+                pos = lemma_pos_map.get(lemma_text, "X")
                 lemma = Lemma(
                     project_id=project_id,
                     lemma_text=lemma_text,
@@ -176,7 +176,7 @@ def process_document_no_run(
         session.flush()
 
         # Update document status
-        doc.status = 'processed'
+        doc.status = "processed"
         doc.processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         doc.sentence_count = len(sentences)
         doc.token_count = total_tokens
@@ -186,14 +186,16 @@ def process_document_no_run(
 
     except Exception as e:
         logger.exception(f"Failed to process document {doc_id}")
-        doc.status = 'failed'
+        doc.status = "failed"
         doc.error_message = str(e)
         session.flush()
         return False, 0, 0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process reference corpus with NLP (batch optimized)")
+    parser = argparse.ArgumentParser(
+        description="Process reference corpus with NLP (batch optimized)"
+    )
     parser.add_argument("--db-path", type=str, required=True)
     parser.add_argument("--project-name", type=str, required=True)
     parser.add_argument("--use-gpu", action="store_true")
@@ -224,21 +226,27 @@ def main():
                 select(func.count(SourceDocument.doc_id))
                 .join(SourceCorpus)
                 .where(SourceCorpus.project_id == project.project_id)
-                .where(SourceDocument.status == 'processed')
+                .where(SourceDocument.status == "processed")
             ).scalar()
 
             # Get only UNPROCESSED documents
-            docs = session.execute(
-                select(SourceDocument.doc_id)
-                .join(SourceCorpus)
-                .where(SourceCorpus.project_id == project.project_id)
-                .where(SourceDocument.status != 'processed')
-                .order_by(SourceDocument.doc_id)
-            ).scalars().all()
+            docs = (
+                session.execute(
+                    select(SourceDocument.doc_id)
+                    .join(SourceCorpus)
+                    .where(SourceCorpus.project_id == project.project_id)
+                    .where(SourceDocument.status != "processed")
+                    .order_by(SourceDocument.doc_id)
+                )
+                .scalars()
+                .all()
+            )
 
             total = len(docs)
             logger.info(f"Total documents: {total_all:,}")
-            logger.info(f"Already processed: {already_processed:,} ({already_processed/total_all*100:.1f}%)")
+            logger.info(
+                f"Already processed: {already_processed:,} ({already_processed/total_all*100:.1f}%)"
+            )
             logger.info(f"To process: {total:,} ({total/total_all*100:.1f}%)")
             logger.info(f"GPU: {args.use_gpu}")
             logger.info(f"Batch size: {args.batch_size}")
@@ -249,6 +257,7 @@ def main():
 
             # Initialize NLP engine
             from app.services.process_service import ProcessService
+
             process_service = ProcessService()
             engine = process_service.get_nlp_engine(use_gpu=args.use_gpu)
 
@@ -262,7 +271,7 @@ def main():
                 project_id=project.project_id,
                 engine=engine.get_name(),
                 engine_version=engine.get_version(),
-                status='running',
+                status="running",
             )
             session.add(run)
             session.commit()
@@ -288,7 +297,9 @@ def main():
                         total_lemmas += lemmas
 
                         if processed_count % args.batch_size == 0:
-                            overall_progress = (already_processed + processed_count) / total_all * 100
+                            overall_progress = (
+                                (already_processed + processed_count) / total_all * 100
+                            )
                             logger.info(
                                 f"Progress: {processed_count:,}/{total:,} this run "
                                 f"({processed_count/total*100:.1f}%) | "
@@ -300,7 +311,7 @@ def main():
                         error = RunError(
                             run_id=run.run_id,
                             doc_id=doc_id,
-                            stage='processing',
+                            stage="processing",
                             message=f"Processing failed (see document error_message)",
                         )
                         session.add(error)
@@ -313,7 +324,7 @@ def main():
                     error_count += 1
 
             # Update run status
-            run.status = 'ok' if error_count == 0 else 'completed_with_errors'
+            run.status = "ok" if error_count == 0 else "completed_with_errors"
             run.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             run.docs_processed = processed_count
             run.tokens_total = total_tokens
@@ -327,7 +338,9 @@ def main():
             logger.info(f"  Errors: {error_count:,} documents")
             logger.info(f"  Tokens: {total_tokens:,}")
             logger.info(f"  Unique lemmas: {total_lemmas:,}")
-            logger.info(f"  Overall: {already_processed + processed_count:,}/{total_all:,} documents processed")
+            logger.info(
+                f"  Overall: {already_processed + processed_count:,}/{total_all:,} documents processed"
+            )
             logger.info(f"=" * 80)
 
     finally:

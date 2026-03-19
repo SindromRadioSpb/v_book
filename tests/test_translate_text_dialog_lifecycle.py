@@ -70,7 +70,10 @@ def test_translate_text_dialog_ignores_stale_error(monkeypatch, qtbot):
     monkeypatch.setattr("app.ui.translate_text_dialog.TranslationService", _DummyTranslationService)
 
     warnings = []
-    monkeypatch.setattr("app.ui.translate_text_dialog.QMessageBox.warning", lambda *args, **kwargs: warnings.append((args, kwargs)))
+    monkeypatch.setattr(
+        "app.ui.translate_text_dialog.QMessageBox.warning",
+        lambda *args, **kwargs: warnings.append((args, kwargs)),
+    )
 
     dialog = TranslateTextDialog()
     qtbot.addWidget(dialog)

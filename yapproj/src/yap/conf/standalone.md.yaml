@@ -59,7 +59,7 @@ feature groups:
    - L1|n|a,L1|n
    - L1|n|t,L1|n
    - L1|t,L1|n
-     
+
  - group: Current Lattice Unigram
    transition: MD
    features:

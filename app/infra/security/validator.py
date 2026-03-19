@@ -4,26 +4,23 @@ Validators check if input meets security requirements, raising errors if not.
 All validation failures should be logged via audit module.
 """
 
-import os
 import re
 from pathlib import Path
-from typing import Optional
 
+from .errors import PathSecurityError, QueryComplexityError, ValidationError
 from .policy import (
     MAX_DOCUMENT_SIZE,
-    MAX_DICTIONARY_SIZE,
-    MAX_QUERY_LENGTH,
     MAX_FTS5_OPERATORS,
-    MAX_FTS5_WILDCARDS,
     MAX_FTS5_PARENTHESES,
+    MAX_FTS5_WILDCARDS,
+    MAX_QUERY_LENGTH,
     SYSTEM_DIRECTORIES,
 )
-from .errors import ValidationError, PathSecurityError, QueryComplexityError
 
 
 def validate_file_size(
     file_path: Path,
-    max_size: Optional[int] = None,
+    max_size: int | None = None,
     file_type: str = "document",
 ) -> None:
     """
@@ -188,8 +185,7 @@ def validate_query_complexity(query: str) -> None:
     # 3. Operator count
     query_upper = query.upper()
     operator_count = sum(
-        len(re.findall(r'\b' + op + r'\b', query_upper))
-        for op in ['AND', 'OR', 'NOT', 'NEAR']
+        len(re.findall(r"\b" + op + r"\b", query_upper)) for op in ["AND", "OR", "NOT", "NEAR"]
     )
     if operator_count > MAX_FTS5_OPERATORS:
         raise QueryComplexityError(
@@ -202,10 +198,10 @@ def validate_query_complexity(query: str) -> None:
     max_depth = 0
     current_depth = 0
     for char in query:
-        if char == '(':
+        if char == "(":
             current_depth += 1
             max_depth = max(max_depth, current_depth)
-        elif char == ')':
+        elif char == ")":
             current_depth -= 1
 
     if max_depth > MAX_FTS5_PARENTHESES:

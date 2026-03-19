@@ -1,5 +1,7 @@
 """Database service - central access point for all DB operations."""
+
 import logging
+from datetime import UTC
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +14,7 @@ class DBService:
     """Singleton service for database access."""
 
     _instance: Optional["DBService"] = None
-    _db_manager: Optional[DatabaseManager] = None
+    _db_manager: DatabaseManager | None = None
 
     # PERF-SCALE PATCH-A: reference DB registry.
     # Maps project_id (int) → ReadOnlyDatabaseManager for each attached reference DB.
@@ -67,8 +69,9 @@ class DBService:
         Returns:
             Number of runs recovered
         """
+        from datetime import datetime
+
         from app.infra.sa_models import ProcessorRun, RunError
-        from datetime import datetime, timezone
 
         with self.get_session() as session:
             # Find all running jobs (explicit ORDER BY for determinism)
@@ -83,20 +86,14 @@ class DBService:
                 logger.debug("No crash recovery needed")
                 return 0
 
-            logger.warning(
-                f"Found {len(running_runs)} unfinished runs - recovering..."
-            )
+            logger.warning(f"Found {len(running_runs)} unfinished runs - recovering...")
 
             for run in running_runs:
                 run.status = "failed"
                 run.stage = "failed"
                 if not getattr(run, "error_message", None):
-                    run.error_message = (
-                        "Process terminated unexpectedly - recovered on restart"
-                    )
-                run.finished_at = datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%S.%fZ"
-                )
+                    run.error_message = "Process terminated unexpectedly - recovered on restart"
+                run.finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
                 # Create error record
                 error = RunError(
@@ -146,9 +143,7 @@ class DBService:
 
         manager = ReadOnlyDatabaseManager(db_path)
         cls._ref_managers[project_id] = manager
-        logger.info(
-            "Attached reference DB for project %d → %s", project_id, db_path
-        )
+        logger.info("Attached reference DB for project %d → %s", project_id, db_path)
 
     @classmethod
     def get_ref_session(cls, project_id: int):

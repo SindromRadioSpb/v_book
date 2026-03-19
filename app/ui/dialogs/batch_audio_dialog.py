@@ -23,7 +23,13 @@ from app.ui.dialogs.mms_license_gate_dialog import ensure_mms_license_accepted
 class BatchAudioDialog(QDialog):
     """Confirm dialog for batch audio generation."""
 
-    def __init__(self, parent=None, selected_count: int = 0, scope_enabled: bool = False, filtered_count: int = 0):
+    def __init__(
+        self,
+        parent=None,
+        selected_count: int = 0,
+        scope_enabled: bool = False,
+        filtered_count: int = 0,
+    ):
         super().__init__(parent)
         self.selected_count = selected_count
         self.scope_enabled = scope_enabled
@@ -54,7 +60,9 @@ class BatchAudioDialog(QDialog):
             self.scope_group.addButton(self.all_pages_radio, 1)
             scope_layout.addWidget(self.all_pages_radio)
 
-            count_label = QLabel(f"   -> Will process ~{self.filtered_count} rows matching current filters")
+            count_label = QLabel(
+                f"   -> Will process ~{self.filtered_count} rows matching current filters"
+            )
             count_label.setStyleSheet("color: #666; font-size: 11px; padding-left: 20px;")
             scope_layout.addWidget(count_label)
             scope_group.setLayout(scope_layout)

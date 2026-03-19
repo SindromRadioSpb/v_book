@@ -9,6 +9,7 @@ Covers:
 - Concurrent register/unregister is thread-safe
 - reset_for_tests() clears state between tests
 """
+
 from __future__ import annotations
 
 import threading

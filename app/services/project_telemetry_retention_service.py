@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -142,7 +142,7 @@ class ProjectTelemetryRetentionService:
         return keep_latest_ok
 
     @staticmethod
-    def _as_int_or_none(value: Any) -> Optional[int]:
+    def _as_int_or_none(value: Any) -> int | None:
         if value is None:
             return None
         try:
@@ -155,7 +155,9 @@ class ProjectTelemetryRetentionService:
         value = session.execute(text(sql_text), params).scalar()
         return int(value or 0)
 
-    def _candidate_scalar(self, session: Session, sql_text: str, project_id: int, keep_latest_ok: int) -> int:
+    def _candidate_scalar(
+        self, session: Session, sql_text: str, project_id: int, keep_latest_ok: int
+    ) -> int:
         value = session.execute(
             text(self._candidate_cte_sql(sql_text)),
             {"pid": int(project_id), "keep_latest_ok": int(keep_latest_ok)},
@@ -168,12 +170,18 @@ class ProjectTelemetryRetentionService:
         sql_text: str,
         project_id: int,
         keep_latest_ok: int,
-    ) -> tuple[Optional[int], Optional[int]]:
-        row = session.execute(
-            text(self._candidate_cte_sql(sql_text)),
-            {"pid": int(project_id), "keep_latest_ok": int(keep_latest_ok)},
-        ).mappings().one()
-        return self._as_int_or_none(row.get("oldest_run_id")), self._as_int_or_none(row.get("newest_run_id"))
+    ) -> tuple[int | None, int | None]:
+        row = (
+            session.execute(
+                text(self._candidate_cte_sql(sql_text)),
+                {"pid": int(project_id), "keep_latest_ok": int(keep_latest_ok)},
+            )
+            .mappings()
+            .one()
+        )
+        return self._as_int_or_none(row.get("oldest_run_id")), self._as_int_or_none(
+            row.get("newest_run_id")
+        )
 
     @staticmethod
     def _candidate_cte_sql(body_sql: str) -> str:

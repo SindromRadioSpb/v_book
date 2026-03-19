@@ -39,14 +39,14 @@ def setup_logging(verbose: bool = False):
     """Configure logging."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        level=level, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
     return logging.getLogger(__name__)
 
 
-def backfill_lemmas(session: Session, batch_size: int, dry_run: bool, logger: logging.Logger) -> dict:
+def backfill_lemmas(
+    session: Session, batch_size: int, dry_run: bool, logger: logging.Logger
+) -> dict:
     """Backfill classification for lemmas.
 
     Args:
@@ -65,9 +65,9 @@ def backfill_lemmas(session: Session, batch_size: int, dry_run: bool, logger: lo
     logger.info(f"Found {total_count} lemmas to classify")
 
     if total_count == 0:
-        return {'processed': 0, 'noise': 0, 'classes': Counter()}
+        return {"processed": 0, "noise": 0, "classes": Counter()}
 
-    stats = {'processed': 0, 'noise': 0, 'classes': Counter()}
+    stats = {"processed": 0, "noise": 0, "classes": Counter()}
     batch_count = 0
 
     while True:
@@ -89,12 +89,12 @@ def backfill_lemmas(session: Session, batch_size: int, dry_run: bool, logger: lo
             lemma.norm_text = classification.norm_text
 
             # Track stats
-            stats['processed'] += 1
-            stats['classes'][classification.entity_class] += 1
+            stats["processed"] += 1
+            stats["classes"][classification.entity_class] += 1
             if classification.is_noise:
-                stats['noise'] += 1
+                stats["noise"] += 1
 
-            if stats['processed'] % 100 == 0:
+            if stats["processed"] % 100 == 0:
                 logger.debug(
                     f"  Classified {stats['processed']}/{total_count} lemmas "
                     f"({stats['noise']} noise)"
@@ -115,7 +115,9 @@ def backfill_lemmas(session: Session, batch_size: int, dry_run: bool, logger: lo
     return stats
 
 
-def backfill_clusters(session: Session, batch_size: int, dry_run: bool, logger: logging.Logger) -> dict:
+def backfill_clusters(
+    session: Session, batch_size: int, dry_run: bool, logger: logging.Logger
+) -> dict:
     """Backfill classification for term clusters.
 
     Args:
@@ -134,9 +136,9 @@ def backfill_clusters(session: Session, batch_size: int, dry_run: bool, logger: 
     logger.info(f"Found {total_count} term clusters to classify")
 
     if total_count == 0:
-        return {'processed': 0, 'noise': 0, 'classes': Counter()}
+        return {"processed": 0, "noise": 0, "classes": Counter()}
 
-    stats = {'processed': 0, 'noise': 0, 'classes': Counter()}
+    stats = {"processed": 0, "noise": 0, "classes": Counter()}
     batch_count = 0
 
     while True:
@@ -158,12 +160,12 @@ def backfill_clusters(session: Session, batch_size: int, dry_run: bool, logger: 
             cluster.norm_text = classification.norm_text
 
             # Track stats
-            stats['processed'] += 1
-            stats['classes'][classification.entity_class] += 1
+            stats["processed"] += 1
+            stats["classes"][classification.entity_class] += 1
             if classification.is_noise:
-                stats['noise'] += 1
+                stats["noise"] += 1
 
-            if stats['processed'] % 100 == 0:
+            if stats["processed"] % 100 == 0:
                 logger.debug(
                     f"  Classified {stats['processed']}/{total_count} clusters "
                     f"({stats['noise']} noise)"
@@ -179,37 +181,26 @@ def backfill_clusters(session: Session, batch_size: int, dry_run: bool, logger: 
             )
         else:
             session.rollback()
-            logger.info(f"  [DRY RUN] Would commit batch {batch_count} with {len(clusters)} clusters")
+            logger.info(
+                f"  [DRY RUN] Would commit batch {batch_count} with {len(clusters)} clusters"
+            )
 
     return stats
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Backfill entity classification for existing lemmas and term clusters'
+        description="Backfill entity classification for existing lemmas and term clusters"
     )
+    parser.add_argument("--db-path", type=str, required=True, help="Path to SQLite database file")
     parser.add_argument(
-        '--db-path',
-        type=str,
-        required=True,
-        help='Path to SQLite database file'
-    )
-    parser.add_argument(
-        '--batch-size',
+        "--batch-size",
         type=int,
         default=500,
-        help='Number of rows to process per commit (default: 500)'
+        help="Number of rows to process per commit (default: 500)",
     )
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Preview changes without committing'
-    )
-    parser.add_argument(
-        '-v', '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes without committing")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
     args = parser.parse_args()
 
@@ -262,7 +253,7 @@ def main():
 
         # Summary
         elapsed = datetime.now() - start_time
-        total_processed = lemma_stats['processed'] + cluster_stats['processed']
+        total_processed = lemma_stats["processed"] + cluster_stats["processed"]
 
         logger.info("")
         logger.info("=" * 60)
@@ -293,5 +284,5 @@ def main():
         engine.dispose()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

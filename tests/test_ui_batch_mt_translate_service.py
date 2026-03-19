@@ -237,9 +237,7 @@ def test_batch_translate_overwrite_existing(temp_db):
 def test_batch_translate_overwrite_forces_tm_global_update(temp_db):
     """OVERWRITE should replace existing higher-ranked tm_global translation."""
     service = BatchMTTranslateService()
-    service.translation_service = MockTranslationService(
-        translation_map={"alpha": "MT_NEW"}
-    )
+    service.translation_service = MockTranslationService(translation_map={"alpha": "MT_NEW"})
 
     db_service = DBService.get_instance()
     with db_service.get_session() as session:
@@ -283,7 +281,9 @@ def test_batch_translate_overwrite_forces_tm_global_update(temp_db):
     assert result.failed == 0
 
     with db_service.get_session() as session:
-        entry = session.query(TMEntry).filter_by(kind="lemma", src_norm="alpha", project_id=None).one()
+        entry = (
+            session.query(TMEntry).filter_by(kind="lemma", src_norm="alpha", project_id=None).one()
+        )
         global_row = session.query(TMGlobal).filter_by(kind="lemma", src_norm="alpha").one()
         assert entry.translation == "MT_NEW"
         assert global_row.translation == "MT_NEW"
@@ -292,9 +292,7 @@ def test_batch_translate_overwrite_forces_tm_global_update(temp_db):
 def test_batch_translate_per_row_error_continue(temp_db):
     """Test per-row error handling - continues on failure (default)."""
     service = BatchMTTranslateService()
-    service.translation_service = MockTranslationService(
-        error_ids={"world"}  # world will fail
-    )
+    service.translation_service = MockTranslationService(error_ids={"world"})  # world will fail
 
     items = [
         BatchTranslateItem(

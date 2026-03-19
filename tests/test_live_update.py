@@ -1,4 +1,5 @@
 """Test live update (M4)."""
+
 import pytest
 
 

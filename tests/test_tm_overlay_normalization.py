@@ -20,7 +20,9 @@ class _DummyUserDictService:
         self.pron_map = {}
 
     @staticmethod
-    def _canonical_src_norm(src_lang: str, src_text: str, kind: str, fallback_norm: str = "") -> str:
+    def _canonical_src_norm(
+        src_lang: str, src_text: str, kind: str, fallback_norm: str = ""
+    ) -> str:
         normalized = normalize_for_tm(src_lang, src_text, kind).norm
         normalized = (normalized or "").strip()
         return normalized or (fallback_norm or "").strip()
@@ -122,7 +124,9 @@ def test_tm_overlay_uses_normalized_hash_and_cluster_raw_norm(monkeypatch):
             )
 
             dummy = _DummyUserDictService()
-            monkeypatch.setattr("app.services.translation_admin_service.UserDictionaryService", lambda: dummy)
+            monkeypatch.setattr(
+                "app.services.translation_admin_service.UserDictionaryService", lambda: dummy
+            )
 
             service = TranslationAdminService()
             service._apply_study_overlays(session, [entry])
@@ -237,7 +241,9 @@ def test_tm_overlay_applies_row_specific_pronunciation_for_duplicate_canonical_h
                 ("he", raw_a): {"pronunciation_text": "pron_a"},
                 ("he", raw_b): {"pronunciation_text": "pron_b"},
             }
-            monkeypatch.setattr("app.services.translation_admin_service.UserDictionaryService", lambda: dummy)
+            monkeypatch.setattr(
+                "app.services.translation_admin_service.UserDictionaryService", lambda: dummy
+            )
 
             TranslationAdminService()._apply_study_overlays(session, [entry_a, entry_b])
 

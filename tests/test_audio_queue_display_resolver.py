@@ -1,4 +1,5 @@
 """Tests for AudioPlayerPanel._refresh_display_contexts() (PATCH-04i)."""
+
 from __future__ import annotations
 
 import sys
@@ -11,6 +12,7 @@ import pytest
 @pytest.fixture(scope="module")
 def qapp():
     from PyQt6.QtCore import QCoreApplication
+
     return QCoreApplication.instance() or QCoreApplication(sys.argv)
 
 
@@ -29,15 +31,18 @@ def _make_panel(qapp):
         panel = AudioPlayerPanel.__new__(AudioPlayerPanel)
         # Minimal attribute initialisation (avoid full __init__ which needs Qt event loop running)
         from app.services.audio_player_service import AudioPlayerService as _APS
+
         panel.player = _APS(settings=settings_mock)
 
     return panel
 
 
-def _make_track(kind: str, source_id: int, hebrew: str = "", source_label: str = "",
-                project_id: int = 1) -> object:
+def _make_track(
+    kind: str, source_id: int, hebrew: str = "", source_label: str = "", project_id: int = 1
+) -> object:
     """Create a minimal AudioTrack-like namespace for testing."""
     from app.services.audio_player_service import AudioTrack
+
     ctx = {
         "kind": kind,
         "source_id": source_id,
@@ -106,8 +111,10 @@ def test_refresh_term_display_populates_niqqud_and_translation(qapp):
     mock_pron_svc = MagicMock()
     mock_pron_svc.return_value.bulk_lookup.return_value = {"shalom_olam": mock_niqqud_dto}
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
-         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc),
+    ):
         count = panel._refresh_term_display(mock_session, [t])
 
     assert count >= 1
@@ -135,8 +142,10 @@ def test_refresh_term_display_clears_stale_snapshots_when_source_missing(qapp):
     mock_pron_svc = MagicMock()
     mock_pron_svc.return_value.bulk_lookup.return_value = {}
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
-         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc),
+    ):
         count = panel._refresh_term_display(mock_session, [t])
 
     assert count >= 1
@@ -181,8 +190,10 @@ def test_refresh_lemma_display_updates_source_label(qapp):
 
     mock_session.execute.return_value.all.return_value = []
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
-         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc),
+    ):
         count = panel._refresh_lemma_display(mock_session, [t])
 
     assert count >= 1
@@ -211,8 +222,10 @@ def test_refresh_lemma_display_populates_niqqud(qapp):
     mock_pron_svc = MagicMock()
     mock_pron_svc.return_value.bulk_lookup.return_value = {"shalom": mock_niqqud_dto}
 
-    with patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm), \
-         patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc):
+    with (
+        patch("app.domain.normalization.normalizer.normalize_for_tm", side_effect=fake_ntm),
+        patch("app.services.pronunciation_service.PronunciationService", mock_pron_svc),
+    ):
         panel._refresh_lemma_display(mock_session, [t])
 
     assert t.context["snapshot_niqqud"] == "שָׁלוֹם"
@@ -231,7 +244,9 @@ def test_refresh_display_contexts_nonfatal_on_db_error(qapp):
     t = _make_track("sentence", 1, "שלום", "sentence:1")
     panel.player._tracks = [t]
 
-    with patch("app.services.db_service.DBService.get_instance", side_effect=RuntimeError("DB down")):
+    with patch(
+        "app.services.db_service.DBService.get_instance", side_effect=RuntimeError("DB down")
+    ):
         panel._refresh_display_contexts()  # must not raise
 
     # Track should be unchanged
@@ -272,10 +287,24 @@ def test_refresh_display_contexts_normalizes_kind_aliases(qapp):
         def get_session(self):
             return _DummyCtx()
 
-    with patch("app.services.db_service.DBService.get_instance", return_value=_DummyDB()), \
-         patch.object(panel, "_refresh_sentence_display", side_effect=lambda _s, tracks: called.__setitem__("sentence", len(tracks)) or 0), \
-         patch.object(panel, "_refresh_lemma_display", side_effect=lambda _s, tracks: called.__setitem__("lemma", len(tracks)) or 0), \
-         patch.object(panel, "_refresh_term_display", side_effect=lambda _s, tracks: called.__setitem__("term", len(tracks)) or 0):
+    with (
+        patch("app.services.db_service.DBService.get_instance", return_value=_DummyDB()),
+        patch.object(
+            panel,
+            "_refresh_sentence_display",
+            side_effect=lambda _s, tracks: called.__setitem__("sentence", len(tracks)) or 0,
+        ),
+        patch.object(
+            panel,
+            "_refresh_lemma_display",
+            side_effect=lambda _s, tracks: called.__setitem__("lemma", len(tracks)) or 0,
+        ),
+        patch.object(
+            panel,
+            "_refresh_term_display",
+            side_effect=lambda _s, tracks: called.__setitem__("term", len(tracks)) or 0,
+        ),
+    ):
         panel._refresh_display_contexts()
 
     assert called["sentence"] == 1
