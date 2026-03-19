@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import sys
 import builtins
 import importlib
@@ -62,7 +63,9 @@ def test_run_phonikud_subprocess_bridge_uses_identity_fallback_on_backend_error(
             raise RuntimeError("DLL load failed while importing onnxruntime_pybind11_state")
 
     monkeypatch.setitem(sys.modules, "phonikud_onnx", SimpleNamespace(Phonikud=_BrokenPhonikud))
-    monkeypatch.setitem(sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None))
+    monkeypatch.setitem(
+        sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None)
+    )
     monkeypatch.setattr(
         main.sys,
         "stdin",
@@ -86,7 +89,11 @@ def test_run_phonikud_subprocess_bridge_reads_utf8_buffer_and_emits_ascii_safe_j
             pass
 
         def add_diacritics(self, text: str) -> str:
-            return "\u05e9\u05b8\u05c1\u05dc\u05d5\u05b9\u05dd" if text == "\u05e9\u05dc\u05d5\u05dd" else text
+            return (
+                "\u05e9\u05b8\u05c1\u05dc\u05d5\u05b9\u05dd"
+                if text == "\u05e9\u05dc\u05d5\u05dd"
+                else text
+            )
 
     class _FakeStdin:
         def __init__(self, payload_bytes: bytes):
@@ -96,7 +103,9 @@ def test_run_phonikud_subprocess_bridge_reads_utf8_buffer_and_emits_ascii_safe_j
             return ""
 
     monkeypatch.setitem(sys.modules, "phonikud_onnx", SimpleNamespace(Phonikud=_FakePhonikud))
-    monkeypatch.setitem(sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None))
+    monkeypatch.setitem(
+        sys.modules, "phonikud", SimpleNamespace(prepare_runtime_dll_paths=lambda: None)
+    )
     payload = json.dumps(
         {"model_path": "C:/models/phonikud.onnx", "texts": ["\u05e9\u05dc\u05d5\u05dd"]},
         ensure_ascii=False,
@@ -182,6 +191,9 @@ def test_candidate_db_paths_cli_override(monkeypatch, tmp_path: Path):
 
 
 def test_main_self_check_path_skips_heavy_ui_imports(monkeypatch):
+    # Prevent main() from calling logging.disable(CRITICAL) globally — it would
+    # break caplog in all subsequent tests in the session.
+    monkeypatch.setattr(logging, "disable", lambda level: None)
     original_import = builtins.__import__
 
     def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -193,7 +205,9 @@ def test_main_self_check_path_skips_heavy_ui_imports(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", _guarded_import)
     monkeypatch.setattr(main.sys, "argv", ["prog", "--self-check", "import"])
-    monkeypatch.setattr(main, "run_self_check", lambda mode, db_path_arg=None: (0, {"mode": mode, "ok": True}))
+    monkeypatch.setattr(
+        main, "run_self_check", lambda mode, db_path_arg=None: (0, {"mode": mode, "ok": True})
+    )
     monkeypatch.setattr(
         main,
         "_emit_self_check",
@@ -229,7 +243,9 @@ def test_import_self_check_uses_frozen_onnx_helper(monkeypatch):
         if name == "phonikud":
             return SimpleNamespace(__name__="phonikud", __version__="test")
         if name == "onnxruntime":
-            raise AssertionError("Frozen import self-check must use helper instead of in-process onnxruntime import")
+            raise AssertionError(
+                "Frozen import self-check must use helper instead of in-process onnxruntime import"
+            )
         return real_import(name)
 
     monkeypatch.setattr(main.importlib, "import_module", _fake_import)

@@ -66,6 +66,8 @@ def test_resource_manifest_parsing_and_status(monkeypatch, tmp_path):
 
 
 def test_resource_status_uses_bundled_fallback_when_custom_data_root_missing(monkeypatch, tmp_path):
+    # Clear env var that PhonikudAdapter._configure_env() may have set in a prior test.
+    monkeypatch.delenv("PHONIKUD_MODEL_PATH", raising=False)
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
     settings._settings.clear()

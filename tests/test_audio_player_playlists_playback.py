@@ -99,6 +99,9 @@ def test_playlist_play_selected_launches_audio(panel, monkeypatch, tmp_path):
     audio_file = tmp_path / "ready.wav"
     audio_file.write_bytes(b"RIFF")
 
+    # A playlist must be selected — action state requires has_playlist=True.
+    panel._selected_playlist_id = 1
+
     panel._playlist_entries_model.load_rows(
         [
             {
@@ -120,7 +123,12 @@ def test_playlist_play_selected_launches_audio(panel, monkeypatch, tmp_path):
     monkeypatch.setattr(
         panel,
         "_resolve_playlist_row_paths",
-        lambda rows: ([audio_file], ["שלום"], [{"kind": "lemma", "source_id": 42, "project_id": 7}], rows),
+        lambda rows: (
+            [audio_file],
+            ["שלום"],
+            [{"kind": "lemma", "source_id": 42, "project_id": 7}],
+            rows,
+        ),
     )
 
     def _capture(paths, **kwargs):
@@ -128,7 +136,9 @@ def test_playlist_play_selected_launches_audio(panel, monkeypatch, tmp_path):
         calls["kwargs"] = kwargs
         return len(paths)
 
-    monkeypatch.setattr("app.services.audio_playback_service.AudioPlaybackService.launch_audio_files", _capture)
+    monkeypatch.setattr(
+        "app.services.audio_playback_service.AudioPlaybackService.launch_audio_files", _capture
+    )
     panel._on_play_playlist_selected_clicked()
 
     assert calls["paths"] == [audio_file]
@@ -137,6 +147,9 @@ def test_playlist_play_selected_launches_audio(panel, monkeypatch, tmp_path):
 
 
 def test_playlist_play_selected_missing_shows_info(panel, monkeypatch):
+    # A playlist must be selected — action state requires has_playlist=True.
+    panel._selected_playlist_id = 1
+
     panel._playlist_entries_model.load_rows(
         [
             {
@@ -151,15 +164,15 @@ def test_playlist_play_selected_missing_shows_info(panel, monkeypatch):
         ]
     )
     panel.playlist_entries_table.selectRow(0)
-    monkeypatch.setattr(panel, "_resolve_playlist_row_paths", lambda rows: ([], [], [], rows))
 
+    # "missing" status → any_ready=False → action state disabled → _show_status_message
+    # is called instead of launching audio. No QMessageBox.information in this path.
     shown = {"count": 0}
 
-    def _info(*_args, **_kwargs):
+    def _status_msg(message, timeout_ms=4500):
         shown["count"] += 1
-        return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr("app.ui.widgets.audio_player_panel.QMessageBox.information", _info)
+    monkeypatch.setattr(panel, "_show_status_message", _status_msg)
     monkeypatch.setattr(
         "app.services.audio_playback_service.AudioPlaybackService.launch_audio_files",
         lambda *_a, **_k: pytest.fail("launch_audio_files must not be called for missing paths"),
