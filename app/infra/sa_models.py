@@ -748,6 +748,9 @@ class TermExtractRun(Base):
     chunks_completed = Column(Integer, nullable=False, default=0)
     last_doc_id = Column(Integer)
     error_message = Column(Text)
+    # params_hash: canonical SHA-256[:16] of extraction params (see migration 043).
+    # NULL on old rows; populated for all new runs.
+    params_hash = Column(String)
     started_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now, onupdate=utc_now)
     finished_at = Column(String)
@@ -842,6 +845,9 @@ class TermCluster(Base):
 
     tfidf = Column(Float)
     weirdness = Column(Float)
+    # best_keyness: LLR-based keyness vs reference corpus, stored at extraction time.
+    # NULL = not computed (no reference corpus); 0.0 = computed and equals zero.
+    best_keyness = Column(Float)
 
     source_kinds = Column(String)
     created_at = Column(String, nullable=False, default=utc_now)

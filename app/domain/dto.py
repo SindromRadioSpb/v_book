@@ -297,6 +297,7 @@ class TermExtractionRunState:
     chunks_total: int
     chunks_completed: int
     last_doc_id: int | None = None
+    params_hash: str | None = None
     error_message: str | None = None
 
 
@@ -317,6 +318,9 @@ class ClusterStats:
     best_tscore: float | None
     # M5.4: Termhood metrics vs reference corpus
     weirdness: float | None = None
+    # best_keyness: stored at extraction time (NULL = not computed; 0.0 = zero).
+    # Prefer over keyness_llr (query-time) when available.
+    best_keyness: float | None = None
     keyness_llr: float | None = None
     termhood_score: float | None = None
     # M7: Translation
