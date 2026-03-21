@@ -2271,7 +2271,7 @@ class TermExtractionService:
             project_id: Project ID
             top_n: Limit results
             search: Search term (LIKE)
-            preset: Ranking preset ('freq', 'strong', 'balanced', 'termhood')
+            preset: Ranking preset ('freq', 'strong', 'balanced', 'termhood', 'keyness', 'weirdness')
             min_freq: Minimum frequency filter
             source_filter: Source kind filter ('ngram', 'np', or None for all)
             hide_noise: Hide noisy clusters (default True, Task 11)
@@ -2361,6 +2361,19 @@ class TermExtractionService:
                 TermCluster.best_llr.desc(),
                 TermCluster.best_dice.desc(),
                 TermCluster.doc_freq.desc(),
+                TermCluster.freq_abs.desc(),
+            )
+        elif preset == "keyness":
+            # PATCH-09: Pure SQL sort on stored best_keyness column (fast, no Python compute).
+            # NULLS LAST: clusters without reference metrics sink to the bottom.
+            stmt = stmt.order_by(
+                TermCluster.best_keyness.desc().nulls_last(),
+                TermCluster.freq_abs.desc(),
+            )
+        elif preset == "weirdness":
+            # PATCH-09: Pure SQL sort on stored weirdness column (fast, no Python compute).
+            stmt = stmt.order_by(
+                TermCluster.weirdness.desc().nulls_last(),
                 TermCluster.freq_abs.desc(),
             )
 

@@ -228,7 +228,7 @@ class TermsView(QWidget):
 
         filter_layout.addWidget(QLabel("Preset:"))
         self.preset_combo = QComboBox()
-        self.preset_combo.addItems(["freq", "strong", "balanced", "termhood"])
+        self.preset_combo.addItems(["freq", "strong", "balanced", "termhood", "keyness", "weirdness"])
         self.preset_combo.currentTextChanged.connect(self.on_filter_changed)
         filter_layout.addWidget(self.preset_combo)
 
