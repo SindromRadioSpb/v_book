@@ -1,5 +1,6 @@
 """Term Extraction Service (M5 Base + M5.1 Clustering)."""
 
+import hashlib
 import json
 import logging
 import time
@@ -482,17 +483,20 @@ class TermExtractionService:
                     np_max_len=np_max_len,
                     overwrite=overwrite,
                 )
-                if run is not None and run.status not in ("staged", "finalizing"):
-                    if int(run.docs_total or 0) != int(total_docs):
-                        logger.info(
-                            "Ignoring resumable term extraction run %s for project %s "
-                            "because processed-doc count changed (%s -> %s)",
-                            run.run_id,
-                            project_id,
-                            run.docs_total,
-                            total_docs,
-                        )
-                        run = None
+                if (
+                    run is not None
+                    and run.status not in ("staged", "finalizing")
+                    and int(run.docs_total or 0) != int(total_docs)
+                ):
+                    logger.info(
+                        "Ignoring resumable term extraction run %s for project %s "
+                        "because processed-doc count changed (%s -> %s)",
+                        run.run_id,
+                        project_id,
+                        run.docs_total,
+                        total_docs,
+                    )
+                    run = None
 
             if run is None:
                 run = self._create_term_extract_run(
@@ -623,10 +627,10 @@ class TermExtractionService:
                             ),
                         )
 
-                    def _on_resumed() -> None:
+                    def _on_resumed() -> None:  # noqa: B023
                         if run is None:
                             return
-                        run.stage = resume_stage
+                        run.stage = resume_stage  # noqa: B023
                         run.updated_at = self._utc_now()
                         session.commit()
                         _emit(
@@ -972,6 +976,41 @@ class TermExtractionService:
             return 0
         return (int(docs_total) + int(batch_size) - 1) // int(batch_size)
 
+    # algo_version: bump this when extraction logic changes in a way that makes
+    # old params_hash values incompatible with new results.
+    _TERM_EXTRACT_ALGO_VERSION = 1
+
+    def _build_term_extract_params_hash(
+        self,
+        *,
+        enable_ngrams: bool,
+        include_np: bool,
+        min_freq: int,
+        ngram_ns: tuple[int, ...],
+        np_max_len: int,
+    ) -> str:
+        """Build canonical SHA-256[:16] hash of extraction parameters.
+
+        Contract:
+        - algo_version is included so logic changes can invalidate old hashes.
+        - overwrite is NOT included (execution mode, not extraction result params).
+        - ngram_ns is always sorted to ensure determinism.
+        - Serialized as compact JSON with sorted keys.
+        """
+        payload = json.dumps(
+            {
+                "algo_version": self._TERM_EXTRACT_ALGO_VERSION,
+                "enable_ngrams": bool(enable_ngrams),
+                "include_np": bool(include_np),
+                "min_freq": int(min_freq),
+                "ngram_ns": sorted(int(n) for n in ngram_ns),
+                "np_max_len": int(np_max_len),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
     def _find_resumable_term_extract_run(
         self,
         session: Session,
@@ -984,6 +1023,13 @@ class TermExtractionService:
         np_max_len: int,
         overwrite: bool,
     ) -> TermExtractRun | None:
+        computed_hash = self._build_term_extract_params_hash(
+            enable_ngrams=enable_ngrams,
+            include_np=include_np,
+            min_freq=min_freq,
+            ngram_ns=ngram_ns,
+            np_max_len=np_max_len,
+        )
         stmt = (
             select(TermExtractRun)
             .where(
@@ -995,6 +1041,12 @@ class TermExtractionService:
                     TermExtractRun.min_freq == int(min_freq),
                     TermExtractRun.ngram_ns_json == self._serialize_ngram_ns(ngram_ns),
                     TermExtractRun.np_max_len == int(np_max_len),
+                    # params_hash gating: old rows (NULL) pass through for backward compat;
+                    # new rows must match exactly (catches algo_version changes).
+                    or_(
+                        TermExtractRun.params_hash == computed_hash,
+                        TermExtractRun.params_hash.is_(None),
+                    ),
                     TermExtractRun.status.in_(
                         ("running", "staged", "finalizing", "failed", "cancelled")
                     ),
@@ -1028,6 +1080,13 @@ class TermExtractionService:
             min_freq=int(min_freq),
             ngram_ns_json=self._serialize_ngram_ns(ngram_ns),
             np_max_len=int(np_max_len),
+            params_hash=self._build_term_extract_params_hash(
+                enable_ngrams=enable_ngrams,
+                include_np=include_np,
+                min_freq=min_freq,
+                ngram_ns=ngram_ns,
+                np_max_len=np_max_len,
+            ),
             docs_total=int(docs_total),
             docs_processed=0,
             chunks_total=self._estimate_term_extract_chunks(docs_total, batch_size),
@@ -1865,14 +1924,15 @@ class TermExtractionService:
     ) -> int:
         """Store staged NP accumulators into final term tables."""
         nps_stored = 0
-        batch_no = 0
-        for rows in self._iter_term_extract_accumulator_batches(
-            session,
-            run_id=run_id,
-            source_kind="np",
-            min_freq=min_freq,
+        for batch_no, rows in enumerate(
+            self._iter_term_extract_accumulator_batches(
+                session,
+                run_id=run_id,
+                source_kind="np",
+                min_freq=min_freq,
+            ),
+            start=1,
         ):
-            batch_no += 1
             for row in rows:
                 ngram_result = session.execute(
                     Ngram.__table__.insert().values(
@@ -2539,7 +2599,7 @@ class TermExtractionService:
         results = session.execute(stmt).all()
 
         members = []
-        for ngram, stat, member in results:
+        for ngram, stat, _member in results:
             members.append(
                 {
                     "surface_text": ngram.surface_text,
@@ -2784,8 +2844,6 @@ class TermExtractionService:
         Returns:
             List of ClusterStats with termhood fields populated
         """
-        from sqlalchemy import alias
-
         # Get total cluster tokens for both projects
         N_d = self._get_total_cluster_tokens(session, project_id)
         N_r = self._get_total_cluster_tokens(session, reference_project_id)
@@ -2797,9 +2855,6 @@ class TermExtractionService:
         if N_r == 0:
             logger.warning(f"No clusters found in reference project {reference_project_id}")
             N_r = 1  # Avoid division by zero, treat as very small reference
-
-        # Alias for reference clusters
-        RefCluster = alias(TermCluster.__table__, name="ref_cluster")
 
         # Query domain clusters
         stmt = select(TermCluster).where(TermCluster.project_id == project_id)

@@ -1,5 +1,6 @@
 """Terms view - MWE extraction and clustering (M5+)."""
 
+import json
 import logging
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer
@@ -150,8 +151,28 @@ class TermsView(QWidget):
         extract_controls_layout = QHBoxLayout()
 
         self.include_np_checkbox = QCheckBox("Include NP chunks")
-        self.include_np_checkbox.setChecked(True)
+        saved_include_np = self.settings.get_bool("terms_view/include_np", True)
+        self.include_np_checkbox.setChecked(saved_include_np)
+        self.include_np_checkbox.stateChanged.connect(self.on_include_np_changed)
         extract_controls_layout.addWidget(self.include_np_checkbox)
+
+        # N-gram sizes: configurable bigrams/trigrams (persisted via QSettings)
+        extract_controls_layout.addWidget(QLabel("N-grams:"))
+        self.ngram_bigrams_checkbox = QCheckBox("Bigrams")
+        self.ngram_trigrams_checkbox = QCheckBox("Trigrams")
+        saved_ngram_ns_json = self.settings.get_string(
+            "terms_view/ngram_ns_json", "[2,3]"
+        )
+        try:
+            _saved_ns = set(json.loads(saved_ngram_ns_json))
+        except (ValueError, TypeError):
+            _saved_ns = {2, 3}
+        self.ngram_bigrams_checkbox.setChecked(2 in _saved_ns)
+        self.ngram_trigrams_checkbox.setChecked(3 in _saved_ns)
+        self.ngram_bigrams_checkbox.stateChanged.connect(self.on_ngram_ns_changed)
+        self.ngram_trigrams_checkbox.stateChanged.connect(self.on_ngram_ns_changed)
+        extract_controls_layout.addWidget(self.ngram_bigrams_checkbox)
+        extract_controls_layout.addWidget(self.ngram_trigrams_checkbox)
 
         extract_controls_layout.addWidget(QLabel("Max NP length:"))
         self.np_max_len_spin = QSpinBox()
@@ -431,6 +452,19 @@ class TermsView(QWidget):
     def on_min_freq_changed(self):
         """Handle Min freq change - save setting (no reload needed, used only during extraction)."""
         self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
+
+    def on_include_np_changed(self):
+        """Handle Include NP chunks toggle - persist via QSettings."""
+        self.settings.set_value("terms_view/include_np", self.include_np_checkbox.isChecked())
+
+    def on_ngram_ns_changed(self):
+        """Handle bigram/trigram checkbox toggle - persist selection via QSettings."""
+        ns = sorted(
+            n
+            for n, cb in ((2, self.ngram_bigrams_checkbox), (3, self.ngram_trigrams_checkbox))
+            if cb.isChecked()
+        )
+        self.settings.set_value("terms_view/ngram_ns_json", json.dumps(ns))
 
     def build_filters(self) -> dict:
         """Build filters dict for search."""
@@ -958,6 +992,16 @@ class TermsView(QWidget):
         include_np = self.include_np_checkbox.isChecked()
         np_max_len = self.np_max_len_spin.value()
         min_freq = self.min_freq_spin.value()
+        ngram_ns_list = [
+            n
+            for n, cb in (
+                (2, self.ngram_bigrams_checkbox),
+                (3, self.ngram_trigrams_checkbox),
+            )
+            if cb.isChecked()
+        ]
+        # Fall back to (2, 3) if user unchecked both (prevent empty extraction)
+        ngram_ns: tuple[int, ...] = tuple(ngram_ns_list) if ngram_ns_list else (2, 3)
 
         # Disable UI during extraction (prevent QThread lifecycle issues)
         self.extract_btn.setEnabled(False)
@@ -987,7 +1031,7 @@ class TermsView(QWidget):
             enable_ngrams=True,
             include_np=include_np,
             min_freq=min_freq,
-            ngram_ns=(2, 3),
+            ngram_ns=ngram_ns,
             np_max_len=np_max_len,
             overwrite=True,
         )
