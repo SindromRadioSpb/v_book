@@ -28,7 +28,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[OK] PyInstaller $pyinstallerVersion" -ForegroundColor Green
 
 # Check Inno Setup
-$isccPath = "C:\Users\Win10_Game_OS\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
+$isccPath = "C:\Users\lletp\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $isccPath)) {
     Write-Host "[FAIL] Inno Setup not found at: $isccPath" -ForegroundColor Red
     Write-Host "Install from: https://jrsoftware.org/isdl.php" -ForegroundColor Yellow
@@ -210,7 +210,7 @@ if ($LASTEXITCODE -ne 0) {
         Write-Host "Error 110 = Antivirus/Defender is blocking resource update" -ForegroundColor Yellow
         Write-Host "Solutions:" -ForegroundColor Yellow
         Write-Host "  1. Add exclusions to Windows Defender for:" -ForegroundColor Yellow
-        Write-Host "     - J:\Project_Vibe\V_book\installer\output" -ForegroundColor Yellow
+        Write-Host "     - E:\projects\Project_Vibe\V_book\installer\output" -ForegroundColor Yellow
         Write-Host "     - $tempOutput" -ForegroundColor Yellow
         Write-Host "  2. Temporarily disable Controlled Folder Access" -ForegroundColor Yellow
         Write-Host "  3. Run PowerShell as Administrator" -ForegroundColor Yellow
