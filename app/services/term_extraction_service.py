@@ -879,13 +879,13 @@ class TermExtractionService:
                     chunks_hint=int(run.chunks_total or 0),
                     last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
                 )
-                self._store_best_keyness_for_project(
+                self._store_termhood_metrics_for_project(
                     session,
                     project_id,
                     reference_project_id,
                     progress_callback=lambda msg: _emit(
                         msg,
-                        stage="Computing keyness",
+                        stage="Computing keyness/weirdness",
                         phase="finalize",
                         docs_done=total_docs,
                         docs_hint=total_docs,
@@ -2382,6 +2382,7 @@ class TermExtractionService:
                     best_llr=c.best_llr,
                     best_dice=c.best_dice,
                     best_tscore=c.best_tscore,
+                    weirdness=c.weirdness,
                     best_keyness=c.best_keyness,
                     entity_class=c.entity_class,
                     is_noise=c.is_noise,
@@ -2849,7 +2850,7 @@ class TermExtractionService:
 
         return score
 
-    def _store_best_keyness_for_project(
+    def _store_termhood_metrics_for_project(
         self,
         session: Session,
         project_id: int,
@@ -2858,10 +2859,11 @@ class TermExtractionService:
         progress_callback: Callable[[str], None] | None = None,
         chunk_size: int = 500,
     ) -> int:
-        """Compute and store best_keyness for all clusters of project_id.
+        """Compute and store best_keyness and weirdness for all clusters of project_id.
 
         Uses batch key lookup against reference corpus to avoid N+1 queries.
         Commits in chunks of chunk_size to keep write transactions short (WAL safety).
+        Both metrics are written in a single UPDATE per cluster (one pass, no second scan).
 
         NULL semantics: NULL = not computed (no reference corpus at extraction time).
         0.0 = computed and keyness equals zero (term equally distributed).
@@ -2874,7 +2876,7 @@ class TermExtractionService:
 
         if N_d == 0:
             logger.warning(
-                "No clusters found in domain project %s — skipping keyness storage", project_id
+                "No clusters found in domain project %s — skipping metrics storage", project_id
             )
             return 0
 
@@ -2911,7 +2913,8 @@ class TermExtractionService:
             for r in ref_rows:
                 ref_freq_map[r.canonical_key] = int(r.freq_abs)
 
-        # Update clusters in chunks (short write transactions)
+        # Update clusters in chunks (short write transactions).
+        # Both best_keyness and weirdness are set in one UPDATE per cluster.
         updated = 0
         for i in range(0, len(domain_rows), chunk_size):
             batch = domain_rows[i : i + chunk_size]
@@ -2919,15 +2922,16 @@ class TermExtractionService:
                 f_d = int(row.freq_abs)
                 f_r = ref_freq_map.get(row.canonical_key, 0)
                 keyness = self._compute_keyness_llr(f_d, N_d, f_r, N_r)
+                weirdness = self._compute_weirdness(f_d, N_d, f_r, N_r)
                 session.execute(
                     TermCluster.__table__.update()
                     .where(TermCluster.__table__.c.cluster_id == row.cluster_id)
-                    .values(best_keyness=keyness)
+                    .values(best_keyness=keyness, weirdness=weirdness)
                 )
                 updated += 1
             session.commit()
             if progress_callback:
-                progress_callback(f"Stored keyness for {updated}/{len(domain_rows)} clusters")
+                progress_callback(f"Stored metrics for {updated}/{len(domain_rows)} clusters")
 
         return updated
 
@@ -3037,7 +3041,10 @@ class TermExtractionService:
                     best_llr=d_cluster.best_llr,
                     best_dice=d_cluster.best_dice,
                     best_tscore=d_cluster.best_tscore,
-                    weirdness=weirdness,
+                    # Prefer stored weirdness (set during extraction); fall back to query-time.
+                    weirdness=(
+                        d_cluster.weirdness if d_cluster.weirdness is not None else weirdness
+                    ),
                     # Prefer stored best_keyness when available (set during extraction);
                     # fall back to freshly computed keyness_llr for query-time termhood view.
                     best_keyness=(

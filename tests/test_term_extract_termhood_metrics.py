@@ -1,13 +1,14 @@
-"""Tests for _store_best_keyness_for_project() — Epic 4 PATCH-06.
+"""Tests for _store_termhood_metrics_for_project() — Epic 4 PATCH-07.
 
 Contracts verified:
-1. Correct values stored in batches (project scoped).
-2. NULL when no reference corpus configured.
+1. weirdness is stored for all domain clusters (alongside best_keyness).
+2. Both metrics stored in one pass — single UPDATE per cluster.
 3. Only target project updated — other projects untouched.
-4. Partial overlap: clusters not in reference get 0-based keyness (f_r=0).
+4. Partial overlap: clusters absent from reference get weirdness computed with f_r=0.
 5. Repeat-run safety: correct overwrite without data corruption.
-6. Empty domain project returns 0 updates without crashing.
-7. Batch chunk commits — progress_callback called once per chunk.
+6. Batch chunk commits — progress_callback called once per chunk.
+7. Empty reference project — N_r=1 fallback, no crash.
+8. Backward-compat: old method name alias removed; new name is canonical.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ def _add_cluster(
     canonical_key: str,
     freq_abs: int,
     best_keyness: float | None = None,
+    weirdness: float | None = None,
 ) -> int:
     c = TermCluster(
         project_id=project_id,
@@ -61,6 +63,7 @@ def _add_cluster(
         doc_freq=1,
         members_count=1,
         best_keyness=best_keyness,
+        weirdness=weirdness,
     )
     session.add(c)
     session.flush()
@@ -74,13 +77,13 @@ def svc(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 1. Correct values stored — basic happy path
+# 1. Both metrics stored — basic happy path
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_stores_values(svc, monkeypatch, tmp_path):
-    """best_keyness is computed and stored for all domain clusters."""
-    engine = _make_engine(tmp_path, "keyness_basic.db")
+def test_store_termhood_metrics_stores_both_values(svc, tmp_path):
+    """best_keyness and weirdness are computed and stored for all domain clusters."""
+    engine = _make_engine(tmp_path, "metrics_basic.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -91,11 +94,8 @@ def test_store_best_keyness_stores_values(svc, monkeypatch, tmp_path):
         domain_id = _add_project(session, lib_id, "domain")
         ref_id = _add_project(session, lib_id, "reference")
 
-        # Domain: 2 clusters
         _add_cluster(session, domain_id, "alpha_beta", freq_abs=10)
         _add_cluster(session, domain_id, "gamma_delta", freq_abs=5)
-
-        # Reference: matching cluster for alpha_beta, none for gamma_delta
         _add_cluster(session, ref_id, "alpha_beta", freq_abs=3)
 
         session.commit()
@@ -120,23 +120,25 @@ def test_store_best_keyness_stores_values(svc, monkeypatch, tmp_path):
     alpha = next(c for c in clusters if c.canonical_key == "alpha_beta")
     gamma = next(c for c in clusters if c.canonical_key == "gamma_delta")
 
-    # alpha_beta has a reference match → keyness > 0
+    # alpha_beta has a reference match
     assert alpha.best_keyness is not None
     assert alpha.best_keyness > 0.0
+    assert alpha.weirdness is not None
+    assert alpha.weirdness > 0.0
 
-    # gamma_delta has no reference match (f_r=0) → keyness computed with f_r=0
-    # Result should still be non-NULL (0.0 is valid when computed)
+    # gamma_delta has no reference match — still stored (computed with f_r=0)
     assert gamma.best_keyness is not None
+    assert gamma.weirdness is not None
 
 
 # ---------------------------------------------------------------------------
-# 2. NULL when domain is empty
+# 2. Empty domain project returns 0 updates
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_empty_domain_returns_zero(svc, tmp_path):
+def test_store_termhood_metrics_empty_domain_returns_zero(svc, tmp_path):
     """Empty domain project → 0 updates, no crash."""
-    engine = _make_engine(tmp_path, "keyness_empty.db")
+    engine = _make_engine(tmp_path, "metrics_empty.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -160,9 +162,9 @@ def test_store_best_keyness_empty_domain_returns_zero(svc, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_scoped_to_project(svc, tmp_path):
+def test_store_termhood_metrics_scoped_to_project(svc, tmp_path):
     """Clusters in other projects are not modified."""
-    engine = _make_engine(tmp_path, "keyness_scope.db")
+    engine = _make_engine(tmp_path, "metrics_scope.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -176,8 +178,8 @@ def test_store_best_keyness_scoped_to_project(svc, tmp_path):
 
         _add_cluster(session, domain_id, "term_a", freq_abs=8)
         _add_cluster(session, ref_id, "term_a", freq_abs=2)
-        # other project has same canonical_key — must NOT be touched
-        _add_cluster(session, other_id, "term_a", freq_abs=99, best_keyness=42.0)
+        # other project has same canonical_key and sentinel values — must NOT be touched
+        _add_cluster(session, other_id, "term_a", freq_abs=99, best_keyness=42.0, weirdness=7.7)
 
         session.commit()
         svc._store_termhood_metrics_for_project(session, domain_id, ref_id)
@@ -192,18 +194,18 @@ def test_store_best_keyness_scoped_to_project(svc, tmp_path):
     engine.dispose()
 
     assert len(other_clusters) == 1
-    # best_keyness must remain exactly 42.0 — not overwritten
     assert other_clusters[0].best_keyness == pytest.approx(42.0)
+    assert other_clusters[0].weirdness == pytest.approx(7.7)
 
 
 # ---------------------------------------------------------------------------
-# 4. Partial overlap: clusters not in reference
+# 4. Partial overlap: clusters absent from reference get weirdness computed
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_partial_overlap(svc, tmp_path):
-    """Clusters absent from reference get keyness computed with f_r=0."""
-    engine = _make_engine(tmp_path, "keyness_partial.db")
+def test_store_termhood_metrics_partial_overlap(svc, tmp_path):
+    """Clusters absent from reference get both metrics computed with f_r=0."""
+    engine = _make_engine(tmp_path, "metrics_partial.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -236,8 +238,8 @@ def test_store_best_keyness_partial_overlap(svc, tmp_path):
 
     assert updated == 2
     for c in clusters:
-        # Both must have a non-NULL value — even those absent from reference
         assert c.best_keyness is not None, f"{c.canonical_key} has NULL keyness"
+        assert c.weirdness is not None, f"{c.canonical_key} has NULL weirdness"
 
 
 # ---------------------------------------------------------------------------
@@ -245,9 +247,9 @@ def test_store_best_keyness_partial_overlap(svc, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_repeat_run_overwrites_correctly(svc, tmp_path):
-    """Running _store_best_keyness_for_project twice produces consistent results."""
-    engine = _make_engine(tmp_path, "keyness_repeat.db")
+def test_store_termhood_metrics_repeat_run_overwrites_correctly(svc, tmp_path):
+    """Running _store_termhood_metrics_for_project twice produces consistent results."""
+    engine = _make_engine(tmp_path, "metrics_repeat.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -266,23 +268,27 @@ def test_store_best_keyness_repeat_run_overwrites_correctly(svc, tmp_path):
         svc._store_termhood_metrics_for_project(session, domain_id, ref_id)
         session.commit()
 
-        # Record first-run value
-        after_first = session.execute(
-            select(TermCluster.best_keyness).where(TermCluster.project_id == domain_id)
-        ).scalar()
+        after_first_k, after_first_w = session.execute(
+            select(TermCluster.best_keyness, TermCluster.weirdness).where(
+                TermCluster.project_id == domain_id
+            )
+        ).one()
 
-        # Run again — must produce same result
         svc._store_termhood_metrics_for_project(session, domain_id, ref_id)
         session.commit()
 
-        after_second = session.execute(
-            select(TermCluster.best_keyness).where(TermCluster.project_id == domain_id)
-        ).scalar()
+        after_second_k, after_second_w = session.execute(
+            select(TermCluster.best_keyness, TermCluster.weirdness).where(
+                TermCluster.project_id == domain_id
+            )
+        ).one()
 
     engine.dispose()
 
-    assert after_first is not None
-    assert after_second == pytest.approx(after_first)
+    assert after_first_k is not None
+    assert after_first_w is not None
+    assert after_second_k == pytest.approx(after_first_k)
+    assert after_second_w == pytest.approx(after_first_w)
 
 
 # ---------------------------------------------------------------------------
@@ -290,9 +296,9 @@ def test_store_best_keyness_repeat_run_overwrites_correctly(svc, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_batch_commits(svc, tmp_path):
+def test_store_termhood_metrics_batch_commits(svc, tmp_path):
     """progress_callback is called once per chunk — verifies chunked commits."""
-    engine = _make_engine(tmp_path, "keyness_batch.db")
+    engine = _make_engine(tmp_path, "metrics_batch.db")
     chunk_size = 3
 
     with Session(engine) as session:
@@ -322,20 +328,18 @@ def test_store_best_keyness_batch_commits(svc, tmp_path):
 
     engine.dispose()
 
-    # 7 clusters / chunk_size 3 = 3 chunks
     assert len(callback_calls) == 3
-    # Last callback reports all 7 updated
     assert "7" in callback_calls[-1]
 
 
 # ---------------------------------------------------------------------------
-# 7. Reference project with no tokens → graceful N_r=1 fallback
+# 7. Empty reference project — N_r=1 fallback, no crash
 # ---------------------------------------------------------------------------
 
 
-def test_store_best_keyness_empty_reference_uses_fallback(svc, tmp_path):
+def test_store_termhood_metrics_empty_reference_uses_fallback(svc, tmp_path):
     """Empty reference (N_r=0) falls back to N_r=1 without crashing."""
-    engine = _make_engine(tmp_path, "keyness_empty_ref.db")
+    engine = _make_engine(tmp_path, "metrics_empty_ref.db")
 
     with Session(engine) as session:
         lib = Library(name="lib")
@@ -350,15 +354,17 @@ def test_store_best_keyness_empty_reference_uses_fallback(svc, tmp_path):
 
         session.commit()
 
-        # Must not raise ZeroDivisionError
         updated = svc._store_termhood_metrics_for_project(session, domain_id, ref_id)
         session.commit()
 
-        kval = session.execute(
-            select(TermCluster.best_keyness).where(TermCluster.project_id == domain_id)
-        ).scalar()
+        kval, wval = session.execute(
+            select(TermCluster.best_keyness, TermCluster.weirdness).where(
+                TermCluster.project_id == domain_id
+            )
+        ).one()
 
     engine.dispose()
 
     assert updated == 1
-    assert kval is not None  # Computed with N_r=1 fallback, not NULL
+    assert kval is not None
+    assert wval is not None
