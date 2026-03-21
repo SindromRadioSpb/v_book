@@ -940,6 +940,29 @@ class TMEntry(Base):
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="SET NULL"))
     # Global TM canonical link (Task 19)
     tm_global_id = Column(Integer, ForeignKey("tm_global.tm_global_id", ondelete="SET NULL"))
+    # Epic 5A: provenance snapshot (migration 045)
+    # promoted_from_cluster_id: plain INTEGER, no FK — permanent audit snapshot,
+    #   never overwritten. Survives cluster deletion.
+    promoted_from_cluster_id = Column(Integer)
+    # promoted_at_params_hash: SHA-256[:16] of extraction params at promotion time.
+    promoted_at_params_hash = Column(Text)
+    # promoted_at_run_id: soft ref to the run; SET NULL when run is pruned.
+    promoted_at_run_id = Column(Integer, ForeignKey("term_extract_run.run_id", ondelete="SET NULL"))
+
+    @property
+    def source_status(self) -> str:
+        """Compute source status at query time — never stored.
+
+        Returns:
+            'linked'                — cluster_id IS NOT NULL (live link active)
+            'source_cluster_missing'— cluster deleted after promotion (provenance survives)
+            'manual'                — no cluster source (manual or import)
+        """
+        if self.cluster_id is not None:
+            return "linked"
+        if self.promoted_from_cluster_id is not None:
+            return "source_cluster_missing"
+        return "manual"
 
     __table_args__ = (
         UniqueConstraint(
