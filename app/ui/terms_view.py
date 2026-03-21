@@ -255,6 +255,26 @@ class TermsView(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
+        # PATCH-08: Staleness warning — shown when reference corpus changed since last extraction.
+        self.staleness_warning_btn = QPushButton(
+            "⚠ Keyness/Weirdness may be outdated — Recalculate"
+        )
+        self.staleness_warning_btn.setStyleSheet(
+            "QPushButton {"
+            "  background: #fef3c7; color: #92400e; border: 1px solid #f59e0b;"
+            "  border-radius: 4px; padding: 4px 10px; font-weight: bold;"
+            "}"
+            "QPushButton:hover { background: #fde68a; }"
+        )
+        self.staleness_warning_btn.setToolTip(
+            "The reference corpus was changed since the last extraction.\n"
+            "Click to recalculate Keyness and Weirdness without re-extracting.\n"
+            "Or re-run full extraction to update all metrics."
+        )
+        self.staleness_warning_btn.clicked.connect(self.on_recalculate_keyness)
+        self.staleness_warning_btn.setVisible(False)
+        layout.addWidget(self.staleness_warning_btn)
+
         # Terms table with proxy model for sorting (M7 P1: converted to QTableView + TermClusterTableModel)
         self.terms_model = TermClusterTableModel()
         self.proxy_model = MultiSortProxyModel()
@@ -438,8 +458,30 @@ class TermsView(QWidget):
                 # Set current selection
                 self.reference_combo.setCurrentIndex(current_index)
 
+                # PATCH-08: Staleness check — show warning if reference changed since last run.
+                last_run_ref = self.term_service.get_last_run_reference_project_id(
+                    session, self.project_id
+                )
+                self._update_staleness_warning(current_ref, last_run_ref)
+
         except Exception:
             logger.exception("Failed to load reference projects")
+
+    def _update_staleness_warning(
+        self, current_ref_id: int | None, last_run_ref_id: int | None
+    ) -> None:
+        """Show/hide staleness warning based on reference corpus mismatch.
+
+        Hidden when: no completed run exists, run has NULL reference_project_id (pre-044 rows),
+        or current reference matches the run's snapshot.
+        Shown when: both are non-NULL and they differ.
+        """
+        stale = (
+            current_ref_id is not None
+            and last_run_ref_id is not None
+            and current_ref_id != last_run_ref_id
+        )
+        self.staleness_warning_btn.setVisible(stale)
 
     def on_reference_changed(self, index: int):
         """Handle reference project selection change (M5.4)."""
@@ -448,6 +490,11 @@ class TermsView(QWidget):
 
             with self.db_service.get_session() as session:
                 self.term_service.set_reference_project(session, self.project_id, reference_id)
+                # Re-check staleness after reference change.
+                last_run_ref = self.term_service.get_last_run_reference_project_id(
+                    session, self.project_id
+                )
+                self._update_staleness_warning(reference_id, last_run_ref)
 
             # Refresh terms table
             self.current_page = 1
@@ -456,6 +503,37 @@ class TermsView(QWidget):
         except Exception as e:
             logger.exception("Failed to set reference project")
             show_error(self, "Error", f"Failed to set reference project: {e}")
+
+    def on_recalculate_keyness(self):
+        """Recalculate Keyness/Weirdness without re-extracting (PATCH-08)."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from app.ui.workers import RecalculateKeynessWorker
+
+        self.staleness_warning_btn.setEnabled(False)
+        self.staleness_warning_btn.setText("Recalculating...")
+
+        self._recalc_worker = RecalculateKeynessWorker(project_id=self.project_id)
+        self._recalc_worker.progress.connect(
+            lambda msg: self.staleness_warning_btn.setText(f"Recalculating… {msg}")
+        )
+        self._recalc_worker.finished.connect(self._on_recalculate_finished)
+        self._recalc_worker.error.connect(self._on_recalculate_error)
+        self._recalc_worker.start()
+
+    def _on_recalculate_finished(self, result: dict):
+        """Handle recalculate completion."""
+        self.staleness_warning_btn.setEnabled(True)
+        self.staleness_warning_btn.setText("⚠ Keyness/Weirdness may be outdated — Recalculate")
+        updated = result.get("updated", 0)
+        self.staleness_warning_btn.setVisible(False)
+        self.status_label.setText(f"Recalculated metrics for {updated} clusters.")
+        self.perform_search()
+
+    def _on_recalculate_error(self, error_msg: str):
+        """Handle recalculate error."""
+        self.staleness_warning_btn.setEnabled(True)
+        self.staleness_warning_btn.setText("⚠ Keyness/Weirdness may be outdated — Recalculate")
+        show_error(self, "Recalculate Error", f"Failed to recalculate metrics:\n{error_msg}")
 
     def on_np_max_len_changed(self):
         """Handle Max NP length change - save setting (no reload needed, used only during extraction)."""

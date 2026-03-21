@@ -751,6 +751,12 @@ class TermExtractRun(Base):
     # params_hash: canonical SHA-256[:16] of extraction params (see migration 043).
     # NULL on old rows; populated for all new runs.
     params_hash = Column(String)
+    # reference_project_id: snapshot of general_corpus_id at extraction/recalculation time
+    # (see migration 044). NULL on old rows or when no reference corpus was set.
+    # Used to detect staleness when the reference corpus is later changed.
+    reference_project_id = Column(
+        Integer, ForeignKey("dict_project.project_id", ondelete="SET NULL")
+    )
     started_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now, onupdate=utc_now)
     finished_at = Column(String)

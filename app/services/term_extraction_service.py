@@ -912,6 +912,8 @@ class TermExtractionService:
             run.error_message = None
             run.finished_at = self._utc_now()
             run.updated_at = run.finished_at
+            # Snapshot reference corpus used for metrics (migration 044 staleness tracking).
+            run.reference_project_id = reference_project_id
             session.commit()
 
             _emit(
@@ -2690,6 +2692,30 @@ class TermExtractionService:
             raise ValueError(f"Project {project_id} not found")
 
         return project.general_corpus_id
+
+    def get_last_run_reference_project_id(self, session: Session, project_id: int) -> int | None:
+        """Return reference_project_id stored in the most recently completed run.
+
+        Returns None if no completed run exists or if it was run before migration 044.
+        Used for staleness detection in Terms view.
+
+        Args:
+            session: DB session
+            project_id: Domain project ID
+
+        Returns:
+            reference_project_id from most recent ok run, or None
+        """
+        row = session.execute(
+            select(TermExtractRun.reference_project_id)
+            .where(
+                TermExtractRun.project_id == project_id,
+                TermExtractRun.status == "ok",
+            )
+            .order_by(TermExtractRun.run_id.desc())
+            .limit(1)
+        ).scalar()
+        return row  # type: ignore[return-value]
 
     def _get_default_reference_corpus_id(self, session: Session) -> int | None:
         """

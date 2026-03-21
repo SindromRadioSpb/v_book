@@ -4774,3 +4774,76 @@ class UnifiedHealthCheckWorker(QThread):
             self.finished.emit(report)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+class RecalculateKeynessWorker(QThread):
+    """Recalculate and store best_keyness + weirdness without re-extracting.
+
+    Runs only the metrics computation stage (_store_termhood_metrics_for_project)
+    against the currently configured reference corpus. Updates run's
+    reference_project_id snapshot for staleness tracking.
+
+    Signal contract:
+        progress(str)  — status message for UI
+        finished(dict) — {"updated": int, "reference_project_id": int | None}
+        error(str)     — error message on failure
+    """
+
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, *, project_id: int, parent=None):
+        super().__init__(parent)
+        self.project_id = project_id
+        self._cancel_flag = False
+
+    def cancel(self):
+        """Request cancellation (checked between chunks via progress_callback)."""
+        self._cancel_flag = True
+
+    def run(self):
+        try:
+            from app.services.db_service import DBService
+            from app.services.term_extraction_service import TermExtractionService
+            from sqlalchemy.orm import Session
+            from sqlalchemy import select
+            from app.infra.sa_models import TermExtractRun
+
+            svc = TermExtractionService()
+            db = DBService.instance()
+
+            with db.get_session() as session:
+                ref_id = svc.get_reference_project(session, self.project_id)
+                if not ref_id:
+                    self.finished.emit({"updated": 0, "reference_project_id": None})
+                    return
+
+                self.progress.emit("Recalculating keyness and weirdness...")
+
+                updated = svc._store_termhood_metrics_for_project(
+                    session,
+                    self.project_id,
+                    ref_id,
+                    progress_callback=self.progress.emit,
+                )
+
+                # Update reference_project_id snapshot in the most recent completed run.
+                run = session.execute(
+                    select(TermExtractRun)
+                    .where(
+                        TermExtractRun.project_id == self.project_id,
+                        TermExtractRun.status == "ok",
+                    )
+                    .order_by(TermExtractRun.run_id.desc())
+                    .limit(1)
+                ).scalars().first()
+                if run is not None:
+                    run.reference_project_id = ref_id
+                    session.commit()
+
+                self.finished.emit({"updated": updated, "reference_project_id": ref_id})
+
+        except Exception as exc:
+            logger.exception("RecalculateKeynessWorker error")
+            self.error.emit(str(exc))
