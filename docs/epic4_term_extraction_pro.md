@@ -1,15 +1,33 @@
 # Epic 4: Term Extraction Pro
 
 **Status:** In progress
-**Schema:** v43 (migration 043)
+**Schema:** v43 (migration 043), v44 planned (migration 044)
 
 ---
 
-## What Changed
+## Patch Series
+
+| Patch | Status | Description |
+|-------|--------|-------------|
+| PATCH-01 | ✅ done | Migration 043: params_hash + best_keyness schema |
+| PATCH-02 | ✅ done | params_hash gating, include_np/ngram_ns persistence |
+| PATCH-03 | ✅ done | 19 tests: hash contract + config persistence |
+| fix     | ✅ done | Validation error when ngram_ns empty |
+| PATCH-04 | ✅ done | Docs + Bigrams/Trigrams/Keyness/Weirdness tooltips |
+| PATCH-05 | ✅ done | _store_termhood_metrics_for_project(), DTO, sortable Keyness col |
+| PATCH-06 | ✅ done | 7 tests: best_keyness batch logic, scoping, NULL contract |
+| PATCH-07 | 🔄 planned | Store weirdness at extraction time (same pass as keyness) |
+| PATCH-08 | 🔄 planned | Recalculate Keyness/Weirdness button + staleness indicator |
+| PATCH-09 | 🔄 planned | keyness / weirdness sort presets in preset_combo |
+| PATCH-10 | 🔄 planned | min_doc_freq filter (separate from min_freq_abs) |
+
+---
+
+## Delivered (PATCH-01..06)
 
 ### params_hash — Extraction Reproducibility
 
-Every term extraction run now stores a `params_hash` in `term_extract_run`.
+Every term extraction run stores a `params_hash` in `term_extract_run`.
 
 **Canonical payload** (SHA-256[:16], JSON `sort_keys=True, separators=(',',':')`):
 
@@ -24,21 +42,17 @@ Every term extraction run now stores a `params_hash` in `term_extract_run`.
 }
 ```
 
-- `overwrite` is **not** included — it is an execution mode, not a result parameter.
+- `overwrite` is **not** included — execution mode, not a result parameter.
 - `ngram_ns` is always sorted ascending.
 - `algo_version` is bumped in `TermExtractionService._TERM_EXTRACT_ALGO_VERSION` when
-  extraction logic changes in a way that invalidates old results without changing UI params.
+  extraction logic changes without UI param changes.
 
-**Resume gating:** When resuming a staged run, the computed hash must match the stored
-`params_hash`. Old rows (NULL hash, pre-migration 043) pass through for backward compat.
+**Resume gating:** computed hash must match stored `params_hash`. NULL rows (pre-migration 043)
+pass through for backward compat.
 
 ---
 
 ### N-gram Size Selection (UI)
-
-**Before:** `ngram_ns=(2, 3)` hardcoded.
-
-**After:** Two independent checkboxes in the extraction controls:
 
 | Bigrams | Trigrams | `ngram_ns` | Meaning |
 |---------|----------|-----------|---------|
@@ -47,81 +61,102 @@ Every term extraction run now stores a `params_hash` in `term_extract_run`.
 | ☑ | ☑ | `(2, 3)` | bigrams + trigrams |
 | ☐ | ☐ | blocked | validation error shown |
 
-Each size is extracted independently — trigrams-only extracts **only** 3-word sequences,
-not "trigrams plus lower orders". Persisted via QSettings (`terms_view/ngram_ns_json`).
+Each size is extracted independently. Persisted via QSettings (`terms_view/ngram_ns_json`).
 
 ---
 
 ### include_np Persistence (Bug Fix)
 
 `include_np` checkbox was hardcoded to `True` on every view open.
-Now it is saved/restored via QSettings (`terms_view/include_np`).
+Now saved/restored via QSettings (`terms_view/include_np`).
 
 ---
 
 ### best_keyness — Stored Keyness Column
 
-**New column:** `term_cluster.best_keyness REAL` (migration 043).
+**Column:** `term_cluster.best_keyness REAL` (migration 043).
 
-- **NULL** = not computed (reference corpus not configured at extraction time).
-- **0.0** = computed and equals zero (term equally distributed between domain and reference).
+- **NULL** = not computed (no reference corpus at extraction time).
+- **0.0** = computed and equals zero.
 
-**When stored:** At the end of term extraction finalization, if a reference corpus is
-configured for the project (`dict_project.general_corpus_id`).
+**When stored:** After `_cluster_terms()` finalization, if `general_corpus_id` is set.
 
-**Algorithm:** LLR (log-likelihood ratio) keyness — same formula as `_compute_keyness_llr()`
-used by the `termhood` query-time preset.
+**Algorithm:** LLR (log-likelihood ratio) — same as `_compute_keyness_llr()`.
 
-**Performance:** Batch lookup (1000 canonical keys per IN query) + batch UPDATE (500 rows per
-commit). Avoids N+1 queries that the query-time path uses.
+**Performance:** Batch IN-lookup (1000 keys/batch) + batch UPDATE (500 rows/commit).
 
-**UI:** The Keyness column (col 10 in Terms table) prefers `best_keyness` (stored) over
-`keyness_llr` (query-time). The column is sortable via `MultiSortProxyModel` numeric sort.
+**UI:** Keyness column (col 10) prefers `best_keyness` over query-time `keyness_llr`.
+Sortable via `MultiSortProxyModel` numeric sort.
 
 ---
 
-## Tooltips
+## Planned (PATCH-07..10)
 
-| Column | Tooltip explains |
-|--------|-----------------|
-| Weirdness | Domain specificity ratio vs reference; >1.0 = more frequent in domain |
-| Keyness | LLR statistical significance; source (stored/query-time) shown |
-| Termhood | Composite score used by `termhood` preset |
-| Bigrams checkbox | Independent size; Bigrams only = 2-word sequences only |
-| Trigrams checkbox | Independent size; Trigrams only = 3-word sequences only |
+### PATCH-07 — Store weirdness at extraction time
 
----
+**Problem:** `term_cluster.weirdness` column exists since M5.1 but is **never populated**.
+Only computed at query-time in `_list_clusters_with_termhood()`.
 
-## Index
+**Solution:** Extend `_store_termhood_metrics_for_project()` (rename from
+`_store_best_keyness_for_project`) to store both `best_keyness` and `weirdness` in the same
+pass — one batch UPDATE per cluster, no second scan.
 
-```sql
-CREATE INDEX idx_term_cluster_keyness ON term_cluster(project_id, best_keyness DESC);
-```
+**DTO:** `ClusterStats.weirdness` reads from stored column in `list_clusters()`; falls back to
+query-time value in `_list_clusters_with_termhood()` if stored is NULL.
 
-Accepted as sufficient for Epic 4. Revisit if Terms view adds additional filter conditions
-(is_noise, curation_status) that would benefit from a composite index.
+**Tests:** mirror PATCH-06 pattern for weirdness.
 
 ---
 
-## Troubleshooting
+### PATCH-08 — Recalculate Keyness/Weirdness + staleness indicator
 
-**"Resume rejected" (params changed):**
-Not an error — params_hash mismatch means a previous run used different settings.
-The UI will start a fresh run automatically. Old staged data is left in `term_extract_accumulator`
-until the new run's `overwrite=True` clears existing terms.
+**Problem:** When user changes reference corpus, `best_keyness` and `weirdness` are stale
+without a full re-extraction.
 
-**best_keyness is NULL after extraction:**
-No reference corpus is configured for this project.
-Set one via: Terms view → reference project selector → select a project.
-Then re-run extraction.
+**Solution:**
 
-**Keyness shows stale value after changing reference corpus:**
-`best_keyness` is stored at extraction time. Re-run extraction to update stored values.
-The query-time `termhood` preset always computes fresh values against the current reference.
+1. **Staleness tracking:** Store `reference_project_id` snapshot in `term_extract_run`
+   (new column `reference_project_id INTEGER`, migration 044). On Terms view load, compare
+   stored snapshot with current `general_corpus_id`. If mismatch → show warning label.
+
+2. **Recalculate button:** Small worker `RecalculateKeynesWorker` (reuses
+   `_store_termhood_metrics_for_project()`) — runs only the metrics computation stage
+   without re-extracting ngrams/NP/clustering. Progress dialog, cancel support.
+
+**UI:** Warning label: `"⚠ Keyness/Weirdness may be outdated — Recalculate"` (clickable).
+Shown only when reference has changed since last extraction.
 
 ---
 
-## Schema Changes (migration 043)
+### PATCH-09 — keyness / weirdness sort presets
+
+**Problem:** `preset_combo` has only `freq / strong / balanced / termhood`. Keyness and
+Weirdness as primary sort require switching to `termhood` preset (which computes all three
+metrics at query-time), slow for large projects.
+
+**Solution:** Add `keyness` and `weirdness` to `preset_combo`. In `list_clusters()`:
+- `keyness` → `ORDER BY term_cluster.best_keyness DESC NULLS LAST`
+- `weirdness` → `ORDER BY term_cluster.weirdness DESC NULLS LAST`
+
+These use stored columns → pure SQL sort, no Python-side computation.
+
+---
+
+### PATCH-10 — min_doc_freq filter
+
+**Problem:** `Min freq` filters by `freq_abs` (absolute token count). A term appearing
+10 times in one document is ranked equally with a term appearing 2 times in 5 documents.
+`doc_freq` is a better signal for terminological reliability.
+
+**Solution:** Add `Min doc freq` spin box (range 1–50, default 1) alongside existing
+`Min freq`. Persisted via QSettings (`terms_view/min_doc_freq`). Passed to `list_clusters()`
+as `min_doc_freq` parameter → `WHERE term_cluster.doc_freq >= :min_doc_freq`.
+
+---
+
+## Schema Changes
+
+### Migration 043 (done)
 
 ```sql
 ALTER TABLE term_extract_run ADD COLUMN params_hash TEXT;
@@ -130,4 +165,41 @@ CREATE INDEX IF NOT EXISTS idx_term_cluster_keyness
     ON term_cluster(project_id, best_keyness DESC);
 ```
 
-Migration is additive — no data loss, backward-compatible with existing rows.
+### Migration 044 (planned — PATCH-08)
+
+```sql
+ALTER TABLE term_extract_run ADD COLUMN reference_project_id INTEGER;
+```
+
+Stores the `general_corpus_id` snapshot at the time of extraction. Used to detect
+staleness when the reference corpus is later changed.
+
+---
+
+## Tooltips
+
+| Element | Tooltip explains |
+|---------|-----------------|
+| Weirdness col | Domain specificity ratio; >1.0 = more frequent in domain; stored at extraction |
+| Keyness col | LLR significance; source (stored/query-time); requires reference corpus |
+| Termhood col | Composite: log(Keyness) × log(Weirdness) × log(Freq) |
+| Bigrams checkbox | Independent size — bigrams only = 2-word sequences only |
+| Trigrams checkbox | Independent size — trigrams only = 3-word sequences only |
+
+---
+
+## Troubleshooting
+
+**"Resume rejected" (params changed):**
+params_hash mismatch — previous run used different settings. Fresh run starts automatically.
+
+**best_keyness / weirdness is NULL after extraction:**
+No reference corpus configured. Set via Terms view → reference project selector.
+Then re-run extraction (or use Recalculate after PATCH-08).
+
+**"⚠ Keyness/Weirdness may be outdated" warning:**
+Reference corpus was changed since last extraction. Click "Recalculate" or re-run extraction.
+
+**keyness/weirdness preset shows N/A for all rows:**
+Reference corpus not set, or extraction ran before reference was configured.
+Set reference → Recalculate.
