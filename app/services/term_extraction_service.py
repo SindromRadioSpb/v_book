@@ -865,6 +865,36 @@ class TermExtractionService:
             )
             clusters_created = self._cluster_terms(session, project_id)
 
+            # Store best_keyness if a reference corpus is configured.
+            # NULL = no reference corpus; non-NULL = computed and stored for fast sort.
+            reference_project_id = self.get_reference_project(session, project_id)
+            if reference_project_id:
+                _emit(
+                    "Computing keyness vs reference corpus...",
+                    stage="Computing keyness",
+                    phase="finalize",
+                    docs_done=total_docs,
+                    docs_hint=total_docs,
+                    chunks_done=int(run.chunks_completed or 0),
+                    chunks_hint=int(run.chunks_total or 0),
+                    last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
+                )
+                self._store_best_keyness_for_project(
+                    session,
+                    project_id,
+                    reference_project_id,
+                    progress_callback=lambda msg: _emit(
+                        msg,
+                        stage="Computing keyness",
+                        phase="finalize",
+                        docs_done=total_docs,
+                        docs_hint=total_docs,
+                        chunks_done=int(run.chunks_completed or 0),
+                        chunks_hint=int(run.chunks_total or 0),
+                        last_doc_id=(int(run.last_doc_id) if run.last_doc_id is not None else None),
+                    ),
+                )
+
             self._update_extract_project_metadata(
                 project,
                 min_freq=min_freq,
@@ -2352,6 +2382,7 @@ class TermExtractionService:
                     best_llr=c.best_llr,
                     best_dice=c.best_dice,
                     best_tscore=c.best_tscore,
+                    best_keyness=c.best_keyness,
                     entity_class=c.entity_class,
                     is_noise=c.is_noise,
                     noise_reason=c.noise_reason,
@@ -2818,6 +2849,88 @@ class TermExtractionService:
 
         return score
 
+    def _store_best_keyness_for_project(
+        self,
+        session: Session,
+        project_id: int,
+        reference_project_id: int,
+        *,
+        progress_callback: Callable[[str], None] | None = None,
+        chunk_size: int = 500,
+    ) -> int:
+        """Compute and store best_keyness for all clusters of project_id.
+
+        Uses batch key lookup against reference corpus to avoid N+1 queries.
+        Commits in chunks of chunk_size to keep write transactions short (WAL safety).
+
+        NULL semantics: NULL = not computed (no reference corpus at extraction time).
+        0.0 = computed and keyness equals zero (term equally distributed).
+
+        Returns:
+            Number of clusters updated.
+        """
+        N_d = self._get_total_cluster_tokens(session, project_id)
+        N_r = self._get_total_cluster_tokens(session, reference_project_id)
+
+        if N_d == 0:
+            logger.warning(
+                "No clusters found in domain project %s — skipping keyness storage", project_id
+            )
+            return 0
+
+        if N_r == 0:
+            logger.warning(
+                "No clusters in reference project %s — using N_r=1 to avoid division by zero",
+                reference_project_id,
+            )
+            N_r = 1
+
+        # Load all domain clusters (cluster_id, canonical_key, freq_abs)
+        domain_rows = session.execute(
+            select(TermCluster.cluster_id, TermCluster.canonical_key, TermCluster.freq_abs).where(
+                TermCluster.project_id == project_id
+            )
+        ).all()
+
+        if not domain_rows:
+            return 0
+
+        # Batch-fetch matching reference frequencies to avoid N+1 queries.
+        # Only fetch ref rows for keys that exist in the domain project.
+        all_canonical_keys = [r.canonical_key for r in domain_rows]
+        ref_freq_map: dict[str, int] = {}
+        key_batch_size = 1000
+        for k in range(0, len(all_canonical_keys), key_batch_size):
+            key_batch = all_canonical_keys[k : k + key_batch_size]
+            ref_rows = session.execute(
+                select(TermCluster.canonical_key, TermCluster.freq_abs).where(
+                    TermCluster.project_id == reference_project_id,
+                    TermCluster.canonical_key.in_(key_batch),
+                )
+            ).all()
+            for r in ref_rows:
+                ref_freq_map[r.canonical_key] = int(r.freq_abs)
+
+        # Update clusters in chunks (short write transactions)
+        updated = 0
+        for i in range(0, len(domain_rows), chunk_size):
+            batch = domain_rows[i : i + chunk_size]
+            for row in batch:
+                f_d = int(row.freq_abs)
+                f_r = ref_freq_map.get(row.canonical_key, 0)
+                keyness = self._compute_keyness_llr(f_d, N_d, f_r, N_r)
+                session.execute(
+                    TermCluster.__table__.update()
+                    .where(TermCluster.__table__.c.cluster_id == row.cluster_id)
+                    .values(best_keyness=keyness)
+                )
+                updated += 1
+            session.commit()
+            if progress_callback:
+                progress_callback(f"Stored keyness for {updated}/{len(domain_rows)} clusters")
+
+        return updated
+
     def _list_clusters_with_termhood(
         self,
         session: Session,
@@ -2925,6 +3038,13 @@ class TermExtractionService:
                     best_dice=d_cluster.best_dice,
                     best_tscore=d_cluster.best_tscore,
                     weirdness=weirdness,
+                    # Prefer stored best_keyness when available (set during extraction);
+                    # fall back to freshly computed keyness_llr for query-time termhood view.
+                    best_keyness=(
+                        d_cluster.best_keyness
+                        if d_cluster.best_keyness is not None
+                        else keyness_llr
+                    ),
                     keyness_llr=keyness_llr,
                     termhood_score=termhood_score,
                     entity_class=d_cluster.entity_class,

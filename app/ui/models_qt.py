@@ -340,6 +340,28 @@ class TermClusterTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
+            if col == 9:
+                return (
+                    "Weirdness — domain specificity vs reference corpus.\n"
+                    "> 1.0: term is more frequent in this domain than in the reference.\n"
+                    "Requires a reference corpus to be set (Termhood preset).\n"
+                    "Stored at extraction time when reference corpus is configured."
+                )
+            if col == 10:
+                kval = getattr(cluster, "best_keyness", None)
+                src = "stored" if kval is not None else "query-time"
+                return (
+                    f"Keyness (LLR) — statistical significance of domain frequency vs reference.\n"
+                    f"Higher = more statistically distinctive in this domain.\n"
+                    f"Source: {src}. Requires a reference corpus.\n"
+                    "Stored at extraction time; sortable without re-computing."
+                )
+            if col == 11:
+                return (
+                    "Termhood — composite score: log(Keyness) × log(Weirdness) × log(Freq).\n"
+                    "Combines statistical significance, domain specificity, and frequency.\n"
+                    "Used by the 'termhood' preset for ranking."
+                )
             if col == 17 and getattr(cluster, "pronunciation_text", None):
                 source = getattr(cluster, "pronunciation_source", None) or "none"
                 confidence = getattr(cluster, "pronunciation_confidence", None)
@@ -392,7 +414,11 @@ class TermClusterTableModel(QAbstractTableModel):
             elif col == 9:
                 return f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
             elif col == 10:
-                return f"{cluster.keyness_llr:.2f}" if cluster.keyness_llr else "N/A"
+                # Prefer stored best_keyness (set during extraction) over query-time keyness_llr
+                kval = getattr(cluster, "best_keyness", None)
+                if kval is None:
+                    kval = cluster.keyness_llr
+                return f"{kval:.2f}" if kval is not None else "N/A"
             elif col == 11:
                 return f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
             elif col == 12:
