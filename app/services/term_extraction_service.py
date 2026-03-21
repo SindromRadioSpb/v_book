@@ -2259,6 +2259,7 @@ class TermExtractionService:
         search: str | None = None,
         preset: str = "freq",
         min_freq: int | None = None,
+        min_doc_freq: int | None = None,
         source_filter: str | None = None,
         hide_noise: bool = True,
         offset: int = 0,
@@ -2272,7 +2273,8 @@ class TermExtractionService:
             top_n: Limit results
             search: Search term (LIKE)
             preset: Ranking preset ('freq', 'strong', 'balanced', 'termhood', 'keyness', 'weirdness')
-            min_freq: Minimum frequency filter
+            min_freq: Minimum absolute frequency filter
+            min_doc_freq: Minimum document frequency filter (PATCH-10)
             source_filter: Source kind filter ('ngram', 'np', or None for all)
             hide_noise: Hide noisy clusters (default True, Task 11)
 
@@ -2313,6 +2315,10 @@ class TermExtractionService:
         # Apply filters
         if min_freq:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        # PATCH-10: min_doc_freq filter (separate from min_freq)
+        if min_doc_freq and min_doc_freq > 1:
+            stmt = stmt.where(TermCluster.doc_freq >= min_doc_freq)
 
         # Apply noise filter (Task 11: Entity Classification)
         if hide_noise:
@@ -2415,6 +2421,7 @@ class TermExtractionService:
         *,
         search: str | None = None,
         min_freq: int | None = None,
+        min_doc_freq: int | None = None,
         source_filter: str | None = None,
         hide_noise: bool = True,
     ) -> int:
@@ -2425,7 +2432,8 @@ class TermExtractionService:
             session: Database session
             project_id: Project ID
             search: Search text (optional)
-            min_freq: Minimum frequency filter
+            min_freq: Minimum absolute frequency filter
+            min_doc_freq: Minimum document frequency filter (PATCH-10)
             source_filter: Source kind filter ("ngrams" or "np")
             hide_noise: Hide noise clusters (default True)
 
@@ -2451,6 +2459,10 @@ class TermExtractionService:
         # Min freq filter
         if min_freq:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
+
+        # PATCH-10: min_doc_freq filter
+        if min_doc_freq and min_doc_freq > 1:
+            stmt = stmt.where(TermCluster.doc_freq >= min_doc_freq)
 
         # Noise filter
         if hide_noise:

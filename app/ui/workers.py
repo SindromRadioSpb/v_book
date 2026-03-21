@@ -1477,6 +1477,7 @@ class TermsSearchWorker(QThread):
                     search=self.filters.get("search"),
                     preset=self.filters.get("preset", "freq"),
                     min_freq=self.filters.get("min_freq"),
+                    min_doc_freq=self.filters.get("min_doc_freq"),
                     source_filter=self.filters.get("source_filter"),
                     hide_noise=self.filters.get("hide_noise", True),
                     top_n=self.limit,
@@ -1496,6 +1497,7 @@ class TermsSearchWorker(QThread):
                     project_id=self.project_id,
                     search=self.filters.get("search"),
                     min_freq=self.filters.get("min_freq"),
+                    min_doc_freq=self.filters.get("min_doc_freq"),
                     source_filter=self.filters.get("source_filter"),
                     hide_noise=self.filters.get("hide_noise", True),
                 )

@@ -204,6 +204,20 @@ class TermsView(QWidget):
         self.min_freq_spin.valueChanged.connect(self.on_min_freq_changed)
         extract_controls_layout.addWidget(self.min_freq_spin)
 
+        # PATCH-10: Min doc freq filter (separate from min_freq)
+        extract_controls_layout.addWidget(QLabel("Min doc freq:"))
+        self.min_doc_freq_spin = QSpinBox()
+        self.min_doc_freq_spin.setRange(1, 50)
+        self.min_doc_freq_spin.setToolTip(
+            "Minimum number of documents a term must appear in.\n"
+            "Filters out terms that appear many times in a single document.\n"
+            "Default 1 = no filter."
+        )
+        saved_min_doc_freq = self.settings.get_int("terms_view/min_doc_freq", 1)
+        self.min_doc_freq_spin.setValue(saved_min_doc_freq)
+        self.min_doc_freq_spin.valueChanged.connect(self.on_min_doc_freq_changed)
+        extract_controls_layout.addWidget(self.min_doc_freq_spin)
+
         extract_controls_layout.addStretch()
         layout.addLayout(extract_controls_layout)
 
@@ -543,6 +557,12 @@ class TermsView(QWidget):
         """Handle Min freq change - save setting (no reload needed, used only during extraction)."""
         self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
 
+    def on_min_doc_freq_changed(self):
+        """Handle Min doc freq change - persist and refresh view (PATCH-10)."""
+        self.settings.set_value("terms_view/min_doc_freq", self.min_doc_freq_spin.value())
+        self.current_page = 1
+        self.perform_search()
+
     def on_include_np_changed(self):
         """Handle Include NP chunks toggle - persist via QSettings."""
         self.settings.set_value("terms_view/include_np", self.include_np_checkbox.isChecked())
@@ -563,6 +583,9 @@ class TermsView(QWidget):
             "preset": self.preset_combo.currentText().lower(),
             "source_filter": self._get_source_filter(),
             "min_freq": self.min_freq_spin.value() if self.min_freq_spin.value() > 1 else None,
+            "min_doc_freq": (
+                self.min_doc_freq_spin.value() if self.min_doc_freq_spin.value() > 1 else None
+            ),
             "hide_noise": self.hide_noise_checkbox.isChecked(),
         }
 
