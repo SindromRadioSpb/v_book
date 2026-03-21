@@ -159,7 +159,19 @@ class TermsView(QWidget):
         # N-gram sizes: configurable bigrams/trigrams (persisted via QSettings)
         extract_controls_layout.addWidget(QLabel("N-grams:"))
         self.ngram_bigrams_checkbox = QCheckBox("Bigrams")
+        self.ngram_bigrams_checkbox.setToolTip(
+            "Extract 2-word n-grams (bigrams).\n"
+            "Each checked size is extracted independently.\n"
+            "Bigrams only → only 2-word sequences.\n"
+            "Both checked → 2-word and 3-word sequences."
+        )
         self.ngram_trigrams_checkbox = QCheckBox("Trigrams")
+        self.ngram_trigrams_checkbox.setToolTip(
+            "Extract 3-word n-grams (trigrams).\n"
+            "Each checked size is extracted independently.\n"
+            "Trigrams only → only 3-word sequences.\n"
+            "Both checked → 2-word and 3-word sequences."
+        )
         saved_ngram_ns_json = self.settings.get_string(
             "terms_view/ngram_ns_json", "[2,3]"
         )
