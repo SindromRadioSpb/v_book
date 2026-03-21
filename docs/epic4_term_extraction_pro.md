@@ -1,7 +1,7 @@
 # Epic 4: Term Extraction Pro
 
-**Status:** In progress
-**Schema:** v43 (migration 043), v44 planned (migration 044)
+**Status:** Complete
+**Schema:** v43 (migration 043), v44 (migration 044)
 
 ---
 
@@ -16,10 +16,10 @@
 | PATCH-04 | ✅ done | Docs + Bigrams/Trigrams/Keyness/Weirdness tooltips |
 | PATCH-05 | ✅ done | _store_termhood_metrics_for_project(), DTO, sortable Keyness col |
 | PATCH-06 | ✅ done | 7 tests: best_keyness batch logic, scoping, NULL contract |
-| PATCH-07 | 🔄 planned | Store weirdness at extraction time (same pass as keyness) |
-| PATCH-08 | 🔄 planned | Recalculate Keyness/Weirdness button + staleness indicator |
-| PATCH-09 | 🔄 planned | keyness / weirdness sort presets in preset_combo |
-| PATCH-10 | 🔄 planned | min_doc_freq filter (separate from min_freq_abs) |
+| PATCH-07 | ✅ done | Store weirdness at extraction time (same pass as keyness) |
+| PATCH-08 | ✅ done | Recalculate Keyness/Weirdness button + staleness indicator |
+| PATCH-09 | ✅ done | keyness / weirdness sort presets in preset_combo |
+| PATCH-10 | ✅ done | min_doc_freq filter (separate from min_freq_abs) |
 
 ---
 
