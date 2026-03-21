@@ -1000,8 +1000,15 @@ class TermsView(QWidget):
             )
             if cb.isChecked()
         ]
-        # Fall back to (2, 3) if user unchecked both (prevent empty extraction)
-        ngram_ns: tuple[int, ...] = tuple(ngram_ns_list) if ngram_ns_list else (2, 3)
+        # Validate: n-gram extraction requires at least one size selected
+        if not ngram_ns_list:
+            QMessageBox.warning(
+                self,
+                "N-gram size required",
+                "For n-gram extraction, select at least one size: Bigrams and/or Trigrams.",
+            )
+            return
+        ngram_ns: tuple[int, ...] = tuple(ngram_ns_list)
 
         # Disable UI during extraction (prevent QThread lifecycle issues)
         self.extract_btn.setEnabled(False)

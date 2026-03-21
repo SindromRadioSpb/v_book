@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from app.ui.terms_view import TermsView
 
 
@@ -134,7 +132,12 @@ def test_on_ngram_ns_changed_saves_both():
 
 
 def test_on_ngram_ns_changed_saves_empty_when_none_checked():
-    """on_ngram_ns_changed() saves [] when both unchecked (fallback handled in on_extract)."""
+    """on_ngram_ns_changed() saves [] when both unchecked.
+
+    [] in QSettings is valid — it records the user's selection faithfully.
+    on_extract() will show a validation error and refuse to start extraction,
+    so the empty value never reaches the service layer.
+    """
     settings = _FakeSettings()
     view = TermsView.__new__(TermsView)
     view.settings = settings
