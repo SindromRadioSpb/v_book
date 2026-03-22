@@ -26,6 +26,7 @@ from app.infra.sa_models import (
     Lemma,
     StudyProgress,
     TermCluster,
+    TermExtractRun,
     TMEntry,
     TMGlobal,
     UserDictionary,
@@ -442,7 +443,7 @@ class UserDictionaryService:
                     noise_reason=item.noise_reason,
                     notes=item.notes,
                 )
-                self._attach_source_links(entry, item)
+                self._attach_source_links(entry, item, session)
                 session.add(entry)
                 session.flush()
                 created += 1
@@ -462,9 +463,9 @@ class UserDictionaryService:
                 entry.noise_reason = item.noise_reason
 
             if entry.lemma_id is None and item.kind == "lemma":
-                self._attach_source_links(entry, item)
+                self._attach_source_links(entry, item, session)
             if entry.cluster_id is None and item.kind == "term_cluster":
-                self._attach_source_links(entry, item)
+                self._attach_source_links(entry, item, session)
 
             cache[key] = entry
             if global_row:
@@ -517,8 +518,36 @@ class UserDictionaryService:
         return entry_scope == item_scope
 
     @staticmethod
-    def _attach_source_links(entry: TMEntry, item: UserDictionaryItem) -> None:
-        """Attach source entity IDs to TM entry when available."""
+    def _get_last_run_provenance(
+        session: Session, project_id: int
+    ) -> tuple[str | None, int | None]:
+        """Return (params_hash, run_id) from the last successful extraction run.
+
+        Used to populate promoted_at_params_hash / promoted_at_run_id at
+        promotion time. Returns (None, None) when no run exists.
+        """
+        row = session.execute(
+            select(TermExtractRun.params_hash, TermExtractRun.run_id)
+            .where(
+                TermExtractRun.project_id == project_id,
+                TermExtractRun.status == "ok",
+            )
+            .order_by(TermExtractRun.run_id.desc())
+            .limit(1)
+        ).one_or_none()
+        if row is None:
+            return None, None
+        return row.params_hash, row.run_id
+
+    def _attach_source_links(
+        self, entry: TMEntry, item: UserDictionaryItem, session: Session | None = None
+    ) -> None:
+        """Attach source entity IDs to TM entry when available.
+
+        When session is provided and the entry is being linked to a cluster
+        for the first time, also populates the Epic 5A provenance fields
+        (promoted_from_cluster_id, promoted_at_params_hash, promoted_at_run_id).
+        """
         try:
             entity_id = int(item.origin_entity_id) if item.origin_entity_id is not None else None
         except Exception:
@@ -531,6 +560,14 @@ class UserDictionaryService:
             and entity_id is not None
         ):
             entry.cluster_id = entity_id
+            # Populate provenance on first promotion only (never overwrite).
+            if entry.promoted_from_cluster_id is None and session is not None:
+                project_id = item.origin_project_id
+                if project_id is not None:
+                    params_hash, run_id = self._get_last_run_provenance(session, project_id)
+                    entry.promoted_from_cluster_id = entity_id
+                    entry.promoted_at_params_hash = params_hash
+                    entry.promoted_at_run_id = run_id
 
     def bulk_remove_items(
         self,
@@ -686,7 +723,16 @@ class UserDictionaryService:
                 and item.origin_entity_id
             ):
                 try:
-                    created.cluster_id = int(item.origin_entity_id)
+                    cid = int(item.origin_entity_id)
+                    created.cluster_id = cid
+                    # Provenance: first-time promotion snapshot (Epic 5A PATCH-02)
+                    if item.origin_project_id is not None:
+                        params_hash, run_id = self._get_last_run_provenance(
+                            session, item.origin_project_id
+                        )
+                        created.promoted_from_cluster_id = cid
+                        created.promoted_at_params_hash = params_hash
+                        created.promoted_at_run_id = run_id
                 except Exception:
                     created.cluster_id = None
             session.add(created)

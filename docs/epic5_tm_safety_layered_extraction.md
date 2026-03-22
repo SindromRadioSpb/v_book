@@ -51,7 +51,7 @@
 | Patch | Status | Description |
 |-------|--------|-------------|
 | PATCH-01 | ✅ done | Migration 045: provenance columns на tm_entry |
-| PATCH-02 | 🔄 planned | Populate provenance при promotion (attach + bulk create) |
+| PATCH-02 | ✅ done | Populate provenance при promotion (attach + bulk create) |
 | PATCH-03 | 🔄 planned | Impact preview перед destructive overwrite |
 | PATCH-04 | 🔄 planned | source_status в UI Translation Management |
 | PATCH-05 | 🔄 planned | Тесты: провенанс, статусы, impact count |

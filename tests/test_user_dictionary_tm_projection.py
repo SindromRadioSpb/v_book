@@ -15,6 +15,7 @@ from app.infra.sa_models import (
     Library,
     SourceDocument,
     StudyProgress,
+    TermExtractRun,
     TMEntry,
     TMGlobal,
     TermCluster,
@@ -38,6 +39,7 @@ def _create_schema(engine):
     SourceDocument.__table__.create(engine, checkfirst=True)
     Lemma.__table__.create(engine, checkfirst=True)
     TermCluster.__table__.create(engine, checkfirst=True)
+    TermExtractRun.__table__.create(engine, checkfirst=True)
     TMEntry.__table__.create(engine, checkfirst=True)
     TMGlobal.__table__.create(engine, checkfirst=True)
     UserDictionary.__table__.create(engine, checkfirst=True)
