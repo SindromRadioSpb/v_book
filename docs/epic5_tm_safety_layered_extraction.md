@@ -1,6 +1,6 @@
 # Epic 5: TM Safety, Provenance & Layered Extraction
 
-**Status:** Planned
+**Status:** Epic 5A complete; Epic 5B planned
 **Schema:** v44 → v45 (Epic 5A), v46 (Epic 5B)
 
 ---
@@ -54,7 +54,7 @@
 | PATCH-02 | ✅ done | Populate provenance при promotion (attach + bulk create) |
 | PATCH-03 | ✅ done | Impact preview перед destructive overwrite |
 | PATCH-04 | ✅ done | source_status в UI Translation Management |
-| PATCH-05 | 🔄 planned | Тесты: провенанс, статусы, impact count |
+| PATCH-05 | ✅ done | Тесты: провенанс, статусы, impact count |
 
 ### Epic 5B — Layered Extraction Modes
 
