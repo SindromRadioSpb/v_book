@@ -1,7 +1,7 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for HDLE Premium
 #
-# РђРљРўРЈРђР›Р¬РќРђРЇ Р’Р•Р РЎРРЇ: 2026-02-11 (РІРєР»СЋС‡Р°РµС‚ Task 9 - Project Exchange, Task 11 - Entity Classification)
+# РђРљРўРЈРђР›Р¬РќРђРЇ Р’Р•Р РЎРРЇ: 2026-03-22 (РІРєР»СЋС‡Р°РµС‚ Task 9 - Project Exchange, Task 11 - Entity Classification)
 #
 # Р­С‚РѕС‚ spec С„Р°Р№Р» СЃРѕР·РґР°РµС‚ standalone Windows executable СЃ:
 # - РџРѕР»РЅС‹РјРё hiddenimports (PyQt6, SQLAlchemy, psutil, Google Cloud Translate)
@@ -87,6 +87,7 @@ a = Analysis(
         'app.services.concordance_service',
         'app.services.stats_service',
         'app.services.term_extraction_service',
+        'app.services.translation_admin_service',  # all import sites are lazy — must be explicit
         'app.services.coverage_service',
         'app.services.dictionary_import_service',
         'app.services.entity_classifier',  # Task 11: Entity Classification
