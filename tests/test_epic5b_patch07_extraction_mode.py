@@ -6,7 +6,7 @@ Tests:
 3. Worker accepts extraction_mode kwarg (replace_layer)
 4. Worker defaults extraction_mode to "overwrite"
 5. Service accepts extraction_mode=overwrite and runs chunked path
-6. Service accepts extraction_mode=merge and runs legacy path
+6. Service accepts extraction_mode=merge and runs chunked path with overwrite=False
 7. Service extraction_mode=replace_layer raises NotImplementedError
 8. Service backward-compat: overwrite=False maps to merge
 """
@@ -99,20 +99,20 @@ def test_service_overwrite_mode_calls_chunked(session):
     assert call_kwargs.get("overwrite") is True
 
 
-def test_service_merge_mode_calls_legacy(session):
-    """extraction_mode='merge' dispatches to legacy path (non-destructive)."""
+def test_service_merge_mode_calls_chunked(session):
+    """extraction_mode='merge' dispatches to chunked path with overwrite=False."""
     svc = TermExtractionService.__new__(TermExtractionService)
-    legacy_mock = MagicMock(return_value=MagicMock())
+    chunked_mock = MagicMock(return_value=MagicMock())
 
-    with patch.object(svc, "_extract_terms_for_project_legacy", legacy_mock):
+    with patch.object(svc, "_extract_terms_for_project_chunked", chunked_mock):
         svc.extract_terms_for_project(
             session,
             1,
             extraction_mode="merge",
         )
 
-    legacy_mock.assert_called_once()
-    call_kwargs = legacy_mock.call_args[1]
+    chunked_mock.assert_called_once()
+    call_kwargs = chunked_mock.call_args[1]
     assert call_kwargs.get("overwrite") is False
 
 
@@ -129,11 +129,11 @@ def test_service_replace_layer_raises(session):
 
 
 def test_service_backward_compat_overwrite_false_maps_to_merge(session):
-    """overwrite=False with default extraction_mode='overwrite' → merge path."""
+    """overwrite=False with default extraction_mode='overwrite' → chunked with overwrite=False."""
     svc = TermExtractionService.__new__(TermExtractionService)
-    legacy_mock = MagicMock(return_value=MagicMock())
+    chunked_mock = MagicMock(return_value=MagicMock())
 
-    with patch.object(svc, "_extract_terms_for_project_legacy", legacy_mock):
+    with patch.object(svc, "_extract_terms_for_project_chunked", chunked_mock):
         svc.extract_terms_for_project(
             session,
             1,
@@ -141,6 +141,6 @@ def test_service_backward_compat_overwrite_false_maps_to_merge(session):
             # extraction_mode defaults to "overwrite", backward-compat maps it to "merge"
         )
 
-    legacy_mock.assert_called_once()
-    call_kwargs = legacy_mock.call_args[1]
+    chunked_mock.assert_called_once()
+    call_kwargs = chunked_mock.call_args[1]
     assert call_kwargs.get("overwrite") is False

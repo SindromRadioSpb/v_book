@@ -263,9 +263,9 @@ class TermExtractionService:
 
         if extraction_mode == "merge":
             # Merge mode: add new clusters without clearing existing ones.
-            # Uses legacy path which skips the clear step. (Epic 5B PATCH-08 will
-            # replace this with a proper upsert-aware chunked path.)
-            return self._extract_terms_for_project_legacy(
+            # Routes to chunked path with overwrite=False so _clear_existing_terms
+            # is skipped; inserts use OR IGNORE to preserve curated clusters.
+            return self._extract_terms_for_project_chunked(
                 session,
                 project_id,
                 enable_ngrams=enable_ngrams,
@@ -274,6 +274,12 @@ class TermExtractionService:
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
                 overwrite=False,
+                batch_size=batch_size,
+                progress_callback=progress_callback,
+                state_callback=state_callback,
+                cancel_check=cancel_check,
+                pause_check=pause_check,
+                resume_latest=resume_latest,
             )
 
         if extraction_mode == "replace_layer":
@@ -578,7 +584,8 @@ class TermExtractionService:
             docs_processed = int(run.docs_processed or 0)
 
             if total_docs == 0:
-                self._clear_existing_terms(session, project_id)
+                if overwrite:
+                    self._clear_existing_terms(session, project_id)
                 self._update_extract_project_metadata(
                     project,
                     min_freq=min_freq,
@@ -840,7 +847,8 @@ class TermExtractionService:
                 last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
             )
 
-            self._clear_existing_terms(session, project_id)
+            if overwrite:
+                self._clear_existing_terms(session, project_id)
             total_tokens = self._get_total_tokens(session, project_id)
             ngrams_extracted = (
                 self._store_staged_ngrams(
@@ -849,6 +857,7 @@ class TermExtractionService:
                     run_id=run_id,
                     min_freq=min_freq,
                     total_tokens=total_tokens,
+                    overwrite=overwrite,
                     progress_callback=lambda message: _emit(
                         message,
                         stage="Storing staged n-grams",
@@ -870,6 +879,7 @@ class TermExtractionService:
                     project_id,
                     run_id=run_id,
                     min_freq=min_freq,
+                    overwrite=overwrite,
                     progress_callback=lambda message: _emit(
                         message,
                         stage="Storing staged NP chunks",
@@ -895,7 +905,7 @@ class TermExtractionService:
                 chunks_hint=int(run.chunks_total or 0),
                 last_doc_id=int(run.last_doc_id) if run.last_doc_id is not None else None,
             )
-            clusters_created = self._cluster_terms(session, project_id)
+            clusters_created = self._cluster_terms(session, project_id, overwrite=overwrite)
 
             # Store best_keyness if a reference corpus is configured.
             # NULL = no reference corpus; non-NULL = computed and stored for fast sort.
@@ -1930,6 +1940,7 @@ class TermExtractionService:
         run_id: int,
         min_freq: int,
         total_tokens: int,
+        overwrite: bool = True,
         progress_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Store staged ngram accumulators into final term tables."""
@@ -1960,18 +1971,48 @@ class TermExtractionService:
                 doc_freq = int(row["doc_freq"] or 0)
 
                 canonical_key = get_cluster_key(surface_text, lemma_phrase)
-                ngram_result = session.execute(
-                    Ngram.__table__.insert().values(
-                        project_id=project_id,
-                        n=n,
-                        surface_text=surface_text,
-                        he_canonical=canonical_key,
-                        lemma_phrase=lemma_phrase,
-                        source_kind="ngram",
-                        pos_pattern=pos_pattern,
+                ngram_values = {
+                    "project_id": project_id,
+                    "n": n,
+                    "surface_text": surface_text,
+                    "he_canonical": canonical_key,
+                    "lemma_phrase": lemma_phrase,
+                    "source_kind": "ngram",
+                    "pos_pattern": pos_pattern,
+                }
+                if overwrite:
+                    ngram_result = session.execute(Ngram.__table__.insert().values(**ngram_values))
+                    ngram_id = int(ngram_result.inserted_primary_key[0])
+                    is_new_ngram = True
+                else:
+                    session.execute(
+                        sqlite_insert(Ngram.__table__)
+                        .values(**ngram_values)
+                        .on_conflict_do_nothing()
                     )
-                )
-                ngram_id = int(ngram_result.inserted_primary_key[0])
+                    ngram_id = int(
+                        session.execute(
+                            select(Ngram.ngram_id).where(
+                                and_(
+                                    Ngram.project_id == project_id,
+                                    Ngram.n == n,
+                                    Ngram.surface_text == surface_text,
+                                    Ngram.source_kind == "ngram",
+                                )
+                            )
+                        ).scalar_one()
+                    )
+                    # Check whether we inserted or found an existing row
+                    is_new_ngram = not session.execute(
+                        select(func.count())
+                        .select_from(NgramProjectStat.__table__)
+                        .where(
+                            and_(
+                                NgramProjectStat.project_id == project_id,
+                                NgramProjectStat.ngram_id == ngram_id,
+                            )
+                        )
+                    ).scalar()
 
                 if n == 2:
                     lemmas = lemma_phrase.split()
@@ -1988,19 +2029,21 @@ class TermExtractionService:
                 else:
                     measures = {"pmi": None, "tscore": None, "llr": None, "dice": None}
 
-                session.execute(
-                    NgramProjectStat.__table__.insert().values(
-                        project_id=project_id,
-                        ngram_id=ngram_id,
-                        freq_abs=freq_abs,
-                        doc_freq=doc_freq,
-                        pmi_cache=measures["pmi"],
-                        tscore_cache=measures["tscore"],
-                        llr_cache=measures["llr"],
-                        dice_cache=measures["dice"],
+                if is_new_ngram:
+                    session.execute(
+                        NgramProjectStat.__table__.insert().values(
+                            project_id=project_id,
+                            ngram_id=ngram_id,
+                            freq_abs=freq_abs,
+                            doc_freq=doc_freq,
+                            pmi_cache=measures["pmi"],
+                            tscore_cache=measures["tscore"],
+                            llr_cache=measures["llr"],
+                            dice_cache=measures["dice"],
+                        )
                     )
-                )
-                ngrams_stored += 1
+                if is_new_ngram:
+                    ngrams_stored += 1
 
             session.flush()
             if progress_callback:
@@ -2015,6 +2058,7 @@ class TermExtractionService:
         *,
         run_id: int,
         min_freq: int,
+        overwrite: bool = True,
         progress_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Store staged NP accumulators into final term tables."""
@@ -2029,34 +2073,63 @@ class TermExtractionService:
             start=1,
         ):
             for row in rows:
-                ngram_result = session.execute(
-                    Ngram.__table__.insert().values(
-                        project_id=project_id,
-                        n=int(row["n"]),
-                        surface_text=str(row["surface_text"]),
-                        he_canonical=get_cluster_key(
-                            str(row["surface_text"]),
-                            str(row.get("lemma_phrase") or ""),
-                        ),
-                        lemma_phrase=str(row.get("lemma_phrase") or ""),
-                        source_kind="np",
-                        pos_pattern=row.get("pos_pattern"),
+                np_surface = str(row["surface_text"])
+                np_n = int(row["n"])
+                np_lemma = str(row.get("lemma_phrase") or "")
+                np_values = {
+                    "project_id": project_id,
+                    "n": np_n,
+                    "surface_text": np_surface,
+                    "he_canonical": get_cluster_key(np_surface, np_lemma),
+                    "lemma_phrase": np_lemma,
+                    "source_kind": "np",
+                    "pos_pattern": row.get("pos_pattern"),
+                }
+                if overwrite:
+                    np_result = session.execute(Ngram.__table__.insert().values(**np_values))
+                    ngram_id = int(np_result.inserted_primary_key[0])
+                    is_new_np = True
+                else:
+                    session.execute(
+                        sqlite_insert(Ngram.__table__).values(**np_values).on_conflict_do_nothing()
                     )
-                )
-                ngram_id = int(ngram_result.inserted_primary_key[0])
-                session.execute(
-                    NgramProjectStat.__table__.insert().values(
-                        project_id=project_id,
-                        ngram_id=ngram_id,
-                        freq_abs=int(row["freq_abs"] or 0),
-                        doc_freq=int(row["doc_freq"] or 0),
-                        pmi_cache=None,
-                        tscore_cache=None,
-                        llr_cache=None,
-                        dice_cache=None,
+                    ngram_id = int(
+                        session.execute(
+                            select(Ngram.ngram_id).where(
+                                and_(
+                                    Ngram.project_id == project_id,
+                                    Ngram.n == np_n,
+                                    Ngram.surface_text == np_surface,
+                                    Ngram.source_kind == "np",
+                                )
+                            )
+                        ).scalar_one()
                     )
-                )
-                nps_stored += 1
+                    is_new_np = not session.execute(
+                        select(func.count())
+                        .select_from(NgramProjectStat.__table__)
+                        .where(
+                            and_(
+                                NgramProjectStat.project_id == project_id,
+                                NgramProjectStat.ngram_id == ngram_id,
+                            )
+                        )
+                    ).scalar()
+
+                if is_new_np:
+                    session.execute(
+                        NgramProjectStat.__table__.insert().values(
+                            project_id=project_id,
+                            ngram_id=ngram_id,
+                            freq_abs=int(row["freq_abs"] or 0),
+                            doc_freq=int(row["doc_freq"] or 0),
+                            pmi_cache=None,
+                            tscore_cache=None,
+                            llr_cache=None,
+                            dice_cache=None,
+                        )
+                    )
+                    nps_stored += 1
 
             session.flush()
             if progress_callback:
@@ -2138,6 +2211,8 @@ class TermExtractionService:
         canonical_key: str,
         members: list[dict],
         classification_stats: dict,
+        *,
+        overwrite: bool = True,
     ) -> int:
         """Insert one cluster and its members from pre-fetched member rows."""
         if not members:
@@ -2179,27 +2254,65 @@ class TermExtractionService:
         if classification.is_noise:
             classification_stats["noise"] += 1
 
-        cluster_result = session.execute(
-            TermCluster.__table__.insert().values(
-                project_id=project_id,
-                canonical_key=canonical_key,
-                representative_he=representative_he,
-                representative_lemma=representative_lemma,
-                freq_abs=total_freq,
-                doc_freq=total_doc_freq,
-                members_count=len(members),
-                best_pmi=max(pmis) if pmis else None,
-                best_llr=max(llrs) if llrs else None,
-                best_dice=max(dices) if dices else None,
-                best_tscore=max(tscores) if tscores else None,
-                source_kinds=",".join(source_kinds) if source_kinds else None,
-                ngram_n_set=ngram_n_set,
-                entity_class=classification.entity_class,
-                is_noise=1 if classification.is_noise else 0,
-                noise_reason=classification.noise_reason,
-                norm_text=classification.norm_text,
-            )
-        )
+        cluster_values = {
+            "project_id": project_id,
+            "canonical_key": canonical_key,
+            "representative_he": representative_he,
+            "representative_lemma": representative_lemma,
+            "freq_abs": total_freq,
+            "doc_freq": total_doc_freq,
+            "members_count": len(members),
+            "best_pmi": max(pmis) if pmis else None,
+            "best_llr": max(llrs) if llrs else None,
+            "best_dice": max(dices) if dices else None,
+            "best_tscore": max(tscores) if tscores else None,
+            "source_kinds": ",".join(source_kinds) if source_kinds else None,
+            "ngram_n_set": ngram_n_set,
+            "entity_class": classification.entity_class,
+            "is_noise": 1 if classification.is_noise else 0,
+            "noise_reason": classification.noise_reason,
+            "norm_text": classification.norm_text,
+        }
+
+        if not overwrite:
+            # Merge mode: check for existing cluster before attempting insert.
+            existing_id = session.execute(
+                select(TermCluster.cluster_id).where(
+                    and_(
+                        TermCluster.project_id == project_id,
+                        TermCluster.canonical_key == canonical_key,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing_id is not None:
+                # Cluster already exists — preserve curation state, link only new members.
+                cluster_id = int(existing_id)
+                existing_member_ids = {
+                    int(r[0])
+                    for r in session.execute(
+                        select(TermClusterMember.ngram_id).where(
+                            TermClusterMember.cluster_id == cluster_id
+                        )
+                    )
+                }
+                new_members = [m for m in members if int(m["ngram_id"]) not in existing_member_ids]
+                if new_members:
+                    session.execute(
+                        TermClusterMember.__table__.insert(),
+                        [
+                            {
+                                "cluster_id": cluster_id,
+                                "ngram_id": int(member["ngram_id"]),
+                                "member_freq_abs": int(member["freq_abs"] or 0),
+                                "member_doc_freq": int(member["doc_freq"] or 0),
+                            }
+                            for member in new_members
+                        ],
+                    )
+                return 0  # Existing cluster: not counted in clusters_created
+
+        cluster_result = session.execute(TermCluster.__table__.insert().values(**cluster_values))
         cluster_id = int(cluster_result.inserted_primary_key[0])
 
         session.execute(
@@ -2216,7 +2329,7 @@ class TermExtractionService:
         )
         return 1
 
-    def _cluster_terms(self, session: Session, project_id: int) -> int:
+    def _cluster_terms(self, session: Session, project_id: int, *, overwrite: bool = True) -> int:
         """
         Cluster terms by canonical key (M5.1).
 
@@ -2276,6 +2389,7 @@ class TermExtractionService:
                         current_key,
                         current_members,
                         classification_stats,
+                        overwrite=overwrite,
                     )
                     current_members = []
                     current_key = canonical_key
@@ -2288,6 +2402,7 @@ class TermExtractionService:
                     current_key,
                     current_members,
                     classification_stats,
+                    overwrite=overwrite,
                 )
 
         session.flush()
