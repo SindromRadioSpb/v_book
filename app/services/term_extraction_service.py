@@ -972,6 +972,37 @@ class TermExtractionService:
                 ),
             )
 
+    @staticmethod
+    def get_overwrite_impact(session: Session, project_id: int) -> dict[str, int]:
+        """Return the impact of a Full Overwrite extraction on existing data.
+
+        Used to show a confirmation dialog before destructive re-extraction.
+
+        Returns:
+            dict with keys:
+                'clusters'         — number of term_cluster rows that will be deleted
+                'linked_tm_entries'— number of tm_entry rows that will lose their
+                                     cluster_id link (cluster_id → NULL after delete)
+        """
+        cluster_count = (
+            session.execute(
+                select(func.count()).where(TermCluster.project_id == project_id)
+            ).scalar()
+            or 0
+        )
+        linked_tm_count = (
+            session.execute(
+                select(func.count())
+                .select_from(TMEntry)
+                .where(
+                    TMEntry.project_id == project_id,
+                    TMEntry.cluster_id.is_not(None),
+                )
+            ).scalar()
+            or 0
+        )
+        return {"clusters": int(cluster_count), "linked_tm_entries": int(linked_tm_count)}
+
     def _clear_existing_terms(self, session: Session, project_id: int) -> None:
         """Clear existing ngrams and clusters for project."""
         # Delete clusters (CASCADE handles members)

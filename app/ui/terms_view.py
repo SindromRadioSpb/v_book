@@ -1145,6 +1145,35 @@ class TermsView(QWidget):
             self.status_label.setText("Ready")
             return
 
+        # Epic 5A PATCH-03: impact preview before destructive overwrite.
+        # Run a quick read-only query to count clusters and linked TM entries
+        # that will be affected. Show a confirmation if any TM links exist.
+        with self.db_service.get_session() as _impact_sess:
+            impact = self.term_service.get_overwrite_impact(
+                _impact_sess, self.project_id
+            )
+        if impact["linked_tm_entries"] > 0:
+            linked = impact["linked_tm_entries"]
+            clusters = impact["clusters"]
+            msg = (
+                f"Full Overwrite will delete {clusters} term cluster(s).\n\n"
+                f"{linked} Translation Memory entry(ies) will lose their active cluster link\n"
+                f"(they will be kept in TM with status \u201csource_cluster_missing\u201d).\n\n"
+                "Continue?"
+            )
+            overwrite_reply = QMessageBox.question(
+                self,
+                "Overwrite Impact",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if overwrite_reply != QMessageBox.StandardButton.Yes:
+                self.extract_btn.setEnabled(True)
+                self.refresh_btn.setEnabled(True)
+                self.progress_bar.setVisible(False)
+                self.status_label.setText("Ready")
+                return
+
         # Create and start worker (keep strong reference to prevent GC)
         self.extract_worker = ProjectTermExtractionWorker(
             project_id=self.project_id,
