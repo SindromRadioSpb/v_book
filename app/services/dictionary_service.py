@@ -47,6 +47,33 @@ class DictionaryService:
     _lemma_fts_warning_emitted: ClassVar[set[str]] = set()
 
     # ------------------------------------------------------------------
+    # Epic 6A: source lifecycle helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def compute_source_lifecycle(
+        lemma_id: int | None,
+        orphaned_lemma_id: int | None,
+        origin: str | None,
+    ) -> str:
+        """Compute the source_lifecycle of a TM entry at query time.
+
+        Never stored — always derived from three fields:
+          'linked'         — lemma_id IS NOT NULL
+          'source_missing' — lemma_id IS NULL AND orphaned_lemma_id IS NOT NULL
+          'manual'         — lemma_id IS NULL AND orphaned_lemma_id IS NULL
+                             AND origin in ('user_edit', 'manual')
+          'auto_only'      — otherwise
+        """
+        if lemma_id is not None:
+            return "linked"
+        if orphaned_lemma_id is not None:
+            return "source_missing"
+        if origin in ("user_edit", "manual"):
+            return "manual"
+        return "auto_only"
+
+    # ------------------------------------------------------------------
     # FTS5 helpers
     # ------------------------------------------------------------------
 
@@ -154,7 +181,7 @@ class DictionaryService:
         """Stable cache key for (project_id, filters)."""
         # Sort keys for stability; use only JSON-serializable values.
         stable = json.dumps(
-            {"project_id": project_id, **{k: v for k, v in sorted(filters.items())}},
+            {"project_id": project_id, **dict(sorted(filters.items()))},
             sort_keys=True,
             default=str,
         )

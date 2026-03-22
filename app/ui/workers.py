@@ -2110,11 +2110,19 @@ class BulkNoiseUpdateWorker(QThread):
                     # Get chunk of IDs
                     chunk_ids = self.item_ids[i : i + chunk_size]
 
-                    # Update chunk
+                    # Update chunk — Epic 6A: track manual provenance for Lemma
+                    from datetime import UTC, datetime
+
+                    extra_values: dict = {}
+                    if self.model_class == "Lemma":
+                        extra_values = {
+                            "noise_source": "manual",
+                            "noise_updated_at": datetime.now(UTC).isoformat(),
+                        }
                     stmt = (
                         update(Model)
                         .where(id_column.in_(chunk_ids))
-                        .values(is_noise=1 if self.is_noise else 0)
+                        .values(is_noise=1 if self.is_noise else 0, **extra_values)
                     )
                     result = session.execute(stmt)
 

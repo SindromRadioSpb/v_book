@@ -1,6 +1,7 @@
 ﻿"""Dictionary view - lemmas and MWE list."""
 
 import logging
+from datetime import UTC, datetime
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer
 from PyQt6.QtGui import QAction
@@ -1617,11 +1618,15 @@ class DictionaryView(QWidget):
 
                 from app.infra.sa_models import Lemma
 
-                # Update is_noise field
+                # Update is_noise field — Epic 6A: track manual provenance
                 stmt = (
                     update(Lemma)
                     .where(Lemma.lemma_id == lemma.lemma_id)
-                    .values(is_noise=1 if is_noise else 0)
+                    .values(
+                        is_noise=1 if is_noise else 0,
+                        noise_source="manual",
+                        noise_updated_at=datetime.now(UTC).isoformat(),
+                    )
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_lemmas(session, [lemma.lemma_id])
@@ -1699,11 +1704,15 @@ class DictionaryView(QWidget):
 
                 from app.infra.sa_models import Lemma
 
-                # Bulk update using WHERE IN
+                # Bulk update using WHERE IN — Epic 6A: track manual provenance
                 stmt = (
                     update(Lemma)
                     .where(Lemma.lemma_id.in_(lemma_ids))
-                    .values(is_noise=1 if is_noise else 0)
+                    .values(
+                        is_noise=1 if is_noise else 0,
+                        noise_source="manual",
+                        noise_updated_at=datetime.now(UTC).isoformat(),
+                    )
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_lemmas(session, lemma_ids)

@@ -1,5 +1,6 @@
 """Document processing service."""
 
+import contextlib
 import hashlib
 import inspect
 import json
@@ -661,10 +662,8 @@ class ProcessService:
             return summary
         finally:
             if conn is not None:
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     conn.close()
-                except sqlite3.Error:
-                    pass
 
     def _run_snapshot_backfill_integrity_check(
         self,
@@ -717,10 +716,8 @@ class ProcessService:
             return summary
         finally:
             if conn is not None:
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     conn.close()
-                except sqlite3.Error:
-                    pass
 
     def _finalize_snapshot_backfill_run(
         self,
@@ -1128,6 +1125,8 @@ class ProcessService:
                     is_noise=1 if classification.is_noise else 0,
                     noise_reason=classification.noise_reason,
                     norm_text=classification.norm_text,
+                    noise_source="auto",  # Epic 6A: initial classification is auto
+                    noise_updated_at=datetime.now(UTC).isoformat(),
                 )
                 session.add(lemma)
                 session.flush()
@@ -1259,7 +1258,9 @@ class ProcessService:
             param_names = [f"lemma_id_{idx}" for idx in range(len(chunk))]
             in_clause = ", ".join(f":{name}" for name in param_names)
             params = {"pid": int(project_id)}
-            params.update({name: int(lemma_id) for name, lemma_id in zip(param_names, chunk)})
+            params.update(
+                {name: int(lemma_id) for name, lemma_id in zip(param_names, chunk, strict=False)}
+            )
             rows = session.execute(
                 text(
                     "SELECT lemma_id FROM lemma_project_stat "
@@ -1278,7 +1279,19 @@ class ProcessService:
             param_names = [f"lemma_id_{idx}" for idx in range(len(chunk))]
             in_clause = ", ".join(f":{name}" for name in param_names)
             params = {"pid": int(project_id)}
-            params.update({name: int(lemma_id) for name, lemma_id in zip(param_names, chunk)})
+            params.update(
+                {name: int(lemma_id) for name, lemma_id in zip(param_names, chunk, strict=False)}
+            )
+            # Epic 6A: snapshot lemma_id → tm_entry.orphaned_lemma_id before deletion
+            snap_params = {name: int(lid) for name, lid in zip(param_names, chunk, strict=False)}
+            session.execute(
+                text(
+                    "UPDATE tm_entry SET orphaned_lemma_id = lemma_id "
+                    f"WHERE lemma_id IN ({in_clause}) "
+                    "AND orphaned_lemma_id IS NULL"
+                ),
+                snap_params,
+            )
             session.execute(
                 text("DELETE FROM lemma " f"WHERE project_id = :pid AND lemma_id IN ({in_clause})"),
                 params,

@@ -499,6 +499,13 @@ class BatchMTTranslateService:
         existing = session.execute(stmt).scalar()
 
         if existing:
+            # Epic 6A R2 guard: protect user-approved entries unless OVERWRITE mode
+            if (
+                not force_global_update
+                and existing.origin == "user_edit"
+                and existing.status == "approved"
+            ):
+                return
             # Update existing
             existing.translation = translation
             existing.status = "approved"
