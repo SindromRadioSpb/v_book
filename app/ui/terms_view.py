@@ -218,6 +218,25 @@ class TermsView(QWidget):
         self.min_doc_freq_spin.valueChanged.connect(self.on_min_doc_freq_changed)
         extract_controls_layout.addWidget(self.min_doc_freq_spin)
 
+        # Epic 5B PATCH-07: Extraction mode selector
+        extract_controls_layout.addWidget(QLabel("Mode:"))
+        self.extraction_mode_combo = QComboBox()
+        self.extraction_mode_combo.addItem("Full Overwrite", userData="overwrite")
+        self.extraction_mode_combo.addItem("Merge", userData="merge")
+        self.extraction_mode_combo.addItem("Replace Layer", userData="replace_layer")
+        self.extraction_mode_combo.setToolTip(
+            "Full Overwrite — delete all clusters and re-extract from scratch.\n"
+            "Merge — add new clusters without deleting existing ones.\n"
+            "Replace Layer — delete only clusters matching the selected n-gram sizes,\n"
+            "  then re-extract those layers. Existing other-size clusters are preserved."
+        )
+        saved_mode = self.settings.get_string("terms_view/extraction_mode", "overwrite")
+        idx = self.extraction_mode_combo.findData(saved_mode)
+        if idx >= 0:
+            self.extraction_mode_combo.setCurrentIndex(idx)
+        self.extraction_mode_combo.currentIndexChanged.connect(self.on_extraction_mode_changed)
+        extract_controls_layout.addWidget(self.extraction_mode_combo)
+
         extract_controls_layout.addStretch()
         layout.addLayout(extract_controls_layout)
 
@@ -562,6 +581,11 @@ class TermsView(QWidget):
         self.settings.set_value("terms_view/min_doc_freq", self.min_doc_freq_spin.value())
         self.current_page = 1
         self.perform_search()
+
+    def on_extraction_mode_changed(self):
+        """Persist extraction mode selection (Epic 5B PATCH-07)."""
+        mode = self.extraction_mode_combo.currentData()
+        self.settings.set_value("terms_view/extraction_mode", mode)
 
     def on_include_np_changed(self):
         """Handle Include NP chunks toggle - persist via QSettings."""
@@ -1123,6 +1147,9 @@ class TermsView(QWidget):
             return
         ngram_ns: tuple[int, ...] = tuple(ngram_ns_list)
 
+        # Epic 5B PATCH-07: read extraction mode from combo.
+        extraction_mode = self.extraction_mode_combo.currentData() or "overwrite"
+
         # Disable UI during extraction (prevent QThread lifecycle issues)
         self.extract_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
@@ -1146,13 +1173,12 @@ class TermsView(QWidget):
             return
 
         # Epic 5A PATCH-03: impact preview before destructive overwrite.
-        # Run a quick read-only query to count clusters and linked TM entries
-        # that will be affected. Show a confirmation if any TM links exist.
+        # Only show for Full Overwrite mode — Merge and Replace Layer are non-destructive.
         with self.db_service.get_session() as _impact_sess:
             impact = self.term_service.get_overwrite_impact(
                 _impact_sess, self.project_id
             )
-        if impact["linked_tm_entries"] > 0:
+        if extraction_mode == "overwrite" and impact["linked_tm_entries"] > 0:
             linked = impact["linked_tm_entries"]
             clusters = impact["clusters"]
             msg = (
@@ -1175,6 +1201,8 @@ class TermsView(QWidget):
                 return
 
         # Create and start worker (keep strong reference to prevent GC)
+        # Full Overwrite: overwrite=True; Merge and Replace Layer: overwrite=False.
+        overwrite_flag = extraction_mode == "overwrite"
         self.extract_worker = ProjectTermExtractionWorker(
             project_id=self.project_id,
             enable_ngrams=True,
@@ -1182,7 +1210,8 @@ class TermsView(QWidget):
             min_freq=min_freq,
             ngram_ns=ngram_ns,
             np_max_len=np_max_len,
-            overwrite=True,
+            overwrite=overwrite_flag,
+            extraction_mode=extraction_mode,
         )
 
         self.extract_worker.progress.connect(self.on_extract_progress)
