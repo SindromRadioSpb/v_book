@@ -573,8 +573,10 @@ class TermsView(QWidget):
         self.settings.set_value("terms_view/np_max_len", self.np_max_len_spin.value())
 
     def on_min_freq_changed(self):
-        """Handle Min freq change - save setting (no reload needed, used only during extraction)."""
+        """Handle Min freq change - persist and refresh view (Epic 5C: display-time filter)."""
         self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
+        self.current_page = 1
+        self.perform_search()
 
     def on_min_doc_freq_changed(self):
         """Handle Min doc freq change - persist and refresh view (PATCH-10)."""
