@@ -533,7 +533,6 @@ class TermExtractionService:
                     project_id,
                     enable_ngrams=enable_ngrams,
                     include_np=include_np,
-                    min_freq=min_freq,
                     ngram_ns=ngram_ns,
                     np_max_len=np_max_len,
                     overwrite=overwrite,
@@ -1153,14 +1152,13 @@ class TermExtractionService:
 
     # algo_version: bump this when extraction logic changes in a way that makes
     # old params_hash values incompatible with new results.
-    _TERM_EXTRACT_ALGO_VERSION = 1
+    _TERM_EXTRACT_ALGO_VERSION = 2  # bumped Epic 5C: min_freq removed from hash
 
     def _build_term_extract_params_hash(
         self,
         *,
         enable_ngrams: bool,
         include_np: bool,
-        min_freq: int,
         ngram_ns: tuple[int, ...],
         np_max_len: int,
     ) -> str:
@@ -1169,6 +1167,7 @@ class TermExtractionService:
         Contract:
         - algo_version is included so logic changes can invalidate old hashes.
         - overwrite is NOT included (execution mode, not extraction result params).
+        - min_freq is NOT included (Epic 5C: display-time filter, not extraction param).
         - ngram_ns is always sorted to ensure determinism.
         - Serialized as compact JSON with sorted keys.
         """
@@ -1177,7 +1176,6 @@ class TermExtractionService:
                 "algo_version": self._TERM_EXTRACT_ALGO_VERSION,
                 "enable_ngrams": bool(enable_ngrams),
                 "include_np": bool(include_np),
-                "min_freq": int(min_freq),
                 "ngram_ns": sorted(int(n) for n in ngram_ns),
                 "np_max_len": int(np_max_len),
             },
@@ -1193,7 +1191,6 @@ class TermExtractionService:
         *,
         enable_ngrams: bool,
         include_np: bool,
-        min_freq: int,
         ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
@@ -1201,7 +1198,6 @@ class TermExtractionService:
         computed_hash = self._build_term_extract_params_hash(
             enable_ngrams=enable_ngrams,
             include_np=include_np,
-            min_freq=min_freq,
             ngram_ns=ngram_ns,
             np_max_len=np_max_len,
         )
@@ -1213,7 +1209,6 @@ class TermExtractionService:
                     TermExtractRun.enable_ngrams == (1 if enable_ngrams else 0),
                     TermExtractRun.include_np == (1 if include_np else 0),
                     TermExtractRun.overwrite == (1 if overwrite else 0),
-                    TermExtractRun.min_freq == int(min_freq),
                     TermExtractRun.ngram_ns_json == self._serialize_ngram_ns(ngram_ns),
                     TermExtractRun.np_max_len == int(np_max_len),
                     # params_hash gating: old rows (NULL) pass through for backward compat;
@@ -1258,7 +1253,6 @@ class TermExtractionService:
             params_hash=self._build_term_extract_params_hash(
                 enable_ngrams=enable_ngrams,
                 include_np=include_np,
-                min_freq=min_freq,
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
             ),
@@ -1613,9 +1607,7 @@ class TermExtractionService:
             return 0
 
         bigram_lemma_texts: set[str] = set()
-        for (surface_text, n), freq in ngram_counts.items():
-            if freq < min_freq:
-                continue
+        for (surface_text, n), _freq in ngram_counts.items():
             meta = ngram_meta.get((surface_text, n)) or {}
             if n != 2:
                 continue
@@ -1628,9 +1620,6 @@ class TermExtractionService:
 
         ngrams_stored = 0
         for (surface_text, n), freq in ngram_counts.items():
-            if freq < min_freq:
-                continue
-
             meta = ngram_meta[(surface_text, n)]
 
             # Get canonical key
@@ -1683,7 +1672,7 @@ class TermExtractionService:
             ngrams_stored += 1
 
         session.flush()
-        logger.info(f"Stored {ngrams_stored} n-grams (min_freq={min_freq})")
+        logger.info("Stored %d n-grams (all frequencies stored)", ngrams_stored)
         return ngrams_stored
 
     def _extract_ngrams(
@@ -1828,9 +1817,6 @@ class TermExtractionService:
 
         nps_stored = 0
         for (surface_text, n), freq in np_counts.items():
-            if freq < min_freq:
-                continue
-
             meta = np_meta[(surface_text, n)]
 
             # Get canonical key
@@ -1977,7 +1963,6 @@ class TermExtractionService:
                     and_(
                         TermExtractAccumulator.run_id == run_id,
                         TermExtractAccumulator.source_kind == source_kind,
-                        TermExtractAccumulator.freq_abs >= int(min_freq),
                     )
                 )
                 .order_by(TermExtractAccumulator.n.asc(), TermExtractAccumulator.surface_text.asc())
