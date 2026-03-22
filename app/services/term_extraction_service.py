@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, bindparam, func, or_, select
+from sqlalchemy import and_, bindparam, case, func, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -1044,9 +1044,10 @@ class TermExtractionService:
 
         Returns:
             dict with keys:
-                'clusters'         — number of term_cluster rows that will be deleted
-                'linked_tm_entries'— number of tm_entry rows that will lose their
-                                     cluster_id link (cluster_id → NULL after delete)
+                'clusters'          — number of term_cluster rows that will be deleted
+                'linked_tm_entries' — number of tm_entry rows that will lose their
+                                      cluster_id link (cluster_id → NULL after delete)
+                'processed_docs'    — number of processed source documents in the project
         """
         cluster_count = (
             session.execute(
@@ -1065,7 +1066,49 @@ class TermExtractionService:
             ).scalar()
             or 0
         )
-        return {"clusters": int(cluster_count), "linked_tm_entries": int(linked_tm_count)}
+        processed_docs = (
+            session.execute(
+                select(func.count(SourceDocument.doc_id))
+                .select_from(SourceDocument)
+                .join(SourceCorpus)
+                .where(
+                    SourceCorpus.project_id == project_id,
+                    SourceDocument.status == "processed",
+                )
+            ).scalar()
+            or 0
+        )
+        return {
+            "clusters": int(cluster_count),
+            "linked_tm_entries": int(linked_tm_count),
+            "processed_docs": int(processed_docs),
+        }
+
+    @staticmethod
+    def get_freq_distribution(session: Session, project_id: int) -> dict[str, int]:
+        """Return cluster counts per frequency band for a project (Epic 5D P1).
+
+        Bands: freq=1, freq=2-4, freq=5-9, freq>=10.
+        Uses idx_cluster_freq index — single aggregate SELECT.
+        """
+        row = session.execute(
+            select(
+                func.sum(case((TermCluster.freq_abs == 1, 1), else_=0)).label("band_1"),
+                func.sum(
+                    case(((TermCluster.freq_abs >= 2) & (TermCluster.freq_abs <= 4), 1), else_=0)
+                ).label("band_2_4"),
+                func.sum(
+                    case(((TermCluster.freq_abs >= 5) & (TermCluster.freq_abs <= 9), 1), else_=0)
+                ).label("band_5_9"),
+                func.sum(case((TermCluster.freq_abs >= 10, 1), else_=0)).label("band_10_plus"),
+            ).where(TermCluster.project_id == project_id)
+        ).one()
+        return {
+            "1": int(row.band_1 or 0),
+            "2-4": int(row.band_2_4 or 0),
+            "5-9": int(row.band_5_9 or 0),
+            "10+": int(row.band_10_plus or 0),
+        }
 
     def _clear_existing_terms(self, session: Session, project_id: int) -> None:
         """Clear existing ngrams and clusters for project."""

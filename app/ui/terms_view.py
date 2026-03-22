@@ -246,6 +246,23 @@ class TermsView(QWidget):
         extract_controls_layout.addStretch()
         layout.addLayout(extract_controls_layout)
 
+        # Epic 5D P1 PATCH-01: Quick freq presets
+        freq_preset_layout = QHBoxLayout()
+        freq_preset_layout.addWidget(QLabel("Freq preset:"))
+        for _label, _value, _tip in [
+            ("All", 1, "Show all candidates including hapax (freq≥1)"),
+            ("Common", 3, "Hide very rare terms (freq≥3)"),
+            ("Strict", 5, "Only terms appearing 5+ times (freq≥5)"),
+            ("High", 10, "High-confidence terms only (freq≥10)"),
+        ]:
+            _btn = QPushButton(f"{_label} ({_value})")
+            _btn.setMaximumWidth(90)
+            _btn.setToolTip(_tip)
+            _btn.clicked.connect(lambda checked, v=_value: self.min_freq_spin.setValue(v))
+            freq_preset_layout.addWidget(_btn)
+        freq_preset_layout.addStretch()
+        layout.addLayout(freq_preset_layout)
+
         # Migration 011: Last extraction parameters info
         self.last_extract_label = QLabel("")
         self.last_extract_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
@@ -449,6 +466,11 @@ class TermsView(QWidget):
         # Status
         self.status_label = QLabel("No terms extracted")
         layout.addWidget(self.status_label)
+
+        # Epic 5D P1: freq-distribution summary label
+        self.freq_dist_label = QLabel("")
+        self.freq_dist_label.setStyleSheet("color: #64748b; font-size: 11px; padding: 0 2px;")
+        layout.addWidget(self.freq_dist_label)
 
         self.setLayout(layout)
 
@@ -690,6 +712,9 @@ class TermsView(QWidget):
                 unfiltered, seq
             )
         )
+        self.search_worker.freq_dist_ready.connect(
+            lambda dist, seq=request_seq: self.on_freq_dist_ready(dist, seq)
+        )
         self.search_worker.error.connect(
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
         )
@@ -795,6 +820,22 @@ class TermsView(QWidget):
             hidden = self._unfiltered_count - self.total_count
             text += f"   ·   Hidden by min freq: {hidden:,}"
         self.status_label.setText(text)
+
+    def on_freq_dist_ready(self, dist: dict, request_seq: int | None = None) -> None:
+        """Handle freq-distribution result from worker (Epic 5D P1)."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            return
+        total = sum(dist.values())
+        if total == 0:
+            self.freq_dist_label.setText("")
+            return
+        parts = [
+            f"freq=1: {dist.get('1', 0):,}",
+            f"freq=2–4: {dist.get('2-4', 0):,}",
+            f"freq=5–9: {dist.get('5-9', 0):,}",
+            f"freq≥10: {dist.get('10+', 0):,}",
+        ]
+        self.freq_dist_label.setText("  ·  ".join(parts))
 
     def _snapshot_cluster_state(self) -> dict[int, dict]:
         snapshot: dict[int, dict] = {}
@@ -1223,6 +1264,33 @@ class TermsView(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             )
             if overwrite_reply != QMessageBox.StandardButton.Yes:
+                self.extract_btn.setEnabled(True)
+                self.refresh_btn.setEnabled(True)
+                self.progress_bar.setVisible(False)
+                self.status_label.setText("Ready")
+                return
+
+        # Epic 5D P1 PATCH-03: warn on large corpus + low min_freq (store-all semantics).
+        # Threshold: > 200 processed docs and min_freq == 1 and existing clusters present.
+        _LARGE_CORPUS_THRESHOLD = 200
+        processed_docs = impact.get("processed_docs", 0)
+        if (
+            extraction_mode == "overwrite"
+            and processed_docs > _LARGE_CORPUS_THRESHOLD
+            and min_freq == 1
+            and impact["clusters"] > 0
+        ):
+            growth_reply = QMessageBox.question(
+                self,
+                "Large corpus — storage notice",
+                f"This project has {processed_docs:,} processed documents.\n\n"
+                f"With min freq = 1 (All), extraction will store every candidate\n"
+                f"including hapax legomena. This may create significantly more\n"
+                f"clusters than the current {impact['clusters']:,}.\n\n"
+                "Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if growth_reply != QMessageBox.StandardButton.Yes:
                 self.extract_btn.setEnabled(True)
                 self.refresh_btn.setEnabled(True)
                 self.progress_bar.setVisible(False)

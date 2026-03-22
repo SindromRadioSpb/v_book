@@ -1439,6 +1439,7 @@ class TermsSearchWorker(QThread):
     results_ready = pyqtSignal(list)  # clusters: List[TermCluster]
     count_ready = pyqtSignal(int)  # filtered total_count
     count_unfiltered_ready = pyqtSignal(int)  # total without min_freq filter (Epic 5D)
+    freq_dist_ready = pyqtSignal(dict)  # {band: count} freq distribution (Epic 5D P1)
     error = pyqtSignal(str)
 
     def __init__(
@@ -1522,6 +1523,14 @@ class TermsSearchWorker(QThread):
                     )
                     if not self._cancelled:
                         self.count_unfiltered_ready.emit(unfiltered)
+
+                # Epic 5D P1: freq-distribution (one aggregate SELECT, index-covered)
+                if not self._cancelled:
+                    freq_dist = term_service.get_freq_distribution(
+                        session, project_id=self.project_id
+                    )
+                    if not self._cancelled:
+                        self.freq_dist_ready.emit(freq_dist)
 
         except Exception as e:
             logger.exception("Terms search error")

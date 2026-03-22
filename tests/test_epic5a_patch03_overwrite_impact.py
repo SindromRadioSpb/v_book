@@ -80,9 +80,11 @@ def _make_entry(session, project_id: int = 1, cluster_id: int | None = None) -> 
 
 
 def test_impact_empty_project(session):
-    """Zero counts when no clusters exist."""
+    """Zero counts when no clusters exist. Epic 5D P1: processed_docs also returned."""
     impact = TermExtractionService.get_overwrite_impact(session, 1)
-    assert impact == {"clusters": 0, "linked_tm_entries": 0}
+    assert impact["clusters"] == 0
+    assert impact["linked_tm_entries"] == 0
+    assert "processed_docs" in impact  # Epic 5D P1: new key always present
 
 
 def test_impact_cluster_count(session):
