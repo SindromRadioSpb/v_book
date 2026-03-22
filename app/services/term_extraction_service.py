@@ -584,9 +584,15 @@ class TermExtractionService:
                 run.updated_at = self._utc_now()
                 session.commit()
                 run_id = int(run.run_id)
+                min_freq_note = (
+                    f" (min_freq changed: {run.min_freq}→{min_freq}, resume still valid)"
+                    if int(run.min_freq or 0) != int(min_freq)
+                    else ""
+                )
                 _emit(
                     f"Resuming term extraction run {run.run_id} "
-                    f"at doc {int(run.docs_processed or 0)}/{int(run.docs_total or 0)}",
+                    f"at doc {int(run.docs_processed or 0)}/{int(run.docs_total or 0)}"
+                    f"{min_freq_note}",
                     stage="Resuming staged extraction",
                     phase="prepare",
                     docs_done=int(run.docs_processed or 0),

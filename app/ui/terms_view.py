@@ -76,6 +76,7 @@ class TermsView(QWidget):
         self.current_page = 1
         self.page_size = self.settings.get_int("terms_view/page_size", 100)
         self.total_count = 0
+        self._unfiltered_count: int | None = None  # Epic 5D: total without min_freq filter
         self.search_worker = None  # Track worker for cancellation
         self._search_request_seq = 0
         self._active_search_seq = 0
@@ -201,6 +202,11 @@ class TermsView(QWidget):
         # Load saved value or use default (2)
         saved_min_freq = self.settings.get_int("terms_view/min_freq", 2)
         self.min_freq_spin.setValue(saved_min_freq)
+        self.min_freq_spin.setToolTip(
+            "Display filter — clusters below this frequency are hidden, not discarded.\n"
+            "Change without re-extraction (Epic 5C).\n"
+            "Default 2 = hide hapax legomena (freq=1)."
+        )
         self.min_freq_spin.valueChanged.connect(self.on_min_freq_changed)
         extract_controls_layout.addWidget(self.min_freq_spin)
 
@@ -653,6 +659,7 @@ class TermsView(QWidget):
         preserved_state = self._snapshot_cluster_state() if preserve_existing_state else {}
         if include_total_count:
             self.total_count = 0
+            self._unfiltered_count = None
 
         # Build filters
         filters = self.build_filters()
@@ -677,6 +684,11 @@ class TermsView(QWidget):
         )
         self.search_worker.count_ready.connect(
             lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
+        )
+        self.search_worker.count_unfiltered_ready.connect(
+            lambda unfiltered, seq=request_seq: self.on_search_count_unfiltered_ready(
+                unfiltered, seq
+            )
         )
         self.search_worker.error.connect(
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
@@ -759,15 +771,30 @@ class TermsView(QWidget):
             return
 
         self.total_count = int(total_count or 0)
+        self._update_status_label()
+        self.update_pagination_controls()
+
+    def on_search_count_unfiltered_ready(
+        self, unfiltered: int, request_seq: int | None = None
+    ):
+        """Handle unfiltered total-count (Epic 5D: hidden-by-min_freq indicator)."""
+        if request_seq is not None and request_seq != self._active_search_seq:
+            return
+        self._unfiltered_count = int(unfiltered or 0)
+        self._update_status_label()
+
+    def _update_status_label(self) -> None:
+        """Rebuild status label from current count state (Epic 5D)."""
         if self.total_count == 0:
             self.status_label.setText("No term clusters found")
-        else:
-            start = self.current_offset + 1
-            end = min(self.current_offset + len(self.terms_model.clusters), self.total_count)
-            self.status_label.setText(
-                f"Showing {start}-{end} of {self.total_count:,} term clusters"
-            )
-        self.update_pagination_controls()
+            return
+        start = self.current_offset + 1
+        end = min(self.current_offset + len(self.terms_model.clusters), self.total_count)
+        text = f"Showing {start}-{end} of {self.total_count:,} term clusters"
+        if self._unfiltered_count is not None and self._unfiltered_count > self.total_count:
+            hidden = self._unfiltered_count - self.total_count
+            text += f"   ·   Hidden by min freq: {hidden:,}"
+        self.status_label.setText(text)
 
     def _snapshot_cluster_state(self) -> dict[int, dict]:
         snapshot: dict[int, dict] = {}

@@ -1437,7 +1437,8 @@ class TermsSearchWorker(QThread):
     """
 
     results_ready = pyqtSignal(list)  # clusters: List[TermCluster]
-    count_ready = pyqtSignal(int)  # total_count
+    count_ready = pyqtSignal(int)  # filtered total_count
+    count_unfiltered_ready = pyqtSignal(int)  # total without min_freq filter (Epic 5D)
     error = pyqtSignal(str)
 
     def __init__(
@@ -1507,6 +1508,20 @@ class TermsSearchWorker(QThread):
 
                 if not self._cancelled:
                     self.count_ready.emit(total_count)
+
+                # Epic 5D: emit unfiltered count only when a min_freq filter is active
+                if not self._cancelled and self.filters.get("min_freq"):
+                    unfiltered = term_service.count_term_clusters(
+                        session,
+                        project_id=self.project_id,
+                        search=self.filters.get("search"),
+                        min_freq=None,
+                        min_doc_freq=self.filters.get("min_doc_freq"),
+                        source_filter=self.filters.get("source_filter"),
+                        hide_noise=self.filters.get("hide_noise", True),
+                    )
+                    if not self._cancelled:
+                        self.count_unfiltered_ready.emit(unfiltered)
 
         except Exception as e:
             logger.exception("Terms search error")
