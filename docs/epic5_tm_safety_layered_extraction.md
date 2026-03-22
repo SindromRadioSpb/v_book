@@ -60,7 +60,7 @@
 
 | Patch | Status | Description |
 |-------|--------|-------------|
-| PATCH-06 | 🔄 planned | Migration 046: ngram_n_set на term_cluster |
+| PATCH-06 | ✅ done | Migration 046: ngram_n_set на term_cluster |
 | PATCH-07 | 🔄 planned | Extraction mode selector в UI (Full Overwrite / Merge / Replace Layer) |
 | PATCH-08 | 🔄 planned | Merge mode: добавляет без удаления, upsert кластеров |
 | PATCH-09 | 🔄 planned | Replace Layer mode: скоупированное удаление по n-слою |

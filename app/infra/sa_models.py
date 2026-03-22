@@ -856,6 +856,10 @@ class TermCluster(Base):
     best_keyness = Column(Float)
 
     source_kinds = Column(String)
+    # Epic 5B: canonical JSON set of ngram sizes that produced this cluster (migration 046).
+    # Format: sorted-ascending compact JSON array, e.g. "[2]", "[3]", "[2,3]".
+    # NULL for clusters sourced entirely from NP chunks (no meaningful n-size).
+    ngram_n_set = Column(Text)
     created_at = Column(String, nullable=False, default=utc_now)
     updated_at = Column(String, nullable=False, default=utc_now)
 

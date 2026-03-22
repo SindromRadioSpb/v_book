@@ -42,6 +42,20 @@ from app.services.entity_classifier import classify_phrase
 logger = logging.getLogger(__name__)
 
 
+def canonical_ngram_n_set(ns: Iterable[int]) -> str | None:
+    """Serialize a set of ngram sizes to canonical JSON (Epic 5B).
+
+    Contract:
+      - Sorted ascending, deduplicated, compact JSON.
+      - Returns None when the input is empty (NP-only clusters).
+      - Examples: {2} → "[2]", {3} → "[3]", {2, 3} → "[2,3]"
+    """
+    values = sorted({int(n) for n in ns})
+    if not values:
+        return None
+    return json.dumps(values, separators=(",", ":"))
+
+
 def normalize_search_query(query: str) -> list[str]:
     """
     Normalize search query and generate search variants for Hebrew term matching.
@@ -2133,6 +2147,14 @@ class TermExtractionService:
         source_kinds = sorted(
             {str(member["source_kind"]) for member in members if member["source_kind"]}
         )
+        # Epic 5B: compute ngram_n_set — canonical JSON of n-sizes from ngram members.
+        # NP-chunk members (source_kind='np') have no meaningful n-size, excluded.
+        ngram_ns = {
+            int(member["n"])
+            for member in members
+            if member.get("source_kind") == "ngram" and member.get("n") is not None
+        }
+        ngram_n_set = canonical_ngram_n_set(ngram_ns)
 
         classification = classify_phrase(representative_he)
         classification_stats["classes"][classification.entity_class] += 1
@@ -2153,6 +2175,7 @@ class TermExtractionService:
                 best_dice=max(dices) if dices else None,
                 best_tscore=max(tscores) if tscores else None,
                 source_kinds=",".join(source_kinds) if source_kinds else None,
+                ngram_n_set=ngram_n_set,
                 entity_class=classification.entity_class,
                 is_noise=1 if classification.is_noise else 0,
                 noise_reason=classification.noise_reason,
@@ -2197,6 +2220,7 @@ class TermExtractionService:
                     Ngram.lemma_phrase.label("lemma_phrase"),
                     Ngram.he_canonical.label("he_canonical"),
                     Ngram.source_kind.label("source_kind"),
+                    Ngram.n.label("n"),
                     NgramProjectStat.freq_abs.label("freq_abs"),
                     NgramProjectStat.doc_freq.label("doc_freq"),
                     NgramProjectStat.pmi_cache.label("pmi_cache"),
