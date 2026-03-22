@@ -421,6 +421,9 @@ class Lemma(Base):
     is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise
     noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_SYMBOL_ONLY, etc.
     norm_text = Column(String)  # Normalized form of lemma_text
+    # Noise provenance (Epic 6A — Migration 047)
+    noise_source = Column(String)  # "auto" (classifier) | "manual" (user override) | NULL (legacy)
+    noise_updated_at = Column(String)  # ISO8601 UTC of last noise_source write | NULL (legacy)
 
     __table_args__ = (
         UniqueConstraint("project_id", "lemma_text", name="uq_lemma_project_text"),
@@ -944,6 +947,13 @@ class TMEntry(Base):
     ngram_id = Column(Integer, ForeignKey("ngram.ngram_id", ondelete="SET NULL"))
     # Global TM canonical link (Task 19)
     tm_global_id = Column(Integer, ForeignKey("tm_global.tm_global_id", ondelete="SET NULL"))
+    # Epic 6A: orphan provenance snapshot (migration 047)
+    # orphaned_lemma_id: plain INTEGER, no FK — snapshot of lemma_id written by
+    #   _cleanup_orphaned_lemmas_for_ids() BEFORE the lemma row is deleted.
+    #   Never overwritten after first write (idempotent guard: AND orphaned_lemma_id IS NULL).
+    #   Distinguishes source_missing (orphaned_lemma_id IS NOT NULL) from
+    #   manual (both lemma_id and orphaned_lemma_id are NULL).
+    orphaned_lemma_id = Column(Integer)
     # Epic 5A: provenance snapshot (migration 045)
     # promoted_from_cluster_id: plain INTEGER, no FK — permanent audit snapshot,
     #   never overwritten. Survives cluster deletion.

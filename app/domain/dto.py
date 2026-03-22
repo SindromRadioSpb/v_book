@@ -31,6 +31,8 @@ class LemmaStats:
     is_noise: int | None = None
     noise_reason: str | None = None
     norm_text: str | None = None
+    noise_source: str | None = None  # "auto" | "manual" | None (legacy) — Epic 6A
+    noise_updated_at: str | None = None  # ISO8601 UTC | None (legacy) — Epic 6A
     saved_to_ud: bool = False
     in_user_dictionary_count: int = 0
     study_state: str | None = None
