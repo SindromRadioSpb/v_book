@@ -7,7 +7,7 @@ Tests:
 4. Worker defaults extraction_mode to "overwrite"
 5. Service accepts extraction_mode=overwrite and runs chunked path
 6. Service accepts extraction_mode=merge and runs chunked path with overwrite=False
-7. Service extraction_mode=replace_layer raises NotImplementedError
+7. Service extraction_mode=replace_layer dispatches to chunked path (implemented in PATCH-09)
 8. Service backward-compat: overwrite=False maps to merge
 """
 
@@ -116,16 +116,27 @@ def test_service_merge_mode_calls_chunked(session):
     assert call_kwargs.get("overwrite") is False
 
 
-def test_service_replace_layer_raises(session):
-    """extraction_mode='replace_layer' raises NotImplementedError until PATCH-09."""
+def test_service_replace_layer_dispatches_to_chunked(session):
+    """extraction_mode='replace_layer' dispatches to chunked path (PATCH-09 implemented)."""
     svc = TermExtractionService.__new__(TermExtractionService)
+    chunked_mock = MagicMock(return_value=MagicMock())
+    clear_layer_mock = MagicMock(return_value=0)
 
-    with pytest.raises(NotImplementedError, match="PATCH-09"):
+    with (
+        patch.object(svc, "_extract_terms_for_project_chunked", chunked_mock),
+        patch.object(svc, "_clear_terms_for_layer", clear_layer_mock),
+    ):
         svc.extract_terms_for_project(
             session,
             1,
             extraction_mode="replace_layer",
+            enable_ngrams=True,
+            ngram_ns=(2, 3),
         )
+
+    chunked_mock.assert_called_once()
+    # resume_latest=False because layer clear makes resume unsafe
+    assert chunked_mock.call_args[1].get("resume_latest") is False
 
 
 def test_service_backward_compat_overwrite_false_maps_to_merge(session):

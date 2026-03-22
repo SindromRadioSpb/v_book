@@ -283,10 +283,27 @@ class TermExtractionService:
             )
 
         if extraction_mode == "replace_layer":
-            # Replace Layer mode: scoped delete by ngram_n_set then re-extract.
-            # Full implementation in Epic 5B PATCH-09.
-            raise NotImplementedError(
-                "Replace Layer extraction mode is not yet implemented (Epic 5B PATCH-09)"
+            # Replace Layer mode: scoped delete by ngram_n_set then re-extract that layer.
+            # 1. Clear clusters + ngrams for the requested ngram_ns layer.
+            # 2. Re-extract only those layers (enable_ngrams only, no NP chunks).
+            # NP clusters and other n-size layers are preserved.
+            if enable_ngrams and ngram_ns:
+                self._clear_terms_for_layer(session, project_id, ngram_ns)
+            return self._extract_terms_for_project_chunked(
+                session,
+                project_id,
+                enable_ngrams=enable_ngrams,
+                include_np=False,  # NP layer is preserved; only ngram layers replaced
+                min_freq=min_freq,
+                ngram_ns=ngram_ns,
+                np_max_len=np_max_len,
+                overwrite=True,
+                batch_size=batch_size,
+                progress_callback=progress_callback,
+                state_callback=state_callback,
+                cancel_check=cancel_check,
+                pause_check=pause_check,
+                resume_latest=False,  # Layer clear makes resume unsafe
             )
 
         # Default: "overwrite" — full clear then chunked re-extraction.
@@ -1055,6 +1072,59 @@ class TermExtractionService:
 
         session.flush()
         logger.info(f"Cleared existing terms for project {project_id}")
+
+    def _clear_terms_for_layer(
+        self,
+        session: Session,
+        project_id: int,
+        ngram_ns: tuple[int, ...],
+    ) -> int:
+        """Delete clusters and ngrams for specific n-gram layer(s), preserving other layers.
+
+        Removes term_cluster rows whose ngram_n_set exactly matches the canonical
+        representation of ngram_ns, then removes ngram rows for those n-sizes.
+        Clusters sourced from NP chunks (ngram_n_set IS NULL) are never touched.
+
+        Returns:
+            Number of clusters deleted.
+        """
+        target_n_set = canonical_ngram_n_set(ngram_ns)
+        if target_n_set is None:
+            logger.warning("_clear_terms_for_layer called with empty ngram_ns — no-op")
+            return 0
+
+        n_list = sorted({int(n) for n in ngram_ns})
+
+        # Delete clusters whose n-set exactly matches the target layer.
+        result = session.execute(
+            TermCluster.__table__.delete().where(
+                and_(
+                    TermCluster.project_id == project_id,
+                    TermCluster.ngram_n_set == target_n_set,
+                )
+            )
+        )
+        clusters_deleted = int(result.rowcount)
+
+        # Delete ngrams for those n-sizes (CASCADE handles stats + components).
+        session.execute(
+            Ngram.__table__.delete().where(
+                and_(
+                    Ngram.project_id == project_id,
+                    Ngram.source_kind == "ngram",
+                    Ngram.n.in_(n_list),
+                )
+            )
+        )
+
+        session.flush()
+        logger.info(
+            "Cleared layer %s for project %s: %d clusters deleted",
+            target_n_set,
+            project_id,
+            clusters_deleted,
+        )
+        return clusters_deleted
 
     def _utc_now(self) -> str:
         return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
