@@ -323,6 +323,7 @@ class ProjectTermExtractionWorker(QThread):
         ngram_ns: tuple = (2, 3),
         np_max_len: int = 5,
         overwrite: bool = True,
+        extraction_mode: str = "overwrite",
     ):
         super().__init__()
         self.project_id = project_id
@@ -332,6 +333,7 @@ class ProjectTermExtractionWorker(QThread):
         self.ngram_ns = ngram_ns
         self.np_max_len = np_max_len
         self.overwrite = overwrite
+        self.extraction_mode = extraction_mode
         self._cancel_requested = False
         self._pause_requested = False
 
@@ -371,6 +373,7 @@ class ProjectTermExtractionWorker(QThread):
                     ngram_ns=self.ngram_ns,
                     np_max_len=self.np_max_len,
                     overwrite=self.overwrite,
+                    extraction_mode=self.extraction_mode,
                     progress_callback=lambda message: self.progress.emit(message),
                     state_callback=lambda state: self.state_changed.emit(state),
                     cancel_check=lambda: self._cancel_requested,

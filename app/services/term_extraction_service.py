@@ -222,6 +222,7 @@ class TermExtractionService:
         ngram_ns: tuple[int, ...] = (2, 3),
         np_max_len: int = 5,
         overwrite: bool = True,
+        extraction_mode: str = "overwrite",
         batch_size: int = 200,
         progress_callback: Callable[[str], None] | None = None,
         state_callback: Callable[[dict], None] | None = None,
@@ -240,7 +241,11 @@ class TermExtractionService:
             min_freq: Minimum frequency threshold
             ngram_ns: N-gram sizes (default: bigrams + trigrams)
             np_max_len: Maximum NP chunk length (2-5, default 5)
-            overwrite: Clear existing ngrams before extraction
+            overwrite: Clear existing ngrams before extraction (legacy compat flag)
+            extraction_mode: Extraction mode — "overwrite" | "merge" | "replace_layer"
+                - "overwrite": full clear then re-extract (default)
+                - "merge": add without deleting existing clusters (Epic 5B PATCH-08)
+                - "replace_layer": scoped delete by ngram_n_set then re-extract (Epic 5B PATCH-09)
             batch_size: Number of processed docs to stage per commit
             progress_callback: Optional human-readable progress callback
             state_callback: Optional structured progress callback
@@ -251,10 +256,15 @@ class TermExtractionService:
         Returns:
             ExtractReport with counts
         """
-        if not overwrite:
-            # Non-overwrite mode is legacy-only: final term tables use unique
-            # constraints keyed by project/source_kind/surface and cannot be
-            # safely merged from staged counters without a wider redesign.
+        # Normalise: extraction_mode is authoritative; overwrite is derived for
+        # backward-compatibility with callers that only pass overwrite=False.
+        if extraction_mode == "overwrite" and not overwrite:
+            extraction_mode = "merge"
+
+        if extraction_mode == "merge":
+            # Merge mode: add new clusters without clearing existing ones.
+            # Uses legacy path which skips the clear step. (Epic 5B PATCH-08 will
+            # replace this with a proper upsert-aware chunked path.)
             return self._extract_terms_for_project_legacy(
                 session,
                 project_id,
@@ -263,9 +273,17 @@ class TermExtractionService:
                 min_freq=min_freq,
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
-                overwrite=overwrite,
+                overwrite=False,
             )
 
+        if extraction_mode == "replace_layer":
+            # Replace Layer mode: scoped delete by ngram_n_set then re-extract.
+            # Full implementation in Epic 5B PATCH-09.
+            raise NotImplementedError(
+                "Replace Layer extraction mode is not yet implemented (Epic 5B PATCH-09)"
+            )
+
+        # Default: "overwrite" — full clear then chunked re-extraction.
         return self._extract_terms_for_project_chunked(
             session,
             project_id,
@@ -274,7 +292,7 @@ class TermExtractionService:
             min_freq=min_freq,
             ngram_ns=ngram_ns,
             np_max_len=np_max_len,
-            overwrite=overwrite,
+            overwrite=True,
             batch_size=batch_size,
             progress_callback=progress_callback,
             state_callback=state_callback,
