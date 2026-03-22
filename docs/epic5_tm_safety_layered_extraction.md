@@ -64,7 +64,7 @@
 | PATCH-07 | ✅ done | Extraction mode selector в UI + worker/service wiring (overwrite/merge/replace_layer) |
 | PATCH-08 | ✅ done | Merge mode: chunked path с overwrite=False; INSERT OR IGNORE для ngrams; pre-check для clusters |
 | PATCH-09 | ✅ done | Replace Layer mode: _clear_terms_for_layer(ngram_ns) + chunked re-extract |
-| PATCH-10 | 🔄 planned | Тесты: все три режима, граничные случаи |
+| PATCH-10 | ✅ done | Тесты: все три режима + граничные случаи (PATCH-07/08/09 test files) |
 
 ### Epic 5C — Candidate Persistence (future)
 
