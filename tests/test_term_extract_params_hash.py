@@ -112,6 +112,7 @@ def test_params_hash_does_not_include_overwrite(svc):
             "include_np": False,
             "ngram_ns": [2, 3],
             "np_max_len": 5,
+            "store_hapax": True,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -135,6 +136,7 @@ def test_params_hash_does_not_include_min_freq(svc):
             "include_np": False,
             "ngram_ns": [2, 3],
             "np_max_len": 5,
+            "store_hapax": True,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -152,7 +154,7 @@ def test_params_hash_includes_algo_version(svc):
     """algo_version is part of the canonical payload — version 2 is current (Epic 5C)."""
     assert TermExtractionService._TERM_EXTRACT_ALGO_VERSION == 2
 
-    # Compute expected hash with algo_version=2 (current after Epic 5C bump)
+    # Compute expected hash with algo_version=2 and store_hapax (current after P2.2 bump)
     payload_v2 = json.dumps(
         {
             "algo_version": 2,
@@ -160,6 +162,7 @@ def test_params_hash_includes_algo_version(svc):
             "include_np": False,
             "ngram_ns": [2, 3],
             "np_max_len": 5,
+            "store_hapax": True,
         },
         sort_keys=True,
         separators=(",", ":"),

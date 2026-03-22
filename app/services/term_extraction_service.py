@@ -223,6 +223,7 @@ class TermExtractionService:
         np_max_len: int = 5,
         overwrite: bool = True,
         extraction_mode: str = "overwrite",
+        store_hapax: bool = True,
         batch_size: int = 200,
         progress_callback: Callable[[str], None] | None = None,
         state_callback: Callable[[dict], None] | None = None,
@@ -274,6 +275,7 @@ class TermExtractionService:
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
                 overwrite=False,
+                store_hapax=store_hapax,
                 batch_size=batch_size,
                 progress_callback=progress_callback,
                 state_callback=state_callback,
@@ -298,6 +300,7 @@ class TermExtractionService:
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
                 overwrite=True,
+                store_hapax=store_hapax,
                 batch_size=batch_size,
                 progress_callback=progress_callback,
                 state_callback=state_callback,
@@ -316,6 +319,7 @@ class TermExtractionService:
             ngram_ns=ngram_ns,
             np_max_len=np_max_len,
             overwrite=True,
+            store_hapax=store_hapax,
             batch_size=batch_size,
             progress_callback=progress_callback,
             state_callback=state_callback,
@@ -335,6 +339,7 @@ class TermExtractionService:
         ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
+        store_hapax: bool = True,
     ) -> ExtractReport:
         """Legacy monolithic extractor retained for non-overwrite compatibility."""
         logger.info(f"Starting legacy term extraction for project {project_id}")
@@ -378,6 +383,7 @@ class TermExtractionService:
                     ngram_doc_freq=ngram_doc_freq,
                     ngram_meta=ngram_meta,
                     min_freq=min_freq,
+                    store_hapax=store_hapax,
                 )
 
             if include_np:
@@ -388,6 +394,7 @@ class TermExtractionService:
                     np_doc_freq=np_doc_freq,
                     np_meta=np_meta,
                     min_freq=min_freq,
+                    store_hapax=store_hapax,
                 )
 
             # Cluster terms
@@ -449,6 +456,7 @@ class TermExtractionService:
         ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
+        store_hapax: bool = True,
         batch_size: int,
         progress_callback: Callable[[str], None] | None,
         state_callback: Callable[[dict], None] | None,
@@ -536,6 +544,7 @@ class TermExtractionService:
                     ngram_ns=ngram_ns,
                     np_max_len=np_max_len,
                     overwrite=overwrite,
+                    store_hapax=store_hapax,
                 )
                 if (
                     run is not None
@@ -562,6 +571,7 @@ class TermExtractionService:
                     ngram_ns=ngram_ns,
                     np_max_len=np_max_len,
                     overwrite=overwrite,
+                    store_hapax=store_hapax,
                     docs_total=total_docs,
                     batch_size=batch_size,
                 )
@@ -877,7 +887,7 @@ class TermExtractionService:
                     session,
                     project_id,
                     run_id=run_id,
-                    min_freq=min_freq,
+                    store_hapax=store_hapax,
                     total_tokens=total_tokens,
                     overwrite=overwrite,
                     progress_callback=lambda message: _emit(
@@ -900,7 +910,7 @@ class TermExtractionService:
                     session,
                     project_id,
                     run_id=run_id,
-                    min_freq=min_freq,
+                    store_hapax=store_hapax,
                     overwrite=overwrite,
                     progress_callback=lambda message: _emit(
                         message,
@@ -1210,6 +1220,7 @@ class TermExtractionService:
         include_np: bool,
         ngram_ns: tuple[int, ...],
         np_max_len: int,
+        store_hapax: bool = True,
     ) -> str:
         """Build canonical SHA-256[:16] hash of extraction parameters.
 
@@ -1217,6 +1228,7 @@ class TermExtractionService:
         - algo_version is included so logic changes can invalidate old hashes.
         - overwrite is NOT included (execution mode, not extraction result params).
         - min_freq is NOT included (Epic 5C: display-time filter, not extraction param).
+        - store_hapax IS included (affects which candidates are stored — Epic 5D P2.2).
         - ngram_ns is always sorted to ensure determinism.
         - Serialized as compact JSON with sorted keys.
         """
@@ -1227,6 +1239,7 @@ class TermExtractionService:
                 "include_np": bool(include_np),
                 "ngram_ns": sorted(int(n) for n in ngram_ns),
                 "np_max_len": int(np_max_len),
+                "store_hapax": bool(store_hapax),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -1243,12 +1256,14 @@ class TermExtractionService:
         ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
+        store_hapax: bool = True,
     ) -> TermExtractRun | None:
         computed_hash = self._build_term_extract_params_hash(
             enable_ngrams=enable_ngrams,
             include_np=include_np,
             ngram_ns=ngram_ns,
             np_max_len=np_max_len,
+            store_hapax=store_hapax,
         )
         stmt = (
             select(TermExtractRun)
@@ -1286,6 +1301,7 @@ class TermExtractionService:
         ngram_ns: tuple[int, ...],
         np_max_len: int,
         overwrite: bool,
+        store_hapax: bool = True,
         docs_total: int,
         batch_size: int,
     ) -> TermExtractRun:
@@ -1304,6 +1320,7 @@ class TermExtractionService:
                 include_np=include_np,
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
+                store_hapax=store_hapax,
             ),
             docs_total=int(docs_total),
             docs_processed=0,
@@ -1650,6 +1667,7 @@ class TermExtractionService:
         ngram_doc_freq: Counter,
         ngram_meta: dict[tuple[str, int], dict[str, str]],
         min_freq: int,
+        store_hapax: bool = True,
     ) -> int:
         """Store precomputed n-gram counters in one bounded write phase."""
         if not ngram_counts:
@@ -1669,6 +1687,8 @@ class TermExtractionService:
 
         ngrams_stored = 0
         for (surface_text, n), freq in ngram_counts.items():
+            if not store_hapax and freq < 2:
+                continue
             meta = ngram_meta[(surface_text, n)]
 
             # Get canonical key
@@ -1859,6 +1879,7 @@ class TermExtractionService:
         np_doc_freq: Counter,
         np_meta: dict[tuple[str, int], dict[str, str]],
         min_freq: int,
+        store_hapax: bool = True,
     ) -> int:
         """Store precomputed NP counters in one bounded write phase."""
         if not np_counts:
@@ -1866,6 +1887,8 @@ class TermExtractionService:
 
         nps_stored = 0
         for (surface_text, n), freq in np_counts.items():
+            if not store_hapax and freq < 2:
+                continue
             meta = np_meta[(surface_text, n)]
 
             # Get canonical key
@@ -1991,14 +2014,27 @@ class TermExtractionService:
         *,
         run_id: int,
         source_kind: str,
-        min_freq: int,
+        store_hapax: bool = True,
         batch_size: int = 500,
     ) -> Iterable[list[dict]]:
-        """Yield staged accumulator rows in deterministic bounded batches."""
+        """Yield staged accumulator rows in deterministic bounded batches.
+
+        When store_hapax=False, rows with freq_abs < 2 are skipped (hapax legomena
+        are excluded from the final term tables).
+        """
         last_n: int | None = None
         last_surface: str | None = None
 
         while True:
+            where_clause = and_(
+                TermExtractAccumulator.run_id == run_id,
+                TermExtractAccumulator.source_kind == source_kind,
+            )
+            if not store_hapax:
+                where_clause = and_(
+                    where_clause,
+                    TermExtractAccumulator.freq_abs >= 2,
+                )
             stmt = (
                 select(
                     TermExtractAccumulator.n,
@@ -2008,12 +2044,7 @@ class TermExtractionService:
                     TermExtractAccumulator.freq_abs,
                     TermExtractAccumulator.doc_freq,
                 )
-                .where(
-                    and_(
-                        TermExtractAccumulator.run_id == run_id,
-                        TermExtractAccumulator.source_kind == source_kind,
-                    )
-                )
+                .where(where_clause)
                 .order_by(TermExtractAccumulator.n.asc(), TermExtractAccumulator.surface_text.asc())
                 .limit(int(batch_size))
             )
@@ -2042,7 +2073,7 @@ class TermExtractionService:
         project_id: int,
         *,
         run_id: int,
-        min_freq: int,
+        store_hapax: bool = True,
         total_tokens: int,
         overwrite: bool = True,
         progress_callback: Callable[[str], None] | None = None,
@@ -2054,7 +2085,7 @@ class TermExtractionService:
             session,
             run_id=run_id,
             source_kind="ngram",
-            min_freq=min_freq,
+            store_hapax=store_hapax,
         ):
             batch_no += 1
             bigram_lemma_texts: set[str] = set()
@@ -2161,7 +2192,7 @@ class TermExtractionService:
         project_id: int,
         *,
         run_id: int,
-        min_freq: int,
+        store_hapax: bool = True,
         overwrite: bool = True,
         progress_callback: Callable[[str], None] | None = None,
     ) -> int:
@@ -2172,7 +2203,7 @@ class TermExtractionService:
                 session,
                 run_id=run_id,
                 source_kind="np",
-                min_freq=min_freq,
+                store_hapax=store_hapax,
             ),
             start=1,
         ):

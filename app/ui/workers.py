@@ -324,6 +324,7 @@ class ProjectTermExtractionWorker(QThread):
         np_max_len: int = 5,
         overwrite: bool = True,
         extraction_mode: str = "overwrite",
+        store_hapax: bool = True,
     ):
         super().__init__()
         self.project_id = project_id
@@ -334,6 +335,7 @@ class ProjectTermExtractionWorker(QThread):
         self.np_max_len = np_max_len
         self.overwrite = overwrite
         self.extraction_mode = extraction_mode
+        self.store_hapax = store_hapax
         self._cancel_requested = False
         self._pause_requested = False
 
@@ -374,6 +376,7 @@ class ProjectTermExtractionWorker(QThread):
                     np_max_len=self.np_max_len,
                     overwrite=self.overwrite,
                     extraction_mode=self.extraction_mode,
+                    store_hapax=self.store_hapax,
                     progress_callback=lambda message: self.progress.emit(message),
                     state_callback=lambda state: self.state_changed.emit(state),
                     cancel_check=lambda: self._cancel_requested,

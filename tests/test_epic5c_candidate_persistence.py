@@ -242,7 +242,7 @@ def test_accumulator_batch_yields_low_freq_rows(svc, session, run):
             session,
             run_id=run.run_id,
             source_kind="ngram",
-            min_freq=5,  # legacy param: no longer gates rows in Epic 5C
+            store_hapax=True,  # all rows yielded; freq gate removed in Epic 5C
             batch_size=100,
         )
     )

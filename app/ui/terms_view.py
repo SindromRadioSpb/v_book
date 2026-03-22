@@ -243,6 +243,21 @@ class TermsView(QWidget):
         self.extraction_mode_combo.currentIndexChanged.connect(self.on_extraction_mode_changed)
         extract_controls_layout.addWidget(self.extraction_mode_combo)
 
+        # Epic 5D P2.2: Store hapax toggle (storage policy)
+        self.store_hapax_check = QCheckBox("Store hapax")
+        self.store_hapax_check.setToolTip(
+            "When checked (default): store ALL candidates during extraction,\n"
+            "including hapax legomena (freq=1). Recommended for exploration.\n"
+            "When unchecked: skip freq=1 candidates at extraction time.\n"
+            "Use on large corpora to limit database growth."
+        )
+        saved_store_hapax = self.settings.get_bool("terms_view/store_hapax", True)
+        self.store_hapax_check.setChecked(saved_store_hapax)
+        self.store_hapax_check.toggled.connect(
+            lambda v: self.settings.set_value("terms_view/store_hapax", v)
+        )
+        extract_controls_layout.addWidget(self.store_hapax_check)
+
         extract_controls_layout.addStretch()
         layout.addLayout(extract_controls_layout)
 
@@ -260,6 +275,16 @@ class TermsView(QWidget):
             _btn.setToolTip(_tip)
             _btn.clicked.connect(lambda checked, v=_value: self.min_freq_spin.setValue(v))
             freq_preset_layout.addWidget(_btn)
+
+        # Epic 5D P2.1: Recent min_freq history (per-project, up to 5 values)
+        freq_preset_layout.addWidget(QLabel("Recent:"))
+        self.recent_min_freq_combo = QComboBox()
+        self.recent_min_freq_combo.setMaximumWidth(100)
+        self.recent_min_freq_combo.setToolTip("Recently used min_freq values for this project")
+        self._rebuild_recent_combo()
+        self.recent_min_freq_combo.currentIndexChanged.connect(self._on_recent_min_freq_selected)
+        freq_preset_layout.addWidget(self.recent_min_freq_combo)
+
         freq_preset_layout.addStretch()
         layout.addLayout(freq_preset_layout)
 
@@ -600,9 +625,56 @@ class TermsView(QWidget):
         """Handle Max NP length change - save setting (no reload needed, used only during extraction)."""
         self.settings.set_value("terms_view/np_max_len", self.np_max_len_spin.value())
 
+    # ------------------------------------------------------------------
+    # Epic 5D P2.1: Recent min_freq history helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _recent_min_freq_key(self) -> str:
+        return f"terms_view/project_{self.project_id}/recent_min_freqs"
+
+    def _load_recent_min_freqs(self) -> list[int]:
+        import json as _json
+
+        raw = self.settings.get_string(self._recent_min_freq_key, "[]")
+        try:
+            values = _json.loads(raw)
+            return [int(v) for v in values if isinstance(v, int)]
+        except Exception:
+            return []
+
+    def _push_recent_min_freq(self, value: int) -> None:
+        import json as _json
+
+        recent = [v for v in self._load_recent_min_freqs() if v != value]
+        recent.insert(0, value)
+        self.settings.set_value(self._recent_min_freq_key, _json.dumps(recent[:5]))
+        self._rebuild_recent_combo()
+
+    def _rebuild_recent_combo(self) -> None:
+        combo = self.recent_min_freq_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("—", userData=None)
+        for v in self._load_recent_min_freqs():
+            combo.addItem(str(v), userData=v)
+        combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+    def _on_recent_min_freq_selected(self, index: int) -> None:
+        if index <= 0:
+            return
+        value = self.recent_min_freq_combo.itemData(index)
+        if value is not None:
+            self.min_freq_spin.setValue(int(value))
+        self.recent_min_freq_combo.blockSignals(True)
+        self.recent_min_freq_combo.setCurrentIndex(0)
+        self.recent_min_freq_combo.blockSignals(False)
+
     def on_min_freq_changed(self):
         """Handle Min freq change - persist and refresh view (Epic 5C: display-time filter)."""
         self.settings.set_value("terms_view/min_freq", self.min_freq_spin.value())
+        self._push_recent_min_freq(self.min_freq_spin.value())
         self.current_page = 1
         self.perform_search()
 
@@ -1300,6 +1372,7 @@ class TermsView(QWidget):
         # Create and start worker (keep strong reference to prevent GC)
         # Full Overwrite: overwrite=True; Merge and Replace Layer: overwrite=False.
         overwrite_flag = extraction_mode == "overwrite"
+        store_hapax = self.store_hapax_check.isChecked()
         self.extract_worker = ProjectTermExtractionWorker(
             project_id=self.project_id,
             enable_ngrams=True,
@@ -1309,6 +1382,7 @@ class TermsView(QWidget):
             np_max_len=np_max_len,
             overwrite=overwrite_flag,
             extraction_mode=extraction_mode,
+            store_hapax=store_hapax,
         )
 
         self.extract_worker.progress.connect(self.on_extract_progress)
