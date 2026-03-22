@@ -53,7 +53,7 @@
 | PATCH-01 | ✅ done | Migration 045: provenance columns на tm_entry |
 | PATCH-02 | ✅ done | Populate provenance при promotion (attach + bulk create) |
 | PATCH-03 | ✅ done | Impact preview перед destructive overwrite |
-| PATCH-04 | 🔄 planned | source_status в UI Translation Management |
+| PATCH-04 | ✅ done | source_status в UI Translation Management |
 | PATCH-05 | 🔄 planned | Тесты: провенанс, статусы, impact count |
 
 ### Epic 5B — Layered Extraction Modes

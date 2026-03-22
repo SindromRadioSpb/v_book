@@ -1185,6 +1185,10 @@ class TranslationAdminService:
             cluster_id=entry.cluster_id,
             ngram_id=entry.ngram_id,
             tm_global_id=entry.tm_global_id,  # PATCH-19-03
+            # Epic 5A provenance fields
+            promoted_from_cluster_id=entry.promoted_from_cluster_id,
+            promoted_at_params_hash=entry.promoted_at_params_hash,
+            promoted_at_run_id=entry.promoted_at_run_id,
             raw_src_norm=None,
         )
 

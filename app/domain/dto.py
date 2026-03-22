@@ -402,6 +402,10 @@ class TMEntryDTO:
     ngram_id: int | None
     # Global TM canonical link (Task 19)
     tm_global_id: int | None = None
+    # Epic 5A provenance fields (migration 045)
+    promoted_from_cluster_id: int | None = None
+    promoted_at_params_hash: str | None = None
+    promoted_at_run_id: int | None = None
     # Study/meta indicators (non-intrusive overlays)
     in_user_dictionary_count: int = 0
     study_state: str | None = None
@@ -415,6 +419,21 @@ class TMEntryDTO:
     pronunciation_confidence: float | None = None
     pronunciation_qc: str | None = None
     raw_src_norm: str | None = None
+
+    @property
+    def source_status(self) -> str:
+        """Computed TM source status (Epic 5A).
+
+        Returns:
+            'linked'                 — cluster_id is not None (live link)
+            'source_cluster_missing' — cluster deleted after promotion
+            'manual'                 — no cluster source (manual/import)
+        """
+        if self.cluster_id is not None:
+            return "linked"
+        if self.promoted_from_cluster_id is not None:
+            return "source_cluster_missing"
+        return "manual"
 
 
 @dataclass

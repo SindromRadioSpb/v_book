@@ -546,7 +546,8 @@ class TranslationManagementTableModel(QAbstractTableModel):
         # Added Noise column for is_noise visualization
         self.headers = [
             "UD", "ID", "Kind", "Source", "Translation", "Status",
-            "Scope", "Origin", "Source Ref", "Updated", "Noise", "Last Review", "Niqqud", "Audio"
+            "Scope", "Origin", "Source Ref", "Updated", "Noise", "Last Review", "Niqqud", "Audio",
+            "Src",  # Epic 5A: source_status indicator (col 14)
         ]
         self.total_count = 0  # Total matching entries (for pagination)
 
@@ -572,6 +573,19 @@ class TranslationManagementTableModel(QAbstractTableModel):
                 return f"Niqqud: {entry.pronunciation_text}\nSource: {source}\nConfidence: {conf_text}\nQC: {qc}"
             if col == 13 and getattr(entry, "audio_status", None):
                 return f"Audio: {entry.audio_status}"
+            if col == 14 and entry.kind == "term_cluster":
+                status = entry.source_status
+                if status == "linked":
+                    return "Cluster is active in the current extraction"
+                if status == "source_cluster_missing":
+                    pfid = getattr(entry, "promoted_from_cluster_id", None)
+                    phash = getattr(entry, "promoted_at_params_hash", None) or "?"
+                    parts = ["Source cluster was deleted during re-extraction. Entry preserved."]
+                    if pfid:
+                        parts.append(f"Original cluster: #{pfid}")
+                    parts.append(f"Extracted with params: {phash}")
+                    return "\n".join(parts)
+                return "Added manually — no cluster source"
             if entry.study_tooltip and int(getattr(entry, "in_user_dictionary_count", 0) or 0) > 0:
                 return entry.study_tooltip
             return None
@@ -590,6 +604,15 @@ class TranslationManagementTableModel(QAbstractTableModel):
                 )
             if col == 13 and getattr(entry, "audio_status", None):
                 return audio_status_brush(getattr(entry, "audio_status", None))
+            if col == 14 and entry.kind == "term_cluster":
+                from PyQt6.QtGui import QColor
+
+                status = entry.source_status
+                if status == "linked":
+                    return QColor("#16a34a")  # green
+                if status == "source_cluster_missing":
+                    return QColor("#dc2626")  # red
+                return QColor("#6b7280")  # gray (manual)
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             if col == 0:
@@ -634,6 +657,16 @@ class TranslationManagementTableModel(QAbstractTableModel):
                 return getattr(entry, "pronunciation_text", "") or ""
             elif col == 13:
                 return getattr(entry, "audio_status", "") or ""
+            elif col == 14:
+                # source_status indicator — only meaningful for term_cluster entries
+                if entry.kind != "term_cluster":
+                    return ""
+                status = entry.source_status
+                if status == "linked":
+                    return "\u25cf"  # ● green
+                if status == "source_cluster_missing":
+                    return "\u25cf"  # ● red
+                return "\u25cf"  # ● gray (manual)
 
         return None
 
