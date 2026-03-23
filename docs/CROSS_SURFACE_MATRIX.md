@@ -13,7 +13,7 @@ This document maps concepts across the three main data surfaces (Terms, Dictiona
 
 - **LEGITIMATE** — different surfaces have genuinely different models; document it
 - **ALIGN** — surfaces should use the same pattern; document the target state
-- **TARGETED POLISH** — minor wording inconsistency; fix in PATCH-04 or doc correction
+- **TARGETED POLISH** — minor wording inconsistency; fix in a doc correction or targeted code patch
 
 ---
 
@@ -43,8 +43,8 @@ Action: Document both in `docs/UI_VOCABULARY.md` with explicit scoping.
 |--------|-----------|-----------------|----------|
 | Concept | Extraction run (params_hash, algo_version) | `source_lifecycle` (corpus link state) — **NOT SURFACED** | `source_status` (cluster link state) — Src col (●) |
 | Field | `term_extract_run.params_hash`, `term_cluster.ngram_n_set` | `lemma_id`, `orphaned_lemma_id`, `origin` | `cluster_id`, `promoted_from_cluster_id` |
-| UI indicator | Staleness warning label | *(none — PATCH-04 target)* | Src col ● (green/red/grey) |
-| Tooltip | Staleness detail | *(none — PATCH-04 target)* | `promoted_from_cluster_id` + `params_hash` |
+| UI indicator | Staleness warning label | *(none — see Decision below)* | Src col ● (green/red/grey) |
+| Tooltip | Staleness detail | *(none — see Decision below)* | `promoted_from_cluster_id` + `params_hash` |
 
 **Decision: DEFERRED — semantic mismatch confirmed by code audit**
 
@@ -66,7 +66,7 @@ This does not provide user value. The TM panel (which shows TM entries, includin
 - A column in Dictionary view showing "translation status" (has translation / missing / MT-only / approved)
 - This is a different concept from `source_lifecycle` and needs its own design
 
-**Next Wave PATCH-04 is therefore a no-code patch.** The CROSS_SURFACE_MATRIX decision is updated here. The memory note `project_epic6_source_lifecycle_status.md` is updated to reflect this conclusion.
+The CROSS_SURFACE_MATRIX decision is recorded here. The memory note `project_epic6_source_lifecycle_status.md` is updated to reflect this conclusion.
 
 ---
 
@@ -181,7 +181,7 @@ This is the intended pattern. Do not backfill provenance retroactively.
 | Concept | Decision | Action |
 |---------|----------|--------|
 | Noise | LEGITIMATE DIVERGENCE | Document in UI_VOCABULARY |
-| Source / provenance | TARGETED POLISH | PATCH-04: add Lifecycle col to Dictionary |
+| Source / provenance | DEFERRED | Lifecycle col in Dictionary: no user value (always "linked") — see Concept 2 decision |
 | Status | LEGITIMATE DIVERGENCE | Document scoped variants in UI_VOCABULARY |
 | Valid vs. Approved | LEGITIMATE DIVERGENCE + DOCUMENT | Add "not to be confused" note in UI_VOCABULARY |
 | Hidden counts | LEGITIMATE ASYMMETRY | No action |
