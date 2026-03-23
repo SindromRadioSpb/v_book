@@ -31,6 +31,86 @@ from app.ui.study_status_ui import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Epic 6B PATCH-02: Semantic tooltip helpers (noise provenance + NER class)
+# ---------------------------------------------------------------------------
+
+_NER_DESCRIPTIONS: dict[str, str] = {
+    "GPE": "Geo-Political Entity (country, city, region)",
+    "PER": "Person name",
+    "ORG": "Organization",
+    "LOC": "Location",
+    "FAC": "Facility (building, infrastructure)",
+    "EVT": "Event",
+    "WOA": "Work of Art",
+    "ANG": "Language",
+    "DUC": "Product / brand",
+    "MISC": "Miscellaneous named entity",
+    "TTL": "Title / honorific",
+}
+
+_NOISE_REASON_LABELS: dict[str, str] = {
+    "NOISE_PUNCT_ONLY": "punctuation only",
+    "NOISE_NUMBER_ONLY": "number only",
+    "NOISE_TOO_SHORT": "too short",
+    "NOISE_STOPWORD": "stopword",
+    "NOISE_MANUAL": "manually marked",
+    "NOISE_FOREIGN": "foreign-script token",
+    "NOISE_HAPAX": "hapax (frequency = 1)",
+}
+
+
+def _noise_provenance_tooltip(obj) -> str:
+    """Tooltip for Noise column — axis: who set the noise/valid state.
+
+    Keeps this axis strictly separate from source_lifecycle (corpus link).
+    """
+    is_noise = getattr(obj, "is_noise", None)
+    noise_source = getattr(obj, "noise_source", None)
+    updated = getattr(obj, "noise_updated_at", None)
+
+    if is_noise is None:
+        return "Not yet classified"
+
+    date_line = f"\nDate: {updated.split('T')[0]}" if updated else ""
+    state = "noise" if is_noise == 1 else "valid"
+
+    if noise_source == "auto":
+        action = "classified as noise" if is_noise == 1 else "classified as valid"
+        return f"Automatically {action} by NLP pipeline{date_line}"
+    if noise_source == "manual":
+        action = "marked as noise" if is_noise == 1 else "confirmed as valid"
+        return f"Manually {action}{date_line}"
+    # Legacy: noise_source is None
+    label = "Noise" if is_noise == 1 else "Valid"
+    return f"{label} — source unknown (legacy data)"
+
+
+def _entity_class_tooltip(entity_class: str | None) -> str | None:
+    """Return human-readable description for a NER entity class code."""
+    if not entity_class:
+        return None
+    desc = _NER_DESCRIPTIONS.get(entity_class)
+    if desc:
+        return f"{entity_class}: {desc}"
+    return f"Named entity class: {entity_class}"
+
+
+def _tm_noise_tooltip(entry) -> str:
+    """Tooltip for Noise column in TM view — uses noise_reason when available."""
+    is_noise = getattr(entry, "is_noise", None)
+    reason = getattr(entry, "noise_reason", None)
+
+    if is_noise is None:
+        return "Not yet classified"
+
+    state = "Noise" if is_noise == 1 else "Valid"
+    if reason:
+        label = _NOISE_REASON_LABELS.get(reason, reason.lower().replace("_", " "))
+        return f"{state}: {label}"
+    return f"{state} — reason not recorded"
+
+
 class ProjectListModel(QAbstractTableModel):
     """Model for project list table."""
 
@@ -159,6 +239,12 @@ class LemmaTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
+            # Epic 6B PATCH-02: noise provenance (axis 1) — who set the state
+            if col == 8:
+                return _noise_provenance_tooltip(lemma)
+            # Epic 6B PATCH-02: NER class description
+            if col == 9:
+                return _entity_class_tooltip(getattr(lemma, "entity_class", None))
             if col == 11 and getattr(lemma, "pronunciation_text", None):
                 source = getattr(lemma, "pronunciation_source", None) or "none"
                 confidence = getattr(lemma, "pronunciation_confidence", None)
@@ -571,6 +657,9 @@ class TranslationManagementTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
+            # Epic 6B PATCH-02: noise provenance (axis 1) — using noise_reason for TM entries
+            if col == 10:
+                return _tm_noise_tooltip(entry)
             if col == 12 and getattr(entry, "pronunciation_text", None):
                 source = getattr(entry, "pronunciation_source", None) or "none"
                 confidence = getattr(entry, "pronunciation_confidence", None)
