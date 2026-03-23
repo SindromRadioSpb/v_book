@@ -1,7 +1,8 @@
 # Epic 5: TM Safety, Provenance & Layered Extraction
 
-**Status:** Epic 5A complete; Epic 5B planned
-**Schema:** v44 → v45 (Epic 5A), v46 (Epic 5B)
+**Status:** ✅ Epic 5A complete · ✅ Epic 5B complete · ✅ Epic 5C complete · ✅ Epic 5D complete
+**Schema:** v44 → v45 (Epic 5A) → v46 (Epic 5B) — 5C/5D required no new migrations
+**Last updated:** 2026-03-23
 
 ---
 
@@ -66,12 +67,26 @@
 | PATCH-09 | ✅ done | Replace Layer mode: _clear_terms_for_layer(ngram_ns) + chunked re-extract |
 | PATCH-10 | ✅ done | Тесты: все три режима + граничные случаи (PATCH-07/08/09 test files) |
 
-### Epic 5C — Candidate Persistence (future)
+### Epic 5C — Candidate Persistence
 
 | Patch | Status | Description |
 |-------|--------|-------------|
-| PATCH-11+ | 🔄 future | min_freq как display-time фильтр вместо extraction-time |
-| PATCH-12+ | 🔄 future | Хранение расширенного пула кандидатов |
+| PATCH-11 | ✅ done | min_freq как display-time фильтр; store_hapax flag; расширенный пул кандидатов |
+| PATCH-12 | ✅ done | Аккумуляторный режим: chunked накопление с hapax-passthrough |
+
+### Epic 5D — Terms UX Hardening
+
+| Patch | Status | Description |
+|-------|--------|-------------|
+| P0-01 | ✅ done | Hidden cluster count в статусной строке |
+| P0-02 | ✅ done | Freq distribution tooltip на слайдере min_freq |
+| P0-03 | ✅ done | Last-used threshold persistence |
+| P1-01 | ✅ done | Quick-threshold presets (preset_combo) |
+| P1-02 | ✅ done | Threshold change summary dialog |
+| P1-03 | ✅ done | Keyness/Weirdness staleness warning + Recalculate button |
+| P2.1  | ✅ done | Extraction history log (последние N run'ов) |
+| P2.2  | ✅ done | Storage policy UI (hapax ON/OFF, corpus size warning) |
+| P2.3  | ✅ done | Аудит пустых кластеров + диагностические метрики |
 
 ---
 
@@ -311,28 +326,18 @@ def _clear_terms_by_layer(
 
 ---
 
-## Epic 5C — Candidate Persistence (future)
+## Epic 5C — Candidate Persistence (complete)
 
 **Цель:** `min_freq` и аналогичные параметры переводятся из extraction-time в display-time фильтры.
 
-**Текущее состояние:**
-- `min_freq` — extraction-time: термины ниже порога **не сохраняются** в БД
-- `min_doc_freq` — display-time (PATCH-10 Epic 4): термины сохраняются, скрываются в UI
+**Реализованное состояние:**
+- `min_freq` — display-time: все термины хранятся в БД; слайдер фильтрует отображение
+- `store_hapax` flag — управляет хранением hapax (freq=1) на этапе извлечения
+- Аккумуляторный режим — chunked накопление с passthrough для hapax-кандидатов
+- Статусная строка Terms view — показывает скрытое количество кластеров при текущем пороге
 
-**Целевое состояние:**
-- Хранить более широкий пул кандидатов при извлечении
-- Фильтровать при отображении и ранжировании
-- Destructive re-extract только при явном намерении пользователя
-
-**Переход:**
-
-PATCH-11: `min_freq` как display-time фильтр (по аналогии с `min_doc_freq`)
-- При извлечении использовать низкий системный порог (например, 1)
-- В UI добавить slider/spin с предупреждением «Не влияет на хранимые данные»
-
-PATCH-12: Candidate pool management
-- UI для просмотра всех кандидатов включая "ниже порога"
-- Возможность вручную промоутировать кандидата ниже порога в TM
+**Epic 5D** продолжил эту работу на уровне UX — пресеты, история запусков, storage policy.
+Документация: `docs/epic5d_completion.md`, `docs/epic5d_ux_guide.md`.
 
 ---
 

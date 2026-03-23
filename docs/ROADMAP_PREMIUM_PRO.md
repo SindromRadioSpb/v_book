@@ -1,9 +1,34 @@
 # V_book Premium-Pro Roadmap
 
-**Date:** 2026-02-04
-**Version:** 1.0
+**Date:** 2026-02-04 · **Last Updated:** 2026-03-23
+**Version:** 2.0
 **Target Audience:** Premium professional translation memory application
 **Baseline:** M1-M7 + P1-P3 complete, M8-M10 gaps identified
+
+---
+
+## Current Status (2026-03-23)
+
+| Iteration | Status | Notes |
+|-----------|--------|-------|
+| Iteration 1: Core Roadmap (M8-M10) | ✅ Complete | M8, M9, M10 shipped; v1.0.0 released |
+| Iteration 2: Security Hardening | ✅ Complete | SECURITY_AUDIT.md; security test suite |
+| Iteration 3: UI Pro Workspace | ✅ Complete | Command palette, keyboard shortcuts, multi-sort |
+| Iteration 4: Translation Pro (MT + Terms) | ✅ Complete | Google Cloud Translate integrated; Term Extraction Pro (see below) |
+| Iteration 5: Import/Export Premium + QA | 🔄 Partial | Export Center complete; Import preview partial |
+| Iteration 6: Performance + History | 🔄 Partial | Performance baselines established; perf tests present |
+
+### Delivered Beyond Original Roadmap Scope
+
+Three engineering epics were executed organically after v1.0.0, outside the original roadmap numbering. They are documented separately and listed here for completeness:
+
+| Epic | Status | Doc | Summary |
+|------|--------|-----|---------|
+| **Epic 4: Term Extraction Pro** (internal naming) | ✅ Complete | `epic4_term_extraction_pro.md`, `epic4_user_guide.md` | params_hash reproducibility, keyness/weirdness storage, staleness detection, min_doc_freq, sort presets |
+| **Epic 5: TM Safety & Layered Extraction** (internal naming) | ✅ Complete | `epic5_tm_safety_layered_extraction.md`, `epic5*_completion.md` | TM provenance, layered extraction modes (overwrite/merge/replace), candidate persistence, Terms UX hardening |
+| **Epic 6: Dictionary Maturity** (internal naming) | ✅ Complete | `epic6_completion.md`, `epic6_dictionary_guide.md` | Noise provenance, Entity Class column, semantic tooltips, noise count metric — backend truth → product truth |
+
+**Schema version after all epics:** v47
 
 ---
 
@@ -677,6 +702,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 1: Complete Core Roadmap (M8-M10)
 **Duration:** 2-3 weeks
+**Status:** ✅ COMPLETE — v1.0.0 shipped
 **Goal:** Fulfill original plan, enable standalone distribution
 
 **P0 Tasks:**
@@ -728,6 +754,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 2: Security Hardening
 **Duration:** 2 weeks
+**Status:** ✅ COMPLETE
 **Goal:** Production-grade security for enterprise deployments
 
 **P0 Tasks:**
@@ -771,6 +798,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 3: UI Pro Workspace
 **Duration:** 3 weeks
+**Status:** ✅ COMPLETE
 **Goal:** Professional multi-panel workspace with keyboard-driven workflows
 
 **P1 Tasks:**
@@ -816,7 +844,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 4: Translation Pro (MT + Term Extraction)
 **Duration:** 4 weeks
-**Status:** 🚧 IN PROGRESS (Started: 2026-02-07)
+**Status:** ✅ COMPLETE (2026-03)
 **Goal:** Automated translation with MT providers + advanced term extraction
 
 **P1 Tasks:**
@@ -870,6 +898,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 5: Import/Export Premium + QA Pro
 **Duration:** 2 weeks
+**Status:** 🔄 PARTIAL — Export Center complete; Import preview and Coverage trends in progress
 **Goal:** Safe imports with preview + enhanced QA coverage
 
 **P1 Tasks:**
@@ -920,6 +949,7 @@ Epic 7 (History/Audit) ← Epic 2 (UI Pro)
 
 ### Iteration 6: Performance + History Enhancements
 **Duration:** 3 weeks
+**Status:** 🔄 PARTIAL — Performance baselines and benchmarks established; History diff and audit not yet done
 **Goal:** Enforce performance budgets + enhance history/audit
 
 **P1 Tasks:**
@@ -1115,12 +1145,13 @@ Write-Host "PASS 20/20"
 - **MINOR:** New features (M8, M9, M10, epics)
 - **PATCH:** Bug fixes, performance improvements
 
-**Examples:**
-- v1.0.0: M1-M7 + P1-P3 (current baseline)
-- v2.0.0: M8-M10 complete (Iteration 1)
-- v2.1.0: Security hardening complete (Iteration 2)
-- v2.2.0: UI Pro workspace complete (Iteration 3)
-- v3.0.0: MT integration complete (Iteration 4)
+**Actual shipped versions:**
+- v1.0.0: M1-M10 + P1-P3 + Security + UI Pro + MT Integration *(shipped 2026-03)*
+- v1.x.x: Epic 4 (Term Extraction Pro) + Epic 5 (TM Safety + Layered Extraction) + Epic 6 (Dictionary Maturity)
+
+**Planned:**
+- v1.x+1: Import Preview + Coverage Trends (Iteration 5 remainder)
+- v2.0.0: Next major feature wave (History/Audit, Performance Budget, Localization)
 
 ---
 
@@ -1270,7 +1301,7 @@ V_book/
 
 ---
 
-**Last Updated:** 2026-02-04
-**Document Version:** 1.0
-**Next Review:** After Iteration 1 completion
+**Last Updated:** 2026-03-23
+**Document Version:** 2.0
+**Next Review:** Before next major feature wave
 **Maintainer:** Project Lead / Product Owner
