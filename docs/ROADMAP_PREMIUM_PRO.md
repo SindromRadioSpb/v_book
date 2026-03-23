@@ -1,13 +1,13 @@
 # V_book Premium-Pro Roadmap
 
-**Date:** 2026-02-04 · **Last Updated:** 2026-03-23
-**Version:** 2.0
+**Date:** 2026-02-04 · **Last Updated:** 2026-03-24
+**Version:** 2.1
 **Target Audience:** Premium professional translation memory application
 **Baseline:** M1-M7 + P1-P3 complete, M8-M10 gaps identified
 
 ---
 
-## Current Status (2026-03-23)
+## Current Status (2026-03-24)
 
 | Iteration | Status | Notes |
 |-----------|--------|-------|
@@ -29,6 +29,22 @@ Three engineering epics were executed organically after v1.0.0, outside the orig
 | **Epic 6: Dictionary Maturity** (internal naming) | ✅ Complete | `epic6_completion.md`, `epic6_dictionary_guide.md` | Noise provenance, Entity Class column, semantic tooltips, noise count metric — backend truth → product truth |
 
 **Schema version after all epics:** v47
+
+### Next Wave: Post-Epics 4/5/6 Stabilization (2026-03-24)
+
+A bounded consolidation wave executed after Epics 4/5/6 to prevent semantic drift and establish normative references. No new broad epics, no schema changes.
+
+| Phase | Status | Deliverable |
+|-------|--------|-------------|
+| PATCH-00: Audit consolidation | ✅ Complete | `docs/next_wave_audit.md` |
+| PATCH-01: Semantic contract | ✅ Complete | `docs/SEMANTIC_CONTRACT.md` |
+| PATCH-02: Cross-surface matrix | ✅ Complete | `docs/CROSS_SURFACE_MATRIX.md` |
+| PATCH-03: UI vocabulary | ✅ Complete | `docs/UI_VOCABULARY.md` |
+| PATCH-04: Axis 2 in Dictionary | ✅ Resolved (deferred) | Semantic analysis in `CROSS_SURFACE_MATRIX.md` — column would always be "linked", no user value |
+| PATCH-05: Manual QA matrix | ✅ Complete | `docs/MANUAL_QA_MATRIX.md` |
+| PATCH-06: Release consolidation | ✅ Complete | `docs/MATURITY_SUMMARY.md`, `docs/OPERATOR_GUIDE.md` |
+
+**Key normative documents created:** `SEMANTIC_CONTRACT.md` · `CROSS_SURFACE_MATRIX.md` · `UI_VOCABULARY.md`
 
 ---
 
