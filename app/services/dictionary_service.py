@@ -399,6 +399,14 @@ class DictionaryService:
 
         return stmt
 
+    def count_noise_lemmas(self, session: Session, project_id: int) -> int:
+        """Epic 6B: Count lemmas with is_noise=1 for status bar display."""
+        stmt = select(func.count()).where(
+            Lemma.project_id == project_id,
+            Lemma.is_noise == 1,
+        )
+        return session.execute(stmt).scalar_one() or 0
+
     def count_lemma_ids_for_translation(
         self,
         session: Session,

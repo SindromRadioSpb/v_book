@@ -26,7 +26,7 @@ def test_dictionary_ud_marker_is_due_aware():
         ]
     )
     assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"
-    assert model.data(model.index(0, 9), Qt.ItemDataRole.DisplayRole) == "Again"
+    assert model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole) == "Again"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
     assert brush.color().name().lower() == "#ffd7d9"

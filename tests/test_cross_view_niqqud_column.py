@@ -139,12 +139,12 @@ def _ud_item() -> SimpleNamespace:
 
 def test_dictionary_model_has_niqqud_column():
     model = LemmaTableModel([_lemma()])
-    assert model.headerData(10, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
+    assert model.headerData(11, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
     assert (
-        model.data(model.index(0, 10), Qt.ItemDataRole.DisplayRole)
+        model.data(model.index(0, 11), Qt.ItemDataRole.DisplayRole)
         == "Ч”Ц·ЧЄЦ·ЦјЧ—ЦІЧ ЦёЧ” Ч”Ц·Ч‘ЦёЦјЧђЦёЧ”"
     )
-    tooltip = model.data(model.index(0, 10), Qt.ItemDataRole.ToolTipRole)
+    tooltip = model.data(model.index(0, 11), Qt.ItemDataRole.ToolTipRole)
     assert "Source: manual" in tooltip
 
 

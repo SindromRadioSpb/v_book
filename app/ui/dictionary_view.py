@@ -355,10 +355,11 @@ class DictionaryView(QWidget):
                 5: 260,  # Translation
                 6: 120,  # Source
                 7: 110,  # Status
-                8: 90,  # Noise
-                9: 110,  # Last Review
-                10: 180,  # Niqqud
-                11: 90,  # Audio
+                8: 90,   # Noise
+                9: 110,  # Entity Class (Epic 6B)
+                10: 110, # Last Review (was 9)
+                11: 180, # Niqqud (was 10)
+                12: 90,  # Audio (was 11)
             },
         )
         self.table_layout_controller.install()
@@ -366,7 +367,7 @@ class DictionaryView(QWidget):
             self.lemma_table,
             on_play_clicked=self.on_audio_cell_play_clicked,
         )
-        self.lemma_table.setItemDelegateForColumn(11, self.audio_play_delegate)
+        self.lemma_table.setItemDelegateForColumn(12, self.audio_play_delegate)
 
         # M7 P1: Connect dataChanged to save handler
         self.lemma_model.dataChanged.connect(self.on_translation_edited)
@@ -376,9 +377,14 @@ class DictionaryView(QWidget):
 
         layout.addWidget(self.lemma_table)
 
-        # Status bar
+        # Status bar — Epic 6B: added noise count label
+        status_bar_layout = QHBoxLayout()
         self.status_label = QLabel("No lemmas")
-        layout.addWidget(self.status_label)
+        self.noise_label = QLabel("")
+        status_bar_layout.addWidget(self.status_label)
+        status_bar_layout.addStretch()
+        status_bar_layout.addWidget(self.noise_label)
+        layout.addLayout(status_bar_layout)
 
         self.setLayout(layout)
         self._apply_sort_indicator()
@@ -496,6 +502,7 @@ class DictionaryView(QWidget):
         self.search_worker.count_ready.connect(
             lambda total_count, seq=request_seq: self.on_search_count_ready(total_count, seq)
         )
+        self.search_worker.noise_count_ready.connect(self.on_noise_count_ready)
         self.search_worker.error.connect(
             lambda error_msg, seq=request_seq: self.on_search_error(error_msg, seq)
         )
@@ -552,6 +559,8 @@ class DictionaryView(QWidget):
                 is_noise=lemma.is_noise,
                 noise_reason=lemma.noise_reason,
                 norm_text=lemma.norm_text,
+                noise_source=lemma.noise_source if hasattr(lemma, "noise_source") else None,
+                noise_updated_at=lemma.noise_updated_at if hasattr(lemma, "noise_updated_at") else None,
             )
             lemmas.append(lemma_dto)
 
@@ -594,6 +603,13 @@ class DictionaryView(QWidget):
             end = min(self.current_offset + len(self.lemma_model.lemmas), self.total_count)
             self.status_label.setText(f"Showing {start}-{end} of {self.total_count:,} lemmas")
         self.update_pagination_controls()
+
+    def on_noise_count_ready(self, count: int) -> None:
+        """Epic 6B: Update noise count label in status bar."""
+        if count > 0:
+            self.noise_label.setText(f"Noise: {count:,}")
+        else:
+            self.noise_label.setText("")
 
     def _snapshot_lemma_state(self) -> dict[int, dict]:
         snapshot: dict[int, dict] = {}

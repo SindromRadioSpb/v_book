@@ -1362,6 +1362,7 @@ class DictionarySearchWorker(QThread):
 
     results_ready = pyqtSignal(list)  # rows: List[Tuple[Lemma, LemmaProjectStat]]
     count_ready = pyqtSignal(int)  # total_count
+    noise_count_ready = pyqtSignal(int)  # Epic 6B: noise lemma count for status bar
     error = pyqtSignal(str)
 
     def __init__(
@@ -1423,6 +1424,13 @@ class DictionarySearchWorker(QThread):
 
                     if not self._cancelled:
                         self.count_ready.emit(total_count)
+
+                    # Epic 6B: noise count for status bar (fast COUNT, same session)
+                    noise_count = dict_service.count_noise_lemmas(
+                        session, project_id=self.project_id
+                    )
+                    if not self._cancelled:
+                        self.noise_count_ready.emit(noise_count)
 
         except Exception as e:
             logger.exception("Dictionary search error")

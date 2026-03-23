@@ -126,19 +126,21 @@ class LemmaTableModel(QAbstractTableModel):
         self.lemmas = lemmas or []
         # M7: Added Source column between Translation and Status
         # Added Noise column for is_noise visualization
+        # Epic 6B: Added Entity Class column (col 9); Niqqud→11, Audio→12
         self.headers = [
-            "UD",
-            "Lemma",
-            "POS",
-            "Frequency",
-            "Doc Freq",
-            "Translation",
-            "Source",
-            "Status",
-            "Noise",
-            "Last Review",
-            "Niqqud",
-            "Audio",
+            "UD",           # 0
+            "Lemma",        # 1
+            "POS",          # 2
+            "Frequency",    # 3
+            "Doc Freq",     # 4
+            "Translation",  # 5  (editable)
+            "Source",       # 6
+            "Status",       # 7
+            "Noise",        # 8
+            "Entity Class", # 9  (Epic 6B)
+            "Last Review",  # 10 (was 9)
+            "Niqqud",       # 11 (was 10)
+            "Audio",        # 12 (was 11)
         ]
         # M7: Store full TranslationResult for each lemma (for Why dialog)
         self.translation_results = {}  # row_index -> TranslationResult
@@ -157,13 +159,13 @@ class LemmaTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if col == 10 and getattr(lemma, "pronunciation_text", None):
+            if col == 11 and getattr(lemma, "pronunciation_text", None):
                 source = getattr(lemma, "pronunciation_source", None) or "none"
                 confidence = getattr(lemma, "pronunciation_confidence", None)
                 qc = getattr(lemma, "pronunciation_qc", None) or "ok"
                 conf_text = f"{float(confidence):.2f}" if confidence is not None else "n/a"
                 return f"Niqqud: {lemma.pronunciation_text}\nSource: {source}\nConfidence: {conf_text}\nQC: {qc}"
-            if col == 11 and getattr(lemma, "audio_status", None):
+            if col == 12 and getattr(lemma, "audio_status", None):
                 return f"Audio: {lemma.audio_status}"
             if lemma.study_tooltip and int(getattr(lemma, "in_user_dictionary_count", 0) or 0) > 0:
                 return lemma.study_tooltip
@@ -181,7 +183,7 @@ class LemmaTableModel(QAbstractTableModel):
                     int(getattr(lemma, "in_user_dictionary_count", 0) or 0),
                     getattr(lemma, "study_state", None),
                 )
-            if col == 11 and getattr(lemma, "audio_status", None):
+            if col == 12 and getattr(lemma, "audio_status", None):
                 return audio_status_brush(getattr(lemma, "audio_status", None))
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
@@ -211,20 +213,24 @@ class LemmaTableModel(QAbstractTableModel):
                 # M7: Status
                 return lemma.status
             elif col == 8:
-                # Noise column
+                # Noise column — Epic 6B: show noise_source provenance
+                ns = getattr(lemma, "noise_source", None)
+                suffix = f" ({ns})" if ns else ""
                 if lemma.is_noise == 1:
-                    return "Noise"
+                    return f"Noise{suffix}"
                 elif lemma.is_noise == 0:
-                    return "Valid"
-                else:
-                    return ""  # NULL - legacy records
+                    return f"Valid{suffix}"
+                return ""  # NULL - legacy records
             elif col == 9:
+                # Epic 6B: Entity Class
+                return getattr(lemma, "entity_class", None) or ""
+            elif col == 10:
                 if int(getattr(lemma, "in_user_dictionary_count", 0) or 0) <= 0:
                     return ""
                 return last_review_label(getattr(lemma, "last_grade", None))
-            elif col == 10:
-                return getattr(lemma, "pronunciation_text", "") or ""
             elif col == 11:
+                return getattr(lemma, "pronunciation_text", "") or ""
+            elif col == 12:
                 return getattr(lemma, "audio_status", "") or ""
 
         return None
