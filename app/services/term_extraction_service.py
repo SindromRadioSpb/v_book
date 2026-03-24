@@ -289,6 +289,14 @@ class TermExtractionService:
             # 1. Clear clusters + ngrams for the requested ngram_ns layer.
             # 2. Re-extract only those layers (enable_ngrams only, no NP chunks).
             # NP clusters and other n-size layers are preserved.
+            #
+            # overwrite=False is intentional: _clear_terms_for_layer already removed the
+            # target layer before this call. Passing overwrite=True would trigger
+            # _clear_existing_terms() in finalization, wiping ALL remaining clusters
+            # (including trigrams and NP chunks that must be preserved). overwrite=False
+            # uses INSERT OR IGNORE for ngrams (safe — no conflicts after layer clear)
+            # and merge-semantics for cluster creation (preserves existing clusters from
+            # other layers).
             if enable_ngrams and ngram_ns:
                 self._clear_terms_for_layer(session, project_id, ngram_ns)
             return self._extract_terms_for_project_chunked(
@@ -299,7 +307,7 @@ class TermExtractionService:
                 min_freq=min_freq,
                 ngram_ns=ngram_ns,
                 np_max_len=np_max_len,
-                overwrite=True,
+                overwrite=False,  # FIX: was True — see comment above
                 store_hapax=store_hapax,
                 batch_size=batch_size,
                 progress_callback=progress_callback,

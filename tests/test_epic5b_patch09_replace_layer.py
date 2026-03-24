@@ -198,6 +198,25 @@ def test_replace_layer_calls_clear_before_extract(svc, session):
     chunked_mock.assert_called_once()
 
 
+def test_replace_layer_passes_overwrite_false_to_chunked(svc, session):
+    """replace_layer must pass overwrite=False to _extract_terms_for_project_chunked.
+
+    overwrite=True would cause _clear_existing_terms() to run in finalization,
+    wiping clusters from other layers (trigrams, NP) that replace_layer must preserve.
+    """
+    chunked_mock = MagicMock(return_value=MagicMock())
+
+    with (
+        patch.object(svc, "_extract_terms_for_project_chunked", chunked_mock),
+        patch.object(svc, "_clear_terms_for_layer", MagicMock(return_value=0)),
+    ):
+        svc.extract_terms_for_project(session, 1, extraction_mode="replace_layer", ngram_ns=(2,))
+
+    assert (
+        chunked_mock.call_args[1].get("overwrite") is False
+    ), "replace_layer must pass overwrite=False; overwrite=True would wipe all clusters"
+
+
 def test_replace_layer_resume_latest_false(svc, session):
     """replace_layer sets resume_latest=False to avoid stale checkpoints."""
     chunked_mock = MagicMock(return_value=MagicMock())
