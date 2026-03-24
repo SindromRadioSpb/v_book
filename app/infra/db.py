@@ -1,5 +1,6 @@
 """Database connection and migration management."""
 
+import contextlib
 import logging
 import os
 import sqlite3 as _sqlite3
@@ -191,30 +192,21 @@ class DatabaseManager:
                             logger.info(f"Migration {sql_file.name} applied successfully")
                         except Exception as script_err:
                             # Guard: if columns were already added in a previous partial run
-                            # (schema_version not updated), treat as already applied rather
-                            # than crashing the app.
+                            # (schema_version not updated), re-run only non-DDL statements
+                            # (UPDATE backfills, index creation) so they are not silently skipped.
                             if "duplicate column name" in str(script_err).lower():
                                 logger.warning(
                                     f"Migration {sql_file.name} already partially applied "
-                                    f"({script_err}) — forcing schema_version to "
-                                    f"{migration_version}"
+                                    f"({script_err}) — re-running non-DDL statements"
                                 )
-                                try:
+                                with contextlib.suppress(Exception):
                                     raw_conn.rollback()
-                                except Exception:
-                                    pass
-                                cursor2 = raw_conn.cursor()
-                                cursor2.execute(
-                                    "UPDATE schema_meta SET value = ? "
-                                    "WHERE key = 'schema_version'",
-                                    (str(migration_version),),
+                                self._run_migration_skipping_duplicate_columns(
+                                    raw_conn, sql_content, migration_version, sql_file.name
                                 )
-                                raw_conn.commit()
                             else:
-                                try:
+                                with contextlib.suppress(Exception):
                                     raw_conn.rollback()
-                                except Exception:
-                                    pass
                                 raise
                     finally:
                         raw_conn.close()
@@ -233,6 +225,63 @@ class DatabaseManager:
 
         # Task 19: Auto-backfill tm_global if needed (after migration 015)
         self._backfill_tm_global_if_needed()
+
+    def _run_migration_skipping_duplicate_columns(
+        self,
+        raw_conn: object,
+        sql_content: str,
+        migration_version: int,
+        sql_file_name: str,
+    ) -> None:
+        """Re-execute a migration that failed due to duplicate column names.
+
+        Splits the SQL into individual statements, skips ALTER TABLE ADD COLUMN
+        statements (which already succeeded in a prior partial run), and executes
+        the remaining statements (backfill UPDATEs, index creation, trigger
+        definitions, schema_version update).
+
+        Args:
+            raw_conn: Raw DBAPI connection (must be open, any pending tx rolled back).
+            sql_content: Full SQL text of the migration file.
+            migration_version: Integer version number extracted from the filename.
+            sql_file_name: Filename used in log messages.
+        """
+        import re
+
+        cursor = raw_conn.cursor()
+        skipped = 0
+        executed = 0
+
+        for stmt in sql_content.split(";"):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            upper = stmt.upper().lstrip()
+            # Skip transaction boundary keywords (executescript emits them implicitly)
+            if upper in ("BEGIN", "COMMIT", "ROLLBACK"):
+                continue
+            # Skip ALTER TABLE ... ADD [COLUMN] statements — already applied
+            if re.match(r"ALTER\s+TABLE\s+\S+\s+ADD(\s+COLUMN)?\s+", upper):
+                logger.info("  Skipping already-applied DDL: %.60s…", stmt)
+                skipped += 1
+                continue
+            try:
+                cursor.execute(stmt)
+                executed += 1
+            except Exception as exc:
+                logger.warning("  Statement skipped (%s): %.60s…", exc, stmt)
+
+        cursor.execute(
+            "UPDATE schema_meta SET value = ? WHERE key = 'schema_version'",
+            (str(migration_version),),
+        )
+        raw_conn.commit()
+        logger.info(
+            "Migration %s partially re-applied: %d statements executed, %d DDL skipped",
+            sql_file_name,
+            executed,
+            skipped,
+        )
 
     def _ensure_fts_health(self) -> None:
         """Ensure FTS5 tables and triggers exist. Runs on EVERY startup.
