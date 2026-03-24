@@ -1648,8 +1648,11 @@ class DictionaryView(QWidget):
                 self.user_dict_service.sync_noise_from_lemmas(session, [lemma.lemma_id])
                 session.commit()
 
-                # Update local model
+                # Update local model — also update provenance fields so badge
+                # shows "Noise (manual)" immediately without requiring a refresh
                 lemma.is_noise = 1 if is_noise else 0
+                lemma.noise_source = "manual"
+                lemma.noise_updated_at = datetime.now(UTC).isoformat()
 
                 status = "noise" if is_noise else "valid"
                 logger.info(f"Marked lemma '{lemma.lemma_text}' as {status}")
