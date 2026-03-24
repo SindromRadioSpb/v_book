@@ -45,6 +45,7 @@ def _cluster() -> SimpleNamespace:
         freq_abs=5,
         doc_freq=2,
         members_count=1,
+        source_kinds="ngram",
         best_pmi=None,
         best_llr=None,
         best_dice=None,
@@ -150,9 +151,9 @@ def test_dictionary_model_has_niqqud_column():
 
 def test_terms_model_has_niqqud_column():
     model = TermClusterTableModel([_cluster()])
-    assert model.headerData(17, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
+    assert model.headerData(18, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "Niqqud"
     assert (
-        model.data(model.index(0, 17), Qt.ItemDataRole.DisplayRole)
+        model.data(model.index(0, 18), Qt.ItemDataRole.DisplayRole)
         == "ЧћЦґЧ™Ч©ЧЃЧ•Ц№ЧЁ Ч”Ц·ЧћЦјЦ°Ч©ЧЃЦ»Ч¤ЦјЦёЧў"
     )
 

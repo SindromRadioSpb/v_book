@@ -412,7 +412,9 @@ class TermClusterTableModel(QAbstractTableModel):
         # M7: Added Translation, Source, Status columns
         # Added Noise column for is_noise visualization
         self.headers = [
-            "UD", "Term", "Lemma", "Freq", "DocFreq", "Members", "PMI", "LLR", "Dice",
+            "UD", "Term", "Lemma", "Freq", "DocFreq", "Members",
+            "Kind",  # col 6: entity type (ngram | np | ngram+np)
+            "PMI", "LLR", "Dice",
             "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise", "Last Review", "Niqqud", "Audio"
         ]
         # M7: Store full TranslationResult for each cluster
@@ -432,14 +434,16 @@ class TermClusterTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            if col == 9:
+            if col == 6:
+                return "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram+np' = both"
+            if col == 10:
                 return (
                     "Weirdness — domain specificity vs reference corpus.\n"
                     "> 1.0: term is more frequent in this domain than in the reference.\n"
                     "Requires a reference corpus to be set (Termhood preset).\n"
                     "Stored at extraction time when reference corpus is configured."
                 )
-            if col == 10:
+            if col == 11:
                 kval = getattr(cluster, "best_keyness", None)
                 src = "stored" if kval is not None else "query-time"
                 return (
@@ -448,19 +452,19 @@ class TermClusterTableModel(QAbstractTableModel):
                     f"Source: {src}. Requires a reference corpus.\n"
                     "Stored at extraction time; sortable without re-computing."
                 )
-            if col == 11:
+            if col == 12:
                 return (
                     "Termhood — composite score: log(Keyness) × log(Weirdness) × log(Freq).\n"
                     "Combines statistical significance, domain specificity, and frequency.\n"
                     "Used by the 'termhood' preset for ranking."
                 )
-            if col == 17 and getattr(cluster, "pronunciation_text", None):
+            if col == 18 and getattr(cluster, "pronunciation_text", None):
                 source = getattr(cluster, "pronunciation_source", None) or "none"
                 confidence = getattr(cluster, "pronunciation_confidence", None)
                 qc = getattr(cluster, "pronunciation_qc", None) or "ok"
                 conf_text = f"{float(confidence):.2f}" if confidence is not None else "n/a"
                 return f"Niqqud: {cluster.pronunciation_text}\nSource: {source}\nConfidence: {conf_text}\nQC: {qc}"
-            if col == 18 and getattr(cluster, "audio_status", None):
+            if col == 19 and getattr(cluster, "audio_status", None):
                 return f"Audio: {cluster.audio_status}"
             if cluster.study_tooltip and int(getattr(cluster, "in_user_dictionary_count", 0) or 0) > 0:
                 return cluster.study_tooltip
@@ -478,7 +482,7 @@ class TermClusterTableModel(QAbstractTableModel):
                     int(getattr(cluster, "in_user_dictionary_count", 0) or 0),
                     getattr(cluster, "study_state", None),
                 )
-            if col == 18 and getattr(cluster, "audio_status", None):
+            if col == 19 and getattr(cluster, "audio_status", None):
                 return audio_status_brush(getattr(cluster, "audio_status", None))
 
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
@@ -498,31 +502,33 @@ class TermClusterTableModel(QAbstractTableModel):
             elif col == 5:
                 return str(cluster.members_count)
             elif col == 6:
-                return f"{cluster.best_pmi:.2f}" if cluster.best_pmi else "N/A"
+                return getattr(cluster, "source_kinds", None) or "?"
             elif col == 7:
-                return f"{cluster.best_llr:.2f}" if cluster.best_llr else "N/A"
+                return f"{cluster.best_pmi:.2f}" if cluster.best_pmi else "N/A"
             elif col == 8:
-                return f"{cluster.best_dice:.3f}" if cluster.best_dice else "N/A"
+                return f"{cluster.best_llr:.2f}" if cluster.best_llr else "N/A"
             elif col == 9:
-                return f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
+                return f"{cluster.best_dice:.3f}" if cluster.best_dice else "N/A"
             elif col == 10:
+                return f"{cluster.weirdness:.2f}" if cluster.weirdness else "N/A"
+            elif col == 11:
                 # Prefer stored best_keyness (set during extraction) over query-time keyness_llr
                 kval = getattr(cluster, "best_keyness", None)
                 if kval is None:
                     kval = cluster.keyness_llr
                 return f"{kval:.2f}" if kval is not None else "N/A"
-            elif col == 11:
-                return f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
             elif col == 12:
+                return f"{cluster.termhood_score:.2f}" if cluster.termhood_score else "N/A"
+            elif col == 13:
                 # M7: Translation
                 return cluster.translation or ""
-            elif col == 13:
+            elif col == 14:
                 # M7: Source
                 return cluster.translation_source or "none"
-            elif col == 14:
+            elif col == 15:
                 # M7: Status
                 return cluster.translation_status or "none"
-            elif col == 15:
+            elif col == 16:
                 # Noise column
                 if cluster.is_noise == 1:
                     return "Noise"
@@ -530,13 +536,13 @@ class TermClusterTableModel(QAbstractTableModel):
                     return "Valid"
                 else:
                     return ""  # NULL - legacy records
-            elif col == 16:
+            elif col == 17:
                 if int(getattr(cluster, "in_user_dictionary_count", 0) or 0) <= 0:
                     return ""
                 return last_review_label(getattr(cluster, "last_grade", None))
-            elif col == 17:
-                return getattr(cluster, "pronunciation_text", "") or ""
             elif col == 18:
+                return getattr(cluster, "pronunciation_text", "") or ""
+            elif col == 19:
                 return getattr(cluster, "audio_status", "") or ""
 
         return None
@@ -548,8 +554,8 @@ class TermClusterTableModel(QAbstractTableModel):
 
         flags = super().flags(index)
 
-        # Column 12 (Translation) is editable
-        if index.column() == 12:
+        # Column 13 (Translation) is editable
+        if index.column() == 13:
             flags |= Qt.ItemFlag.ItemIsEditable
 
         return flags
@@ -559,7 +565,7 @@ class TermClusterTableModel(QAbstractTableModel):
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
 
-        if index.column() == 12:  # Translation column
+        if index.column() == 13:  # Translation column
             # Update DTO
             cluster = self.clusters[index.row()]
             cluster.translation = value
@@ -568,8 +574,8 @@ class TermClusterTableModel(QAbstractTableModel):
             # Emit data changed
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
 
-            # Also emit for Status column (col 14)
-            status_idx = self.index(index.row(), 14)
+            # Also emit for Status column (col 15)
+            status_idx = self.index(index.row(), 15)
             self.dataChanged.emit(status_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
             return True
@@ -579,6 +585,29 @@ class TermClusterTableModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.headers[section]
+        if role == Qt.ItemDataRole.ToolTipRole and orientation == Qt.Orientation.Horizontal:
+            _tooltips = {
+                1: "Hebrew term (representative surface form of the cluster)",
+                2: "Lemma form of the representative term",
+                3: "Absolute frequency — total occurrences in the corpus",
+                4: "Document frequency — number of documents containing this term",
+                5: "Number of surface variants grouped into this cluster",
+                6: "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram+np' = both",
+                7: "PMI — Pointwise Mutual Information: word co-occurrence association strength",
+                8: "LLR — Log-Likelihood Ratio: statistical significance of co-occurrence",
+                9: "Dice coefficient: symmetric co-occurrence measure (0–1)",
+                10: "Weirdness — domain specificity vs reference corpus (>1.0 = more domain-specific)",
+                11: "Keyness (LLR) — statistical significance of domain frequency vs reference corpus",
+                12: "Termhood — composite score combining Keyness, Weirdness, and Frequency",
+                13: "Best matching translation (from TM, dictionary, MT cache, or MT engine)",
+                14: "Translation source: tm | dict | mt_cache | mt | none",
+                15: "Translation status: approved | draft | none",
+                16: "Noise: 'Noise' = NLP classifier flagged, 'Valid' = not noise, blank = unclassified",
+                17: "Last spaced-repetition review date",
+                18: "Niqqud — vowel diacritics (phonetic transcription)",
+                19: "Audio status: ready | failed | none",
+            }
+            return _tooltips.get(section)
         return None
 
     def update_clusters(self, clusters: list):
@@ -609,8 +638,8 @@ class TermClusterTableModel(QAbstractTableModel):
                 self.translation_results[row] = tr_result
 
                 # Emit dataChanged for Translation, Source, Status columns
-                trans_idx = self.index(row, 12)
-                status_idx = self.index(row, 14)
+                trans_idx = self.index(row, 13)
+                status_idx = self.index(row, 15)
                 self.dataChanged.emit(trans_idx, status_idx, [Qt.ItemDataRole.DisplayRole])
 
     def get_cluster(self, row: int):
@@ -637,7 +666,7 @@ class TranslationManagementTableModel(QAbstractTableModel):
         self.entries: list[TMEntryDTO] = entries or []
         # Added Noise column for is_noise visualization
         self.headers = [
-            "UD", "ID", "Kind", "Source", "Translation", "Status",
+            "UD", "ID", "Kind", "Term", "Translation", "Status",
             "Scope", "Origin", "Source Ref", "Updated", "Noise", "Last Review", "Niqqud", "Audio",
             "Src",  # Epic 5A: source_status indicator (col 14)
         ]
@@ -768,6 +797,19 @@ class TranslationManagementTableModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.headers[section]
+        if role == Qt.ItemDataRole.ToolTipRole and orientation == Qt.Orientation.Horizontal:
+            _tooltips = {
+                2: "Entity type: lemma | ngram | term_cluster | surface",
+                3: "Source term — the Hebrew text being translated (not the translation source/origin)",
+                4: "Translation text",
+                5: "Translation status: approved | draft | rejected",
+                6: "Scope: Global (shared across all projects) or Project-specific",
+                7: "Origin: how this entry was created (user_edit | batch_extract | mt | ...)",
+                8: "Source reference — internal link to the originating object",
+                10: "Noise: 'Noise' = NLP classifier flagged, 'Valid' = not noise, blank = unclassified",
+                14: "Source cluster status: ● green = cluster active, ● red = cluster deleted, ● grey = manual entry",
+            }
+            return _tooltips.get(section)
         return None
 
     def flags(self, index):

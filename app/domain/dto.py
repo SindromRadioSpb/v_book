@@ -347,6 +347,7 @@ class ClusterStats:
     pronunciation_source: str | None = None
     pronunciation_confidence: float | None = None
     pronunciation_qc: str | None = None
+    source_kinds: str | None = None  # ngram | np | ngram+np
 
 
 @dataclass

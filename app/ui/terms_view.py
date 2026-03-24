@@ -1600,8 +1600,8 @@ class TermsView(QWidget):
 
     def on_translation_edited(self, top_left: QModelIndex, bottom_right: QModelIndex, roles):
         """M7 P1: Handle inline edit of translation - save to TM."""
-        # Check if Translation column was edited (col 12)
-        if top_left.column() != 12:
+        # Check if Translation column was edited (col 13)
+        if top_left.column() != 13:
             return
 
         row = top_left.row()
@@ -2705,8 +2705,8 @@ class TermsView(QWidget):
                     if current_index.isValid():
                         # Map proxy index to source
                         source_index = self.proxy_model.mapToSource(current_index)
-                        # Get Translation column (12) in source model
-                        translation_source_index = self.terms_model.index(source_index.row(), 12)
+                        # Get Translation column (13) in source model
+                        translation_source_index = self.terms_model.index(source_index.row(), 13)
                         # Map back to proxy
                         translation_proxy_index = self.proxy_model.mapFromSource(
                             translation_source_index

@@ -59,7 +59,7 @@ def test_terms_ud_marker_is_due_aware():
         ]
     )
     assert model.data(model.index(0, 0), Qt.ItemDataRole.DisplayRole) == "*!"
-    assert model.data(model.index(0, 16), Qt.ItemDataRole.DisplayRole) == "Good"
+    assert model.data(model.index(0, 17), Qt.ItemDataRole.DisplayRole) == "Good"
     brush = model.data(model.index(0, 1), Qt.ItemDataRole.BackgroundRole)
     assert brush is not None
     assert brush.color().name().lower() == "#cdeed1"

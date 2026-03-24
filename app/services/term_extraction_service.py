@@ -2740,6 +2740,7 @@ class TermExtractionService:
                     is_noise=c.is_noise,
                     noise_reason=c.noise_reason,
                     norm_text=c.norm_text,
+                    source_kinds=c.source_kinds,
                 )
             )
 
@@ -3440,6 +3441,7 @@ class TermExtractionService:
                     is_noise=d_cluster.is_noise,
                     noise_reason=d_cluster.noise_reason,
                     norm_text=d_cluster.norm_text,
+                    source_kinds=d_cluster.source_kinds,
                 )
             )
 
