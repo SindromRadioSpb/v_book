@@ -1,14 +1,20 @@
 """Diagnostic tests for Issues 3.1 and 3.2 — extraction mode cross-layer safety.
 
 Issue 3.1 — Replace Layer wipes preserved layers:
-  replace_layer dispatch calls _extract_terms_for_project_chunked(overwrite=True).
-  At finalization this triggers _clear_existing_terms() which deletes ALL clusters —
+  replace_layer dispatch called _extract_terms_for_project_chunked(overwrite=True).
+  At finalization this triggered _clear_existing_terms() which deleted ALL clusters —
   including those that _clear_terms_for_layer intentionally preserved.
+  FIXED: overwrite=False is now passed.
 
 Issue 3.2 — Full Overwrite bigrams-only must delete trigram clusters:
   extract_terms_for_project(extraction_mode="overwrite", ngram_ns=(2,)) must delete
   ALL existing clusters (including trigrams from a previous extraction) before
   re-inserting only the newly staged bigrams.
+
+Issue 3.2 (part 2) — Full Overwrite re-extracts ONLY the selected ngram_ns:
+  After clearing all terms, Full Overwrite with ngram_ns=(2,) must re-insert
+  only bigrams; with ngram_ns=(3,) only trigrams; with ngram_ns=(2,3) both.
+  The ngram_ns checkbox selection is honoured end-to-end.
 """
 
 import pytest
@@ -19,7 +25,10 @@ from app.infra.sa_models import (
     Base,
     DictProject,
     Library,
+    Ngram,
     TermCluster,
+    TermExtractAccumulator,
+    TermExtractRun,
 )
 from app.services.term_extraction_service import TermExtractionService, canonical_ngram_n_set
 
@@ -225,3 +234,141 @@ def test_replace_layer_preserves_np_clusters(svc, session):
     assert np_id in remaining_ids, (
         f"Replace Layer [2] must preserve NP clusters. " f"NP cluster {np_id} was deleted."
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue 3.2 (part 2) — Full Overwrite re-extracts ONLY the selected ngram_ns
+#
+# Strategy: bypass corpus NLP by pre-seeding TermExtractAccumulator with the
+# desired n-gram rows, then call the finalization phase directly:
+#   _clear_existing_terms → _store_staged_ngrams → _cluster_terms
+# This is the exact code path executed after staging completes.
+# ---------------------------------------------------------------------------
+
+
+def _make_run(sess, project_id: int, ngram_ns_json: str) -> TermExtractRun:
+    """Create a TermExtractRun in 'staged' status (staging already done)."""
+    r = TermExtractRun(
+        project_id=project_id,
+        status="staged",
+        stage="test",
+        enable_ngrams=1,
+        include_np=0,
+        overwrite=1,
+        min_freq=2,
+        ngram_ns_json=ngram_ns_json,
+        np_max_len=5,
+        docs_total=1,
+        docs_processed=1,
+        chunks_total=1,
+        chunks_completed=1,
+    )
+    sess.add(r)
+    sess.commit()
+    return r
+
+
+def _acc(sess, run_id: int, surface: str, n: int, freq: int = 3, doc_freq: int = 2) -> None:
+    """Insert a TermExtractAccumulator row simulating a staged n-gram."""
+    sess.add(
+        TermExtractAccumulator(
+            run_id=run_id,
+            source_kind="ngram",
+            n=n,
+            surface_text=surface,
+            lemma_phrase=surface,
+            pos_pattern="NN " * n,
+            freq_abs=freq,
+            doc_freq=doc_freq,
+        )
+    )
+    sess.commit()
+
+
+def _finalize_overwrite(svc: TermExtractionService, session, project_id: int, run_id: int) -> None:
+    """Run the Full Overwrite finalization phase: clear all → store staged → cluster."""
+    svc._clear_existing_terms(session, project_id)
+    svc._store_staged_ngrams(session, project_id, run_id=run_id, total_tokens=1000, overwrite=True)
+    svc._cluster_terms(session, project_id, overwrite=True)
+
+
+def _ngram_n_values(sess, project_id: int) -> set[int]:
+    rows = sess.execute(select(Ngram.n).where(Ngram.project_id == project_id)).scalars().all()
+    return set(rows)
+
+
+def _cluster_n_values(sess, project_id: int) -> set[str | None]:
+    return _cluster_n_sets(sess, project_id)
+
+
+def test_full_overwrite_bigrams_only_reextracts_only_bigrams(svc, session):
+    """Full Overwrite with only bigrams staged produces only bigrams in Ngram + Cluster tables.
+
+    Scenario: project previously had bigram + trigram clusters (pre-seeded).
+    Staged accumulators contain ONLY bigrams (user selected only bigrams checkbox).
+    After Full Overwrite finalization: only bigrams must remain.
+    """
+    _add_cluster(session, 1, "old_bigram", canonical_ngram_n_set([2]))
+    _add_cluster(session, 1, "old_trigram", canonical_ngram_n_set([3]))
+
+    run = _make_run(session, 1, "[2]")
+    _acc(session, run.run_id, "שני מילים", n=2)  # only bigrams staged
+
+    _finalize_overwrite(svc, session, 1, run.run_id)
+
+    ngram_ns = _ngram_n_values(session, 1)
+    cluster_ns = _cluster_n_values(session, 1)
+    assert ngram_ns == {
+        2
+    }, f"Only bigram Ngrams must exist after Full Overwrite [2]; found: {ngram_ns}"
+    assert cluster_ns == {
+        canonical_ngram_n_set([2])
+    }, f"Only bigram clusters must exist; found ngram_n_sets: {cluster_ns}"
+
+
+def test_full_overwrite_trigrams_only_reextracts_only_trigrams(svc, session):
+    """Full Overwrite with only trigrams staged produces only trigrams.
+
+    Scenario: project previously had bigram + trigram clusters.
+    Staged accumulators contain ONLY trigrams (user selected only trigrams checkbox).
+    After Full Overwrite finalization: only trigrams must remain.
+    """
+    _add_cluster(session, 1, "old_bigram", canonical_ngram_n_set([2]))
+    _add_cluster(session, 1, "old_trigram", canonical_ngram_n_set([3]))
+
+    run = _make_run(session, 1, "[3]")
+    _acc(session, run.run_id, "שלש מילים הנה", n=3)  # only trigrams staged
+
+    _finalize_overwrite(svc, session, 1, run.run_id)
+
+    ngram_ns = _ngram_n_values(session, 1)
+    cluster_ns = _cluster_n_values(session, 1)
+    assert ngram_ns == {
+        3
+    }, f"Only trigram Ngrams must exist after Full Overwrite [3]; found: {ngram_ns}"
+    assert cluster_ns == {
+        canonical_ngram_n_set([3])
+    }, f"Only trigram clusters must exist; found ngram_n_sets: {cluster_ns}"
+
+
+def test_full_overwrite_both_layers_reextracts_both(svc, session):
+    """Full Overwrite with bigrams+trigrams staged produces both.
+
+    Scenario: project previously had bigram + trigram clusters.
+    Staged accumulators contain BOTH bigrams and trigrams (both checkboxes selected).
+    After Full Overwrite finalization: both must be present.
+    """
+    _add_cluster(session, 1, "old_bigram", canonical_ngram_n_set([2]))
+    _add_cluster(session, 1, "old_trigram", canonical_ngram_n_set([3]))
+
+    run = _make_run(session, 1, "[2,3]")
+    _acc(session, run.run_id, "שני מילים", n=2)
+    _acc(session, run.run_id, "שלש מילים הנה", n=3)
+
+    _finalize_overwrite(svc, session, 1, run.run_id)
+
+    ngram_ns = _ngram_n_values(session, 1)
+    assert ngram_ns == {
+        2,
+        3,
+    }, f"Both bigram and trigram Ngrams must exist after Full Overwrite [2,3]; found: {ngram_ns}"
