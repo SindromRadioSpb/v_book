@@ -1,8 +1,8 @@
 # Canonical UI Vocabulary — HDLE Premium
 
-> **Status:** Normative (approved 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-24)
 > **Scope:** All UI text, tooltip copy, dialog messages, log messages, docs
-> **Schema version:** v47
+> **Schema version:** v48
 > **See also:** `docs/SEMANTIC_CONTRACT.md`, `docs/CROSS_SURFACE_MATRIX.md`
 
 ---
@@ -16,14 +16,27 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 ## Core Terms
 
 ### Noise
-**Definition:** A lemma (word form) classified as not useful for translation — typically punctuation-only, number-only, very short fragments, or other non-content tokens.
+**Definition:** A linguistic unit classified as not useful for translation — typically punctuation-only, number-only, very short fragments, or other non-content tokens.
 
-**Scope:** Dictionary view (`lemma.is_noise`), TM panel (`tm_entry.is_noise`).
+**Scope:** Dictionary view (`lemma.is_noise`), Terms view (`term_cluster.is_noise`), TM panel (`tm_entry.is_noise`). All three tables have `noise_source` since schema v48.
+
+**Canonical noise status vocabulary (all surfaces, v48):**
+
+| Status string | `is_noise` | `noise_source` | Meaning |
+|---------------|-----------|----------------|---------|
+| `Noise (auto)` | 1 | `"auto"` | Classified as noise by NLP pipeline |
+| `Noise (manual)` | 1 | `"manual"` | User manually marked as noise |
+| `Valid (auto)` | 0 | `"auto"` | Classified as valid by NLP pipeline |
+| `Valid (manual)` | 0 | `"manual"` | User manually confirmed as valid |
+| `Noise` (no suffix) | 1 | NULL | Legacy noise record (pre-v48) |
+| `Valid` (no suffix) | 0 | NULL | Legacy valid record (pre-v48) |
+| *(empty)* | NULL | NULL | Not yet classified (unclassified) |
 
 **Usage in UI:**
-- Badge: "Noise" (state), "Noise (auto)", "Noise (manual)"
-- Filter: "Hide Noise" checkbox
-- Status bar: "Noise: N" (project-wide count)
+- Badge in Noise column: one of the 7 states above
+- Filter: "Hide Noise" checkbox (hides all Noise* states)
+- Multi-select Noise filter in FilterDialog / TermsFilterDialog: 5 options — `noise_auto`, `noise_manual`, `valid_auto`, `valid_manual`, `unclassified`
+- Status bar: "Noise: N" (project-wide count of `is_noise=1` rows, independent of filter)
 
 **Not to be confused with:**
 - "Invalid" — not a synonym; "noise" is a specific classifier output, not a judgment of quality
@@ -32,9 +45,9 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 ---
 
 ### Valid
-**Definition:** A lemma classified as content-bearing — potentially useful for translation or study.
+**Definition:** A linguistic unit classified as content-bearing — potentially useful for translation or study.
 
-**Scope:** Dictionary view (`lemma.is_noise=0`).
+**Scope:** Dictionary view (`lemma.is_noise=0`), Terms view (`term_cluster.is_noise=0`), TM panel (`tm_entry.is_noise=0`).
 
 **Usage in UI:**
 - Badge: "Valid" (state), "Valid (auto)", "Valid (manual)"
@@ -82,9 +95,9 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 ---
 
 ### Legacy Data
-**Definition:** Records created before the provenance tracking system was introduced (before schema v47, 2026-03-23). These records have valid classification data (`is_noise`, translation, etc.) but lack provenance metadata (`noise_source`, `noise_updated_at`).
+**Definition:** Records created before the provenance tracking system was introduced (before schema v48 for `term_cluster`/`tm_entry`, before v47 for `lemma`). These records have valid classification data (`is_noise`, translation, etc.) but lack provenance metadata (`noise_source`).
 
-**Scope:** Any record with `noise_source = NULL` or `orphaned_lemma_id` absent where expected.
+**Scope:** Any record with `noise_source = NULL`.
 
 **Usage in UI:**
 - Badge: "Noise" (no suffix), "Valid" (no suffix)
@@ -248,3 +261,5 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 | "Stale" (for general data) | "Stale keyness/weirdness" | Reserve "stale" specifically for stored keyness/weirdness vs. reference corpus drift |
 | "Re-extract" (button label) | "Full Overwrite" / "Rebuild" | Ambiguous about scope and destructiveness |
 | "Recalculate" (for full extraction) | "Full Overwrite" | "Recalculate" is specifically for metric updates without cluster changes |
+| "Source" (TM col 3 header) | "Term" | Renamed in v48; "Source" in TM was colliding with translation-lineage "Source" |
+| "n-gram+NP" / "ngram+np" | "ngram,np" | Canonical separator is comma-sorted; `+` was a display bug in v47 tooltips |

@@ -1,8 +1,8 @@
 # Semantic Contract — HDLE Premium
 
-> **Status:** Normative (approved 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-24)
 > **Scope:** All subsystems touching terms, dictionary, translation memory
-> **Schema version:** v47
+> **Schema version:** v48
 > **Authority:** This document takes precedence over inline descriptions in epic completion reports.
 
 ---
@@ -42,7 +42,7 @@ Location must be documented in the relevant epic completion report.
 ### Rule 2.1: Snapshot fields record state at a point in time
 A **snapshot field** captures the value of another field at the moment of a specific operation. After writing, snapshot fields are never updated again.
 
-Snapshot fields in v47:
+Snapshot fields in v48:
 
 | Field | Table | Captures | Trigger |
 |-------|-------|----------|---------|
@@ -57,12 +57,22 @@ Snapshot fields use `INTEGER` with no `REFERENCES` constraint (or `ON DELETE SET
 Rationale: if a cluster is re-extracted (deleted + recreated), the old `promoted_from_cluster_id` must remain as evidence of the original source.
 
 ### Rule 2.3: Noise provenance fields record classifier identity and time
-`lemma.noise_source`: who last classified the lemma.
-- `"auto"` — NLP classifier (set by `_create_or_get_lemmas()` or reprocess)
-- `"manual"` — user override (set by `BulkNoiseUpdateWorker`)
-- `NULL` — legacy data (classified before Epic 6A, 2026-03-23)
+
+`lemma.noise_source` / `term_cluster.noise_source` / `tm_entry.noise_source`:
+who last classified this row as noise or valid.
+- `"auto"` — NLP classifier (set by extraction pipeline or reprocess)
+- `"manual"` — user override (set by BulkNoiseUpdateWorker or single-row toggle)
+- `NULL` — legacy data (created before schema v48, 2026-03-24)
 
 `lemma.noise_updated_at`: ISO8601 UTC timestamp of last classification. `NULL` for legacy.
+`term_cluster` and `tm_entry` do not yet have `noise_updated_at`; this is tracked as a
+future extension.
+
+**Sync master for `tm_entry.noise_source`:** DB triggers `trg_lemma_noise_to_tm_entry`
+and `trg_cluster_noise_to_tm_entry` (migration 048) propagate `noise_source` from the
+source entity to `tm_entry` whenever `is_noise` is updated via UPDATE on `lemma` or
+`term_cluster`. This ensures TM entries stay consistent with their source without
+requiring explicit service-layer calls at every write site.
 
 ### Rule 2.4: "Legacy data" means pre-provenance, not corrupt
 A record with `noise_source=NULL` or `noise_updated_at=NULL` is **legacy** — it was created before provenance tracking existed. It is not corrupt or invalid. UI must communicate this clearly (e.g. "source unknown (legacy data)") without implying an error.
@@ -74,10 +84,11 @@ A record with `noise_source=NULL` or `noise_updated_at=NULL` is **legacy** — i
 Source lifecycle is modelled along two independent axes. **These axes must never be mixed** in a single badge, tooltip, or filter.
 
 ### Axis 1 — Noise Provenance (who/when classified noise/valid)
-- **Source:** `lemma.is_noise`, `lemma.noise_source`, `lemma.noise_updated_at`
-- **Surface:** Dictionary view, col 8 (Noise badge + tooltip)
-- **Question answered:** "Who said this lemma is noise, and when?"
-- **States:** `Noise (auto)`, `Noise (manual)`, `Valid (auto)`, `Valid (manual)`, `Noise` (legacy), `Valid` (legacy), *(unclassified)*
+- **Source:** `lemma.is_noise` + `lemma.noise_source`; `term_cluster.is_noise` + `term_cluster.noise_source`; `tm_entry.is_noise` + `tm_entry.noise_source`
+- **Surface:** Dictionary view col 8, Terms view col 15, TM panel col 10 (Noise badge + tooltip)
+- **Question answered:** "Who said this row is noise, and when?"
+- **Canonical states (all surfaces):** `Noise (auto)`, `Noise (manual)`, `Valid (auto)`, `Valid (manual)`, `Noise` (legacy — NULL noise_source), `Valid` (legacy), *(empty — unclassified)*
+- **Sync:** `tm_entry.noise_source` is propagated from lemma/cluster via DB triggers (migration 048). Direct writes (service layer, workers) also set `noise_source` explicitly per write-path rules.
 
 ### Axis 2 — Source Lifecycle (is the corpus link intact?)
 - **Source:** `tm_entry.lemma_id`, `tm_entry.orphaned_lemma_id`, `tm_entry.origin`
