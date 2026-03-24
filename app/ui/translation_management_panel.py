@@ -595,14 +595,7 @@ class TranslationManagementPanel(QWidget):
 
         row3.addStretch()
 
-        # Hide Noise checkbox (default: checked)
-        self.hide_noise_checkbox = QCheckBox("Hide Noise")
-        self.hide_noise_checkbox.setChecked(True)
-        self.hide_noise_checkbox.setToolTip(
-            "Hide entries marked as noise (punctuation, numbers, etc.)"
-        )
-        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
-        row3.addWidget(self.hide_noise_checkbox)
+        # Hide Noise checkbox removed — use Filters button noise multi-select instead
 
         filters_layout.addLayout(row3)
 
@@ -935,11 +928,10 @@ class TranslationManagementPanel(QWidget):
         )
 
     def _count_project_lemmas_cached(self) -> int | None:
-        """Count project lemmas once per (project_id, hide_noise) pair."""
+        """Count all project lemmas (noise filter removed — show-all is now the default)."""
         if self.project_id is None:
             return None
-        hide_noise = self.hide_noise_checkbox.isChecked()
-        cache_key = (int(self.project_id), bool(hide_noise))
+        cache_key = (int(self.project_id), False)
         if cache_key in self._project_lemma_total_cache:
             return self._project_lemma_total_cache[cache_key]
         try:
@@ -951,7 +943,7 @@ class TranslationManagementPanel(QWidget):
                 total = service.count_project_lemmas(
                     session,
                     project_id=int(self.project_id),
-                    hide_noise=hide_noise,
+                    hide_noise=False,
                 )
             total = int(total)
             self._project_lemma_total_cache[cache_key] = total
@@ -1191,9 +1183,6 @@ class TranslationManagementPanel(QWidget):
         source_ref = self.source_ref_edit.text().strip()
         if source_ref:
             filters["source_ref"] = source_ref
-
-        # Hide Noise (default: True)
-        filters["hide_noise"] = self.hide_noise_checkbox.isChecked()
 
         return filters
 
@@ -2400,11 +2389,11 @@ class TranslationManagementPanel(QWidget):
             with db_service.get_session() as session:
                 count = admin_service.set_noise_status_bulk(session, tm_ids, is_noise)
 
-            # Update local model cache
+            # Update in-memory DTOs so Noise column reflects new state immediately
             for row in source_rows:
-                # Update is_noise in model (column might not be visible, but update anyway)
-                # This is for future UI refresh if we show is_noise column
-                pass
+                entry = self.model.entries[row]
+                entry.is_noise = 1 if is_noise else 0
+                entry.noise_source = "manual"
 
             # Show success message
             QMessageBox.information(
@@ -2413,9 +2402,8 @@ class TranslationManagementPanel(QWidget):
 
             logger.info(f"Marked {count} TM entries as {status_text} (direct update)")
 
-            # Reload data if hide_noise is checked (entries will disappear)
-            if is_noise and self.hide_noise_checkbox.isChecked():
-                self.perform_search()
+            # Always reload: active noise_filter may need to exclude updated rows
+            self.perform_search()
 
         except Exception as e:
             logger.error(f"Failed to bulk update noise status: {e}", exc_info=True)
@@ -2484,9 +2472,8 @@ class TranslationManagementPanel(QWidget):
 
         logger.info(f"Bulk noise update completed: {count} TM entries marked as {status_text}")
 
-        # Reload data if hide_noise is checked and marking as noise
-        if self.bulk_worker_is_noise and self.hide_noise_checkbox.isChecked():
-            self.perform_search()
+        # Always reload: active noise_filter may need to exclude updated rows
+        self.perform_search()
 
         # Cleanup
         self.bulk_worker = None

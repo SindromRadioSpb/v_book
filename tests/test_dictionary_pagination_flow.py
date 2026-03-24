@@ -205,13 +205,13 @@ def test_dictionary_build_filters_supports_pos_multiselect(monkeypatch, qtbot):
 
     view.selected_pos = ["NOUN", "VERB"]
     view.search_edit.setText("abc")
-    view.hide_noise_checkbox.setChecked(False)
     filters = view.build_filters()
 
     assert filters["pos_tags"] == ["NOUN", "VERB"]
     assert filters["pos"] == "All"
     assert filters["search"] == "abc"
-    assert filters["hide_noise"] is False
+    # hide_noise checkbox removed; noise filtering is via noise_source_filter
+    assert "hide_noise" not in filters
 
 
 def test_dictionary_pagination_labels_are_ascii_safe(monkeypatch, qtbot):

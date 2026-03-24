@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import ClassVar
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.infra.fts_manager import inspect_lemma_fts_parity
@@ -346,9 +346,29 @@ class DictionaryService:
             if pos_filter and pos_filter != "All":
                 stmt = stmt.where(Lemma.pos == pos_filter)
 
-        # Noise filter
-        if filters.get("hide_noise", True):
-            # Hide noise: is_noise = 0 OR is_noise IS NULL (backward compatibility)
+        # Noise filter — multi-select takes precedence over legacy hide_noise
+        noise_source_filter = filters.get("noise_source_filter")
+        if noise_source_filter:
+            noise_conditions = []
+            for nf in noise_source_filter:
+                if nf == "noise_auto":
+                    noise_conditions.append(and_(Lemma.is_noise == 1, Lemma.noise_source == "auto"))
+                elif nf == "noise_manual":
+                    noise_conditions.append(
+                        and_(Lemma.is_noise == 1, Lemma.noise_source == "manual")
+                    )
+                elif nf == "valid_auto":
+                    noise_conditions.append(and_(Lemma.is_noise == 0, Lemma.noise_source == "auto"))
+                elif nf == "valid_manual":
+                    noise_conditions.append(
+                        and_(Lemma.is_noise == 0, Lemma.noise_source == "manual")
+                    )
+                elif nf == "unclassified":
+                    noise_conditions.append(Lemma.is_noise.is_(None))
+            if noise_conditions:
+                stmt = stmt.where(or_(*noise_conditions))
+        elif filters.get("hide_noise", False):
+            # Legacy hide_noise path (default False = show all when no noise filter)
             stmt = stmt.where(or_(Lemma.is_noise == 0, Lemma.is_noise.is_(None)))
 
         # Search filter: FTS5 path when available, LIKE fallback otherwise.

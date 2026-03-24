@@ -131,6 +131,77 @@ class PosFilterDialog(QDialog):
         return selected
 
 
+class DictNoiseFilterDialog(QDialog):
+    """Multi-select noise status filter dialog for Dictionary view."""
+
+    NOISE_OPTIONS = [
+        ("noise_auto", "Noise (auto)"),
+        ("noise_manual", "Noise (manual)"),
+        ("valid_auto", "Valid (auto)"),
+        ("valid_manual", "Valid (manual)"),
+        ("unclassified", "Unclassified"),
+    ]
+
+    def __init__(self, selected: list[str] | None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Filter by Noise Status")
+        self.setMinimumSize(300, 260)
+        self._selected: list[str] = list(selected) if selected else []
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout()
+        info = QLabel("Select noise statuses to show:")
+        info.setStyleSheet("font-weight: bold;")
+        layout.addWidget(info)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        for key, label in self.NOISE_OPTIONS:
+            item = QListWidgetItem(label)
+            item.setCheckState(
+                Qt.CheckState.Checked if key in self._selected else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        btn_row = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(self._on_select_all)
+        btn_row.addWidget(select_all)
+        clear_all = QPushButton("Clear All")
+        clear_all.clicked.connect(self._on_clear_all)
+        btn_row.addWidget(clear_all)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        self.setLayout(layout)
+
+    def _on_select_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _on_clear_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def get_selected(self) -> list[str] | None:
+        """Return selected noise statuses or None if none checked (= show all)."""
+        selected: list[str] = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
+        return selected if selected else None
+
+
 class DictionaryView(QWidget):
     """Dictionary view showing lemmas."""
 
@@ -172,6 +243,11 @@ class DictionaryView(QWidget):
         else:
             self.selected_pos = None
 
+        saved_noise = self.settings.get_json("dictionary_view/noise_filter", None)
+        self.selected_noise_filter: list[str] | None = (
+            list(saved_noise) if isinstance(saved_noise, list) and saved_noise else None
+        )
+
         self.init_ui()
         self.perform_search()
 
@@ -208,12 +284,14 @@ class DictionaryView(QWidget):
         self.pos_filter_btn.clicked.connect(self.on_select_pos)
         header_layout.addWidget(self.pos_filter_btn)
 
-        # Hide noise filter (Task 11: Entity Classification)
-        self.hide_noise_checkbox = QCheckBox("Hide noise")
-        self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
-        self.hide_noise_checkbox.setToolTip("Hide punctuation, numbers, symbols, and other noise")
-        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
-        header_layout.addWidget(self.hide_noise_checkbox)
+        # Noise status filter button (replaces Hide Noise checkbox)
+        self.noise_filter_btn = QPushButton(self._noise_filter_btn_label())
+        self.noise_filter_btn.setMinimumWidth(120)
+        self.noise_filter_btn.setToolTip(
+            "Filter by noise status: Noise (auto/manual), Valid (auto/manual), Unclassified"
+        )
+        self.noise_filter_btn.clicked.connect(self.on_select_noise_filter)
+        header_layout.addWidget(self.noise_filter_btn)
 
         # Refresh button
         refresh_btn = QPushButton("Refresh")
@@ -423,16 +501,35 @@ class DictionaryView(QWidget):
         self._apply_sort_indicator()
         self.perform_search()
 
+    def _noise_filter_btn_label(self) -> str:
+        if not self.selected_noise_filter:
+            return "Noise: All v"
+        labels = dict(DictNoiseFilterDialog.NOISE_OPTIONS)
+        if len(self.selected_noise_filter) == 1:
+            return f"{labels.get(self.selected_noise_filter[0], self.selected_noise_filter[0])} v"
+        return f"{len(self.selected_noise_filter)} Noise v"
+
+    def on_select_noise_filter(self):
+        """Open noise multi-select dialog and apply filter."""
+        dlg = DictNoiseFilterDialog(self.selected_noise_filter, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.selected_noise_filter = dlg.get_selected()
+        self.settings.set_json("dictionary_view/noise_filter", self.selected_noise_filter)
+        self.noise_filter_btn.setText(self._noise_filter_btn_label())
+        self.on_filter_changed()
+
     def build_filters(self) -> dict:
         """Build filters dict for search."""
-        filters = {
+        filters: dict = {
             "pos": "All",
-            "hide_noise": self.hide_noise_checkbox.isChecked(),
             "search": self.search_edit.text().strip(),
         }
         if self.selected_pos:
             filters["pos_tags"] = list(self.selected_pos)
             filters["pos"] = "All"
+        if self.selected_noise_filter is not None:
+            filters["noise_source_filter"] = self.selected_noise_filter
         return filters
 
     def _pos_filter_btn_label(self) -> str:
@@ -1658,8 +1755,8 @@ class DictionaryView(QWidget):
                 logger.info(f"Marked lemma '{lemma.lemma_text}' as {status}")
 
                 # Reload to apply filter if needed
-                if self.hide_noise_checkbox.isChecked():
-                    self.perform_search()
+                # Always reload: active noise_filter may need to exclude updated rows
+                self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to update noise status for lemma {lemma.lemma_id}")
@@ -1740,6 +1837,7 @@ class DictionaryView(QWidget):
                 # Update local model for all affected rows
                 for source_row in source_rows:
                     self.lemma_model.lemmas[source_row].is_noise = 1 if is_noise else 0
+                    self.lemma_model.lemmas[source_row].noise_source = "manual"
 
                 status = "noise" if is_noise else "valid"
                 logger.info(f"Marked {len(lemma_ids)} lemmas as {status}")
@@ -1750,8 +1848,8 @@ class DictionaryView(QWidget):
                 show_info(self, "Success", f"Marked {len(lemma_ids)} lemmas as {status}")
 
                 # Reload to apply filter if needed
-                if self.hide_noise_checkbox.isChecked():
-                    self.perform_search()
+                # Always reload: active noise_filter may need to exclude updated rows
+                self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(lemma_ids)} lemmas")
@@ -1836,9 +1934,8 @@ class DictionaryView(QWidget):
 
         show_info(self, "Success", f"Marked {count:,} lemmas as {status}")
 
-        # Reload to apply filter if needed
-        if self.hide_noise_checkbox.isChecked():
-            self.perform_search()
+        # Always reload: active noise_filter may need to exclude updated rows
+        self.perform_search()
 
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""

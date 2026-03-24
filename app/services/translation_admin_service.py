@@ -361,7 +361,7 @@ class TranslationAdminService:
                 stmt = stmt.where(or_(*noise_conditions))
         else:
             # Default hide_noise behaviour when no explicit noise filter set
-            if filters.get("hide_noise", True):
+            if filters.get("hide_noise", False):
                 stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Server-side sorting
@@ -483,7 +483,7 @@ class TranslationAdminService:
                 stmt = stmt.where(or_(*noise_conditions))
         else:
             # Default hide_noise behaviour when no explicit noise filter set
-            if filters.get("hide_noise", True):
+            if filters.get("hide_noise", False):
                 stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Execute
@@ -764,7 +764,7 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
-        if filters.get("hide_noise", True):
+        if filters.get("hide_noise", False):
             stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Write mode filter
@@ -845,7 +845,7 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
-        if filters.get("hide_noise", True):
+        if filters.get("hide_noise", False):
             stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Write mode filter

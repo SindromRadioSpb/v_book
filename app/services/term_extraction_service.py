@@ -2593,7 +2593,7 @@ class TermExtractionService:
         min_freq: int | None = None,
         min_doc_freq: int | None = None,
         source_filter: str | None = None,
-        hide_noise: bool = True,
+        hide_noise: bool = False,
         offset: int = 0,
         source_kinds_filter: list[str] | None = None,
         noise_source_filter: list[str] | None = None,
@@ -2778,7 +2778,7 @@ class TermExtractionService:
         min_freq: int | None = None,
         min_doc_freq: int | None = None,
         source_filter: str | None = None,
-        hide_noise: bool = True,
+        hide_noise: bool = False,
         source_kinds_filter: list[str] | None = None,
         noise_source_filter: list[str] | None = None,
     ) -> int:
@@ -2897,7 +2897,7 @@ class TermExtractionService:
         if min_freq:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
 
-        if filters.get("hide_noise", True):
+        if filters.get("hide_noise", False):
             stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         search = filters.get("search", "").strip()
@@ -2970,7 +2970,7 @@ class TermExtractionService:
         if min_freq:
             stmt = stmt.where(TermCluster.freq_abs >= min_freq)
 
-        if filters.get("hide_noise", True):
+        if filters.get("hide_noise", False):
             stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         search = filters.get("search", "").strip()

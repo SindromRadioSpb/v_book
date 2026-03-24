@@ -447,12 +447,7 @@ class TermsView(QWidget):
         self.search_edit.textChanged.connect(self.on_search_changed)
         filter_layout.addWidget(self.search_edit)
 
-        # Hide noise filter (Task 11: Entity Classification)
-        self.hide_noise_checkbox = QCheckBox("Hide noise")
-        self.hide_noise_checkbox.setChecked(True)  # Default: hide noise
-        self.hide_noise_checkbox.setToolTip("Hide numeric, symbolic, and other noisy terms")
-        self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
-        filter_layout.addWidget(self.hide_noise_checkbox)
+        # Hide Noise checkbox removed — use Filters button noise multi-select instead
 
         # Multi-select kind + noise filter button
         self._terms_filter_btn = QPushButton("Filters: All")
@@ -864,7 +859,6 @@ class TermsView(QWidget):
             "min_doc_freq": (
                 self.min_doc_freq_spin.value() if self.min_doc_freq_spin.value() > 1 else None
             ),
-            "hide_noise": self.hide_noise_checkbox.isChecked(),
         }
 
     def _get_source_filter(self) -> str | None:
@@ -2359,15 +2353,15 @@ class TermsView(QWidget):
                 self.user_dict_service.sync_noise_from_term_clusters(session, [cluster.cluster_id])
                 session.commit()
 
-                # Update local model
+                # Update local model — include provenance so badge shows correct suffix
                 cluster.is_noise = 1 if is_noise else 0
+                cluster.noise_source = "manual"
 
                 status = "noise" if is_noise else "valid"
                 logger.info(f"Marked cluster '{cluster.representative_he}' as {status}")
 
-                # Reload to apply filter if needed
-                if self.hide_noise_checkbox.isChecked():
-                    self.perform_search()
+                # Always reload: active noise_filter may need to exclude updated row
+                self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to update noise status for cluster {cluster.cluster_id}")
@@ -2447,6 +2441,7 @@ class TermsView(QWidget):
                 # Update local model for all affected rows
                 for source_row in source_rows:
                     self.terms_model.clusters[source_row].is_noise = 1 if is_noise else 0
+                    self.terms_model.clusters[source_row].noise_source = "manual"
 
                 status = "noise" if is_noise else "valid"
                 logger.info(f"Marked {len(cluster_ids)} clusters as {status}")
@@ -2456,9 +2451,8 @@ class TermsView(QWidget):
 
                 show_info(self, "Success", f"Marked {len(cluster_ids)} term clusters as {status}")
 
-                # Reload to apply filter if needed
-                if self.hide_noise_checkbox.isChecked():
-                    self.perform_search()
+                # Always reload: active noise_filter may need to exclude updated rows
+                self.perform_search()
 
         except Exception as e:
             logger.exception(f"Failed to bulk update noise status for {len(cluster_ids)} clusters")
@@ -2523,6 +2517,7 @@ class TermsView(QWidget):
         # Update local model for all affected rows
         for source_row in self._pending_source_rows:
             self.terms_model.clusters[source_row].is_noise = 1 if self._pending_is_noise else 0
+            self.terms_model.clusters[source_row].noise_source = "manual"
 
         # Sync source noise -> User Dictionaries after worker commit.
         try:
@@ -2545,9 +2540,8 @@ class TermsView(QWidget):
 
         show_info(self, "Success", f"Marked {count:,} term clusters as {status}")
 
-        # Reload to apply filter if needed
-        if self.hide_noise_checkbox.isChecked():
-            self.perform_search()
+        # Always reload: active noise_filter may need to exclude updated rows
+        self.perform_search()
 
     def _on_bulk_error(self, error_msg: str):
         """Handle bulk update error."""

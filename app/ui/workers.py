@@ -1495,7 +1495,7 @@ class TermsSearchWorker(QThread):
                     min_freq=self.filters.get("min_freq"),
                     min_doc_freq=self.filters.get("min_doc_freq"),
                     source_filter=self.filters.get("source_filter"),
-                    hide_noise=self.filters.get("hide_noise", True),
+                    hide_noise=self.filters.get("hide_noise", False),
                     top_n=self.limit,
                     offset=self.offset,
                     source_kinds_filter=self.filters.get("source_kinds_filter"),
@@ -1517,7 +1517,7 @@ class TermsSearchWorker(QThread):
                     min_freq=self.filters.get("min_freq"),
                     min_doc_freq=self.filters.get("min_doc_freq"),
                     source_filter=self.filters.get("source_filter"),
-                    hide_noise=self.filters.get("hide_noise", True),
+                    hide_noise=self.filters.get("hide_noise", False),
                     source_kinds_filter=self.filters.get("source_kinds_filter"),
                     noise_source_filter=self.filters.get("noise_source_filter"),
                 )
@@ -1534,7 +1534,7 @@ class TermsSearchWorker(QThread):
                         min_freq=None,
                         min_doc_freq=self.filters.get("min_doc_freq"),
                         source_filter=self.filters.get("source_filter"),
-                        hide_noise=self.filters.get("hide_noise", True),
+                        hide_noise=self.filters.get("hide_noise", False),
                     )
                     if not self._cancelled:
                         self.count_unfiltered_ready.emit(unfiltered)
