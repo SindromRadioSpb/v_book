@@ -8,9 +8,13 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QMessageBox,
     QProgressBar,
@@ -53,6 +57,119 @@ from app.ui.workers import (
 logger = logging.getLogger(__name__)
 
 
+class TermsFilterDialog(QDialog):
+    """Multi-select filter for Terms view: Kind + Noise."""
+
+    KIND_OPTIONS = [
+        ("ngram", "N-gram"),
+        ("np", "NP chunk"),
+        ("ngram,np", "Mixed (N-gram + NP)"),
+    ]
+    ALL_KINDS = [k for k, _ in KIND_OPTIONS]
+
+    NOISE_OPTIONS = [
+        ("noise_auto", "Noise (auto)"),
+        ("noise_manual", "Noise (manual)"),
+        ("valid_auto", "Valid (auto)"),
+        ("valid_manual", "Valid (manual)"),
+        ("unclassified", "Unclassified"),
+    ]
+    ALL_NOISE = [v for v, _ in NOISE_OPTIONS]
+
+    def __init__(
+        self,
+        selected_kinds: list[str] | None,
+        selected_noise: list[str] | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Filters")
+        self.setMinimumSize(300, 380)
+        self._sel_kinds = list(selected_kinds) if selected_kinds else []
+        self._sel_noise = list(selected_noise) if selected_noise else []
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout()
+
+        kind_label = QLabel("Entity Type:")
+        kind_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(kind_label)
+        self._kind_list = QListWidget()
+        self._kind_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._kind_list.setMaximumHeight(100)
+        for val, label in self.KIND_OPTIONS:
+            item = QListWidgetItem(label)
+            item.setCheckState(
+                Qt.CheckState.Checked if val in self._sel_kinds else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, val)
+            self._kind_list.addItem(item)
+        layout.addWidget(self._kind_list)
+
+        noise_label = QLabel("Noise Status:")
+        noise_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        layout.addWidget(noise_label)
+        self._noise_list = QListWidget()
+        self._noise_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._noise_list.setMaximumHeight(160)
+        for val, label in self.NOISE_OPTIONS:
+            item = QListWidgetItem(label)
+            item.setCheckState(
+                Qt.CheckState.Checked if val in self._sel_noise else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, val)
+            self._noise_list.addItem(item)
+        layout.addWidget(self._noise_list)
+
+        btn_row = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(self._on_select_all)
+        btn_row.addWidget(select_all)
+        clear_all = QPushButton("Clear All")
+        clear_all.clicked.connect(self._on_clear_all)
+        btn_row.addWidget(clear_all)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        self.setLayout(layout)
+
+    def _on_select_all(self):
+        for lw in (self._kind_list, self._noise_list):
+            for i in range(lw.count()):
+                lw.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _on_clear_all(self):
+        for lw in (self._kind_list, self._noise_list):
+            for i in range(lw.count()):
+                lw.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _get_checked(self, lw: QListWidget, all_vals: list[str]) -> list[str] | None:
+        """Return checked values, or None if all or none selected (= no filter)."""
+        selected = []
+        for i in range(lw.count()):
+            item = lw.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
+        if len(selected) == len(all_vals) or len(selected) == 0:
+            return None
+        return selected
+
+    def get_selected_kinds(self) -> list[str] | None:
+        """Return selected kind values, or None if all/none (= no filter)."""
+        return self._get_checked(self._kind_list, self.ALL_KINDS)
+
+    def get_selected_noise(self) -> list[str] | None:
+        """Return selected noise state values, or None if all/none (= no filter)."""
+        return self._get_checked(self._noise_list, self.ALL_NOISE)
+
+
 class TermsView(QWidget):
     """Terms view showing extracted MWEs and clusters (M5)."""
 
@@ -91,6 +208,10 @@ class TermsView(QWidget):
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(300)
         self._search_timer.timeout.connect(self.perform_search)
+
+        # Filter state for multi-select kind + noise filter dialog
+        self._terms_kind_filter: list[str] | None = None
+        self._terms_noise_filter: list[str] | None = None
 
         self.init_ui()
         self.perform_search()
@@ -332,6 +453,13 @@ class TermsView(QWidget):
         self.hide_noise_checkbox.setToolTip("Hide numeric, symbolic, and other noisy terms")
         self.hide_noise_checkbox.stateChanged.connect(self.on_filter_changed)
         filter_layout.addWidget(self.hide_noise_checkbox)
+
+        # Multi-select kind + noise filter button
+        self._terms_filter_btn = QPushButton("Filters: All")
+        self._terms_filter_btn.setMinimumWidth(120)
+        self._terms_filter_btn.setToolTip("Filter by entity type and noise status")
+        self._terms_filter_btn.clicked.connect(self.on_select_filters)
+        filter_layout.addWidget(self._terms_filter_btn)
 
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
@@ -702,12 +830,36 @@ class TermsView(QWidget):
         )
         self.settings.set_value("terms_view/ngram_ns_json", json.dumps(ns))
 
+    def on_select_filters(self):
+        """Open filter dialog for Terms kind and noise selection."""
+        dlg = TermsFilterDialog(self._terms_kind_filter, self._terms_noise_filter, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._terms_kind_filter = dlg.get_selected_kinds()
+            self._terms_noise_filter = dlg.get_selected_noise()
+            label_parts = []
+            if self._terms_kind_filter:
+                kind_labels = dict(TermsFilterDialog.KIND_OPTIONS)
+                label_parts.append(
+                    ", ".join(kind_labels.get(k, k) for k in self._terms_kind_filter)
+                )
+            if self._terms_noise_filter:
+                noise_labels = dict(TermsFilterDialog.NOISE_OPTIONS)
+                label_parts.append(
+                    ", ".join(noise_labels.get(v, v) for v in self._terms_noise_filter)
+                )
+            self._terms_filter_btn.setText(
+                f"Filters: {' | '.join(label_parts)}" if label_parts else "Filters: All"
+            )
+            self.on_filter_changed()
+
     def build_filters(self) -> dict:
         """Build filters dict for search."""
         return {
             "search": self.search_edit.text().strip(),
             "preset": self.preset_combo.currentText().lower(),
             "source_filter": self._get_source_filter(),
+            "source_kinds_filter": self._terms_kind_filter,
+            "noise_source_filter": self._terms_noise_filter,
             "min_freq": self.min_freq_spin.value() if self.min_freq_spin.value() > 1 else None,
             "min_doc_freq": (
                 self.min_doc_freq_spin.value() if self.min_doc_freq_spin.value() > 1 else None
@@ -2198,7 +2350,10 @@ class TermsView(QWidget):
                 stmt = (
                     update(TermCluster)
                     .where(TermCluster.cluster_id == cluster.cluster_id)
-                    .values(is_noise=1 if is_noise else 0)
+                    .values(
+                        is_noise=1 if is_noise else 0,
+                        noise_source="manual",
+                    )
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_term_clusters(session, [cluster.cluster_id])
@@ -2280,7 +2435,10 @@ class TermsView(QWidget):
                 stmt = (
                     update(TermCluster)
                     .where(TermCluster.cluster_id.in_(cluster_ids))
-                    .values(is_noise=1 if is_noise else 0)
+                    .values(
+                        is_noise=1 if is_noise else 0,
+                        noise_source="manual",
+                    )
                 )
                 session.execute(stmt)
                 self.user_dict_service.sync_noise_from_term_clusters(session, cluster_ids)

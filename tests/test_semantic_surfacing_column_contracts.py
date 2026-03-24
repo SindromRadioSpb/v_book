@@ -96,8 +96,8 @@ def test_terms_kind_column_display_np():
 
 
 def test_terms_kind_column_display_both():
-    model = TermClusterTableModel([_cluster("ngram+np")])
-    assert model.data(model.index(0, 6), Qt.ItemDataRole.DisplayRole) == "ngram+np"
+    model = TermClusterTableModel([_cluster("ngram,np")])
+    assert model.data(model.index(0, 6), Qt.ItemDataRole.DisplayRole) == "ngram,np"
 
 
 def test_terms_kind_column_display_none_fallback():

@@ -2414,6 +2414,7 @@ class TermExtractionService:
             "entity_class": classification.entity_class,
             "is_noise": 1 if classification.is_noise else 0,
             "noise_reason": classification.noise_reason,
+            "noise_source": "auto",
             "norm_text": classification.norm_text,
         }
 
@@ -2594,6 +2595,8 @@ class TermExtractionService:
         source_filter: str | None = None,
         hide_noise: bool = True,
         offset: int = 0,
+        source_kinds_filter: list[str] | None = None,
+        noise_source_filter: list[str] | None = None,
     ) -> list[ClusterStats]:
         """
         List term clusters with filtering and ranking.
@@ -2651,8 +2654,27 @@ class TermExtractionService:
         if min_doc_freq and min_doc_freq > 1:
             stmt = stmt.where(TermCluster.doc_freq >= min_doc_freq)
 
-        # Apply noise filter (Task 11: Entity Classification)
-        if hide_noise:
+        # source_kinds_filter: filter directly on term_cluster.source_kinds
+        if source_kinds_filter:
+            stmt = stmt.where(TermCluster.source_kinds.in_(source_kinds_filter))
+
+        # noise_source_filter overrides hide_noise when provided
+        if noise_source_filter:
+            nc = []
+            for nf in noise_source_filter:
+                if nf == "noise_auto":
+                    nc.append(and_(TermCluster.is_noise == 1, TermCluster.noise_source == "auto"))
+                elif nf == "noise_manual":
+                    nc.append(and_(TermCluster.is_noise == 1, TermCluster.noise_source == "manual"))
+                elif nf == "valid_auto":
+                    nc.append(and_(TermCluster.is_noise == 0, TermCluster.noise_source == "auto"))
+                elif nf == "valid_manual":
+                    nc.append(and_(TermCluster.is_noise == 0, TermCluster.noise_source == "manual"))
+                elif nf == "unclassified":
+                    nc.append(TermCluster.is_noise.is_(None))
+            if nc:
+                stmt = stmt.where(or_(*nc))
+        elif hide_noise:
             # Hide noise: is_noise = 0 OR is_noise IS NULL (backward compatibility)
             stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
@@ -2739,6 +2761,7 @@ class TermExtractionService:
                     entity_class=c.entity_class,
                     is_noise=c.is_noise,
                     noise_reason=c.noise_reason,
+                    noise_source=c.noise_source,
                     norm_text=c.norm_text,
                     source_kinds=c.source_kinds,
                 )
@@ -2756,6 +2779,8 @@ class TermExtractionService:
         min_doc_freq: int | None = None,
         source_filter: str | None = None,
         hide_noise: bool = True,
+        source_kinds_filter: list[str] | None = None,
+        noise_source_filter: list[str] | None = None,
     ) -> int:
         """
         Count total term clusters matching filters (for pagination).
@@ -2796,8 +2821,27 @@ class TermExtractionService:
         if min_doc_freq and min_doc_freq > 1:
             stmt = stmt.where(TermCluster.doc_freq >= min_doc_freq)
 
-        # Noise filter
-        if hide_noise:
+        # source_kinds_filter
+        if source_kinds_filter:
+            stmt = stmt.where(TermCluster.source_kinds.in_(source_kinds_filter))
+
+        # noise_source_filter overrides hide_noise when provided
+        if noise_source_filter:
+            nc = []
+            for nf in noise_source_filter:
+                if nf == "noise_auto":
+                    nc.append(and_(TermCluster.is_noise == 1, TermCluster.noise_source == "auto"))
+                elif nf == "noise_manual":
+                    nc.append(and_(TermCluster.is_noise == 1, TermCluster.noise_source == "manual"))
+                elif nf == "valid_auto":
+                    nc.append(and_(TermCluster.is_noise == 0, TermCluster.noise_source == "auto"))
+                elif nf == "valid_manual":
+                    nc.append(and_(TermCluster.is_noise == 0, TermCluster.noise_source == "manual"))
+                elif nf == "unclassified":
+                    nc.append(TermCluster.is_noise.is_(None))
+            if nc:
+                stmt = stmt.where(or_(*nc))
+        elif hide_noise:
             stmt = stmt.where(or_(TermCluster.is_noise == 0, TermCluster.is_noise.is_(None)))
 
         # Search filter with normalized variants
@@ -3440,6 +3484,7 @@ class TermExtractionService:
                     entity_class=d_cluster.entity_class,
                     is_noise=d_cluster.is_noise,
                     noise_reason=d_cluster.noise_reason,
+                    noise_source=d_cluster.noise_source,
                     norm_text=d_cluster.norm_text,
                     source_kinds=d_cluster.source_kinds,
                 )

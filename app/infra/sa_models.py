@@ -883,6 +883,7 @@ class TermCluster(Base):
     entity_class = Column(String)  # WORD_HE, WORD_LATIN, MIXED_ALPHA_NUM, NUMBER, etc.
     is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise
     noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_SYMBOL_ONLY, etc.
+    noise_source = Column(String)  # "auto" | "manual" | NULL (legacy) — migration 048
     norm_text = Column(String)  # Normalized form of representative_he
 
     __table_args__ = (
@@ -940,6 +941,7 @@ class TMEntry(Base):
     approved_by = Column(String)
     is_noise = Column(Integer, default=0)  # 0=not noise, 1=noise, NULL=legacy
     noise_reason = Column(String)  # NOISE_PUNCT_ONLY, NOISE_NUMBER_ONLY, etc.
+    noise_source = Column(String)  # "auto" | "manual" | NULL (legacy) — migration 048
     norm_text = Column(Text)  # Normalized text for noise detection
     # Source entity links (for is_noise synchronization)
     lemma_id = Column(Integer, ForeignKey("lemma.lemma_id", ondelete="SET NULL"))

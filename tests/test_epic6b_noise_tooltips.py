@@ -94,8 +94,9 @@ def test_entity_class_tooltip_none_returns_none():
     [
         (1, "NOISE_PUNCT_ONLY", "punctuation only"),
         (1, "NOISE_NUMBER_ONLY", "number only"),
-        (0, None, "Valid — reason not recorded"),
-        (1, None, "Noise — reason not recorded"),
+        # noise_source=None (legacy) → "Source unknown (legacy data)"
+        (0, None, "Valid"),
+        (1, None, "Noise"),
         (None, None, "Not yet classified"),
     ],
 )
@@ -219,9 +220,11 @@ def test_tm_noise_col_tooltip_with_reason():
 
 
 def test_tm_noise_col_tooltip_without_reason():
+    # noise_source=None (legacy) → shows provenance "Source unknown (legacy data)"
     model = TranslationManagementTableModel([_tm_entry(is_noise=0, noise_reason=None)])
     tip = model.data(model.index(0, 10), Qt.ItemDataRole.ToolTipRole)
-    assert "reason not recorded" in tip
+    assert "Valid" in tip
+    assert "legacy" in tip.lower() or "source unknown" in tip.lower()
 
 
 # ---------------------------------------------------------------------------

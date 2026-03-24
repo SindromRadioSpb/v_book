@@ -249,8 +249,8 @@ class HistoryDialog(QDialog):
                 self.accept()
 
 
-class KindFilterDialog(QDialog):
-    """Multi-select checklist dialog for TM Kind filter."""
+class FilterDialog(QDialog):
+    """Multi-section filter dialog for TM panel: Kind + Noise."""
 
     KIND_OPTIONS = [
         ("lemma", "Lemmas"),
@@ -258,32 +258,66 @@ class KindFilterDialog(QDialog):
         ("ngram", "N-grams"),
         ("surface", "Sentences"),
     ]
-    ALL_KINDS = [kind for kind, _label in KIND_OPTIONS]
+    ALL_KINDS = [k for k, _ in KIND_OPTIONS]
 
-    def __init__(self, selected_kinds: list[str] | None, parent=None):
+    NOISE_OPTIONS = [
+        ("noise_auto", "Noise (auto)"),
+        ("noise_manual", "Noise (manual)"),
+        ("valid_auto", "Valid (auto)"),
+        ("valid_manual", "Valid (manual)"),
+        ("unclassified", "Unclassified"),
+    ]
+    ALL_NOISE = [v for v, _ in NOISE_OPTIONS]
+
+    def __init__(
+        self,
+        selected_kinds: list[str] | None,
+        selected_noise: list[str] | None,
+        parent=None,
+    ):
         super().__init__(parent)
-        self.setWindowTitle("Select Kinds")
-        self.setMinimumSize(280, 260)
-        self._selected = list(selected_kinds) if selected_kinds else []
+        self.setWindowTitle("Filters")
+        self.setMinimumSize(300, 420)
+        self._sel_kinds = list(selected_kinds) if selected_kinds else []
+        self._sel_noise = list(selected_noise) if selected_noise else []
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout()
-        info = QLabel("Select one or more kinds to include:")
-        info.setStyleSheet("font-weight: bold;")
-        layout.addWidget(info)
 
-        self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        for kind, label in self.KIND_OPTIONS:
+        # Kind section
+        kind_label = QLabel("Entity Type:")
+        kind_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(kind_label)
+        self._kind_list = QListWidget()
+        self._kind_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._kind_list.setMaximumHeight(130)
+        for val, label in self.KIND_OPTIONS:
             item = QListWidgetItem(label)
             item.setCheckState(
-                Qt.CheckState.Checked if kind in self._selected else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked if val in self._sel_kinds else Qt.CheckState.Unchecked
             )
-            item.setData(Qt.ItemDataRole.UserRole, kind)
-            self.list_widget.addItem(item)
-        layout.addWidget(self.list_widget)
+            item.setData(Qt.ItemDataRole.UserRole, val)
+            self._kind_list.addItem(item)
+        layout.addWidget(self._kind_list)
 
+        # Noise section
+        noise_label = QLabel("Noise Status:")
+        noise_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        layout.addWidget(noise_label)
+        self._noise_list = QListWidget()
+        self._noise_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._noise_list.setMaximumHeight(160)
+        for val, label in self.NOISE_OPTIONS:
+            item = QListWidgetItem(label)
+            item.setCheckState(
+                Qt.CheckState.Checked if val in self._sel_noise else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, val)
+            self._noise_list.addItem(item)
+        layout.addWidget(self._noise_list)
+
+        # Buttons row
         btn_row = QHBoxLayout()
         select_all = QPushButton("Select All")
         select_all.clicked.connect(self._on_select_all)
@@ -303,23 +337,37 @@ class KindFilterDialog(QDialog):
         self.setLayout(layout)
 
     def _on_select_all(self):
-        for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+        for lw in (self._kind_list, self._noise_list):
+            for i in range(lw.count()):
+                lw.item(i).setCheckState(Qt.CheckState.Checked)
 
     def _on_clear_all(self):
-        for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for lw in (self._kind_list, self._noise_list):
+            for i in range(lw.count()):
+                lw.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _get_checked(self, lw: QListWidget, all_vals: list[str]) -> list[str] | None:
+        """Return checked values, or None if all or none selected (= no filter)."""
+        selected = []
+        for i in range(lw.count()):
+            item = lw.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
+        if len(selected) == len(all_vals) or len(selected) == 0:
+            return None  # None = All (no filter)
+        return selected
 
     def get_selected_kinds(self) -> list[str] | None:
         """Return list of selected kinds, or None if all selected (= no filter)."""
-        selected = []
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                selected.append(str(item.data(Qt.ItemDataRole.UserRole) or ""))
-        if len(selected) == len(self.ALL_KINDS) or len(selected) == 0:
-            return None  # None = All (no filter)
-        return selected
+        return self._get_checked(self._kind_list, self.ALL_KINDS)
+
+    def get_selected_noise(self) -> list[str] | None:
+        """Return list of selected noise states, or None if all selected (= no filter)."""
+        return self._get_checked(self._noise_list, self.ALL_NOISE)
+
+
+# Backward-compatibility alias
+KindFilterDialog = FilterDialog
 
 
 class TranslationManagementPanel(QWidget):
@@ -377,6 +425,12 @@ class TranslationManagementPanel(QWidget):
                 self.settings.set_value(self._kind_filter_init_key, True)
             else:
                 self.selected_kinds = None
+
+        # State: selected noise filter (None = All noise states shown — no filter)
+        _saved_noise = self.settings.get_json("tm_panel/noise_filter", None)
+        self.selected_noise: list[str] | None = (
+            [str(v) for v in _saved_noise if v] if isinstance(_saved_noise, list) else None
+        )
 
         self._selected_source_payload: dict | None = None
 
@@ -489,11 +543,10 @@ class TranslationManagementPanel(QWidget):
         self.search_edit.textChanged.connect(self.on_search_text_changed)
         row1.addWidget(self.search_edit)
 
-        row1.addWidget(QLabel("Kind:"))
-        self.kind_filter_btn = QPushButton(self._kind_btn_label())
+        self.kind_filter_btn = QPushButton(self._filters_btn_label())
         self.kind_filter_btn.setMinimumWidth(140)
-        self.kind_filter_btn.setToolTip("Click to select kinds to filter")
-        self.kind_filter_btn.clicked.connect(self.on_select_kinds)
+        self.kind_filter_btn.setToolTip("Click to select entity types and noise status")
+        self.kind_filter_btn.clicked.connect(self.on_select_filters)
         row1.addWidget(self.kind_filter_btn)
 
         filters_layout.addLayout(row1)
@@ -815,34 +868,43 @@ class TranslationManagementPanel(QWidget):
         self.search_edit.clear()
         self.source_ref_edit.clear()
         self.selected_kinds = list(self.DEFAULT_KIND_FILTER)
-        self.kind_filter_btn.setText(self._kind_btn_label())
+        self.selected_noise = None
+        self.kind_filter_btn.setText(self._filters_btn_label())
         self.settings.set_value("tm_panel/kind_filter", self.selected_kinds)
+        self.settings.set_value("tm_panel/noise_filter", None)
         self.status_combo.setCurrentIndex(0)
         self.origin_combo.setCurrentIndex(0)
         self._apply_scope_mode(reset_page=False)
         self.perform_search()
 
-    def _kind_btn_label(self) -> str:
-        """Return button label reflecting current kind selection."""
-        kind_labels = {kind: label for kind, label in KindFilterDialog.KIND_OPTIONS}
-        if not self.selected_kinds:
-            return "All v"
-        if len(self.selected_kinds) == 1:
-            kind = self.selected_kinds[0]
-            return f"{kind_labels.get(kind, kind)} v"
-        return f"{len(self.selected_kinds)} kinds v"
+    def _filters_btn_label(self) -> str:
+        """Return button label reflecting current kind + noise selection."""
+        parts = []
+        if self.selected_kinds is not None:
+            kind_labels = dict(FilterDialog.KIND_OPTIONS)
+            parts.append(", ".join(kind_labels.get(k, k) for k in self.selected_kinds))
+        if self.selected_noise is not None:
+            noise_labels = dict(FilterDialog.NOISE_OPTIONS)
+            parts.append(", ".join(noise_labels.get(v, v) for v in self.selected_noise))
+        return f"Filters: {' | '.join(parts)}" if parts else "Filters: All"
 
-    def on_select_kinds(self):
-        """Open KindFilterDialog and apply selection."""
-        dlg = KindFilterDialog(self.selected_kinds, parent=self)
+    def on_select_filters(self):
+        """Open FilterDialog and apply kind + noise selection."""
+        dlg = FilterDialog(self.selected_kinds, self.selected_noise, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.selected_kinds = dlg.get_selected_kinds()
+        self.selected_noise = dlg.get_selected_noise()
         # Persist to settings
         self.settings.set_value("tm_panel/kind_filter", self.selected_kinds)
-        self.kind_filter_btn.setText(self._kind_btn_label())
+        self.settings.set_value("tm_panel/noise_filter", self.selected_noise)
+        self.kind_filter_btn.setText(self._filters_btn_label())
         self.current_page = 1
         self.perform_search()
+
+    def on_select_kinds(self):
+        """Backward-compat alias for on_select_filters."""
+        self.on_select_filters()
 
     def on_refresh(self):
         """Refresh data to reflect changes from Dictionary/Terms views.
@@ -1106,6 +1168,10 @@ class TranslationManagementPanel(QWidget):
         # Kind multi-select (None = All; list = restrict to selected)
         if self.selected_kinds:
             filters["kinds"] = self.selected_kinds
+
+        # Noise source filter (multi-select: noise_auto, noise_manual, valid_auto, valid_manual, unclassified)
+        if self.selected_noise is not None:
+            filters["noise_filter"] = self.selected_noise
 
         # Status
         status = self.status_combo.currentText()

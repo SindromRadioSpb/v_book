@@ -335,9 +335,34 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
-        # Hide noise filter (same as Dictionary/Terms views)
-        if filters.get("hide_noise", True):  # Default: hide noise
-            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
+        # Noise source filter (multi-select: noise_auto, noise_manual, valid_auto, valid_manual, unclassified)
+        if "noise_filter" in filters and filters["noise_filter"]:
+            noise_conditions = []
+            for nf in filters["noise_filter"]:
+                if nf == "noise_auto":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 1, TMEntry.noise_source == "auto")
+                    )
+                elif nf == "noise_manual":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 1, TMEntry.noise_source == "manual")
+                    )
+                elif nf == "valid_auto":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 0, TMEntry.noise_source == "auto")
+                    )
+                elif nf == "valid_manual":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 0, TMEntry.noise_source == "manual")
+                    )
+                elif nf == "unclassified":
+                    noise_conditions.append(TMEntry.is_noise.is_(None))
+            if noise_conditions:
+                stmt = stmt.where(or_(*noise_conditions))
+        else:
+            # Default hide_noise behaviour when no explicit noise filter set
+            if filters.get("hide_noise", True):
+                stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Server-side sorting
         sort_col = self._resolve_sort_column(sort_column)
@@ -432,9 +457,34 @@ class TranslationAdminService:
         if "origin" in filters and filters["origin"]:
             stmt = stmt.where(TMEntry.origin == filters["origin"])
 
-        # Hide noise filter (same as search_tm_entries)
-        if filters.get("hide_noise", True):  # Default: hide noise
-            stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
+        # Noise source filter (same logic as search_tm_entries)
+        if "noise_filter" in filters and filters["noise_filter"]:
+            noise_conditions = []
+            for nf in filters["noise_filter"]:
+                if nf == "noise_auto":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 1, TMEntry.noise_source == "auto")
+                    )
+                elif nf == "noise_manual":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 1, TMEntry.noise_source == "manual")
+                    )
+                elif nf == "valid_auto":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 0, TMEntry.noise_source == "auto")
+                    )
+                elif nf == "valid_manual":
+                    noise_conditions.append(
+                        and_(TMEntry.is_noise == 0, TMEntry.noise_source == "manual")
+                    )
+                elif nf == "unclassified":
+                    noise_conditions.append(TMEntry.is_noise.is_(None))
+            if noise_conditions:
+                stmt = stmt.where(or_(*noise_conditions))
+        else:
+            # Default hide_noise behaviour when no explicit noise filter set
+            if filters.get("hide_noise", True):
+                stmt = stmt.where(or_(TMEntry.is_noise == 0, TMEntry.is_noise.is_(None)))
 
         # Execute
         count = session.execute(stmt).scalar()
@@ -1117,6 +1167,7 @@ class TranslationAdminService:
             for entry in entries:
                 entry.is_noise = noise_value
                 entry.noise_reason = noise_reason if is_noise else None
+                entry.noise_source = "manual"
                 entry.updated_at = datetime.now()
                 count += 1
 
@@ -1129,7 +1180,12 @@ class TranslationAdminService:
                 session.execute(
                     update(Lemma)
                     .where(Lemma.lemma_id.in_(lemma_ids_to_update))
-                    .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+                    .values(
+                        is_noise=noise_value,
+                        noise_reason=noise_reason if is_noise else None,
+                        noise_source="manual",
+                        noise_updated_at=datetime.now(UTC).isoformat(),
+                    )
                 )
                 logger.info("Synced is_noise to %s lemmas", len(lemma_ids_to_update))
 
@@ -1137,7 +1193,11 @@ class TranslationAdminService:
                 session.execute(
                     update(TermCluster)
                     .where(TermCluster.cluster_id.in_(cluster_ids_to_update))
-                    .values(is_noise=noise_value, noise_reason=noise_reason if is_noise else None)
+                    .values(
+                        is_noise=noise_value,
+                        noise_reason=noise_reason if is_noise else None,
+                        noise_source="manual",
+                    )
                 )
                 logger.info("Synced is_noise to %s term clusters", len(cluster_ids_to_update))
 
@@ -1180,6 +1240,7 @@ class TranslationAdminService:
             approved_by=entry.approved_by,
             is_noise=entry.is_noise,
             noise_reason=entry.noise_reason,
+            noise_source=entry.noise_source,
             norm_text=entry.norm_text,
             lemma_id=entry.lemma_id,
             cluster_id=entry.cluster_id,

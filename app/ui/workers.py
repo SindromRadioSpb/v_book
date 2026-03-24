@@ -1498,6 +1498,8 @@ class TermsSearchWorker(QThread):
                     hide_noise=self.filters.get("hide_noise", True),
                     top_n=self.limit,
                     offset=self.offset,
+                    source_kinds_filter=self.filters.get("source_kinds_filter"),
+                    noise_source_filter=self.filters.get("noise_source_filter"),
                 )
 
                 if self._cancelled:
@@ -1516,6 +1518,8 @@ class TermsSearchWorker(QThread):
                     min_doc_freq=self.filters.get("min_doc_freq"),
                     source_filter=self.filters.get("source_filter"),
                     hide_noise=self.filters.get("hide_noise", True),
+                    source_kinds_filter=self.filters.get("source_kinds_filter"),
+                    noise_source_filter=self.filters.get("noise_source_filter"),
                 )
 
                 if not self._cancelled:
@@ -2127,6 +2131,8 @@ class BulkNoiseUpdateWorker(QThread):
                             "noise_source": "manual",
                             "noise_updated_at": datetime.now(UTC).isoformat(),
                         }
+                    elif self.model_class in ("TermCluster", "TMEntry"):
+                        extra_values = {"noise_source": "manual"}
                     stmt = (
                         update(Model)
                         .where(id_column.in_(chunk_ids))

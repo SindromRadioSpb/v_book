@@ -264,6 +264,7 @@ class TMGlobalService:
             if "is_noise" in fields:
                 entry.is_noise = g.is_noise
                 entry.noise_reason = g.noise_reason
+                entry.noise_source = getattr(g, "noise_source", None)
                 changed = True
             if changed:
                 entry.updated_at = datetime.now().isoformat()

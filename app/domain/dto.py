@@ -333,6 +333,7 @@ class ClusterStats:
     entity_class: str | None = None
     is_noise: int | None = None
     noise_reason: str | None = None
+    noise_source: str | None = None  # "auto" | "manual" | NULL — migration 048
     norm_text: str | None = None
     saved_to_ud: bool = False
     in_user_dictionary_count: int = 0
@@ -347,7 +348,7 @@ class ClusterStats:
     pronunciation_source: str | None = None
     pronunciation_confidence: float | None = None
     pronunciation_qc: str | None = None
-    source_kinds: str | None = None  # ngram | np | ngram+np
+    source_kinds: str | None = None  # ngram | np | ngram,np
 
 
 @dataclass
@@ -422,6 +423,7 @@ class TMEntryDTO:
     pronunciation_confidence: float | None = None
     pronunciation_qc: str | None = None
     raw_src_norm: str | None = None
+    noise_source: str | None = None  # "auto" | "manual" | NULL — migration 048
 
     @property
     def source_status(self) -> str:

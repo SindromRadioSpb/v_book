@@ -97,18 +97,27 @@ def _entity_class_tooltip(entity_class: str | None) -> str | None:
 
 
 def _tm_noise_tooltip(entry) -> str:
-    """Tooltip for Noise column in TM view — uses noise_reason when available."""
+    """Tooltip for Noise column in TM view."""
     is_noise = getattr(entry, "is_noise", None)
-    reason = getattr(entry, "noise_reason", None)
-
     if is_noise is None:
         return "Not yet classified"
 
+    noise_source = getattr(entry, "noise_source", None)
+    reason = getattr(entry, "noise_reason", None)
+
     state = "Noise" if is_noise == 1 else "Valid"
+
+    if noise_source == "auto":
+        who = "Automatically classified by NLP pipeline"
+    elif noise_source == "manual":
+        who = "Manually set"
+    else:
+        who = "Source unknown (legacy data)"
+
     if reason:
         label = _NOISE_REASON_LABELS.get(reason, reason.lower().replace("_", " "))
-        return f"{state}: {label}"
-    return f"{state} — reason not recorded"
+        return f"{state}: {label}\n{who}"
+    return f"{state}\n{who}"
 
 
 class ProjectListModel(QAbstractTableModel):
@@ -413,7 +422,7 @@ class TermClusterTableModel(QAbstractTableModel):
         # Added Noise column for is_noise visualization
         self.headers = [
             "UD", "Term", "Lemma", "Freq", "DocFreq", "Members",
-            "Kind",  # col 6: entity type (ngram | np | ngram+np)
+            "Kind",  # col 6: entity type (ngram | np | ngram,np)
             "PMI", "LLR", "Dice",
             "Weirdness", "Keyness", "Termhood", "Translation", "Source", "Status", "Noise", "Last Review", "Niqqud", "Audio"
         ]
@@ -435,7 +444,7 @@ class TermClusterTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == 6:
-                return "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram+np' = both"
+                return "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram,np' = both"
             if col == 10:
                 return (
                     "Weirdness — domain specificity vs reference corpus.\n"
@@ -458,6 +467,8 @@ class TermClusterTableModel(QAbstractTableModel):
                     "Combines statistical significance, domain specificity, and frequency.\n"
                     "Used by the 'termhood' preset for ranking."
                 )
+            if col == 16:
+                return _noise_provenance_tooltip(cluster)
             if col == 18 and getattr(cluster, "pronunciation_text", None):
                 source = getattr(cluster, "pronunciation_source", None) or "none"
                 confidence = getattr(cluster, "pronunciation_confidence", None)
@@ -529,13 +540,14 @@ class TermClusterTableModel(QAbstractTableModel):
                 # M7: Status
                 return cluster.translation_status or "none"
             elif col == 16:
-                # Noise column
+                # Noise column — show provenance suffix (auto/manual)
+                ns = getattr(cluster, "noise_source", None)
+                suffix = f" ({ns})" if ns else ""
                 if cluster.is_noise == 1:
-                    return "Noise"
+                    return f"Noise{suffix}"
                 elif cluster.is_noise == 0:
-                    return "Valid"
-                else:
-                    return ""  # NULL - legacy records
+                    return f"Valid{suffix}"
+                return ""  # NULL - unclassified
             elif col == 17:
                 if int(getattr(cluster, "in_user_dictionary_count", 0) or 0) <= 0:
                     return ""
@@ -592,7 +604,7 @@ class TermClusterTableModel(QAbstractTableModel):
                 3: "Absolute frequency — total occurrences in the corpus",
                 4: "Document frequency — number of documents containing this term",
                 5: "Number of surface variants grouped into this cluster",
-                6: "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram+np' = both",
+                6: "Entity type: 'ngram' = statistical n-gram, 'np' = noun phrase, 'ngram,np' = both",
                 7: "PMI — Pointwise Mutual Information: word co-occurrence association strength",
                 8: "LLR — Log-Likelihood Ratio: statistical significance of co-occurrence",
                 9: "Dice coefficient: symmetric co-occurrence measure (0–1)",
@@ -766,13 +778,14 @@ class TranslationManagementTableModel(QAbstractTableModel):
                     return entry.updated_at.split("T")[0]
                 return ""
             elif col == 10:
-                # Noise column
+                # Noise column — show provenance suffix
+                ns = getattr(entry, "noise_source", None)
+                suffix = f" ({ns})" if ns else ""
                 if entry.is_noise == 1:
-                    return "Noise"
+                    return f"Noise{suffix}"
                 elif entry.is_noise == 0:
-                    return "Valid"
-                else:
-                    return ""  # NULL - legacy records
+                    return f"Valid{suffix}"
+                return ""  # NULL - unclassified
             elif col == 11:
                 if int(getattr(entry, "in_user_dictionary_count", 0) or 0) <= 0:
                     return ""

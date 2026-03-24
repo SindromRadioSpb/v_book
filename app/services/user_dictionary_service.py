@@ -858,6 +858,7 @@ class UserDictionaryService:
             for entry in entries:
                 entry.is_noise = noise_value
                 entry.noise_reason = reason_value
+                entry.noise_source = "manual"
                 entry.updated_at = now_str
                 if entry.kind == "lemma" and entry.lemma_id:
                     touched_lemma_ids.add(entry.lemma_id)
@@ -912,13 +913,13 @@ class UserDictionaryService:
             session.execute(
                 update(Lemma)
                 .where(Lemma.lemma_id.in_(sorted(touched_lemma_ids)))
-                .values(is_noise=noise_value, noise_reason=reason_value)
+                .values(is_noise=noise_value, noise_reason=reason_value, noise_source="manual")
             )
         if touched_cluster_ids:
             session.execute(
                 update(TermCluster)
                 .where(TermCluster.cluster_id.in_(sorted(touched_cluster_ids)))
-                .values(is_noise=noise_value, noise_reason=reason_value)
+                .values(is_noise=noise_value, noise_reason=reason_value, noise_source="manual")
             )
         if touched_dictionary_ids:
             session.execute(

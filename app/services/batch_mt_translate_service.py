@@ -540,6 +540,7 @@ class BatchMTTranslateService:
                 lemma_id=lemma.lemma_id if lemma else None,
                 is_noise=lemma.is_noise if lemma else 0,
                 noise_reason=lemma.noise_reason if lemma else None,
+                noise_source=lemma.noise_source if lemma else None,
             )
             session.add(tm_entry)
             # PATCH-19-02: Upsert tm_global and link
@@ -606,6 +607,7 @@ class BatchMTTranslateService:
                 cluster_id=cluster.cluster_id if cluster else None,
                 is_noise=cluster.is_noise if cluster else 0,
                 noise_reason=cluster.noise_reason if cluster else None,
+                noise_source=cluster.noise_source if cluster else None,
             )
             session.add(tm_entry)
             # PATCH-19-02: Upsert tm_global and link
