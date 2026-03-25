@@ -264,7 +264,10 @@ class TMGlobalService:
             if "is_noise" in fields:
                 entry.is_noise = g.is_noise
                 entry.noise_reason = g.noise_reason
-                entry.noise_source = getattr(g, "noise_source", None)
+                # noise_source is an entry-level axis-1 attribute (who set the state
+                # for this specific entry) — TMGlobal has no noise_source column.
+                # Never propagate it from tm_global: doing so would overwrite
+                # 'manual'/'auto' with NULL on every bulk noise action.
                 changed = True
             if changed:
                 entry.updated_at = datetime.now().isoformat()
