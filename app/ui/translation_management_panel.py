@@ -2395,15 +2395,20 @@ class TranslationManagementPanel(QWidget):
                 entry.is_noise = 1 if is_noise else 0
                 entry.noise_source = "manual"
 
+            # Kick off fresh search BEFORE showing the modal dialog.
+            # QMessageBox runs its own local event loop, so any in-flight
+            # TMSearchWorker from a previous search can emit page_ready during
+            # the dialog — with stale noise_source=NULL data.  Calling
+            # perform_search() here increments _active_search_seq first, so
+            # on_search_results will discard those stale results.
+            self.perform_search()
+
             # Show success message
             QMessageBox.information(
                 self, "Success", f"Marked {count:,} TM entries as {status_text}."
             )
 
             logger.info(f"Marked {count} TM entries as {status_text} (direct update)")
-
-            # Always reload: active noise_filter may need to exclude updated rows
-            self.perform_search()
 
         except Exception as e:
             logger.error(f"Failed to bulk update noise status: {e}", exc_info=True)
@@ -2467,13 +2472,14 @@ class TranslationManagementPanel(QWidget):
 
         status_text = "noise" if self.bulk_worker_is_noise else "valid"
 
+        # Kick off fresh search BEFORE the modal to invalidate any in-flight
+        # search workers (same race condition as _run_bulk_update_direct).
+        self.perform_search()
+
         # Show success message
         QMessageBox.information(self, "Success", f"Marked {count:,} TM entries as {status_text}.")
 
         logger.info(f"Bulk noise update completed: {count} TM entries marked as {status_text}")
-
-        # Always reload: active noise_filter may need to exclude updated rows
-        self.perform_search()
 
         # Cleanup
         self.bulk_worker = None
