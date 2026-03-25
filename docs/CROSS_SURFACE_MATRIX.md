@@ -1,8 +1,8 @@
 # Cross-Surface Consistency Matrix
 
-> **Status:** Normative (approved 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-25)
 > **Scope:** Terms view · Dictionary view · Translation Memory (TM) panel
-> **Schema version:** v47
+> **Schema version:** v51
 > **See also:** `docs/SEMANTIC_CONTRACT.md`, `docs/UI_VOCABULARY.md`
 
 ---
@@ -21,11 +21,11 @@ This document maps concepts across the three main data surfaces (Terms, Dictiona
 
 | Aspect | Terms view | Dictionary view | TM panel |
 |--------|-----------|-----------------|----------|
-| Field | No noise field on `term_cluster` | `lemma.is_noise` (0/1/NULL) | `tm_entry.is_noise` (0/1/NULL) |
-| Provenance | N/A | `noise_source` (auto/manual/NULL) | `noise_reason` code (NOISE_PUNCT_ONLY, etc.) |
-| Badge | None | "Noise (auto)", "Noise (manual)", "Noise" (legacy) | Noise badge in TM panel |
-| Tooltip | N/A | Noise provenance tooltip (who/when) | `noise_reason` code → human-readable |
-| Filter | None | Hide Noise checkbox | Hide Noise checkbox |
+| Field | `term_cluster.is_noise` (0/1/NULL) | `lemma.is_noise` (0/1/NULL) | `tm_entry.is_noise` (0/1/NULL) |
+| Provenance | `term_cluster.noise_source` (auto/manual/NULL) | `lemma.noise_source` (auto/manual/NULL) | `tm_entry.noise_source` (auto/manual/NULL); `noise_reason` code (NOISE_PUNCT_ONLY, etc.) |
+| Badge | "Noise (auto/manual)" / "Noise" (legacy) | "Noise (auto/manual)" / "Noise" (legacy) | Noise badge with same 7-state vocabulary |
+| Tooltip | Provenance tooltip (who/when) | Provenance tooltip (who/when) | Provenance tooltip + `noise_reason` code → human-readable |
+| Filter | Multi-select noise filter in TermsFilterDialog | Multi-select noise filter in FilterDialog | Multi-select noise filter in FilterDialog |
 
 **Decision: LEGITIMATE DIVERGENCE**
 

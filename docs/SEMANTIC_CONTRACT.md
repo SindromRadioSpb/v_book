@@ -1,8 +1,8 @@
 # Semantic Contract — HDLE Premium
 
-> **Status:** Normative (approved 2026-03-24, updated 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-25)
 > **Scope:** All subsystems touching terms, dictionary, translation memory
-> **Schema version:** v48
+> **Schema version:** v51
 > **Authority:** This document takes precedence over inline descriptions in epic completion reports.
 
 ---
@@ -42,7 +42,7 @@ Location must be documented in the relevant epic completion report.
 ### Rule 2.1: Snapshot fields record state at a point in time
 A **snapshot field** captures the value of another field at the moment of a specific operation. After writing, snapshot fields are never updated again.
 
-Snapshot fields in v48:
+Snapshot fields in v51:
 
 | Field | Table | Captures | Trigger |
 |-------|-------|----------|---------|
@@ -62,7 +62,8 @@ Rationale: if a cluster is re-extracted (deleted + recreated), the old `promoted
 who last classified this row as noise or valid.
 - `"auto"` — NLP classifier (set by extraction pipeline or reprocess)
 - `"manual"` — user override (set by BulkNoiseUpdateWorker or single-row toggle)
-- `NULL` — legacy data (created before schema v48, 2026-03-24)
+- `NULL` — legacy data (created before schema v48, 2026-03-24); also rows that were
+  classified before migrations 048–051 fully backfilled (see migration history below)
 
 `lemma.noise_updated_at`: ISO8601 UTC timestamp of last classification. `NULL` for legacy.
 `term_cluster` and `tm_entry` do not yet have `noise_updated_at`; this is tracked as a
@@ -73,6 +74,22 @@ and `trg_cluster_noise_to_tm_entry` (migration 048) propagate `noise_source` fro
 source entity to `tm_entry` whenever `is_noise` is updated via UPDATE on `lemma` or
 `term_cluster`. This ensures TM entries stay consistent with their source without
 requiring explicit service-layer calls at every write site.
+
+**Migration history for `noise_source` backfill (v48–v51):**
+- Migration 048 (schema v48): Added `noise_source` column + DB triggers + initial backfill UPDATE.
+  Some databases received the column DDL without the backfill UPDATEs due to a bug in the
+  `"duplicate column name"` handler in `db.py` (`executescript` guard skipped all UPDATE statements).
+- Migration 049 (schema v49): WAL checkpoint workaround — re-ran backfill for DBs where
+  migration 048 applied but WAL wasn't checkpointed before the next connection.
+- Migration 050 (schema v50): Second backfill pass — identical to 049, targeting DBs
+  where `schema_version=49` but gaps remained.
+- Migration 051 (schema v51): Third backfill pass — targeting DBs where the old buggy
+  handler had set `schema_version=50` WITHOUT executing the backfill UPDATEs.
+  After this migration all known databases show 0 `noise_source=NULL` gaps for classified rows.
+- `db.py` structural fix (committed alongside migration 051): Replaced the silent
+  `"duplicate column name"` guard with `_run_migration_skipping_duplicate_columns()`, which
+  re-executes all non-DDL statements (backfill UPDATEs, index creation) while skipping
+  only the already-applied `ALTER TABLE ADD COLUMN` statements.
 
 ### Rule 2.4: "Legacy data" means pre-provenance, not corrupt
 A record with `noise_source=NULL` or `noise_updated_at=NULL` is **legacy** — it was created before provenance tracking existed. It is not corrupt or invalid. UI must communicate this clearly (e.g. "source unknown (legacy data)") without implying an error.

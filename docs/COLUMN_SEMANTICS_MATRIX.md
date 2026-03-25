@@ -1,8 +1,8 @@
 # Column Semantics Matrix — HDLE Premium
 
-> **Status:** Normative (approved 2026-03-24, updated 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-25)
 > **Scope:** Terms view · Dictionary view · Translation Management (TM) panel
-> **Schema version:** v48
+> **Schema version:** v51
 > **See also:** `docs/SEMANTIC_CONTRACT.md`, `docs/UI_VOCABULARY.md`, `docs/CROSS_SURFACE_MATRIX.md`
 
 ---
@@ -197,7 +197,7 @@ Multi-select Kind filter available via TermsFilterDialog (Filters button in Term
 
 ---
 
-## 8. Semantic Surfacing Wave — completion status (v48)
+## 8. Semantic Surfacing Wave — completion status (v51)
 
 | Patch | Scope | Description | Status |
 |-------|-------|-------------|--------|
@@ -205,4 +205,8 @@ Multi-select Kind filter available via TermsFilterDialog (Filters button in Term
 | PATCH-01 | Terms + TM | Kind column + TM Source→Term rename + P1 tooltips | ✓ Done (commit 5a9e9e0) |
 | PATCH-02..07 | All | Noise provenance unification — schema-backed noise_source axis | ✓ Done (commit 78b6869) |
 | — | Docs | This document updated to v48 | ✓ Done |
+| migration 048–051 | DB | noise_source backfill across 3 incremental passes; structural db.py fix | ✓ Done (commits 957f53a, 3beb841, af167c9) |
+| bugfix | TM service | `propagate_to_entries()` was overwriting `noise_source` with NULL on every bulk action | ✓ Fixed (commit 72e625b) |
+| bugfix | TM UI | QMessageBox race — stale search worker overwrote fresh noise_source badges | ✓ Fixed (commit 1ae9884) |
+| — | Docs | Normative docs updated to schema v51 | ✓ Done (2026-03-25) |
 | Remaining P2 | Terms+Dict | Freq/DocFreq/Members/POS/Status tooltips | ⏳ Future |

@@ -1,8 +1,8 @@
 # Canonical UI Vocabulary — HDLE Premium
 
-> **Status:** Normative (approved 2026-03-24, updated 2026-03-24)
+> **Status:** Normative (approved 2026-03-24, updated 2026-03-25)
 > **Scope:** All UI text, tooltip copy, dialog messages, log messages, docs
-> **Schema version:** v48
+> **Schema version:** v51
 > **See also:** `docs/SEMANTIC_CONTRACT.md`, `docs/CROSS_SURFACE_MATRIX.md`
 
 ---
@@ -34,8 +34,7 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 
 **Usage in UI:**
 - Badge in Noise column: one of the 7 states above
-- Filter: "Hide Noise" checkbox (hides all Noise* states)
-- Multi-select Noise filter in FilterDialog / TermsFilterDialog: 5 options — `noise_auto`, `noise_manual`, `valid_auto`, `valid_manual`, `unclassified`
+- Multi-select Noise filter in FilterDialog (Dictionary + TM) / TermsFilterDialog (Terms): 5 options — `noise_auto`, `noise_manual`, `valid_auto`, `valid_manual`, `unclassified`
 - Status bar: "Noise: N" (project-wide count of `is_noise=1` rows, independent of filter)
 
 **Not to be confused with:**
@@ -105,6 +104,11 @@ One term → one meaning. This vocabulary is the authoritative reference for UI 
 - Never show an empty field for date — omit the date line entirely
 
 **Important:** Legacy data is not corrupt. Do not display it as an error or warning.
+
+**Note on schema v48–v51 backfill:** All `is_noise IS NOT NULL` rows in fully migrated
+databases (schema ≥ v51) should have `noise_source` populated. Any remaining
+`noise_source=NULL` rows are either: (a) unclassified (`is_noise=NULL`), or (b) created
+by a code path that did not set `noise_source` — treat these as legacy data.
 
 ---
 

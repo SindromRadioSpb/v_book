@@ -1,9 +1,9 @@
 # Manual QA Matrix — HDLE Premium
 
-> **Status:** Active (approved 2026-03-24)
+> **Status:** Active (approved 2026-03-24, updated 2026-03-25)
 > **Scope:** Terms view · Dictionary view · TM panel · Cross-surface
-> **Schema version:** v47
-> **Automation coverage:** See test suite (1708 automated tests). This matrix covers scenarios that automation cannot verify: visual readability, hover UX, user trust, wording clarity.
+> **Schema version:** v51
+> **Automation coverage:** See test suite (≥1708 automated tests). This matrix covers scenarios that automation cannot verify: visual readability, hover UX, user trust, wording clarity.
 
 ---
 
@@ -50,7 +50,7 @@ Run this matrix after:
 |---|----------|-------|----------|--------|
 | D-11 | Project with 47 noise lemmas, search filter active (showing 20 lemmas) | Apply search filter that returns 20 lemmas | Status: "Found: 20" AND "Noise: 47". Noise count does NOT change when filter changes. | |
 | D-12 | Project with 0 noise lemmas | Open Dictionary | Status: "Noise: 0" | |
-| D-13 | Enable "Hide Noise" filter | Toggle Hide Noise checkbox | "Found:" count decreases. "Noise: N" stays the same (project-wide, independent of filter). | |
+| D-13 | Apply noise filter | Open Filters dialog → select noise state → apply | "Found:" count decreases to match selected noise states. "Noise: N" in status bar stays the same (project-wide, independent of filter). | |
 
 ### 1.4 Translation Column (col 5)
 
