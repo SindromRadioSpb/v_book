@@ -267,6 +267,12 @@ class TermsView(QWidget):
         self.refresh_btn.clicked.connect(self.perform_search)
         header_layout.addWidget(self.refresh_btn)
 
+        self.help_btn = QPushButton("?")
+        self.help_btn.setMaximumWidth(28)
+        self.help_btn.setToolTip("Открыть справочник по настройкам Terms")
+        self.help_btn.clicked.connect(self._open_terms_help)
+        header_layout.addWidget(self.help_btn)
+
         layout.addLayout(header_layout)
 
         # Extraction controls (M5.3)
@@ -1393,6 +1399,12 @@ class TermsView(QWidget):
             self.terms_table.scrollTo(proxy_index, QTableView.ScrollHint.PositionAtCenter)
             return True
         return False
+
+    def _open_terms_help(self) -> None:
+        """Open Help Center on the Terms Settings tab."""
+        from app.ui.help_center_dialog import show_help_center_dialog
+
+        show_help_center_dialog(parent=self, initial_tab="Настройки Terms")
 
     def on_extract(self):
         """Handle extract terms button."""

@@ -24,16 +24,17 @@ def _read_doc(relative_path: str, fallback: str) -> str:
 class HelpCenterDialog(QDialog):
     """Premium help center shell (tabs + markdown content)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, initial_tab: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("Help Center")
         self.resize(980, 720)
+        self._initial_tab = initial_tab
         self._init_ui()
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        tabs = QTabWidget(self)
-        layout.addWidget(tabs, 1)
+        self._tabs = QTabWidget(self)
+        layout.addWidget(self._tabs, 1)
 
         overview_md = _read_doc(
             "docs/HELP_CENTER.md",
@@ -47,11 +48,25 @@ class HelpCenterDialog(QDialog):
             "docs/KEYBOARD_INTERACTIONS.md",
             "# Keyboard Interaction Patterns\n\nNo interaction patterns documentation found.",
         )
+        semantics_md = _read_doc(
+            "docs/USER_GUIDE_SEMANTICS.md",
+            "# Справочник по сущностям\n\nДокументация недоступна.",
+        )
+        terms_guide_md = _read_doc(
+            "docs/TERMS_EXTRACTION_GUIDE.md",
+            "# Настройки Terms\n\nДокументация недоступна.",
+        )
 
-        tabs.addTab(self._markdown_view(overview_md), "Overview")
-        tabs.addTab(self._markdown_view(shortcuts_md), "Shortcuts")
-        tabs.addTab(self._markdown_view(keyboard_flows_md), "Keyboard Flows")
-        tabs.addTab(
+        self._tab_names: list[str] = []
+
+        def _add(widget: QTextBrowser, label: str) -> None:
+            self._tabs.addTab(widget, label)
+            self._tab_names.append(label)
+
+        _add(self._markdown_view(overview_md), "Overview")
+        _add(self._markdown_view(shortcuts_md), "Shortcuts")
+        _add(self._markdown_view(keyboard_flows_md), "Keyboard Flows")
+        _add(
             self._markdown_view(
                 "# Translation\n\n"
                 "- Translate Selected\n"
@@ -62,7 +77,7 @@ class HelpCenterDialog(QDialog):
             ),
             "Translation",
         )
-        tabs.addTab(
+        _add(
             self._markdown_view(
                 "# Audio & Pronunciation\n\n"
                 "- Generate Audio (source-only)\n"
@@ -73,6 +88,12 @@ class HelpCenterDialog(QDialog):
             ),
             "Audio",
         )
+        _add(self._markdown_view(semantics_md), "Справочник сущностей")
+        _add(self._markdown_view(terms_guide_md), "Настройки Terms")
+
+        # Jump to requested tab if specified
+        if self._initial_tab and self._initial_tab in self._tab_names:
+            self._tabs.setCurrentIndex(self._tab_names.index(self._initial_tab))
 
     @staticmethod
     def _markdown_view(markdown_text: str) -> QTextBrowser:
@@ -83,7 +104,18 @@ class HelpCenterDialog(QDialog):
         return view
 
 
-def show_help_center_dialog(parent=None) -> bool:
-    dialog = HelpCenterDialog(parent=parent)
+def show_help_center_dialog(
+    parent=None,
+    initial_tab: str | None = None,
+) -> bool:
+    """Open the Help Center dialog.
+
+    Args:
+        parent: Parent widget.
+        initial_tab: Optional tab label to show on open.
+            Supported values: "Overview", "Shortcuts", "Keyboard Flows",
+            "Translation", "Audio", "Справочник сущностей", "Настройки Terms".
+    """
+    dialog = HelpCenterDialog(parent=parent, initial_tab=initial_tab)
     dialog.exec()
     return True
