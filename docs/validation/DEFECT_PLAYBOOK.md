@@ -118,6 +118,27 @@ and never matched actual implementation.
 
 ---
 
+## Architectural Finding — TM Projection Is Not Automatic
+
+Confirmed by Wave 1 repo audit (2026-03-26):
+
+**`TermExtractionService` does NOT create `tm_entry` rows.**
+
+After extraction completes (term_cluster + ngram tables updated), the TM is not automatically populated. TM projection is a separate, explicitly-triggered step with four pathways:
+
+| Pathway | Function | Kind | Idempotent |
+|---|---|---|---|
+| Batch lemma materialize | `translation_admin_service.materialize_project_lemmas_to_tm` | lemma | Yes (INSERT OR IGNORE) |
+| User dict add | `user_dictionary_service._materialize_tm_entries_for_items` | all | Yes (check-then-insert) |
+| Inline edit | `terms_view.py:1817` | term_cluster | Yes (check-then-insert) |
+| Batch MT | `batch_mt_translate_service._write_term_cluster/lemma` | term_cluster, lemma | Yes (check-then-insert) |
+
+**No bulk projection exists for `kind='term_cluster'`** — that pathway requires user action.
+
+If a test expects TM rows after extraction but finds none: this is by design, not a defect.
+
+---
+
 ## Quick Reference — Oracle Modules
 
 | Oracle | What it calls | Key comparison |

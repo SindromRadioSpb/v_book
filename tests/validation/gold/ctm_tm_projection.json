@@ -1,0 +1,92 @@
+{
+  "corpus_id": "CTM",
+  "description": "TM projection validation: materialize_project_lemmas_to_tm pathway.",
+  "notes": "TermExtractionService does NOT create tm_entry rows. TM projection is a separate explicit step. This corpus validates the lemma→tm_entry materialization pathway (translation_admin_service.materialize_project_lemmas_to_tm). Fields set: kind='lemma', src_text=lemma_text, src_norm=coalesce(norm_text, lemma_text), translation='', status='draft', origin='import', lemma_id=FK. INSERT OR IGNORE — fully idempotent. Note: No bulk materialize function exists for kind='term_cluster' — that gap is documented here as an architectural finding.",
+  "architectural_finding": {
+    "description": "term_cluster kind has no bulk materialization function",
+    "detail": "materialize_project_lemmas_to_tm only creates kind='lemma' rows. kind='term_cluster' tm_entry rows are created only via: user_dictionary_service._materialize_tm_entries_for_items, terms_view.py inline edit handler, or batch_mt_translate_service. There is no equivalent batch projection for term_cluster.",
+    "impact": "Extraction runs do not automatically surface term_cluster results in TM. A user action (add to dictionary, inline edit, batch MT) is required per term_cluster.",
+    "status": "by_design_architectural_gap"
+  },
+  "scenarios": [
+    {
+      "scenario_id": "STM01",
+      "description": "Basic: 3 lemmas → 3 tm_entry rows with correct field values",
+      "input_lemmas": [
+        {"lemma_text": "ילד", "norm_text": "ילד", "is_noise": 0, "noise_reason": null},
+        {"lemma_text": "גדול", "norm_text": "גדול", "is_noise": 0, "noise_reason": null},
+        {"lemma_text": "ספר", "norm_text": "ספר", "is_noise": 0, "noise_reason": null}
+      ],
+      "expected_tm_count": 3,
+      "expected_kind": "lemma",
+      "expected_status": "draft",
+      "expected_origin": "import",
+      "expected_src_lang": "he",
+      "expected_tgt_lang": "ru",
+      "expected_translation": ""
+    },
+    {
+      "scenario_id": "STM02",
+      "description": "src_norm fallback: norm_text is null → src_norm = lemma_text",
+      "input_lemmas": [
+        {"lemma_text": "מדינה", "norm_text": null, "is_noise": 0, "noise_reason": null}
+      ],
+      "expected_src_norm": "מדינה",
+      "notes": "coalesce(trim(norm_text), lemma_text) → falls back to lemma_text when norm_text is null"
+    },
+    {
+      "scenario_id": "STM03",
+      "description": "src_norm from norm_text when set",
+      "input_lemmas": [
+        {"lemma_text": "בתים", "norm_text": "בית", "is_noise": 0, "noise_reason": null}
+      ],
+      "expected_src_norm": "בית",
+      "notes": "norm_text='בית' (lemma base form) → src_norm='בית', src_text='בתים'"
+    },
+    {
+      "scenario_id": "STM04",
+      "description": "is_noise and noise_reason propagated from lemma",
+      "input_lemmas": [
+        {"lemma_text": "123", "norm_text": null, "is_noise": 1, "noise_reason": "NOISE_RATIO_NON_LETTER_HIGH"}
+      ],
+      "expected_is_noise": 1,
+      "expected_noise_reason": "NOISE_RATIO_NON_LETTER_HIGH"
+    },
+    {
+      "scenario_id": "STM05",
+      "description": "Idempotency: calling materialize twice → same row count, no duplicates",
+      "input_lemmas": [
+        {"lemma_text": "ירושלים", "norm_text": "ירושלים", "is_noise": 0, "noise_reason": null}
+      ],
+      "expected_count_after_first": 1,
+      "expected_count_after_second": 1,
+      "notes": "INSERT OR IGNORE on uq_tm_entry (project_id, kind, src_lang, tgt_lang, src_norm) prevents duplicates"
+    },
+    {
+      "scenario_id": "STM06",
+      "description": "Only missing lemmas projected: pre-existing tm_entry is not duplicated",
+      "setup": "1 pre-existing tm_entry for lemma_A; lemma_B has no tm_entry",
+      "expected_after_materialize": "1 existing preserved + 1 new for lemma_B = 2 total"
+    },
+    {
+      "scenario_id": "STM07",
+      "description": "Stats dict has correct counts after materialization",
+      "expected_stats_keys": ["project_id", "total_lemmas", "initial_tm_lemmas", "initial_missing_lemma_links", "attempted", "inserted", "processed_chunks", "final_tm_lemmas", "final_missing_lemma_links"]
+    },
+    {
+      "scenario_id": "STM08",
+      "description": "dry_run=True: no rows created, stats reflect zero inserts",
+      "expected_inserted": 0
+    },
+    {
+      "scenario_id": "STM09",
+      "description": "lemma_id FK: each tm_entry.lemma_id points to the correct Lemma row",
+      "notes": "Critical linkage — broken linkage silently makes TM unfilterable by lemma"
+    },
+    {
+      "scenario_id": "STM10",
+      "description": "term_cluster gap: no tm_entry created for term_cluster kind by materialize",
+      "notes": "Architectural gap: kind='term_cluster' rows require user action. No test can pass for a missing function — this is documented as by_design_architectural_gap."
+    }
+  ]
+}

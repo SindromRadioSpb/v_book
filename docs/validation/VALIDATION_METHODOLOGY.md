@@ -43,6 +43,7 @@ Each test category has three independent verification sources:
 | Association measures | C07 | oracle_measures | test_v07 | No |
 | Noise classification | C08 | oracle_noise | test_v08 | No |
 | Extraction modes | C09 | (integration) | test_v09 | No |
+| TM projection (lemma kind) | CTM | oracle_tm | test_vtm | No |
 | Full pipeline round-trip | C10 | (deferred) | (deferred) | **Yes** |
 
 C02 and C10 require Stanza and a pre-downloaded Hebrew model. They are marked
@@ -103,7 +104,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **104 passed, 0 failed** (as of C09 wave, 2026-03-26).
+Expected: **131 passed, 0 failed** (as of TM wave, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell
@@ -135,7 +136,8 @@ A pipeline component is considered **validated** when:
 |------|--------|--------|
 | C02 tokenization | Deferred | Requires Stanza + Hebrew model |
 | C10 full pipeline | Deferred | Requires Stanza + populated corpus |
-| C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope → TM corpus next |
+| C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope |
+| TM projection (lemma) | **Partial** (2026-03-26) | 27 tests; kind='lemma' materialize validated; kind='term_cluster' no bulk function (by design) |
 | Canonicalization: prefix semantics | Known limitation | מדינה → דינה (מ stripped as prefix) |
 | Dice at c_xy=0 | By design | Returns 0.0, not None (n not a Dice parameter) |
 
