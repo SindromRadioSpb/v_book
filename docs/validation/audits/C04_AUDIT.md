@@ -1,12 +1,15 @@
 # C04 — Audit Report: N-gram Extraction
 
-> Wave completed: 2026-03-26
-> Status: **PARTIAL**
+> Wave 1 completed: 2026-03-26 — all 5 bigram patterns + 2 trigram patterns; POS filter contract
+> Wave 2 completed: 2026-03-26 — NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed script, lemma oracle
+> Status: **VALIDATED**
 > Auditor: post-wave automated audit
 
 ---
 
 ## 1. Scope of this wave
+
+### Wave 1 (2026-03-26) — core POS pattern contract
 
 **What was done:**
 - Gold corpus: 9 cases covering all 5 valid bigram POS patterns (NOUN+NOUN, NOUN+ADJ, ADJ+NOUN, PROPN+PROPN, NUM+NOUN), 2 valid trigram patterns (NOUN+NOUN+NOUN, ADJ+ADJ+NOUN), invalid POS rejection, single-token edge case, and NOUN+ADJ+ADJ rejection.
@@ -16,19 +19,30 @@
 - Gold calibration: C04_09 corrected — NOUN+ADJ+ADJ removed (not in VALID_POS_PATTERNS); ADJ+ADJ+NOUN retained as the valid trigram.
 - `pos_pattern` normalization: oracle normalizes both gold (JSON array → tuple) and actual (pipe-joined string → tuple) via `_ngram_key()`.
 
-**What was NOT in scope:**
-- Punctuation tokens at sentence boundary
-- Mixed Hebrew/Latin n-grams
-- N-grams crossing STOP_POS tokens (which NP extractor handles, not ngram extractor)
-- Very long sentences (n-gram combinatorics at scale)
+### Wave 2 (2026-03-26) — NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed script, lemma oracle
+
+**What was done:**
+- Gold corpus: `tests/validation/gold/c04v2_ngram_extraction.json` — 4 cases.
+- Oracle enhancement: `validate_ngram_lemmas()` added to `oracle_ngram.py` — secondary check for `lemma_phrase` correctness in cases where it diverges from `surface_text`.
+- Tests: `tests/validation/test_v04v2_ngram_extraction.py` — 10 tests across 5 test classes.
+- No implementation changes — all gaps were gold/test coverage gaps.
+- NOUN+ADJ+NOUN trigram: confirmed in `VALID_POS_PATTERNS` (line 20 of ngram_extractor.py); positive case added (C04v2_01).
+- PUNCT boundary: PUNCT token in sliding window fails `is_valid_pos_pattern()` → no n-gram spans the boundary; bigrams on each side extracted independently (C04v2_02).
+- Mixed Hebrew/Latin: PROPN+PROPN pattern works identically for Latin tokens (C04v2_03).
+- Lemma divergence: `validate_ngram_lemmas()` closes the silent-lemma-corruption gap (C04v2_04); corruption detection test proves the oracle has real detection power.
+
+**What was NOT in scope after Wave 2:**
+- n_values=[1] unigram behavior
+- Very long sentences (15+ tokens, sliding window combinatorics)
+- PUNCT at sentence-start or sentence-end (only medial PUNCT tested)
 
 ---
 
 ## 2. Product contract now validated
 
-**Contract:**
+**N-gram extraction pipeline (backed by gold + tests):**
 
-| Claim | Gold evidence | Oracle check |
+| Claim | Gold evidence | Oracle |
 |---|---|---|
 | NOUN+NOUN bigram extracted | C04_01 | set key match |
 | NOUN+ADJ bigram extracted | C04_02 | set key match |
@@ -37,93 +51,117 @@
 | NUM+NOUN bigram extracted | C04_05 | set key match |
 | NOUN+NOUN+NOUN trigram extracted | C04_06 | set key match |
 | ADJ+ADJ+NOUN trigram extracted | C04_09 | set key match |
-| `surface_text` uses original token text; `lemma_phrase` uses lemma | C04_04 (מדינת ישראל / מדינה ישראל) | set key includes surface |
+| NOUN+ADJ+NOUN trigram extracted | C04v2_01 | set key match |
+| NOUN+ADJ+NOUN sub-spans produce 2 bigrams + 1 trigram | C04v2_01 | count = 3 |
+| PUNCT token blocks n-gram window — no n-gram spans PUNCT | C04v2_02 | set key match + inline surface check |
+| Bigrams on each side of PUNCT extracted independently | C04v2_02 | set key match |
+| Mixed Hebrew/Latin PROPN+PROPN bigram extracted | C04v2_03 | set key match |
+| surface_text = inflected tokens; lemma_phrase = lemma tokens | C04_04, C04v2_04 | set key (surface) + validate_ngram_lemmas() |
+| validate_ngram_lemmas() detects silent lemma corruption | C04v2_04 corruption test | secondary oracle + inline assertion |
 | VERB+NOUN produces no n-gram | C04_07 | empty actual set |
 | Single token produces no n-gram | C04_08 | empty actual set |
-| NOUN+ADJ+ADJ does NOT produce a trigram | C04_09 | only ADJ+ADJ+NOUN present |
-| Sliding window produces all valid sub-spans | C04_06 (3-token → 2 bigrams + 1 trigram) | count = 3 |
 
 **Oracle comparison detail:**
-The oracle compares sets of `(surface_text, n, pos_tuple)` keys. This means:
-- Guarantees: correct surface string, correct n-value, correct POS pattern
-- Does NOT guarantee: token indices, positions in original sentence, ordering within the result list, `lemma_phrase` correctness (only `surface_text` and `pos_tuple` are in the key)
-
-`lemma_phrase` is present in gold but only implicitly validated through `surface_text` — if lemma diverges from surface unexpectedly, the oracle would not catch it unless the surface key also changes.
+- Primary oracle (`validate_ngram_extraction`): compares sets of `(surface_text, n, pos_tuple)` keys.
+- Secondary oracle (`validate_ngram_lemmas`): for gold cases with non-trivial `lemma_phrase` (diverges from surface), looks up actual n-gram by set key and compares `lemma_phrase`.
 
 ---
 
 ## 3. What is now guaranteed in practice
 
-- Any change to `VALID_POS_PATTERNS` that adds or removes a bigram/trigram pattern type will cause a test failure.
-- If the sliding window logic breaks (producing fewer or more n-grams for a 3-token input), the count test catches it.
-- VERB, ADP, and other non-nominal POS types correctly produce no n-grams — regression is caught.
+- Any change to `VALID_POS_PATTERNS` that adds or removes any bigram/trigram pattern type will cause a test failure.
+- If the sliding window logic breaks (fewer or more n-grams for a 3-token input), the count test catches it.
+- PUNCT tokens at medial positions correctly block all n-gram window spans — regression is caught.
+- `lemma_phrase` corruption (returning surface instead of lemma) is caught by the secondary oracle.
+- Mixed-script inputs are handled identically to Hebrew-only inputs.
 
 ---
 
 ## 4. What defects are now caught automatically
 
-- **D07 (regression):** Removing a valid POS pattern from the extractor.
-- **D07:** Adding an invalid pattern that should produce no n-gram.
+- **D07 (regression):** Removing or adding a valid POS pattern from the extractor.
 - **D07:** Sliding window producing duplicate or missing spans.
-- **D01/D06:** Gold mismatch after intentional algorithm change to POS filtering.
-- **D04 (non-determinism):** Different set of n-grams on repeat calls.
+- **D07:** PUNCT filtering removed — windows containing PUNCT would produce invalid n-grams.
+- **D07:** `lemma_phrase` reverted to surface (common regression — using `text` instead of `lemma`).
+- **D01/D06:** Gold mismatch after intentional algorithm change.
+- **D04 (non-determinism):** Different set of n-grams on repeat calls (covered by Wave 1 determinism test).
 
 ---
 
 ## 5. What remains NOT covered
 
-- **Punctuation boundary tokens:** What happens when a PUNCT token appears between two NOUNs? Does it break the n-gram window? Not in gold.
-- **Mixed-script n-grams:** `"Apple ישראל"` (PROPN+PROPN) — is PROPN+PROPN also extracted for mixed Hebrew/Latin? Not tested.
-- **NOUN+ADJ+NOUN trigram:** This is in `VALID_POS_PATTERNS` per the gold notes, but there is no gold case that directly tests it with a passing example.
-- **`lemma_phrase` correctness:** The oracle key uses `surface_text`, not `lemma_phrase`. If a change corrupts lemma_phrase without changing surface, it would not be caught.
-- **n_values=[1] (unigrams):** Not in gold. Unigram behavior is unverified.
-- **Very long sentences:** 4-token sentence is the longest tested. Sliding window on 15+ tokens not validated.
+- **n_values=[1] unigrams:** Not in gold. Unigram behavior is unverified.
+- **Very long sentences:** 5-token is the longest tested. Sliding window on 15+ tokens not validated.
+- **PUNCT at sentence-start/end:** Only medial PUNCT (between two NOUN groups) is tested.
+- **Nikud in tokens:** No tokenized input with nikud marks has been tested.
 
 ---
 
 ## 6. Required follow-up
 
-**C04 v2 additions recommended:**
-1. NOUN+ADJ+NOUN trigram with passing example (confirm it's in VALID_POS_PATTERNS and works).
-2. Punctuation token in the middle of a nominal sequence — verify it either breaks the window or is filtered.
-3. Mixed Hebrew/Latin PROPN+PROPN case.
-4. A case where `lemma_phrase` differs from `surface_text` in a way that would be visually distinguishable (to catch silent lemma corruption).
+**No mandatory follow-up after Wave 2.**
+
+Optional (low priority):
+- If unigram extraction is added, add a C04 v3 case.
+- Nikud in pre-tokenized input (if pipeline change affects token text).
 
 ---
 
 ## 7. DoD verdict
 
-**PARTIAL**
+**VALIDATED**
 
-All 9 gold cases pass. All 5 valid bigram patterns and 2 of 3 valid trigram patterns have positive examples. VERB+NOUN rejection confirmed. Sliding window span generation confirmed.
+After Wave 2: 16 test nodes pass (6 Wave 1 + 10 Wave 2). All primary contracts confirmed:
+- All 8 valid POS patterns: NOUN+NOUN, NOUN+ADJ, ADJ+NOUN, PROPN+PROPN, NUM+NOUN, NOUN+NOUN+NOUN, ADJ+ADJ+NOUN, NOUN+ADJ+NOUN
+- NOUN+ADJ+NOUN: both the pattern set contract and a positive extraction case confirmed
+- PUNCT boundary: blocking behavior verified from code trace (no special PUNCT code in extractor — windows fail POS filter) + inline surface check
+- Mixed Hebrew/Latin: Latin tokens pass through extractor unchanged
+- `lemma_phrase` correctness: secondary oracle added + corruption detection proven
 
-Not PASS because:
-- NOUN+ADJ+NOUN trigram has no positive test case (only mentioned in notes, not in gold).
-- Punctuation boundary behavior is unverified.
-- `lemma_phrase` is not independently validated by the oracle key.
+VALIDATED (not PARTIAL) because:
+- All known coverage gaps are now closed with gold evidence
+- PUNT boundary behavior is verified both at oracle level and with inline surface check
+- `lemma_phrase` oracle gap is closed by `validate_ngram_lemmas()` with explicit corruption test
+- No silent defect class remains for the primary use cases (term n-gram extraction in Hebrew text)
 
 ---
 
 ## 8. Files changed in this wave
 
+### Wave 1
 | File | Role |
 |---|---|
-| `tests/validation/gold/c04_ngram_extraction.json` | Gold — 9 cases; C04_09 corrected (removed invalid NOUN+ADJ+ADJ) |
-| `tests/validation/oracles/oracle_ngram.py` | Oracle — set comparison with pos_pattern normalization (list/string → tuple) |
+| `tests/validation/gold/c04_ngram_extraction.json` | Gold — 9 cases; C04_09 corrected |
+| `tests/validation/oracles/oracle_ngram.py` | Oracle — set comparison with pos_pattern normalization |
 | `tests/validation/test_v04_ngram_extraction.py` | 6 test methods |
+
+### Wave 2
+| File | Role |
+|---|---|
+| `tests/validation/gold/c04v2_ngram_extraction.json` | Gold — 4 edge cases |
+| `tests/validation/oracles/oracle_ngram.py` | Added `validate_ngram_lemmas()` secondary oracle |
+| `tests/validation/test_v04v2_ngram_extraction.py` | 10 tests across 5 test classes |
+| `docs/validation/audits/C04_AUDIT.md` | Updated: Wave 2 + VALIDATED verdict |
+| `docs/validation/AUDIT_INDEX.md` | Updated: C04 Partial → Validated, baseline 201→211 |
+| `docs/validation/VALIDATION_METHODOLOGY.md` | Updated: v1.5→v1.6, count 201→211, C04v2 row added |
 
 ---
 
 ## 9. Regression / baseline impact
 
-- Validation suite (non-Stanza): **104 passed**.
-- C04 contributes 6 test nodes (but C04_09 covers 2 patterns).
+- Validation suite (non-Stanza): **211 passed** (201 prior + 10 C04v2).
+- C04 total: 16 test nodes (6 Wave 1 + 10 Wave 2).
+- No implementation changes → zero regression risk in main baseline (1751).
 
 ---
 
 ## 10. Executive summary
 
-C04 validates n-gram extraction across all major POS pattern types via set-based oracle comparison. All 5 valid bigram patterns and 2 trigram patterns are confirmed working. Invalid POS (VERB+NOUN) and single-token inputs correctly produce empty output. The sliding window spanning 3 tokens produces all expected sub-spans. Key limitation: the oracle key uses `surface_text`, not `lemma_phrase`, so silent lemma corruption is undetected. NOUN+ADJ+NOUN trigram has no positive test case. Punctuation boundary handling is entirely untested. Status is PARTIAL; v2 additions would complete the trigram coverage and close the punctuation gap.
+C04 Wave 1 validated the n-gram extraction contract across all 5 valid bigram POS patterns and 2 of 3 valid trigram patterns. VERB+NOUN rejection and single-token edge cases confirmed. Key limitation: NOUN+ADJ+NOUN trigram had no positive test case, PUNCT boundary behavior was unverified, and `lemma_phrase` correctness was not independently validated by the oracle key.
+
+C04 Wave 2 closed all remaining gaps — all were coverage gaps, not code defects. NOUN+ADJ+NOUN confirmed in `VALID_POS_PATTERNS` at line 20 of `ngram_extractor.py`; positive case added with subspan bigrams verified. PUNCT behavior traced from code: no special PUNCT handling — windows fail `is_valid_pos_pattern()` check; no n-gram spans the comma boundary (both surface-check and oracle-match verified). Mixed-script PROPN+PROPN: identical behavior to Hebrew-only. `validate_ngram_lemmas()` secondary oracle: detects silent lemma corruption with explicit corruption-injection test.
+
+Status advances from PARTIAL to **VALIDATED**: all known contract gaps are closed; all primary defect classes are caught automatically.
 
 ---
 
@@ -131,8 +169,8 @@ C04 validates n-gram extraction across all major POS pattern types via set-based
 
 - [x] Update methodology status
 - [x] Update audit index
-- [ ] Add C04 v2: NOUN+ADJ+NOUN trigram positive case
-- [ ] Add C04 v2: punctuation token in nominal sequence
-- [ ] Add C04 v2: mixed-script PROPN+PROPN
-- [ ] Add C04 v2: case where `lemma_phrase` diverges from `surface_text` to test oracle key coverage
-- [ ] Confirm NOUN+ADJ+NOUN is in VALID_POS_PATTERNS (verify in ngram_extractor source)
+- [x] Add C04 v2: NOUN+ADJ+NOUN trigram positive case (C04v2_01)
+- [x] Add C04 v2: punctuation token in nominal sequence (C04v2_02)
+- [x] Add C04 v2: mixed-script PROPN+PROPN (C04v2_03)
+- [x] Add C04 v2: lemma_phrase diverges from surface_text; validate_ngram_lemmas() secondary oracle (C04v2_04)
+- [x] Confirm NOUN+ADJ+NOUN is in VALID_POS_PATTERNS (verified in ngram_extractor.py line 20)

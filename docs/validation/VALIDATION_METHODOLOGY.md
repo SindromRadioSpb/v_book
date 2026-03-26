@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.5 (updated 2026-03-26: C06 v2 completed — prefix matrix, mixed script, geresh, collision; count 185→201)
+> Version: 1.6 (updated 2026-03-26: C04 v2 completed — NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed script, lemma oracle; count 201→211)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -39,6 +39,7 @@ Each test category has three independent verification sources:
 | Tokenization + morphology | C02 | (deferred) | (deferred) | **Yes** |
 | Lemma aggregation | C03 | oracle_lemma_agg | test_v03 | No |
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
+| N-gram extraction edge cases (NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed script, lemma oracle) | C04v2 | oracle_ngram | test_v04v2 | No |
 | NP chunk extraction | C05 | oracle_np | test_v05 | No |
 | Canonicalization | C06 | oracle_canonicalization | test_v06 | No |
 | Canonicalization edge cases (prefix כ/ש, mixed, geresh, collision) | C06v2 | oracle_canonicalization | test_v06v2 | No |
@@ -108,7 +109,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **201 passed, 0 failed** (as of C06 Wave 2, 2026-03-26).
+Expected: **211 passed, 0 failed** (as of C04 Wave 2, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell

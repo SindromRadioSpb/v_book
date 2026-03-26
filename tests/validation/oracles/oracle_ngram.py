@@ -53,3 +53,41 @@ def validate_ngram_extraction(case: dict) -> OracleResult:
         extra=extra,
         notes=case.get("notes", ""),
     )
+
+
+def validate_ngram_lemmas(case: dict, actual: list[dict]) -> list[dict]:
+    """Secondary check: verify lemma_phrase for gold cases where it diverges from surface.
+
+    The main oracle key (surface_text, n, pos_tuple) cannot detect silent lemma
+    corruption — if lemma_phrase is wrong but surface_text is correct the set key
+    still matches. This function closes that gap.
+
+    Args:
+        case: Gold case dict (from c04v2_ngram_extraction.json or any C04 case).
+        actual: Output of extract_ngrams_from_sentence().
+
+    Returns:
+        List of mismatch dicts (empty = all correct).
+        Each entry: {"case_id", "surface_text", "expected_lemma", "actual_lemma"}
+    """
+    case_id = case["case_id"]
+    mismatches = []
+    for exp_ng in case.get("expected_ngrams", []):
+        exp_lemma = exp_ng.get("lemma_phrase")
+        exp_surface = exp_ng.get("surface_text")
+        if not exp_lemma or exp_lemma == exp_surface:
+            continue  # trivial case — no divergence to check
+        exp_key = _ngram_key(exp_ng)
+        actual_ng = next((a for a in actual if _ngram_key(a) == exp_key), None)
+        if actual_ng is None:
+            continue  # missing from actual — already caught by main oracle
+        if actual_ng.get("lemma_phrase") != exp_lemma:
+            mismatches.append(
+                {
+                    "case_id": case_id,
+                    "surface_text": exp_surface,
+                    "expected_lemma": exp_lemma,
+                    "actual_lemma": actual_ng.get("lemma_phrase"),
+                }
+            )
+    return mismatches

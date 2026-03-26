@@ -1,0 +1,113 @@
+{
+  "corpus_id": "C04v2",
+  "description": "N-gram extraction edge cases: NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed Hebrew/Latin, lemma_phrase divergence.",
+  "notes": "Wave 2 closes four gaps from C04 Wave 1: (1) NOUN+ADJ+NOUN trigram had no positive test case despite being in VALID_POS_PATTERNS; (2) PUNCT token behavior was unverified; (3) mixed-script PROPN+PROPN was untested; (4) lemma_phrase silent divergence was undetectable by set-key oracle. No implementation changes — all gaps were gold/test coverage gaps.",
+  "cases": [
+    {
+      "case_id": "C04v2_01",
+      "description": "NOUN+ADJ+NOUN trigram — מרכז רפואי עיר (regional medical center); 3-token sentence yields 2 bigrams + 1 trigram",
+      "input": {
+        "tokens": [
+          {"text": "מרכז", "lemma": "מרכז", "pos": "NOUN"},
+          {"text": "רפואי", "lemma": "רפואי", "pos": "ADJ"},
+          {"text": "עיר", "lemma": "עיר", "pos": "NOUN"}
+        ],
+        "n_values": [2, 3]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "מרכז רפואי",
+          "lemma_phrase": "מרכז רפואי",
+          "pos_pattern": ["NOUN", "ADJ"]
+        },
+        {
+          "n": 2,
+          "surface_text": "רפואי עיר",
+          "lemma_phrase": "רפואי עיר",
+          "pos_pattern": ["ADJ", "NOUN"]
+        },
+        {
+          "n": 3,
+          "surface_text": "מרכז רפואי עיר",
+          "lemma_phrase": "מרכז רפואי עיר",
+          "pos_pattern": ["NOUN", "ADJ", "NOUN"]
+        }
+      ],
+      "expected_count": 3,
+      "notes": "Proves NOUN+ADJ+NOUN is in VALID_POS_PATTERNS and the sliding window produces all 3 sub-spans (NOUN+ADJ bigram at positions 0-1, ADJ+NOUN bigram at 1-2, NOUN+ADJ+NOUN trigram at 0-2)"
+    },
+    {
+      "case_id": "C04v2_02",
+      "description": "PUNCT token breaks n-gram window — comma between two NOUN groups; no bigram/trigram spans the boundary",
+      "input": {
+        "tokens": [
+          {"text": "בית", "lemma": "בית", "pos": "NOUN"},
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+          {"text": ",", "lemma": ",", "pos": "PUNCT"},
+          {"text": "גן", "lemma": "גן", "pos": "NOUN"},
+          {"text": "ילדים", "lemma": "ילד", "pos": "NOUN"}
+        ],
+        "n_values": [2, 3]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "בית ספר",
+          "lemma_phrase": "בית ספר",
+          "pos_pattern": ["NOUN", "NOUN"]
+        },
+        {
+          "n": 2,
+          "surface_text": "גן ילדים",
+          "lemma_phrase": "גן ילד",
+          "pos_pattern": ["NOUN", "NOUN"]
+        }
+      ],
+      "expected_count": 2,
+      "notes": "PUNCT token at index 2. Windows containing PUNCT fail is_valid_pos_pattern() (NOUN+PUNCT, PUNCT+NOUN, NOUN+NOUN+PUNCT, NOUN+PUNCT+NOUN, PUNCT+NOUN+NOUN — none in VALID_POS_PATTERNS). Only the two NOUN+NOUN bigrams on each side pass. No n-gram spans the comma boundary."
+    },
+    {
+      "case_id": "C04v2_03",
+      "description": "Mixed Hebrew/Latin PROPN+PROPN bigram — Apple ישראל",
+      "input": {
+        "tokens": [
+          {"text": "Apple", "lemma": "Apple", "pos": "PROPN"},
+          {"text": "ישראל", "lemma": "ישראל", "pos": "PROPN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "Apple ישראל",
+          "lemma_phrase": "Apple ישראל",
+          "pos_pattern": ["PROPN", "PROPN"]
+        }
+      ],
+      "expected_count": 1,
+      "notes": "Latin token preserved as-is in surface_text and lemma_phrase. PROPN+PROPN is a valid bigram pattern. Confirms mixed-script token sequences are handled identically to pure Hebrew."
+    },
+    {
+      "case_id": "C04v2_04",
+      "description": "Lemma divergence — עיתונים ישנים (plural inflected) has lemma עיתון ישן (singular base)",
+      "input": {
+        "tokens": [
+          {"text": "עיתונים", "lemma": "עיתון", "pos": "NOUN"},
+          {"text": "ישנים", "lemma": "ישן", "pos": "ADJ"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "עיתונים ישנים",
+          "lemma_phrase": "עיתון ישן",
+          "pos_pattern": ["NOUN", "ADJ"]
+        }
+      ],
+      "expected_count": 1,
+      "notes": "surface_text = inflected tokens joined; lemma_phrase = lemma tokens joined. Both differ here. Used by validate_ngram_lemmas() to verify that secondary oracle detects silent lemma corruption. The main set-key oracle cannot catch a regression that leaves surface_text correct but corrupts lemma_phrase."
+    }
+  ]
+}
