@@ -1,0 +1,194 @@
+{
+  "corpus_id": "CTM2",
+  "description": "TM user-dictionary-add pathway validation (Wave 2).",
+  "notes": "Tests _materialize_tm_entries_for_items, _attach_source_links, and tm_global propagation. No Stanza required. Uses In-Memory SQLite.",
+  "pathway_note": "This pathway creates kind='term_cluster' (and kind='lemma') TMEntry rows when a UserDictionaryItem is added via the user dictionary add flow. Unlike the batch-lemma pathway (CTM Wave 1), this pathway operates on already-classified items.",
+  "scenarios": [
+    {
+      "case_id": "STUD01",
+      "description": "Basic term_cluster entry creation via user_dict add",
+      "input": {
+        "items": [
+          {
+            "kind": "term_cluster",
+            "src_lang": "he",
+            "tgt_lang": "ru",
+            "src_text": "\u05e1\u05e4\u05e8",
+            "src_norm": "\u05e1\u05e4\u05e8",
+            "origin_project_id": "{{project_id}}"
+          }
+        ]
+      },
+      "expected": {
+        "stats.created": 1,
+        "stats.reused": 0,
+        "entry.kind": "term_cluster",
+        "entry.source_ref": "user_dictionary_add",
+        "entry.status": "draft",
+        "entry.origin": "import",
+        "entry.translation": ""
+      }
+    },
+    {
+      "case_id": "STUD02",
+      "description": "Reuse existing TMEntry when src_norm matches",
+      "input": {
+        "pre_existing_entry": {
+          "kind": "term_cluster",
+          "src_norm": "\u05e1\u05e4\u05e8"
+        },
+        "items": [
+          {
+            "kind": "term_cluster",
+            "src_norm": "\u05e1\u05e4\u05e8"
+          }
+        ]
+      },
+      "expected": {
+        "stats.reused": 1,
+        "stats.created": 0,
+        "tm_entry_count": 1
+      }
+    },
+    {
+      "case_id": "STUD03",
+      "description": "Empty items list returns zero stats and creates no entries",
+      "input": {
+        "items": []
+      },
+      "expected": {
+        "stats": {"created": 0, "reused": 0, "linked": 0},
+        "tm_entry_count": 0
+      }
+    },
+    {
+      "case_id": "STUD04",
+      "description": "New TMEntry inherits translation/status/origin from TMGlobal when it exists",
+      "input": {
+        "pre_existing_global": {
+          "src_norm": "\u05e1\u05e4\u05e8",
+          "translation": "\u043a\u043d\u0438\u0433\u0430",
+          "status": "approved",
+          "origin": "user_edit"
+        },
+        "items": [
+          {
+            "kind": "term_cluster",
+            "src_norm": "\u05e1\u05e4\u05e8"
+          }
+        ]
+      },
+      "expected": {
+        "entry.translation": "\u043a\u043d\u0438\u0433\u0430",
+        "entry.status": "approved",
+        "entry.origin": "user_edit"
+      }
+    },
+    {
+      "case_id": "STUD05",
+      "description": "item.origin_tm_entry_id and item.src_norm updated after materialize",
+      "input": {
+        "items": [
+          {
+            "kind": "term_cluster",
+            "src_norm": "\u05e1\u05e4\u05e8",
+            "origin_tm_entry_id": null
+          }
+        ]
+      },
+      "expected": {
+        "item.origin_tm_entry_id": "== entry.tm_id",
+        "item.src_norm": "non_empty_string"
+      }
+    },
+    {
+      "case_id": "STUD06",
+      "description": "_attach_source_links sets cluster_id for term_cluster kind",
+      "input": {
+        "items": [
+          {
+            "kind": "term_cluster",
+            "origin_entity_type": "term_cluster",
+            "origin_entity_id": "{{cluster_id}}"
+          }
+        ]
+      },
+      "expected": {
+        "entry.cluster_id": "{{cluster_id}}"
+      }
+    },
+    {
+      "case_id": "STUD07",
+      "description": "_attach_source_links sets lemma_id for lemma kind",
+      "input": {
+        "items": [
+          {
+            "kind": "lemma",
+            "origin_entity_type": "lemma",
+            "origin_entity_id": "{{lemma_id}}"
+          }
+        ]
+      },
+      "expected": {
+        "entry.lemma_id": "{{lemma_id}}"
+      }
+    },
+    {
+      "case_id": "STUD08",
+      "description": "promoted_from_cluster_id set on first promotion; never overwritten",
+      "input": {
+        "first_cluster_id": "{{cluster_id_1}}",
+        "second_cluster_id": "{{cluster_id_2}}"
+      },
+      "expected": {
+        "after_first_link": {
+          "entry.promoted_from_cluster_id": "{{cluster_id_1}}"
+        },
+        "after_reuse_with_different_cluster": {
+          "entry.promoted_from_cluster_id": "{{cluster_id_1}}",
+          "note": "promoted_from_cluster_id is never overwritten"
+        }
+      }
+    },
+    {
+      "case_id": "STUD09",
+      "description": "stats dict keys and counts for multiple items",
+      "input": {
+        "items": [
+          {"kind": "term_cluster", "src_norm": "\u05e1\u05e4\u05e8"},
+          {"kind": "term_cluster", "src_norm": "\u05e2\u05d9\u05e8"}
+        ]
+      },
+      "expected": {
+        "stats.keys": ["created", "reused", "linked"],
+        "stats.created": 2,
+        "stats.linked": 2
+      }
+    },
+    {
+      "case_id": "STUD10",
+      "description": "TMGlobal propagation: linked entries updated after materialize",
+      "input": {
+        "pre_existing_global": {
+          "src_norm": "\u05e1\u05e4\u05e8",
+          "translation": "\u043a\u043d\u0438\u0433\u0430",
+          "status": "approved"
+        },
+        "pre_existing_linked_entry": {
+          "src_norm": "\u05e1\u05e4\u05e8",
+          "translation": "\u0441\u0442\u0430\u0440\u044b\u0439",
+          "project_id": null,
+          "tm_global_id": "{{global_id}}"
+        },
+        "new_item": {
+          "src_norm": "\u05e1\u05e4\u05e8",
+          "origin_project_id": "{{project_id}}"
+        }
+      },
+      "expected": {
+        "pre_existing_entry.translation_after": "\u043a\u043d\u0438\u0433\u0430",
+        "note": "propagate_to_entries updates all entries linked to the touched tm_global"
+      }
+    }
+  ]
+}
