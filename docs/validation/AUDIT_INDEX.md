@@ -1,0 +1,62 @@
+# Validation Audit Index
+
+> Last updated: 2026-03-26
+> Maintainer: update after every completed corpus wave
+> Rule: status "Validated" requires all tests passing + core contract proven; "Partial" means tests pass but known contract gaps exist; "Deferred" means no tests yet
+
+---
+
+## Current corpus status map
+
+| Corpus | Stage | Status | Audit doc | Next required action | Last meaningful update | Notes |
+|---|---|---|---|---|---|---|
+| C01 | Sentence splitting | Partial | [C01_AUDIT.md](audits/C01_AUDIT.md) | **C01 v2**: abbreviations, decimals, mixed script, ellipsis, parens, empty string, long paragraph | 2026-03-26 | Base split verified; punct-detach is by-design contract; C01 v2 blocks full PASS |
+| C02 | Tokenization + morphology | Deferred | — | Build Stanza-dependent corpus; requires Hebrew model download | 2026-03-26 | Requires Stanza `he` model; no current test infrastructure |
+| C03 | Lemma aggregation | Partial | [C03_AUDIT.md](audits/C03_AUDIT.md) | **C03 v2**: hapax lemma, all-doc lemma, empty document scenarios | 2026-03-26 | Invariants (docs≤freq, total tokens) are structural catches; only 1 gold scenario |
+| C04 | N-gram extraction | Partial | [C04_AUDIT.md](audits/C04_AUDIT.md) | **C04 v2**: NOUN+ADJ+NOUN trigram positive case, punctuation boundary, mixed script | 2026-03-26 | All 5 bigram patterns + 2 trigrams confirmed; NOUN+ADJ+NOUN trigram missing positive example |
+| C05 | NP chunk extraction | Partial | [C05_AUDIT.md](audits/C05_AUDIT.md) | **C05 v2**: DET non-first position, multiple DET, convert C05_07 to exact match | 2026-03-26 | merge_standalone_articles verified; C05_07 uses subset match (extra chunks not caught) |
+| C06 | Canonicalization | Partial | [C06_AUDIT.md](audits/C06_AUDIT.md) | **C06 v2**: prefix כ/ש, multi-token nikud, mixed script, geresh | 2026-03-26 | Core pipeline + representative term fully tested; prefix matrix incomplete; מדינה→דינה is known limitation |
+| C07 | Association measures | Validated | [C07_AUDIT.md](audits/C07_AUDIT.md) | C07 v2 (optional): trigram None case, T-score positive, large N | 2026-03-26 | Core measure semantics proven; Dice n-independence verified; LLR at c_xy=0 verified |
+| C08 | Noise classification | Partial | [C08_AUDIT.md](audits/C08_AUDIT.md) | **C08 v2**: profile-specific filtering tests (conservative/balanced/aggressive active gates) | 2026-03-26 | Entity classification + phrase threshold confirmed; profiles documented but NOT tested as active gates |
+| C09 | Extraction modes | Validated | [C09_AUDIT.md](audits/C09_AUDIT.md) | **Build TM validation corpus** (mandatory next wave) | 2026-03-26 | State machine fully verified; store_hapax + min_freq semantics confirmed; TM creation not in scope |
+| C10 | Full pipeline round-trip | Deferred | — | Build after C02 closure and TM validation corpus | 2026-03-26 | Requires Stanza + populated corpus; depends on C02 and TM layer being validated first |
+| TM | TM projection validation | Planned / next | — | **Start now**: verify tm_entry creation from extraction (kind, src_text, cluster_id linkage) | 2026-03-26 | Mandatory follow-up to C09; no tests exist for TM entry creation correctness |
+
+---
+
+## Priority order for next wave
+
+1. **TM validation corpus** — mandatory, directly unblocks product output verification
+2. **C08 v2** — profile-specific filtering tests; profiles used in production but untested
+3. **C01 v2** — abbreviations and mixed text are common in encyclopaedic corpus
+4. **C06 v2** — prefix matrix completion; כ/ש prefixes not covered
+5. **C04 v2** — NOUN+ADJ+NOUN trigram gap; punctuation boundary
+6. **C05 v2** — DET edge cases; convert C05_07 to exact match
+7. **C03 v2** — edge case scenarios for aggregation
+8. **C02** — Stanza-dependent; deferred until model infrastructure is ready
+9. **C10** — deferred until C02 + TM are closed
+
+---
+
+## Mandatory maintenance rules
+
+1. After every completed corpus wave, create or update its audit doc in `docs/validation/audits/`.
+2. After every completed corpus wave, update this index (status, last update, next required action).
+3. If VALIDATION_METHODOLOGY.md status is stale (e.g., shows "test pending" for a completed corpus), update it in the same wave.
+4. If a new edge case family is discovered, record in the audit doc whether it is:
+   - Bug → fix implementation, do not update gold
+   - Stale gold (D06) → update gold with notes
+   - Known limitation (by design) → document in gold notes + VALIDATION_METHODOLOGY.md §8
+5. If a corpus clearly needs v2, it is NOT optional — it must appear as "Next required action" here and in the corpus audit doc.
+6. A corpus with status "Validated" means: all tests pass AND the core contract is proven AND there are no silent defect classes for the primary use cases. Edge cases may be open but must not affect primary correctness claims.
+
+---
+
+## Test baseline (as of 2026-03-26)
+
+| Suite | Count | Status |
+|---|---|---|
+| Main (--ignore=tests/validation) | 1751 passed, 0 failed | Green |
+| Validation non-Stanza | 104 passed, 0 failed | Green |
+| Validation Stanza (C02, C10) | Skipped (model unavailable) | Expected |
+| Total | 1855 (if run separately) | No combined run due to torch DLL in headless context |

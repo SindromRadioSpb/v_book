@@ -122,7 +122,7 @@ and never matched actual implementation.
 
 | Oracle | What it calls | Key comparison |
 |--------|---------------|----------------|
-| oracle_sentence | SentenceSplitter.split() | set of sentence strings |
+| oracle_sentence | SentenceSplitter.split() | ordered list of sentence strings (order-sensitive) |
 | oracle_ngram | extract_ngrams_from_sentence() | (surface, n, pos_tuple) |
 | oracle_np | extract_np_chunks_from_sentence() | (surface, length) |
 | oracle_canonicalization | canonicalize_hebrew_term() | canonical string |
