@@ -1,0 +1,114 @@
+{
+  "corpus_id": "C08v2",
+  "description": "Noise classifier borderline cases and boundary contracts (Wave 2).",
+  "notes": "Extends C08 with: mixed-script inputs (Hebrew+digit, Latin+digit), Latin acronym, short Hebrew word (2 chars), empty string, ratio-check boundary (len>2 required), phrase threshold at exactly 50% noise tokens, multi-word Latin phrase. No Stanza required.",
+  "profiles_note": "The noise_profiles key in c08_noise_classification.json documents conservative/balanced/aggressive conceptually. These profiles are NOT implemented as a filter API in entity_classifier.py — classify_text and classify_phrase are profile-agnostic. Profile-specific filtering would require a separate post-classification layer that does not currently exist in the codebase.",
+  "classify_text_cases": [
+    {
+      "case_id": "C08v2_01",
+      "description": "Latin acronym 'PDF' — pure Latin, not noise",
+      "input": "PDF",
+      "expected": {
+        "entity_class": "WORD_LATIN",
+        "is_noise": false,
+        "noise_reason": null
+      },
+      "notes": "All-caps Latin word classified as WORD_LATIN — no length/ratio rule fires for 3 ASCII letters"
+    },
+    {
+      "case_id": "C08v2_02",
+      "description": "'Q1' — Latin letter + digit — mixed alpha-num, noise",
+      "input": "Q1",
+      "expected": {
+        "entity_class": "MIXED_ALPHA_NUM",
+        "is_noise": true,
+        "noise_reason": "NOISE_MIXED_GARBAGE"
+      },
+      "notes": "len=2, non_letter_ratio=0.5, ratio check requires len>2 so NOISE_RATIO_NON_LETTER_HIGH does NOT fire; NOISE_MIXED_GARBAGE fires from class mapping instead"
+    },
+    {
+      "case_id": "C08v2_03",
+      "description": "'א3' — Hebrew letter + digit — mixed alpha-num, noise",
+      "input": "\u05d03",
+      "expected": {
+        "entity_class": "MIXED_ALPHA_NUM",
+        "is_noise": true,
+        "noise_reason": "NOISE_MIXED_GARBAGE"
+      },
+      "notes": "len=2, ratio check does not fire at len=2; NOISE_MIXED_GARBAGE fires from MIXED_ALPHA_NUM class mapping"
+    },
+    {
+      "case_id": "C08v2_04",
+      "description": "'אב' — two Hebrew letters — WORD_HE, not noise at default profile",
+      "input": "\u05d0\u05d1",
+      "expected": {
+        "entity_class": "WORD_HE",
+        "is_noise": false,
+        "noise_reason": null
+      },
+      "notes": "2-char Hebrew word is pure Hebrew (he_ratio=1.0). NOISE_TOO_SHORT does not apply to WORD_HE. Default classifier does NOT treat short Hebrew as noise — aggressive profile (not implemented) would."
+    },
+    {
+      "case_id": "C08v2_05",
+      "description": "'a1234' — 1 letter + 4 digits — MIXED_ALPHA_NUM; ratio check fires (len>2, ratio=0.8)",
+      "input": "a1234",
+      "expected": {
+        "entity_class": "MIXED_ALPHA_NUM",
+        "is_noise": true,
+        "noise_reason": "NOISE_RATIO_NON_LETTER_HIGH"
+      },
+      "notes": "non_letter_ratio=digit_ratio=0.8 > 0.6 AND len=5 > 2 — NOISE_RATIO_NON_LETTER_HIGH overrides NOISE_MIXED_GARBAGE from class mapping"
+    },
+    {
+      "case_id": "C08v2_06",
+      "description": "'12' — pure 2-digit number — NUMBER, noise; ratio check does NOT fire at len=2",
+      "input": "12",
+      "expected": {
+        "entity_class": "NUMBER",
+        "is_noise": true,
+        "noise_reason": "NOISE_NUMERIC_ONLY"
+      },
+      "notes": "len=2 is NOT > 2, so NOISE_RATIO_NON_LETTER_HIGH does NOT fire. noise_reason stays NOISE_NUMERIC_ONLY. Contrast with '123' (C08_03): len=3 > 2 → ratio fires and overrides to NOISE_RATIO_NON_LETTER_HIGH."
+    },
+    {
+      "case_id": "C08v2_07",
+      "description": "Empty string — PUNCT, noise (normalize_text returns empty string)",
+      "input": "",
+      "expected": {
+        "entity_class": "PUNCT",
+        "is_noise": true,
+        "noise_reason": "NOISE_PUNCT_ONLY"
+      },
+      "notes": "Empty string handled as special case before the decision tree"
+    }
+  ],
+  "classify_phrase_cases": [
+    {
+      "case_id": "C08v2_P01",
+      "description": "Phrase with exactly 50% noise tokens (2/4) — phrase IS noise (threshold is >=0.5 inclusive)",
+      "input": "\u05d9\u05dc\u05d3 123 \u05d2\u05d3\u05d5\u05dc \u00a9",
+      "expected": {
+        "is_noise": true
+      },
+      "notes": "Tokens: '\u05d9\u05dc\u05d3' (WORD_HE, not noise) + '123' (NUMBER, noise) + '\u05d2\u05d3\u05d5\u05dc' (WORD_HE, not noise) + '\u00a9' (SYMBOL, noise). noise_count=2, total=4, ratio=0.5. threshold is >=0.5 so phrase IS noise. Confirms boundary is inclusive."
+    },
+    {
+      "case_id": "C08v2_P02",
+      "description": "Phrase with 25% noise tokens (1/4) — phrase is NOT noise",
+      "input": "\u05d9\u05dc\u05d3 123 \u05d2\u05d3\u05d5\u05dc ABC",
+      "expected": {
+        "is_noise": false
+      },
+      "notes": "Tokens: '\u05d9\u05dc\u05d3' (not noise) + '123' (noise) + '\u05d2\u05d3\u05d5\u05dc' (not noise) + 'ABC' (WORD_LATIN, not noise). noise_count=1, ratio=0.25 < 0.5 → not noise."
+    },
+    {
+      "case_id": "C08v2_P03",
+      "description": "Pure multi-word Latin phrase — not noise",
+      "input": "European Union",
+      "expected": {
+        "is_noise": false
+      },
+      "notes": "2 WORD_LATIN tokens, 0 noise tokens — phrase is not noise. Covers multi-word Latin which was absent from C08 phrase cases."
+    }
+  ]
+}

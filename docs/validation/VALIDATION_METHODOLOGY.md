@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.2 (updated 2026-03-26: TM v2 completed — user_dict pathway + propagation; count 131→156)
+> Version: 1.3 (updated 2026-03-26: C08 v2 completed — borderline cases + profile contract; count 156→174)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -42,6 +42,7 @@ Each test category has three independent verification sources:
 | Canonicalization | C06 | oracle_canonicalization | test_v06 | No |
 | Association measures | C07 | oracle_measures | test_v07 | No |
 | Noise classification | C08 | oracle_noise | test_v08 | No |
+| Noise borderline + profile contract | C08v2 | oracle_noise | test_v08v2 | No |
 | Extraction modes | C09 | (integration) | test_v09 | No |
 | TM projection (lemma kind) | CTM | oracle_tm | test_vtm | No |
 | TM user_dict pathway | CTM2 | (integration) | test_vtm2 | No |
@@ -105,7 +106,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **156 passed, 0 failed** (as of TM Wave 2, 2026-03-26).
+Expected: **174 passed, 0 failed** (as of C08 Wave 2, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell
@@ -139,6 +140,7 @@ A pipeline component is considered **validated** when:
 | C10 full pipeline | Deferred | Requires Stanza + populated corpus |
 | C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope |
 | TM projection (lemma) | **Partial** (2026-03-26) | Wave 1: 27 tests (kind='lemma' batch materialize); Wave 2: 25 tests (user_dict pathway, _attach_source_links, tm_global propagation). Inline_edit + batch_MT deferred (require UI/worker fixtures). |
+| Noise classification | **Validated** (2026-03-26) | Wave 2: borderline inputs, ratio-check boundary (len>2), phrase ≥50% inclusive, profile architecture contract. Profiles not implemented as code — classifier is profile-agnostic. |
 | Canonicalization: prefix semantics | Known limitation | מדינה → דינה (מ stripped as prefix) |
 | Dice at c_xy=0 | By design | Returns 0.0, not None (n not a Dice parameter) |
 
