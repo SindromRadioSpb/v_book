@@ -1,0 +1,208 @@
+{
+  "corpus_id": "C03v2",
+  "description": "Lemma aggregation edge-case scenarios: hapax in isolated corpus, all-doc lemma with non-uniform frequency, empty document, multi-frequency stress, all-empty corpus.",
+  "notes": "Wave 2 closes four C03 gaps: (1) hapax verified only in context of multi-lemma corpus — now also in isolation; (2) all-doc lemma existed (גדול in C03) but with uniform per-doc frequency — now tested with non-uniform; (3) empty document behavior unpinned; (4) overlapping multi-frequency stress case missing. Each scenario is a self-contained corpus. Oracle: pure Python simulation, no DB. DB-level aggregation service is a separate integration test layer.",
+  "scenarios": [
+    {
+      "corpus_id": "C03v2_HAPAX",
+      "description": "Single-doc single-occurrence lemma — hapax in isolation. Proves minimum freq=1, docs=1 case.",
+      "documents": [
+        {
+          "doc_id": "DOC_A",
+          "tokens": [
+            {"lemma": "מלך", "pos": "NOUN"}
+          ]
+        }
+      ],
+      "expected_aggregates": [
+        {
+          "lemma": "מלך",
+          "freq": 1,
+          "docs": 1,
+          "notes": "Single occurrence in single document. freq=1, docs=1. docs ≤ freq (1 ≤ 1)."
+        }
+      ],
+      "invariants": [
+        {
+          "name": "total_tokens_match",
+          "description": "Sum of freq values == total token count",
+          "total_token_count": 1
+        }
+      ],
+      "notes": "Minimal corpus. Docs ≤ Freq holds (1 ≤ 1). Classification: Correct by design."
+    },
+    {
+      "corpus_id": "C03v2_ALLDOC",
+      "description": "All-doc lemma with non-uniform per-doc frequency. Proves docs == corpus_size and freq >> docs.",
+      "documents": [
+        {
+          "doc_id": "DOC_A",
+          "tokens": [
+            {"lemma": "שלום", "pos": "NOUN"},
+            {"lemma": "שלום", "pos": "NOUN"}
+          ]
+        },
+        {
+          "doc_id": "DOC_B",
+          "tokens": [
+            {"lemma": "שלום", "pos": "NOUN"},
+            {"lemma": "שמש", "pos": "NOUN"}
+          ]
+        },
+        {
+          "doc_id": "DOC_C",
+          "tokens": [
+            {"lemma": "שלום", "pos": "NOUN"},
+            {"lemma": "שלום", "pos": "NOUN"},
+            {"lemma": "שלום", "pos": "NOUN"}
+          ]
+        }
+      ],
+      "expected_aggregates": [
+        {
+          "lemma": "שלום",
+          "freq": 6,
+          "docs": 3,
+          "notes": "2x in DOC_A + 1x in DOC_B + 3x in DOC_C = freq 6; in all 3 docs. Non-uniform per-doc frequency (2, 1, 3). docs = corpus_size = 3."
+        },
+        {
+          "lemma": "שמש",
+          "freq": 1,
+          "docs": 1,
+          "notes": "1x only in DOC_B. Hapax embedded in multi-doc corpus."
+        }
+      ],
+      "invariants": [
+        {
+          "name": "total_tokens_match",
+          "description": "Sum of freq values == total token count",
+          "total_token_count": 7
+        }
+      ],
+      "notes": "שלום freq=6 > docs=3. Non-uniform per-doc counts (2,1,3) confirm no per-doc averaging confusion. Classification: Correct by design."
+    },
+    {
+      "corpus_id": "C03v2_EMPTYDOC",
+      "description": "Corpus with one empty document. Empty doc must not inflate docs count or token sum.",
+      "documents": [
+        {
+          "doc_id": "DOC_A",
+          "tokens": [
+            {"lemma": "ספר", "pos": "NOUN"},
+            {"lemma": "ספר", "pos": "NOUN"}
+          ]
+        },
+        {
+          "doc_id": "DOC_B",
+          "tokens": []
+        },
+        {
+          "doc_id": "DOC_C",
+          "tokens": [
+            {"lemma": "ספר", "pos": "NOUN"}
+          ]
+        }
+      ],
+      "expected_aggregates": [
+        {
+          "lemma": "ספר",
+          "freq": 3,
+          "docs": 2,
+          "notes": "2x in DOC_A + 0x in DOC_B (empty) + 1x in DOC_C = freq 3; only 2 docs contain ספר. docs=2 not 3 despite 3 doc_ids existing."
+        }
+      ],
+      "invariants": [
+        {
+          "name": "total_tokens_match",
+          "description": "Sum of freq values == total non-empty token count",
+          "total_token_count": 3
+        }
+      ],
+      "notes": "DOC_B has no tokens. By design: empty doc contributes 0 to freq and 0 to docs. docs=2, freq=3, total=3. Classification: Correct by design."
+    },
+    {
+      "corpus_id": "C03v2_STRESS",
+      "description": "Multi-frequency stress: one lemma with high freq/low docs, one all-doc lemma with freq==docs, one hapax.",
+      "documents": [
+        {
+          "doc_id": "DOC_A",
+          "tokens": [
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "עם", "pos": "NOUN"}
+          ]
+        },
+        {
+          "doc_id": "DOC_B",
+          "tokens": [
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "ארץ", "pos": "NOUN"},
+            {"lemma": "עם", "pos": "NOUN"}
+          ]
+        },
+        {
+          "doc_id": "DOC_C",
+          "tokens": [
+            {"lemma": "עם", "pos": "NOUN"},
+            {"lemma": "מים", "pos": "NOUN"}
+          ]
+        }
+      ],
+      "expected_aggregates": [
+        {
+          "lemma": "ארץ",
+          "freq": 8,
+          "docs": 2,
+          "notes": "5x in DOC_A + 3x in DOC_B = freq 8; only in 2 docs. High freq, low docs — stress test against docs=freq confusion."
+        },
+        {
+          "lemma": "עם",
+          "freq": 3,
+          "docs": 3,
+          "notes": "1x in each of 3 docs = freq 3; in all 3 docs. freq == docs (each doc contributes exactly 1). All-doc lemma with uniform single-occurrence per doc."
+        },
+        {
+          "lemma": "מים",
+          "freq": 1,
+          "docs": 1,
+          "notes": "1x in DOC_C only. Hapax embedded in stress corpus."
+        }
+      ],
+      "invariants": [
+        {
+          "name": "total_tokens_match",
+          "description": "Sum of freq values == total token count",
+          "total_token_count": 12
+        }
+      ],
+      "notes": "Three-lemma stress corpus. ארץ: freq=8 >> docs=2 (tests against accidentally setting docs=freq). עם: freq=3 == docs=3 (each doc exactly 1 occurrence — tests that this edge is correct). מים: hapax. Classification: Correct by design."
+    },
+    {
+      "corpus_id": "C03v2_ALLEMPTY",
+      "description": "All documents are empty — no tokens anywhere. Expected: no aggregates produced.",
+      "documents": [
+        {
+          "doc_id": "DOC_A",
+          "tokens": []
+        },
+        {
+          "doc_id": "DOC_B",
+          "tokens": []
+        }
+      ],
+      "expected_aggregates": [],
+      "invariants": [
+        {
+          "name": "total_tokens_match",
+          "description": "Sum of freq values == 0 for all-empty corpus",
+          "total_token_count": 0
+        }
+      ],
+      "notes": "All docs have no tokens. By design: no lemma rows produced, total_token_count=0. The docs ≤ freq invariant vacuously holds (no rows). Classification: Correct by design."
+    }
+  ]
+}

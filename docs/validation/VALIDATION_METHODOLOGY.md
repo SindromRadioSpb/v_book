@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.7 (updated 2026-03-26: C05 v2 completed — DET non-first, multiple DET, ADJ-led NP, C05_07 exact match; count 211→223)
+> Version: 1.8 (updated 2026-03-26: C03 v2 completed — hapax, all-doc lemma, empty doc, stress, all-empty; parametrized invariants; count 223→247)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -38,6 +38,7 @@ Each test category has three independent verification sources:
 | Sentence splitting borderline + abbreviation fix | C01v2 | oracle_sentence | test_v01v2 | No |
 | Tokenization + morphology | C02 | (deferred) | (deferred) | **Yes** |
 | Lemma aggregation | C03 | oracle_lemma_agg | test_v03 | No |
+| Lemma aggregation edge cases (hapax, all-doc lemma, empty doc, stress, all-empty; parametrized invariants) | C03v2 | oracle_lemma_agg | test_v03v2 | No |
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
 | N-gram extraction edge cases (NOUN+ADJ+NOUN trigram, PUNCT boundary, mixed script, lemma oracle) | C04v2 | oracle_ngram | test_v04v2 | No |
 | NP chunk extraction | C05 | oracle_np | test_v05 | No |
@@ -110,7 +111,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **223 passed, 0 failed** (as of C05 Wave 2, 2026-03-26).
+Expected: **247 passed, 0 failed** (as of C03 Wave 2, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell

@@ -40,8 +40,14 @@ def validate_lemma_aggregation(case: dict) -> OracleResult:
     """Validate simulated aggregation against gold expected values.
 
     Args:
-        case: Top-level dict from c03_lemma_aggregation.json.
+        case: Top-level dict from c03_lemma_aggregation.json or a scenario
+              dict from c03v2_lemma_aggregation.json. Must contain:
+              - documents: list of {doc_id, tokens} dicts
+              - expected_aggregates: list of {lemma, freq, docs} dicts
+              - corpus_id (optional): used as case_id in OracleResult
+              - invariants (optional): list of invariant dicts
     """
+    corpus_id: str = case.get("corpus_id", "C03")
     documents = case["documents"]
     expected_agg = {row["lemma"]: row for row in case["expected_aggregates"]}
 
@@ -49,6 +55,14 @@ def validate_lemma_aggregation(case: dict) -> OracleResult:
     actual_agg = {row["lemma"]: row for row in actual_list}
 
     failures: list[str] = []
+
+    # Check aggregate count matches (catches extra unexpected lemmas)
+    if len(actual_list) != len(expected_agg):
+        failures.append(
+            f"aggregate count: expected={len(expected_agg)}, actual={len(actual_list)}. "
+            f"Extra: {sorted(set(actual_agg) - set(expected_agg))}. "
+            f"Missing: {sorted(set(expected_agg) - set(actual_agg))}"
+        )
 
     # Check each expected lemma
     for lemma, exp_row in expected_agg.items():
@@ -84,7 +98,7 @@ def validate_lemma_aggregation(case: dict) -> OracleResult:
                     )
 
     return OracleResult(
-        case_id="C03",
+        case_id=corpus_id,
         match=len(failures) == 0,
         expected=expected_agg,
         actual=actual_agg,
