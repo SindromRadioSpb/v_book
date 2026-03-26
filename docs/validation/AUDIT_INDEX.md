@@ -1,6 +1,6 @@
 # Validation Audit Index
 
-> Last updated: 2026-03-26 (C03 v2)
+> Last updated: 2026-03-27 (C02 Wave 6a — infra prep)
 > Maintainer: update after every completed corpus wave
 > Rule: status "Validated" requires all tests passing + core contract proven; "Partial" means tests pass but known contract gaps exist; "Deferred" means no tests yet
 
@@ -11,7 +11,7 @@
 | Corpus | Stage | Status | Audit doc | Next required action | Last meaningful update | Notes |
 |---|---|---|---|---|---|---|
 | C01 | Sentence splitting | Validated | [C01_AUDIT.md](audits/C01_AUDIT.md) | Optional: Latin abbreviation expansion, ellipsis exception | 2026-03-26 | Wave 2: abbreviation bug fixed + borderline cases; known limitations documented (Latin abbrev, ellipsis) |
-| C02 | Tokenization + morphology | Deferred | — | Build Stanza-dependent corpus; requires Hebrew model download | 2026-03-26 | Requires Stanza `he` model; no current test infrastructure |
+| C02 | Tokenization + morphology | Infra Prepared | [C02_AUDIT.md](audits/C02_AUDIT.md) | **C02 Wave 6b** (mandatory): lemma paradigm gold, POS consistency, multi-sentence, morph features, determinism | 2026-03-27 | Wave 6a: stanza 1.11.1 installed; he/ model available; StanzaEngine wired; oracle + gold skeleton + 10 smoke tests; requires_stanza marker registered; DET prefix detachment pinned |
 | C03 | Lemma aggregation | Validated | [C03_AUDIT.md](audits/C03_AUDIT.md) | Optional: DB-level aggregation service integration test if service becomes independently testable | 2026-03-26 | Wave 2: hapax in isolation, all-doc lemma (non-uniform freq), empty document, stress, all-empty corpus; parametrized invariants (3×6=18); oracle extra-aggregate check |
 | C04 | N-gram extraction | Validated | [C04_AUDIT.md](audits/C04_AUDIT.md) | Optional: unigram extraction if added, nikud in pre-tokenized input | 2026-03-26 | Wave 2: NOUN+ADJ+NOUN trigram positive case, PUNCT boundary, mixed-script PROPN+PROPN, validate_ngram_lemmas() secondary oracle (lemma divergence) |
 | C05 | NP chunk extraction | Validated | [C05_AUDIT.md](audits/C05_AUDIT.md) | Optional: token index validation if position-based clustering added | 2026-03-26 | Wave 2: DET non-first rejection, multiple DET bridge blocking, ADJ-led NP, C05_07 exact match (9 chunks, no phantom gap) |
@@ -26,7 +26,7 @@
 
 ## Priority order for next wave
 
-1. **C02** — Stanza-dependent; deferred until model infrastructure is ready
+1. **C02 Wave 6b** — lemma paradigm gold, POS consistency across inflections, multi-sentence, morph feature coverage, determinism
 2. **C10** — deferred until C02 + TM are closed
 
 ---
@@ -50,6 +50,7 @@
 | Suite | Count | Status |
 |---|---|---|
 | Main (--ignore=tests/validation) | 1751 passed, 0 failed | Green |
-| Validation non-Stanza | 247 passed, 0 failed | Green (223 prior + 24 C03v2) |
+| Validation non-Stanza | 247 passed, 0 failed | Green (unchanged — C02 deselected by -k filter) |
 | Validation Stanza (C02, C10) | Skipped (model unavailable) | Expected |
-| Total | 1998 (if run separately) | No combined run due to torch DLL in headless context |
+| Validation C02 (requires stanza + he model) | 10 passed (or 10 skipped if model unavailable) | Green when infra available |
+| Total | 2008 when all available (1751 main + 247 non-Stanza + 10 C02) | No combined run due to torch DLL in headless context |

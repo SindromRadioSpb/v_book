@@ -1,0 +1,104 @@
+{
+  "corpus_id": "C02",
+  "description": "Tokenization and morphology via StanzaEngine (Hebrew model). Wave 6a: infrastructure smoke cases only.",
+  "notes": "Gold calibrated against stanza 1.11.1, Hebrew model. Wave 6a provides 3 smoke cases that prove the pipeline is wired correctly. These are NOT a morphology contract validation. Wave 6b (C02 implementation) will add: full lemma paradigm tests, POS consistency across word classes, morphological feature coverage, sentence boundary tests, and multi-sentence inputs.",
+  "stanza_version_calibrated": "1.11.1",
+  "stanza_model_cache": "%LOCALAPPDATA%\\StanfordNLP\\stanza\\Cache\\<version>\\resources\\he\\",
+  "wave": "6a (infra prep)",
+  "cases": [
+    {
+      "case_id": "C02_SMOKE_01",
+      "description": "Single interjection — שלום. 1 token, no morphological features. Tests: minimum non-empty input.",
+      "wave": "6a",
+      "input_text": "שלום",
+      "expected_sentences": [
+        {
+          "token_count": 1,
+          "tokens": [
+            {
+              "text": "שלום",
+              "lemma": "שלום",
+              "pos": "INTJ",
+              "morph": "",
+              "notes": "INTJ has no features in Hebrew Stanza model. morph='' (empty string, not None)."
+            }
+          ]
+        }
+      ],
+      "notes": "Minimum valid case. Proves: process() returns non-empty output for 1-word input; INTJ POS assigned; lemma equals surface form; morph is empty string (not null)."
+    },
+    {
+      "case_id": "C02_SMOKE_02",
+      "description": "Definite article prefix + noun + verb — הכלב רץ. Tests Hebrew prefix detachment: 'הכלב' splits into [ה DET, כלב NOUN].",
+      "wave": "6a",
+      "input_text": "הכלב רץ",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "tokens": [
+            {
+              "text": "ה",
+              "lemma": "ה",
+              "pos": "DET",
+              "morph_contains": ["Definite=Def", "PronType=Art"],
+              "notes": "Definite article detached from noun. Surface 'הכלב' → 2 tokens: ה + כלב."
+            },
+            {
+              "text": "כלב",
+              "lemma": "כלב",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"],
+              "notes": "Masculine singular noun."
+            },
+            {
+              "text": "רץ",
+              "lemma": "רץ",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Past", "Number=Sing"],
+              "notes": "Past tense verb, 3rd person masc sing. morph_contains used (not exact) for version robustness."
+            }
+          ]
+        }
+      ],
+      "notes": "Key C02 contract: Hebrew definite article prefix is detached by Stanza tokenizer. 'הכלב' (the dog) → 2 tokens: ה (DET) + כלב (NOUN). Token count=3, not 2. This must be documented in C02 implementation wave as an explicit invariant."
+    },
+    {
+      "case_id": "C02_SMOKE_03",
+      "description": "Noun + adjective — ספר גדול. Tests basic NOUN/ADJ POS assignment.",
+      "wave": "6a",
+      "input_text": "ספר גדול",
+      "expected_sentences": [
+        {
+          "token_count": 2,
+          "tokens": [
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"],
+              "notes": "Masculine singular noun."
+            },
+            {
+              "text": "גדול",
+              "lemma": "גדול",
+              "pos": "ADJ",
+              "morph_contains": ["Gender=Masc", "Number=Sing"],
+              "notes": "Masculine singular adjective agreeing with noun."
+            }
+          ]
+        }
+      ],
+      "notes": "Tests NOUN+ADJ sequence — a pattern central to the NP extractor (C05). Confirms that lemma equals surface form for dictionary-form lemmas. morph_contains used for version robustness."
+    }
+  ],
+  "TODO_wave_6b": [
+    "Add lemma paradigm cases: plural forms (כלבים → lemma כלב), verb conjugations (רצו → lemma רוץ).",
+    "Add POS consistency: same lemma across forms (ספר NOUN, ספרים NOUN, הספר NOUN).",
+    "Add morphological feature coverage: Gender=Fem, Tense=Pres, Prs=Yes.",
+    "Add multi-sentence input: 2+ sentences → 2 Sentence objects.",
+    "Add empty/whitespace-only input contract (already confirmed: returns []).",
+    "Add sentence boundary alignment test (token spans within sentence text).",
+    "Pin invariants: every token has non-empty text; lemma != '' (fallback to text if None); pos != ''.",
+    "Pin sentence.text == original sentence text from input."
+  ]
+}

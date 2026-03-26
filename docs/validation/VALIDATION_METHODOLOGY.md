@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.8 (updated 2026-03-26: C03 v2 completed — hapax, all-doc lemma, empty doc, stress, all-empty; parametrized invariants; count 223→247)
+> Version: 1.9 (updated 2026-03-27: C02 Wave 6a — infra prep; stanza marker registered; 10 smoke tests; non-Stanza baseline 247 unchanged)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -36,7 +36,7 @@ Each test category has three independent verification sources:
 |-------|-----------|---------------|-----------|---------|
 | Sentence splitting | C01 | oracle_sentence | test_v01 | No |
 | Sentence splitting borderline + abbreviation fix | C01v2 | oracle_sentence | test_v01v2 | No |
-| Tokenization + morphology | C02 | (deferred) | (deferred) | **Yes** |
+| Tokenization + morphology — infra smoke (Wave 6a) | C02 | oracle_token_morph | test_v02_token_morph | **Yes** |
 | Lemma aggregation | C03 | oracle_lemma_agg | test_v03 | No |
 | Lemma aggregation edge cases (hapax, all-doc lemma, empty doc, stress, all-empty; parametrized invariants) | C03v2 | oracle_lemma_agg | test_v03v2 | No |
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
@@ -111,12 +111,15 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **247 passed, 0 failed** (as of C03 Wave 2, 2026-03-26).
+Expected: **247 passed, 0 failed** (non-Stanza baseline; C02 deselected by -k filter).
 
-### Stanza-dependent tests (requires model)
+### C02 / Stanza-dependent tests (requires model)
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -m requires_stanza
 ```
+Expected: **10 passed** (Wave 6a smoke tests) when stanza + he model available; **10 skipped** otherwise.
+
+See `docs/validation/STANZA_HE_PREP.md` for setup commands.
 
 ### Full regression (excludes validation to avoid torch DLL issue in headless context)
 ```powershell
@@ -141,7 +144,7 @@ A pipeline component is considered **validated** when:
 
 | Item | Status | Reason |
 |------|--------|--------|
-| C02 tokenization | Deferred | Requires Stanza + Hebrew model |
+| C02 tokenization — implementation | Infra Prepared | Wave 6a: infra wired, 10 smoke tests pass. Wave 6b needed: lemma paradigm, POS consistency, morph features, multi-sentence. |
 | C10 full pipeline | Deferred | Requires Stanza + populated corpus |
 | C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope |
 | TM projection (lemma) | **Partial** (2026-03-26) | Wave 1: 27 tests (kind='lemma' batch materialize); Wave 2: 25 tests (user_dict pathway, _attach_source_links, tm_global propagation). Inline_edit + batch_MT deferred (require UI/worker fixtures). |

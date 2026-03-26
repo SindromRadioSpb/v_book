@@ -76,16 +76,54 @@
 
 ## D05 — Stanza Model Unavailable
 
-**Symptom:** `pytest.skip("Stanza 'he' model not available")`
+**Symptom:** `pytest.skip("stanza not installed or Hebrew 'he' model directory not found")`
+or: `pytest.skip("Stanza Hebrew model unavailable: ...")`
 
 **Procedure:**
-1. This is expected in CI environments without GPU/model download
-2. To run locally: download the Hebrew Stanza model
-   ```python
-   import stanza
-   stanza.download('he')
+
+1. This is expected in CI environments without model download. Do NOT treat C02 skips as failures in CI.
+
+2. Check which skip path triggered:
+
+   **Path A — stanza not installed:**
+   ```powershell
+   cd E:\projects\Project_Vibe\V_book
+   .\.venv\Scripts\python.exe -c "import stanza; print(stanza.__version__)"
    ```
-3. Do not treat Stanza skips as failures in CI
+   If ImportError: install stanza:
+   ```powershell
+   .\.venv\Scripts\pip.exe install "stanza>=1.7.0"
+   ```
+
+   **Path B — he/ model directory missing:**
+   ```powershell
+   .\.venv\Scripts\python.exe -c "
+   from tests.validation.conftest import _stanza_he_model_available
+   print('model available:', _stanza_he_model_available())
+   "
+   ```
+   If False: download the Hebrew model (~700 MB):
+   ```powershell
+   .\.venv\Scripts\python.exe -c "import stanza; stanza.download('he')"
+   ```
+   Default cache location (Windows):
+   ```
+   C:\Users\<user>\AppData\Local\StanfordNLP\stanza\Cache\<version>\resources\he\
+   ```
+   Override with `$env:STANZA_HOME = "D:\stanza_models"` before downloading.
+
+   **Path C — model directory present but pipeline load fails:**
+   Run the preflight:
+   ```powershell
+   .\.venv\Scripts\python.exe -c "
+   from app.infra.nlp_engines.stanza_engine import StanzaEngine
+   e = StanzaEngine(use_gpu=False)
+   print('OK, version:', e.get_version())
+   "
+   ```
+   If this fails: model files may be corrupt. Re-download: delete `he/` dir and repeat step B.
+
+3. Full setup guide: `docs/validation/STANZA_HE_PREP.md`
 
 ---
 
@@ -151,3 +189,4 @@ If a test expects TM rows after extraction but finds none: this is by design, no
 | oracle_measures | compute_pmi/dice/llr/tscore() | float with tolerance |
 | oracle_noise | classify_text() / classify_phrase() | entity_class, is_noise, noise_reason |
 | oracle_lemma_agg | simulate_aggregation() | freq + docs per lemma |
+| oracle_token_morph | validate_token_morphology() | token count, text, pos, lemma, morph_contains (partial), morph (exact) |
