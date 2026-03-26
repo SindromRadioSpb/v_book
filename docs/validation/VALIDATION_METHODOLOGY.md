@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.4 (updated 2026-03-26: C01 v2 completed — abbreviation fix + borderline cases; count 174→185)
+> Version: 1.5 (updated 2026-03-26: C06 v2 completed — prefix matrix, mixed script, geresh, collision; count 185→201)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -41,6 +41,7 @@ Each test category has three independent verification sources:
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
 | NP chunk extraction | C05 | oracle_np | test_v05 | No |
 | Canonicalization | C06 | oracle_canonicalization | test_v06 | No |
+| Canonicalization edge cases (prefix כ/ש, mixed, geresh, collision) | C06v2 | oracle_canonicalization | test_v06v2 | No |
 | Association measures | C07 | oracle_measures | test_v07 | No |
 | Noise classification | C08 | oracle_noise | test_v08 | No |
 | Noise borderline + profile contract | C08v2 | oracle_noise | test_v08v2 | No |
@@ -107,7 +108,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **185 passed, 0 failed** (as of C01 Wave 2, 2026-03-26).
+Expected: **201 passed, 0 failed** (as of C06 Wave 2, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell
@@ -142,7 +143,8 @@ A pipeline component is considered **validated** when:
 | C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope |
 | TM projection (lemma) | **Partial** (2026-03-26) | Wave 1: 27 tests (kind='lemma' batch materialize); Wave 2: 25 tests (user_dict pathway, _attach_source_links, tm_global propagation). Inline_edit + batch_MT deferred (require UI/worker fixtures). |
 | Noise classification | **Validated** (2026-03-26) | Wave 2: borderline inputs, ratio-check boundary (len>2), phrase ≥50% inclusive, profile architecture contract. Profiles not implemented as code — classifier is profile-agnostic. |
-| Canonicalization: prefix semantics | Known limitation | מדינה → דינה (מ stripped as prefix) |
+| Canonicalization: prefix over-stripping | Known limitation | מדינה→דינה (מ stripped), שמחה→מחה (ש stripped), כמות→מות (כ stripped) — character-level prefix stripping, no semantic awareness |
+| Canonicalization: collision | Known limitation | "כמות" (quantity) and "מות" (death) → same canonical "מות". Pinned in C06v2_08/09 as explicit contract |
 | Dice at c_xy=0 | By design | Returns 0.0, not None (n not a Dice parameter) |
 
 ---

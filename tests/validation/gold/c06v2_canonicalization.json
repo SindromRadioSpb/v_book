@@ -1,0 +1,79 @@
+{
+  "corpus_id": "C06v2",
+  "description": "Canonicalization edge cases — prefix matrix completion (כ, ש), multi-token nikud, mixed Hebrew/Latin, geresh, collision (Wave 2).",
+  "notes": "All cases use lemma_phrase=null to test the surface-text path through canonicalize_hebrew_term(). No implementation changes — all gaps were coverage gaps in gold/tests, not code defects. Pipeline summary: strip_nikud → normalize_quotes → split → filter standalone prefix tokens → strip_prefixes (3-char guard) → join '_' → lowercase → remove non-[Hebrew/digit/Latin/_/space] chars.",
+  "canonicalize_cases": [
+    {
+      "case_id": "C06v2_01",
+      "description": "Prefix כ strips when ≥3 chars remain — 'כחוק' → 'חוק'",
+      "surface_text": "כחוק",
+      "lemma_phrase": null,
+      "expected_canonical": "חוק",
+      "notes": "כ (as/per) + חוק (law). strip_prefixes: 'כ' in HEBREW_PREFIXES, len('כחוק')-1=3 ≥ 3 → strips → 'חוק'. 'ח' not in prefixes. Correct by design: כ as the 'like/as' prefix stripped correctly."
+    },
+    {
+      "case_id": "C06v2_02",
+      "description": "Prefix כ NOT stripped — 3-char guard saves 'כלי' (tool)",
+      "surface_text": "כלי",
+      "lemma_phrase": null,
+      "expected_canonical": "כלי",
+      "notes": "strip_prefixes: 'כ' in HEBREW_PREFIXES, len('כלי')-1=2 < 3 → guard prevents stripping. Same 3-char rule as C06_09 ('בו'), now verified for prefix כ. Correct by design."
+    },
+    {
+      "case_id": "C06v2_03",
+      "description": "Prefix ש NOT stripped — 3-char guard saves 'שכר' (salary)",
+      "surface_text": "שכר",
+      "lemma_phrase": null,
+      "expected_canonical": "שכר",
+      "notes": "strip_prefixes: 'ש' in HEBREW_PREFIXES, len('שכר')-1=2 < 3 → guard prevents stripping. Same 3-char rule verified for prefix ש. Correct by design."
+    },
+    {
+      "case_id": "C06v2_04",
+      "description": "Prefix ש strips when ≥3 chars remain — 'שמחה' → 'מחה' (KNOWN LIMITATION)",
+      "surface_text": "שמחה",
+      "lemma_phrase": null,
+      "expected_canonical": "מחה",
+      "notes": "KNOWN LIMITATION: same class as C06_06 (מדינה→דינה). strip_prefixes: 'ש' in HEBREW_PREFIXES, len('שמחה')-1=3 ≥ 3 → strips → 'מחה'. Then 'מ' in HEBREW_PREFIXES, len('מחה')-1=2 < 3 → guard prevents. 'שמחה' (happiness) loses its 'ש' root letter. Prefix stripping is purely character-based — no semantic awareness. This is intentional behavior given the algorithm's design."
+    },
+    {
+      "case_id": "C06v2_05",
+      "description": "Multi-token phrase where BOTH tokens carry nikud — all nikud stripped",
+      "surface_text": "בֵּית סֵפֶר",
+      "lemma_phrase": null,
+      "expected_canonical": "בית_ספר",
+      "notes": "strip_nikud() operates on full text before tokenizing → both 'בֵּית' and 'סֵפֶר' become 'בית' and 'ספר'. Then strip_prefixes: 'ב' in HEBREW_PREFIXES, len('בית')-1=2 < 3 → guard. canonical: 'בית_ספר'. Correct by design: multi-token nikud handled identically to single-token (C06_06)."
+    },
+    {
+      "case_id": "C06v2_06",
+      "description": "Mixed Hebrew/Latin phrase — Latin letters preserved and lowercased",
+      "surface_text": "קוד Python",
+      "lemma_phrase": null,
+      "expected_canonical": "קוד_python",
+      "notes": "Tokens: ['קוד', 'Python']. strip_prefixes: 'ק' and 'P' not in HEBREW_PREFIXES → unchanged. Join: 'קוד_Python'. lowercase: 'קוד_python'. Cleanup regex keeps Latin letters (a-zA-Z). By design: Latin preserved, lowercased. Pipeline step order: join → lowercase → cleanup."
+    },
+    {
+      "case_id": "C06v2_07",
+      "description": "Geresh (׳, U+05F3) stripped — same cleanup path as gershayim (C06_07)",
+      "surface_text": "צה׳ל",
+      "lemma_phrase": null,
+      "expected_canonical": "צהל",
+      "notes": "normalize_quotes(): GERESH U+05F3 → ASCII apostrophe ' (U+0027). Token: 'צה'ל'. strip_prefixes: 'צ' not in HEBREW_PREFIXES → unchanged. Join: 'צה'ל'. lowercase: 'צה'ל'. Cleanup: ' (U+0027) is NOT in allowed chars [Hebrew/digit/Latin/_/space] → stripped → 'צהל'. By design: same mechanism as gershayim ״ (C06_07)."
+    },
+    {
+      "case_id": "C06v2_08",
+      "description": "Collision case A — 'מות' (death): מ NOT stripped (3-char guard)",
+      "surface_text": "מות",
+      "lemma_phrase": null,
+      "expected_canonical": "מות",
+      "notes": "strip_prefixes: 'מ' in HEBREW_PREFIXES, len('מות')-1=2 < 3 → guard prevents stripping → 'מות'. Correct by design. Paired with C06v2_09: 'כמות' (quantity) also produces 'מות' — documented collision."
+    },
+    {
+      "case_id": "C06v2_09",
+      "description": "Collision case B — 'כמות' (quantity) → 'מות': collides with C06v2_08 (KNOWN LIMITATION)",
+      "surface_text": "כמות",
+      "lemma_phrase": null,
+      "expected_canonical": "מות",
+      "notes": "KNOWN LIMITATION: collision. strip_prefixes: 'כ' in HEBREW_PREFIXES, len('כמות')-1=3 ≥ 3 → strips → 'מות'. Then 'מ' guarded (len-1=2). 'כמות' (quantity) and 'מות' (death) are completely unrelated words — they share the same canonical key. Any cluster containing both would incorrectly merge them. This is an extension of the מדינה→דינה limitation to the collision domain. No fix available without semantic/morphological analysis."
+    }
+  ]
+}
