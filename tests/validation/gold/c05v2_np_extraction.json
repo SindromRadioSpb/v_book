@@ -1,0 +1,84 @@
+{
+  "corpus_id": "C05v2",
+  "description": "NP chunk extraction edge cases: DET in non-first position, multiple DET tokens, ADJ-led NP span.",
+  "notes": "Wave 2 closes three C05 gaps: (1) DET in non-first position was untested; (2) multiple DET tokens were untested; (3) ADJ-led NP spans were not verified. No implementation changes — all gaps were gold/test coverage gaps. DET is not in STOP_POS so it never breaks the segment, but _is_valid_np_span rejects any span where DET is at a non-first position (DET not in CORE_NP_POS or MODIFIER_POS). ADJ is in MODIFIER_POS, so it is allowed as the first token of a span (MODIFIER_POS opens segments).",
+  "cases": [
+    {
+      "case_id": "C05v2_01",
+      "description": "DET in non-first position — spans containing DET at non-first position are rejected; sub-span starting AT the DET is valid",
+      "input": {
+        "tokens": [
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+          {"text": "ה", "lemma": "ה", "pos": "DET"},
+          {"text": "ילד", "lemma": "ילד", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "הילד",
+          "token_indices": [1, 2],
+          "length": 2
+        }
+      ],
+      "expected_count": 1,
+      "notes": "DET at index 1 (non-first) is not in STOP_POS → stays in segment. [ספר,ה]=NOUN+DET: DET non-first → rejected by _is_valid_np_span. [ספר,ה,ילד]=NOUN+DET+NOUN: DET non-first → rejected. [ה,ילד]=DET+NOUN: DET first → valid, has CORE_NP (ילד) → valid; merge_standalone_articles merges 'ה'+'ילד' → 'הילד'. Contract: DET in non-first position → span rejected (by design). Sub-span starting at DET → valid."
+    },
+    {
+      "case_id": "C05v2_02",
+      "description": "Multiple standalone DET tokens — second DET blocks all bridge spans; only first DET+NOUN bigram is extracted",
+      "input": {
+        "tokens": [
+          {"text": "ה", "lemma": "ה", "pos": "DET"},
+          {"text": "ילד", "lemma": "ילד", "pos": "NOUN"},
+          {"text": "ה", "lemma": "ה", "pos": "DET"},
+          {"text": "גדול", "lemma": "גדול", "pos": "ADJ"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "הילד",
+          "token_indices": [0, 1],
+          "length": 2
+        }
+      ],
+      "expected_count": 1,
+      "notes": "None of the 4 tokens are in STOP_POS → single segment. [ה,ילד]=DET+NOUN: valid → 'הילד'. [ילד,ה]=NOUN+DET(non-first)→ rejected. [ה,גדול]=DET+ADJ: no CORE_NP (ADJ is MODIFIER only) → rejected. All n=3 and n=4 spans contain second ה at non-first position → rejected. Contract: second DET prevents any span from bridging across it; only the first [DET,NOUN] bigram survives."
+    },
+    {
+      "case_id": "C05v2_03",
+      "description": "ADJ-led NP span — MODIFIER_POS (ADJ) can open a segment; produces 3 chunks",
+      "input": {
+        "tokens": [
+          {"text": "ישן", "lemma": "ישן", "pos": "ADJ"},
+          {"text": "בית", "lemma": "בית", "pos": "NOUN"},
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "ישן בית",
+          "token_indices": [0, 1],
+          "length": 2
+        },
+        {
+          "surface_text": "בית ספר",
+          "token_indices": [1, 2],
+          "length": 2
+        },
+        {
+          "surface_text": "ישן בית ספר",
+          "token_indices": [0, 1, 2],
+          "length": 3
+        }
+      ],
+      "expected_count": 3,
+      "notes": "ADJ is in MODIFIER_POS; is_valid_np_token(ADJ, is_first=True) → True. [ישן,בית]=ADJ+NOUN: ADJ first → valid, has CORE_NP → valid. [בית,ספר]=NOUN+NOUN → valid. [ישן,בית,ספר]=ADJ+NOUN+NOUN → valid. Contract: ADJ (MODIFIER_POS) is explicitly allowed as first token by is_valid_np_token — no DET prefix required to open a segment."
+    }
+  ]
+}

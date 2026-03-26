@@ -146,7 +146,7 @@
     },
     {
       "case_id": "C05_07",
-      "description": "NP of length 5 (maximum)",
+      "description": "NP of length 5 (maximum) — full sub-span set; exact match replaces subset match (C05 v2)",
       "input": {
         "tokens": [
           {"text": "מערכת", "lemma": "מערכת", "pos": "NOUN"},
@@ -158,11 +158,19 @@
         "min_len": 2,
         "max_len": 5
       },
-      "expected_chunks_contain": [
-        {"surface_text": "מערכת ניהול מידע רפואי מתקדם", "length": 5}
+      "expected_chunks": [
+        {"surface_text": "מערכת ניהול", "token_indices": [0, 1], "length": 2},
+        {"surface_text": "ניהול מידע", "token_indices": [1, 2], "length": 2},
+        {"surface_text": "מידע רפואי", "token_indices": [2, 3], "length": 2},
+        {"surface_text": "מערכת ניהול מידע", "token_indices": [0, 1, 2], "length": 3},
+        {"surface_text": "ניהול מידע רפואי", "token_indices": [1, 2, 3], "length": 3},
+        {"surface_text": "מידע רפואי מתקדם", "token_indices": [2, 3, 4], "length": 3},
+        {"surface_text": "מערכת ניהול מידע רפואי", "token_indices": [0, 1, 2, 3], "length": 4},
+        {"surface_text": "ניהול מידע רפואי מתקדם", "token_indices": [1, 2, 3, 4], "length": 4},
+        {"surface_text": "מערכת ניהול מידע רפואי מתקדם", "token_indices": [0, 1, 2, 3, 4], "length": 5}
       ],
-      "expected_min_count": 7,
-      "notes": "Full 5-token span must be present. Exact count includes all sub-spans: C(5,2)+C(5,3)+C(5,4)+1 minus invalid ones."
+      "expected_count": 9,
+      "notes": "9 valid chunks: 3 bigrams (ADJ+ADJ at positions 3-4 has no CORE_NP → rejected), 3 trigrams, 2 quadrigrams, 1 quintgram. Previously used subset match with min_count=7 — converted to exact match in C05 v2 (Stale gold correction)."
     }
   ]
 }

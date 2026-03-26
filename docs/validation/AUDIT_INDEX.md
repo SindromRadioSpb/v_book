@@ -1,6 +1,6 @@
 # Validation Audit Index
 
-> Last updated: 2026-03-26 (C04 v2)
+> Last updated: 2026-03-26 (C05 v2)
 > Maintainer: update after every completed corpus wave
 > Rule: status "Validated" requires all tests passing + core contract proven; "Partial" means tests pass but known contract gaps exist; "Deferred" means no tests yet
 
@@ -14,7 +14,7 @@
 | C02 | Tokenization + morphology | Deferred | — | Build Stanza-dependent corpus; requires Hebrew model download | 2026-03-26 | Requires Stanza `he` model; no current test infrastructure |
 | C03 | Lemma aggregation | Partial | [C03_AUDIT.md](audits/C03_AUDIT.md) | **C03 v2**: hapax lemma, all-doc lemma, empty document scenarios | 2026-03-26 | Invariants (docs≤freq, total tokens) are structural catches; only 1 gold scenario |
 | C04 | N-gram extraction | Validated | [C04_AUDIT.md](audits/C04_AUDIT.md) | Optional: unigram extraction if added, nikud in pre-tokenized input | 2026-03-26 | Wave 2: NOUN+ADJ+NOUN trigram positive case, PUNCT boundary, mixed-script PROPN+PROPN, validate_ngram_lemmas() secondary oracle (lemma divergence) |
-| C05 | NP chunk extraction | Partial | [C05_AUDIT.md](audits/C05_AUDIT.md) | **C05 v2**: DET non-first position, multiple DET, convert C05_07 to exact match | 2026-03-26 | merge_standalone_articles verified; C05_07 uses subset match (extra chunks not caught) |
+| C05 | NP chunk extraction | Validated | [C05_AUDIT.md](audits/C05_AUDIT.md) | Optional: token index validation if position-based clustering added | 2026-03-26 | Wave 2: DET non-first rejection, multiple DET bridge blocking, ADJ-led NP, C05_07 exact match (9 chunks, no phantom gap) |
 | C06 | Canonicalization | Validated | [C06_AUDIT.md](audits/C06_AUDIT.md) | Optional: morphological analysis to fix over-stripping | 2026-03-26 | Wave 2: prefix כ/ש, multi-token nikud, mixed script, geresh, collision (כמות↔מות) all documented |
 | C07 | Association measures | Validated | [C07_AUDIT.md](audits/C07_AUDIT.md) | C07 v2 (optional): trigram None case, T-score positive, large N | 2026-03-26 | Core measure semantics proven; Dice n-independence verified; LLR at c_xy=0 verified |
 | C08 | Noise classification | Validated | [C08_AUDIT.md](audits/C08_AUDIT.md) | Optional: profile filter layer if implemented | 2026-03-26 | Wave 2: borderline cases, ratio-check boundary, phrase 50% inclusive, profile architecture contract. Key finding: profiles not implemented as code — classifier is profile-agnostic. |
@@ -26,10 +26,9 @@
 
 ## Priority order for next wave
 
-1. **C05 v2** — DET edge cases; convert C05_07 to exact match
-2. **C03 v2** — edge case scenarios for aggregation
-3. **C02** — Stanza-dependent; deferred until model infrastructure is ready
-4. **C10** — deferred until C02 + TM are closed
+1. **C03 v2** — hapax lemma, all-doc lemma, empty document scenarios
+2. **C02** — Stanza-dependent; deferred until model infrastructure is ready
+3. **C10** — deferred until C02 + TM are closed
 
 ---
 
@@ -52,6 +51,6 @@
 | Suite | Count | Status |
 |---|---|---|
 | Main (--ignore=tests/validation) | 1751 passed, 0 failed | Green |
-| Validation non-Stanza | 211 passed, 0 failed | Green (201 prior + 10 C04v2) |
+| Validation non-Stanza | 223 passed, 0 failed | Green (211 prior + 12 C05v2) |
 | Validation Stanza (C02, C10) | Skipped (model unavailable) | Expected |
-| Total | 1962 (if run separately) | No combined run due to torch DLL in headless context |
+| Total | 1974 (if run separately) | No combined run due to torch DLL in headless context |
