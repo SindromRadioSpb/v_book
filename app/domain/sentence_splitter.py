@@ -77,13 +77,15 @@ class SentenceSplitter:
 
                 # Add to current sentence
                 current.append(text_part)
+
+                # If we have sentence-ending punctuation, finish sentence.
+                # Check text_part (word before punct) — not the joined current —
+                # so that "פרופ ." does not shadow the "פרופ" abbreviation entry.
                 if punct:
                     current.append(punct)
-
-                # If we have sentence-ending punctuation, finish sentence
-                if punct and not self._is_abbreviation(" ".join(current)):
-                    sentences.append(" ".join(current))
-                    current = []
+                    if not self._is_abbreviation(text_part):
+                        sentences.append(" ".join(current))
+                        current = []
 
         # Add remaining text as last sentence
         if current:

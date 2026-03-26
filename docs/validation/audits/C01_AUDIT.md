@@ -1,28 +1,39 @@
 # C01 — Audit Report: Sentence Splitting
 
-> Wave completed: 2026-03-26
-> Status: **PARTIAL**
+> Wave 1 completed: 2026-03-26 — core split contract (8 cases)
+> Wave 2 completed: 2026-03-26 — abbreviation fix + borderline cases + known limitations
+> Status: **VALIDATED**
 > Auditor: post-wave automated audit
 
 ---
 
 ## 1. Scope of this wave
 
+### Wave 1 (2026-03-26) — core split contract
+
 **What was done:**
 - Gold corpus defined: 8 cases covering standard terminators (`.`, `!`, `?`), multi-line input, empty/whitespace input, punct-only input, 4-sentence concatenated input.
 - Oracle implemented: `tests/validation/oracles/oracle_sentence.py` — calls `SentenceSplitter.split()`, compares `actual == expected` (order-sensitive list).
-- Integration tests implemented: `tests/validation/test_v01_sentence_splitting.py` — 4 test methods, ~11 test nodes.
+- Integration tests implemented: `tests/validation/test_v01_sentence_splitting.py` — 4 test methods, 11 test nodes.
 - All tests pass. No Stanza required.
 
-**What was NOT in scope:**
-- Abbreviations (`פרופ.`, `ד"ר.`)
-- Mixed Hebrew/English text
-- Decimal numbers with period (`3.14`, `פרק 2.1`)
-- Ellipsis (`...`) as non-boundary
-- Parenthetical content with internal punctuation
-- Nested quotes with terminal punct inside
-- Long paragraphs (≥10 sentences)
-- Unicode edge cases: geresh (`׳`), gershayim (`״`) as potential boundaries
+### Wave 2 (2026-03-26) — abbreviation fix + borderline cases + known limitations
+
+**What was done:**
+- Bug fix: `_is_abbreviation()` was called with `" ".join(current)` (which includes the appended punct, e.g., `"פרופ ."`). The `endswith("פרופ")` check failed because the string ends with `"."`. Fixed to call `_is_abbreviation(text_part)` — the word before punct. Now `"פרופ"` correctly matches the ABBREVIATIONS entry.
+- Gold corpus: `tests/validation/gold/c01v2_sentence_splitting.json` — 7 cases.
+- Tests: `tests/validation/test_v01v2_sentence_splitting.py` — 11 tests across 2 test classes.
+- Abbreviation fix verified: `"פרופ. כהן ביקר"` → 1 sentence (pre-fix: 2 sentences).
+- Known limitations documented: Latin abbreviations ("Inc."), ellipsis ("...") — both split, pinned as explicit contracts.
+- Decimal numbers confirmed correct (period in "2.1" not followed by whitespace → no match).
+- Parenthetical punct confirmed correct ("!" inside parens → no split).
+- Long paragraph (10 sentences) confirmed correct.
+
+**What remains NOT in scope after Wave 2:**
+- Latin/English abbreviations ("Inc.", "Prof.", "Dr.") — ABBREVIATIONS set is Hebrew-only. Documented as known limitation.
+- Ellipsis exception — "..." triggers a split. Documented as known limitation.
+- Geresh/gershayim as potential sentence boundaries — not tested.
+- Nested quotes with terminal punct inside.
 
 ---
 
@@ -86,62 +97,76 @@ Character offsets into the original text. Byte positions. Token spans inside the
 
 ## 6. Required follow-up
 
-**C01 v2 is required.** This is not optional — the contract for real Hebrew text is incompletely covered.
+**No mandatory follow-up after Wave 2.**
 
-Mandatory gold cases for v2:
-1. Abbreviation: `"פרופ. כהן ביקר"` → `["פרופ. כהן ביקר"]` (no split)
-2. Decimal: `"ראו סעיף 2.1 להסבר"` → single sentence
-3. Mixed script: `"Google Inc. הוא חברה"` → single sentence (if splitter handles this)
-4. Ellipsis: `"הוא חיכה... ואז הלך"` → implementation-dependent, but must be documented
-5. Internal punct in parens/quotes: `"אמר (\"שלום!\") ואז הלך"` → 1 sentence
-6. Empty string `""` → `[]`
-7. Long paragraph: 10+ sentences on 1 line
+Optional (low priority):
+- Expand ABBREVIATIONS set to cover Latin abbreviations ("Inc.", "Prof.", "Dr.") if mixed-language corpus is a priority.
+- Add ellipsis exception in the splitter if ellipsis-continuation is a common pattern in target corpora.
+- Geresh (`׳`) and gershayim (`״`) as potential non-boundary punctuation.
 
-For each v2 case: run `SentenceSplitter.split()` interactively first to capture actual behavior. If behavior is wrong → fix implementation. If behavior is by design → document and record in gold.
-
-**Stale docs:** None identified for this wave.
+**Stale docs:** None identified.
 
 ---
 
 ## 7. DoD verdict
 
-**PARTIAL**
+**VALIDATED**
 
-All 8 current gold cases pass. Determinism confirmed. The basic split contract for the common case is validated.
+After Wave 2: 22 tests pass (11 Wave 1 + 11 Wave 2). All primary contracts confirmed:
+- Standard terminators (`.`, `!`, `?`) and multi-line input (Wave 1)
+- Hebrew abbreviation handling — bug fixed and tested (Wave 2)
+- Decimal numbers — correct by design, confirmed (Wave 2)
+- Empty string, long paragraph — confirmed correct (Wave 2)
+- Parenthetical punct — confirmed correct (Wave 2)
+- Known limitations pinned as explicit contracts: Latin abbreviations, ellipsis (Wave 2)
 
-Not PASS because:
-- Abbreviations are a primary practical use case that is not covered.
-- Decimal numbers and mixed text are common in encyclopaedic Hebrew text (the target corpus).
-- Absence of these tests means a regression in abbreviation handling would be completely silent.
-
-Full PASS requires C01 v2 completion.
+VALIDATED (not just PARTIAL) because:
+- The abbreviation gap was resolved: the bug was found and fixed, not just documented
+- All primary classifier contracts for Hebrew encyclopaedic text are now covered
+- No silent defect class exists for the core use cases
+- Remaining known limitations (Latin abbreviations, ellipsis) are documented as explicit behavioral contracts, not gaps
 
 ---
 
 ## 8. Files changed in this wave
 
+### Wave 1
 | File | Role |
 |---|---|
-| `tests/validation/gold/c01_sentence_splitting.json` | Gold standard — 8 sentence splitting cases with expected strings |
+| `tests/validation/gold/c01_sentence_splitting.json` | Gold — 8 sentence splitting cases with expected strings |
 | `tests/validation/oracles/oracle_sentence.py` | Oracle — calls `SentenceSplitter.split()`, order-sensitive list comparison |
-| `tests/validation/test_v01_sentence_splitting.py` | Integration tests — 4 test methods including determinism and count checks |
+| `tests/validation/test_v01_sentence_splitting.py` | 11 tests including determinism and count checks |
 
 Gold required calibration: C01_07 (punct-only `"!"`) corrected to `expected_sentences=[]`; all terminal punct updated to detached form.
+
+### Wave 2
+| File | Role |
+|---|---|
+| `app/domain/sentence_splitter.py` | Bug fix: `_is_abbreviation(text_part)` replaces `_is_abbreviation(" ".join(current))` |
+| `tests/validation/gold/c01v2_sentence_splitting.json` | Gold — 7 borderline cases |
+| `tests/validation/test_v01v2_sentence_splitting.py` | 11 tests across TestBorderlineSentenceSplitting + TestAbbreviationFixContract |
+| `docs/validation/audits/C01_AUDIT.md` | Updated: Wave 2 contracts + VALIDATED verdict |
+| `docs/validation/AUDIT_INDEX.md` | Updated: C01 Partial → Validated |
+| `docs/validation/VALIDATION_METHODOLOGY.md` | Updated: test count + C01v2 row |
 
 ---
 
 ## 9. Regression / baseline impact
 
-- Validation suite (non-Stanza): **104 passed** (post C09 wave).
-- Main baseline (–-ignore=tests/validation): **1751 passed**.
-- C01 contributes ~11 test nodes to validation suite.
+- Validation suite (non-Stanza): **185 passed** (174 prior + 11 C01v2).
+- C01 total: 22 test nodes (11 Wave 1 + 11 Wave 2).
+- Main baseline (--ignore=tests/validation): **1751 passed** (no regression from splitter fix — existing C01 cases all pass).
 - No torch DLL caveat for C01 (pure rule-based, no GPU).
 
 ---
 
 ## 10. Executive summary
 
-C01 validates that `SentenceSplitter.split()` correctly handles 8 specific Hebrew text patterns: `.`/`!`/`?` terminators, multi-line input, empty/whitespace, punct-only, and 4-sentence concatenated input. Terminal punct-detach (e.g., `"ירושלים ."`) is now a verified contract, not implementation noise. The oracle performs exact order-sensitive list comparison — any regression in split output is caught immediately. However, the wave explicitly excluded abbreviations, decimal numbers, mixed Hebrew/English, and ellipsis — all of which are common in real encyclopaedic Hebrew text. A silent regression in abbreviation handling would not be caught. C01 v2 is required before the sentence splitting layer can be considered fully validated for production corpus types. The current status is PARTIAL: the common case is proven, the critical edge cases are not.
+C01 Wave 1 validated that `SentenceSplitter.split()` correctly handles 8 Hebrew text patterns: `.`/`!`/`?` terminators, multi-line input, empty/whitespace, punct-only, and 4-sentence concatenated input. Terminal punct-detach (e.g., `"ירושלים ."`) was documented as a verified contract.
+
+C01 Wave 2 resolved the critical open item: **abbreviation detection was broken**. The `_is_abbreviation()` check was called with `" ".join(current)` after the punct was already appended, so `"פרופ ."` failed to match `"פרופ"` in the ABBREVIATIONS set. The fix: call `_is_abbreviation(text_part)` — the word before punct. After the fix, `"פרופ. כהן ביקר"` → 1 sentence (previously: 2). Wave 2 also confirms decimal numbers (by regex design), empty string, parenthetical punct, and long paragraphs. Known limitations — Latin abbreviations ("Inc."), ellipsis ("...") — are documented as explicit behavioral contracts.
+
+Status advances from PARTIAL to **VALIDATED**: the abbreviation gap was not just documented but fixed; no silent defect class remains for Hebrew encyclopaedic text.
 
 ---
 
@@ -149,7 +174,8 @@ C01 validates that `SentenceSplitter.split()` correctly handles 8 specific Hebre
 
 - [x] Update methodology status (C01 row updated in VALIDATION_METHODOLOGY.md)
 - [x] Update audit index (AUDIT_INDEX.md)
-- [ ] **Add C01 v2 gold cases: abbreviations, decimals, mixed script, ellipsis, parens, empty string, long paragraph**
-- [ ] Run C01 v2 cases against SentenceSplitter before committing to gold
-- [ ] Document any by-design limitations of SentenceSplitter found during v2
-- [ ] Confirm whether C04/C05 downstream assumptions change if C01 v2 reveals a splitter limitation
+- [x] **C01 v2: abbreviation detection fix** — `_is_abbreviation(text_part)` fix applied
+- [x] **C01 v2: gold cases** — abbreviation, decimal, Latin abbrev (known limit), ellipsis (known limit), parens, empty string, long paragraph
+- [x] Run C01 v2 cases against SentenceSplitter before committing to gold
+- [x] Document known limitations of SentenceSplitter found during v2 (Latin abbreviations, ellipsis)
+- [x] Confirmed: existing C04/C05 tests unaffected by the splitter fix (no abbreviation patterns in downstream gold)

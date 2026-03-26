@@ -10,7 +10,7 @@
 
 | Corpus | Stage | Status | Audit doc | Next required action | Last meaningful update | Notes |
 |---|---|---|---|---|---|---|
-| C01 | Sentence splitting | Partial | [C01_AUDIT.md](audits/C01_AUDIT.md) | **C01 v2**: abbreviations, decimals, mixed script, ellipsis, parens, empty string, long paragraph | 2026-03-26 | Base split verified; punct-detach is by-design contract; C01 v2 blocks full PASS |
+| C01 | Sentence splitting | Validated | [C01_AUDIT.md](audits/C01_AUDIT.md) | Optional: Latin abbreviation expansion, ellipsis exception | 2026-03-26 | Wave 2: abbreviation bug fixed + borderline cases; known limitations documented (Latin abbrev, ellipsis) |
 | C02 | Tokenization + morphology | Deferred | — | Build Stanza-dependent corpus; requires Hebrew model download | 2026-03-26 | Requires Stanza `he` model; no current test infrastructure |
 | C03 | Lemma aggregation | Partial | [C03_AUDIT.md](audits/C03_AUDIT.md) | **C03 v2**: hapax lemma, all-doc lemma, empty document scenarios | 2026-03-26 | Invariants (docs≤freq, total tokens) are structural catches; only 1 gold scenario |
 | C04 | N-gram extraction | Partial | [C04_AUDIT.md](audits/C04_AUDIT.md) | **C04 v2**: NOUN+ADJ+NOUN trigram positive case, punctuation boundary, mixed script | 2026-03-26 | All 5 bigram patterns + 2 trigrams confirmed; NOUN+ADJ+NOUN trigram missing positive example |
@@ -26,14 +26,12 @@
 
 ## Priority order for next wave
 
-1. **C01 v2** — abbreviations and mixed text are common in encyclopaedic corpus
-2. **C06 v2** — prefix matrix completion; כ/ש prefixes not covered
-3. **C04 v2** — NOUN+ADJ+NOUN trigram gap; punctuation boundary
-5. **C04 v2** — NOUN+ADJ+NOUN trigram gap; punctuation boundary
-6. **C05 v2** — DET edge cases; convert C05_07 to exact match
-7. **C03 v2** — edge case scenarios for aggregation
-8. **C02** — Stanza-dependent; deferred until model infrastructure is ready
-9. **C10** — deferred until C02 + TM are closed
+1. **C06 v2** — prefix matrix completion; כ/ש prefixes not covered
+2. **C04 v2** — NOUN+ADJ+NOUN trigram gap; punctuation boundary
+3. **C05 v2** — DET edge cases; convert C05_07 to exact match
+4. **C03 v2** — edge case scenarios for aggregation
+5. **C02** — Stanza-dependent; deferred until model infrastructure is ready
+6. **C10** — deferred until C02 + TM are closed
 
 ---
 
@@ -56,6 +54,6 @@
 | Suite | Count | Status |
 |---|---|---|
 | Main (--ignore=tests/validation) | 1751 passed, 0 failed | Green |
-| Validation non-Stanza | 174 passed, 0 failed | Green (156 prior + 18 C08v2) |
+| Validation non-Stanza | 185 passed, 0 failed | Green (174 prior + 11 C01v2) |
 | Validation Stanza (C02, C10) | Skipped (model unavailable) | Expected |
-| Total | 1925 (if run separately) | No combined run due to torch DLL in headless context |
+| Total | 1936 (if run separately) | No combined run due to torch DLL in headless context |

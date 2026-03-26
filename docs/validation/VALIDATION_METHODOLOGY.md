@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 1.3 (updated 2026-03-26: C08 v2 completed — borderline cases + profile contract; count 156→174)
+> Version: 1.4 (updated 2026-03-26: C01 v2 completed — abbreviation fix + borderline cases; count 174→185)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -35,6 +35,7 @@ Each test category has three independent verification sources:
 | Stage | Corpus ID | Oracle Module | Test File | Stanza? |
 |-------|-----------|---------------|-----------|---------|
 | Sentence splitting | C01 | oracle_sentence | test_v01 | No |
+| Sentence splitting borderline + abbreviation fix | C01v2 | oracle_sentence | test_v01v2 | No |
 | Tokenization + morphology | C02 | (deferred) | (deferred) | **Yes** |
 | Lemma aggregation | C03 | oracle_lemma_agg | test_v03 | No |
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
@@ -106,7 +107,7 @@ A test passes iff `result.match == True`.
 cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -k "not v02 and not stanza"
 ```
-Expected: **174 passed, 0 failed** (as of C08 Wave 2, 2026-03-26).
+Expected: **185 passed, 0 failed** (as of C01 Wave 2, 2026-03-26).
 
 ### Stanza-dependent tests (requires model)
 ```powershell

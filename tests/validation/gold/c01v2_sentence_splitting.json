@@ -1,0 +1,86 @@
+{
+  "corpus_id": "C01v2",
+  "description": "Sentence splitting borderline cases and known-limitation contracts (Wave 2).",
+  "notes": "Extends C01 with: Hebrew abbreviation (פרופ. — fix verified), decimal number (no split), Latin abbreviation (known limitation: splits), ellipsis (known limitation: splits), parenthetical exclamation (no split), empty string, long paragraph (10 sentences). Wave 2 also documents the abbreviation-detection bug fix: _is_abbreviation() is now called with the word before punct, not with the punct already joined.",
+  "cases": [
+    {
+      "case_id": "C01v2_01",
+      "description": "Hebrew abbreviation 'פרופ.' — must NOT split (period is part of abbreviation)",
+      "input": "פרופ. כהן ביקר את המוסד.",
+      "expected_sentences": [
+        "פרופ . כהן ביקר את המוסד ."
+      ],
+      "expected_count": 1,
+      "notes": "Fix: _is_abbreviation('פרופ') correctly returns True. Pre-fix: _is_abbreviation('פרופ .') was called and failed endswith check — producing 2 sentences instead of 1. Post-fix: 1 sentence with punct detached (by-design contract)."
+    },
+    {
+      "case_id": "C01v2_02",
+      "description": "Decimal number '2.1' — period inside number must NOT split",
+      "input": "ראו סעיף 2.1 להסבר.",
+      "expected_sentences": [
+        "ראו סעיף 2.1 להסבר ."
+      ],
+      "expected_count": 1,
+      "notes": "The regex requires (?:\\s+|$) after the punct. '2.1' has '1' after the period (no space) — no match. Only the terminal '.' matches. Correct by design — no fix needed."
+    },
+    {
+      "case_id": "C01v2_03",
+      "description": "Latin abbreviation 'Inc.' — KNOWN LIMITATION: splits (Latin abbreviations not in ABBREVIATIONS set)",
+      "input": "Google Inc. הוא חברה.",
+      "expected_sentences": [
+        "Google Inc .",
+        "הוא חברה ."
+      ],
+      "expected_count": 2,
+      "notes": "KNOWN LIMITATION: ABBREVIATIONS set is Hebrew-only. 'Inc' is not present. The splitter incorrectly splits at 'Inc.' — two sentences are produced. This documents the actual behavior. A future improvement would expand the abbreviations set to cover common Latin/English abbreviations."
+    },
+    {
+      "case_id": "C01v2_04",
+      "description": "Ellipsis '...' — KNOWN LIMITATION: splits at ellipsis (treated as sentence boundary)",
+      "input": "הוא חיכה... ואז הלך.",
+      "expected_sentences": [
+        "הוא חיכה ...",
+        "ואז הלך ."
+      ],
+      "expected_count": 2,
+      "notes": "KNOWN LIMITATION: SENTENCE_ENDERS = [.!?...]+ — '...' followed by space matches and triggers a split. In Hebrew text, ellipsis typically means continuation, not sentence end. This documents the actual behavior. A future improvement would add an ellipsis exception in the splitter."
+    },
+    {
+      "case_id": "C01v2_05",
+      "description": "Parenthetical exclamation mark — must NOT split (punct not followed by whitespace)",
+      "input": "אמר (\"שלום!\") ואז הלך.",
+      "expected_sentences": [
+        "אמר (\"שלום!\") ואז הלך ."
+      ],
+      "expected_count": 1,
+      "notes": "The '!' inside parens is followed by ')' (not whitespace or end) — regex (?:\\s+|$) does not match. Correct by design. Only the terminal '.' at end terminates the sentence."
+    },
+    {
+      "case_id": "C01v2_06",
+      "description": "Empty string — must return []",
+      "input": "",
+      "expected_sentences": [],
+      "expected_count": 0,
+      "notes": "Empty string hits early guard: 'if not text or not text.strip(): return []'. '' is falsy — returns [] immediately. Distinct from whitespace-only input (C01_06) which hits the same guard via strip()."
+    },
+    {
+      "case_id": "C01v2_07",
+      "description": "Long paragraph — 10 sentences on one line, all correctly split",
+      "input": "ראובן הלך לבית הספר. שמעון אכל ארוחת בוקר. לוי קרא ספר. יהודה כתב מכתב. דן ישב בגינה. נפתלי רץ בפארק. גד קנה לחם. אשר שר שיר. יששכר למד עברית. זבולון נסע לים.",
+      "expected_sentences": [
+        "ראובן הלך לבית הספר .",
+        "שמעון אכל ארוחת בוקר .",
+        "לוי קרא ספר .",
+        "יהודה כתב מכתב .",
+        "דן ישב בגינה .",
+        "נפתלי רץ בפארק .",
+        "גד קנה לחם .",
+        "אשר שר שיר .",
+        "יששכר למד עברית .",
+        "זבולון נסע לים ."
+      ],
+      "expected_count": 10,
+      "notes": "10 sentences on a single line. All terminators are '.' followed by ' ' (or end-of-string for the last). No word matches the ABBREVIATIONS set. Validates that the splitter scales beyond the 4-sentence cases in C01 Wave 1."
+    }
+  ]
+}

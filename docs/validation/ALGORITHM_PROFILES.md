@@ -85,42 +85,42 @@ Captures all candidate terms for downstream review.
 
 ---
 
-## Noise Classification Profiles
+## Noise Classification Profiles (conceptual — not yet implemented)
 
-Three noise classifier profiles correspond to the extraction profiles:
+> **Implementation status:** These profiles are **NOT implemented** as a filter API in
+> `entity_classifier.py`. The `classify_text()` and `classify_phrase()` functions are
+> profile-agnostic and accept exactly one parameter (`raw`). There is no `profile=`
+> argument. Profile-specific filtering would require a separate post-classification
+> filter layer that does not currently exist in the codebase.
+>
+> The `noise_profiles` key in `c08_noise_classification.json` documents these definitions
+> conceptually. They serve as a specification for a future filter layer, not as a
+> description of current code behaviour.
+>
+> See: `docs/validation/audits/C08_AUDIT.md` — "Profile architecture finding (confirmed by Wave 2)".
+
+Three noise filter profiles are defined conceptually, corresponding to the extraction profiles:
 
 ### `conservative` (→ precise extraction)
-Marks as noise only:
+Would mark as noise only:
 - `PUNCT`, `SYMBOL`, `MATH_EXPR` entity classes
 - `NOISE_PUNCT_ONLY`, `NOISE_SYMBOL_ONLY`, `NOISE_MATH_EXPR`, `NOISE_TOO_SHORT` reasons
 
 ### `balanced` (→ balanced extraction)
-Marks as noise:
+Would mark as noise:
 - All auto-classified classes: `PUNCT`, `SYMBOL`, `NUMBER`, `QUANTITY_UNIT`,
   `MATH_EXPR`, `MIXED_ALPHA_NUM`, `OTHER`
 - All `NoiseReason` codes
 
 ### `aggressive` (→ recall extraction with cleanup)
-Additionally marks:
+Would additionally mark:
 - `WORD_HE` with len ≤ 2
 - Any token with non-letter ratio > 0.4
 
----
-
-## Validation Test Mapping
-
-Each profile should be validated with the C08 noise corpus using the corresponding profile:
-
-```python
-# Example: run balanced profile validation
-cases = gold_data("c08_noise_classification")["classify_text_cases"]
-for case in cases:
-    result = validate_classify_text(case, profile="balanced")
-    assert result.match
-```
-
-The `noise_profiles` key in `c08_noise_classification.json` documents which
-entity classes and reason codes each profile treats as noise.
+**If a profile filter layer is implemented**, it would apply these definitions as a
+post-classification step on top of the profile-agnostic `classify_text/classify_phrase`
+output. Until then, all classification uses the default (equivalent to `balanced`) path
+through the decision tree in `entity_classifier.py`.
 
 ---
 
