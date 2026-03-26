@@ -1,0 +1,102 @@
+{
+  "corpus_id": "C07",
+  "description": "Association measures gold standard. Hand-calculated expected values with tolerance=0.01.",
+  "notes": "PMI = log2((c_xy * N) / (c_x * c_y)). T-score = (c_xy - c_x*c_y/N) / sqrt(c_xy/N). LLR = full 2x2 contingency table formula. Dice = 2*c_xy / (c_x + c_y). All measures return None if any input is 0 or invalid. Trigrams get None for all measures.",
+  "tolerance": 0.01,
+  "cases": [
+    {
+      "case_id": "C07_01",
+      "description": "Strong association — bigram that co-occurs very frequently",
+      "inputs": {
+        "c_xy": 50,
+        "c_x": 60,
+        "c_y": 55,
+        "n": 1000
+      },
+      "expected": {
+        "pmi": 3.897,
+        "dice": 0.870,
+        "notes": "PMI = log2(50*1000 / (60*55)) = log2(50000/3300) ≈ log2(15.15) ≈ 3.921. Use tolerance 0.05 for rounding."
+      },
+      "tolerance_override": 0.05
+    },
+    {
+      "case_id": "C07_02",
+      "description": "Dice coefficient maximum — bigram always co-occurs with itself",
+      "inputs": {
+        "c_xy": 10,
+        "c_x": 10,
+        "c_y": 10,
+        "n": 100
+      },
+      "expected": {
+        "dice": 1.0,
+        "pmi": 3.322
+      },
+      "notes": "Dice = 2*10/(10+10) = 1.0. PMI = log2(10*100/(10*10)) = log2(10) ≈ 3.322"
+    },
+    {
+      "case_id": "C07_03",
+      "description": "Zero c_xy — PMI/tscore are None; dice=0.0; LLR computed from contingency table",
+      "inputs": {
+        "c_xy": 0,
+        "c_x": 100,
+        "c_y": 50,
+        "n": 1000
+      },
+      "expected": {
+        "pmi": null,
+        "dice": 0.0,
+        "llr": 85.545,
+        "tscore": null
+      },
+      "tolerance_override": 0.1,
+      "notes": "PMI/tscore guard c_xy<=0 → None. Dice=2*0/(100+50)=0.0. LLR uses contingency table (o11=0 contributes 0 via safe_log_ratio) ≈ 85.545."
+    },
+    {
+      "case_id": "C07_04",
+      "description": "Dice with different marginals",
+      "inputs": {
+        "c_xy": 5,
+        "c_x": 20,
+        "c_y": 30,
+        "n": 500
+      },
+      "expected": {
+        "dice": 0.2
+      },
+      "notes": "Dice = 2*5/(20+30) = 10/50 = 0.2"
+    },
+    {
+      "case_id": "C07_05",
+      "description": "PMI with weak association — words co-occur near chance level",
+      "inputs": {
+        "c_xy": 2,
+        "c_x": 100,
+        "c_y": 80,
+        "n": 1000
+      },
+      "expected": {
+        "pmi": -2.0,
+        "notes": "PMI = log2(2*1000/(100*80)) = log2(2000/8000) = log2(0.25) = -2.0"
+      }
+    },
+    {
+      "case_id": "C07_06",
+      "description": "n=0 — PMI/LLR/tscore return None; Dice is n-independent and returns 0.5",
+      "inputs": {
+        "c_xy": 5,
+        "c_x": 10,
+        "c_y": 10,
+        "n": 0
+      },
+      "expected": {
+        "pmi": null,
+        "dice": 0.5,
+        "llr": null,
+        "tscore": null
+      },
+      "notes": "Dice = 2*5/(10+10) = 0.5; n is not a parameter of compute_dice."
+    }
+  ]
+}

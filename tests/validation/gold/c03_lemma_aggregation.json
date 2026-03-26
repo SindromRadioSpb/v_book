@@ -1,0 +1,82 @@
+{
+  "corpus_id": "C03",
+  "description": "Lemma aggregation gold standard: Freq and Docs per lemma across multiple documents.",
+  "notes": "Freq = total token occurrences of this lemma across all docs. Docs = count of distinct documents where lemma appears at least once. Invariant: Docs <= Freq always. Different surface forms mapping to the same lemma must be aggregated together.",
+  "documents": [
+    {
+      "doc_id": "DOC_01",
+      "tokens": [
+        {"lemma": "ילד", "pos": "NOUN"},
+        {"lemma": "ילד", "pos": "NOUN"},
+        {"lemma": "גדול", "pos": "ADJ"},
+        {"lemma": "ילד", "pos": "NOUN"}
+      ]
+    },
+    {
+      "doc_id": "DOC_02",
+      "tokens": [
+        {"lemma": "ילד", "pos": "NOUN"},
+        {"lemma": "קטן", "pos": "ADJ"},
+        {"lemma": "גדול", "pos": "ADJ"}
+      ]
+    },
+    {
+      "doc_id": "DOC_03",
+      "tokens": [
+        {"lemma": "בית", "pos": "NOUN"},
+        {"lemma": "ספר", "pos": "NOUN"},
+        {"lemma": "גדול", "pos": "ADJ"},
+        {"lemma": "קטן", "pos": "ADJ"},
+        {"lemma": "קטן", "pos": "ADJ"}
+      ]
+    }
+  ],
+  "expected_aggregates": [
+    {
+      "lemma": "ילד",
+      "freq": 4,
+      "docs": 2,
+      "notes": "Appears 3x in DOC_01 + 1x in DOC_02 = freq 4; in 2 distinct docs"
+    },
+    {
+      "lemma": "גדול",
+      "freq": 3,
+      "docs": 3,
+      "notes": "1x in DOC_01, 1x in DOC_02, 1x in DOC_03 = freq 3; in 3 distinct docs"
+    },
+    {
+      "lemma": "קטן",
+      "freq": 3,
+      "docs": 2,
+      "notes": "1x in DOC_02, 2x in DOC_03 = freq 3; in 2 distinct docs"
+    },
+    {
+      "lemma": "בית",
+      "freq": 1,
+      "docs": 1
+    },
+    {
+      "lemma": "ספר",
+      "freq": 1,
+      "docs": 1
+    }
+  ],
+  "invariants": [
+    {
+      "name": "docs_lte_freq",
+      "description": "For every lemma: Docs <= Freq",
+      "check": "all(row.docs <= row.freq for row in aggregates)"
+    },
+    {
+      "name": "no_duplicate_lemma",
+      "description": "Each lemma_text appears exactly once in the aggregate table",
+      "check": "len(set(r.lemma for r in aggregates)) == len(aggregates)"
+    },
+    {
+      "name": "total_tokens_match",
+      "description": "Sum of all Freq values == total number of tokens across all documents",
+      "check": "sum(r.freq for r in aggregates) == total_token_count",
+      "total_token_count": 12
+    }
+  ]
+}

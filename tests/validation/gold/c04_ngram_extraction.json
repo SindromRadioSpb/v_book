@@ -1,0 +1,188 @@
+{
+  "corpus_id": "C04",
+  "description": "N-gram extraction gold standard. Inputs are pre-tokenized (no Stanza required).",
+  "notes": "VALID_POS_PATTERNS for bigrams: (NOUN,NOUN),(NOUN,ADJ),(ADJ,NOUN),(PROPN,PROPN),(NUM,NOUN). For trigrams: (NOUN,NOUN,NOUN),(NOUN,ADJ,NOUN),(ADJ,ADJ,NOUN). N-grams use sliding window within sentence. merge_standalone_articles may alter tokens before matching.",
+  "cases": [
+    {
+      "case_id": "C04_01",
+      "description": "NOUN+NOUN bigram (construct chain) — ספר לימוד (textbook)",
+      "input": {
+        "tokens": [
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+          {"text": "לימוד", "lemma": "לימוד", "pos": "NOUN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "ספר לימוד",
+          "lemma_phrase": "ספר לימוד",
+          "pos_pattern": ["NOUN", "NOUN"]
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C04_02",
+      "description": "NOUN+ADJ bigram — ילד גדול (big boy)",
+      "input": {
+        "tokens": [
+          {"text": "ילד", "lemma": "ילד", "pos": "NOUN"},
+          {"text": "גדול", "lemma": "גדול", "pos": "ADJ"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "ילד גדול",
+          "lemma_phrase": "ילד גדול",
+          "pos_pattern": ["NOUN", "ADJ"]
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C04_03",
+      "description": "ADJ+NOUN bigram — גדול עיר (big city, though unusual order)",
+      "input": {
+        "tokens": [
+          {"text": "גדול", "lemma": "גדול", "pos": "ADJ"},
+          {"text": "עיר", "lemma": "עיר", "pos": "NOUN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "גדול עיר",
+          "lemma_phrase": "גדול עיר",
+          "pos_pattern": ["ADJ", "NOUN"]
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C04_04",
+      "description": "PROPN+PROPN bigram — מדינת ישראל (State of Israel)",
+      "input": {
+        "tokens": [
+          {"text": "מדינת", "lemma": "מדינה", "pos": "PROPN"},
+          {"text": "ישראל", "lemma": "ישראל", "pos": "PROPN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "מדינת ישראל",
+          "lemma_phrase": "מדינה ישראל",
+          "pos_pattern": ["PROPN", "PROPN"]
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C04_05",
+      "description": "NUM+NOUN bigram — שלוש שנים (three years)",
+      "input": {
+        "tokens": [
+          {"text": "שלוש", "lemma": "שלוש", "pos": "NUM"},
+          {"text": "שנים", "lemma": "שנה", "pos": "NOUN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "שלוש שנים",
+          "lemma_phrase": "שלוש שנה",
+          "pos_pattern": ["NUM", "NOUN"]
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C04_06",
+      "description": "NOUN+NOUN+NOUN trigram — בית ספר לשפות (language school)",
+      "input": {
+        "tokens": [
+          {"text": "בית", "lemma": "בית", "pos": "NOUN"},
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+          {"text": "לשפות", "lemma": "שפה", "pos": "NOUN"}
+        ],
+        "n_values": [2, 3]
+      },
+      "expected_ngrams": [
+        {
+          "n": 2,
+          "surface_text": "בית ספר",
+          "lemma_phrase": "בית ספר",
+          "pos_pattern": ["NOUN", "NOUN"]
+        },
+        {
+          "n": 2,
+          "surface_text": "ספר לשפות",
+          "lemma_phrase": "ספר שפה",
+          "pos_pattern": ["NOUN", "NOUN"]
+        },
+        {
+          "n": 3,
+          "surface_text": "בית ספר לשפות",
+          "lemma_phrase": "בית ספר שפה",
+          "pos_pattern": ["NOUN", "NOUN", "NOUN"]
+        }
+      ],
+      "expected_count": 3
+    },
+    {
+      "case_id": "C04_07",
+      "description": "Invalid POS pattern VERB+NOUN — should produce NO n-gram",
+      "input": {
+        "tokens": [
+          {"text": "אוכל", "lemma": "אכל", "pos": "VERB"},
+          {"text": "לחם", "lemma": "לחם", "pos": "NOUN"}
+        ],
+        "n_values": [2]
+      },
+      "expected_ngrams": [],
+      "expected_count": 0
+    },
+    {
+      "case_id": "C04_08",
+      "description": "Single token — no bigrams/trigrams possible",
+      "input": {
+        "tokens": [
+          {"text": "ירושלים", "lemma": "ירושלים", "pos": "PROPN"}
+        ],
+        "n_values": [2, 3]
+      },
+      "expected_ngrams": [],
+      "expected_count": 0
+    },
+    {
+      "case_id": "C04_09",
+      "description": "Trigrams only (n_values=[3]) — only ADJ+ADJ+NOUN is valid; NOUN+ADJ+ADJ is not in VALID_POS_PATTERNS",
+      "input": {
+        "tokens": [
+          {"text": "מחקר", "lemma": "מחקר", "pos": "NOUN"},
+          {"text": "מדעי", "lemma": "מדעי", "pos": "ADJ"},
+          {"text": "חדש", "lemma": "חדש", "pos": "ADJ"},
+          {"text": "נגיף", "lemma": "נגיף", "pos": "NOUN"}
+        ],
+        "n_values": [3]
+      },
+      "expected_ngrams": [
+        {
+          "n": 3,
+          "surface_text": "מדעי חדש נגיף",
+          "lemma_phrase": "מדעי חדש נגיף",
+          "pos_pattern": ["ADJ", "ADJ", "NOUN"]
+        }
+      ],
+      "expected_count": 1,
+      "notes": "NOUN+ADJ+ADJ is not in VALID_POS_PATTERNS — only ADJ+ADJ+NOUN is valid"
+    }
+  ]
+}

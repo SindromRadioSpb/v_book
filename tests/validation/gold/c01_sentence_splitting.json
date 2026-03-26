@@ -1,0 +1,84 @@
+{
+  "corpus_id": "C01",
+  "description": "Sentence splitting gold standard for SentenceSplitter (rule-based, Hebrew).",
+  "notes": "SentenceSplitter tokenizes punctuation as separate tokens, so terminal punct appears with a leading space (e.g. 'ירושלים .' not 'ירושלים.'). Single punct-only input (e.g. '!') returns empty list — splitter filters such lines.",
+  "cases": [
+    {
+      "case_id": "C01_01",
+      "description": "Simple two sentences separated by period+space",
+      "input": "ירושלים היא בירת ישראל. תל אביב היא העיר הגדולה ביותר.",
+      "expected_sentences": [
+        "ירושלים היא בירת ישראל .",
+        "תל אביב היא העיר הגדולה ביותר ."
+      ],
+      "expected_count": 2
+    },
+    {
+      "case_id": "C01_02",
+      "description": "Three sentences with different terminators (.!?)",
+      "input": "מה השם שלך? שמי דוד. בוקר טוב!",
+      "expected_sentences": [
+        "מה השם שלך ?",
+        "שמי דוד .",
+        "בוקר טוב !"
+      ],
+      "expected_count": 3
+    },
+    {
+      "case_id": "C01_03",
+      "description": "Multi-line input — each non-empty line yields its own sentence(s)",
+      "input": "ירושלים היא בירת ישראל.\nתל אביב היא העיר הגדולה.",
+      "expected_sentences": [
+        "ירושלים היא בירת ישראל .",
+        "תל אביב היא העיר הגדולה ."
+      ],
+      "expected_count": 2
+    },
+    {
+      "case_id": "C01_04",
+      "description": "Empty lines between paragraphs are ignored",
+      "input": "ירושלים היא בירת ישראל.\n\nתל אביב היא העיר הגדולה.",
+      "expected_sentences": [
+        "ירושלים היא בירת ישראל .",
+        "תל אביב היא העיר הגדולה ."
+      ],
+      "expected_count": 2
+    },
+    {
+      "case_id": "C01_05",
+      "description": "Single sentence with no terminal punctuation",
+      "input": "ירושלים היא בירת ישראל",
+      "expected_sentences": [
+        "ירושלים היא בירת ישראל"
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C01_06",
+      "description": "Empty or whitespace-only input returns empty list",
+      "input": "   ",
+      "expected_sentences": [],
+      "expected_count": 0
+    },
+    {
+      "case_id": "C01_07",
+      "description": "Single exclamation mark only — splitter filters punct-only lines",
+      "input": "!",
+      "expected_sentences": [],
+      "expected_count": 0,
+      "notes": "SentenceSplitter returns empty list for punct-only input"
+    },
+    {
+      "case_id": "C01_08",
+      "description": "Four sentences on one line",
+      "input": "ספר טוב. סרט טוב. מוזיקה טובה. אוכל טוב.",
+      "expected_sentences": [
+        "ספר טוב .",
+        "סרט טוב .",
+        "מוזיקה טובה .",
+        "אוכל טוב ."
+      ],
+      "expected_count": 4
+    }
+  ]
+}

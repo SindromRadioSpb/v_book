@@ -1,0 +1,168 @@
+{
+  "corpus_id": "C05",
+  "description": "NP chunk extraction gold standard. Inputs are pre-tokenized (no Stanza required).",
+  "notes": "STOP_POS: PUNCT, ADP, CCONJ, SCONJ, PRON, VERB, AUX, PART. CORE_NP_POS: NOUN, PROPN. DET allowed only as first token. All non-first tokens must be CORE_NP or MODIFIER_POS (ADJ, NUM). NP must contain at least one NOUN/PROPN. Length: min_len=2, max_len=5.",
+  "cases": [
+    {
+      "case_id": "C05_01",
+      "description": "Simple 2-token NP: NOUN+NOUN",
+      "input": {
+        "tokens": [
+          {"text": "בית", "lemma": "בית", "pos": "NOUN"},
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "בית ספר",
+          "token_indices": [0, 1],
+          "length": 2
+        }
+      ],
+      "expected_count": 1
+    },
+    {
+      "case_id": "C05_02",
+      "description": "3-token NP: NOUN+ADJ+NOUN",
+      "input": {
+        "tokens": [
+          {"text": "מחקר", "lemma": "מחקר", "pos": "NOUN"},
+          {"text": "מדעי", "lemma": "מדעי", "pos": "ADJ"},
+          {"text": "חדש", "lemma": "חדש", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "מחקר מדעי",
+          "token_indices": [0, 1],
+          "length": 2
+        },
+        {
+          "surface_text": "מדעי חדש",
+          "token_indices": [1, 2],
+          "length": 2
+        },
+        {
+          "surface_text": "מחקר מדעי חדש",
+          "token_indices": [0, 1, 2],
+          "length": 3
+        }
+      ],
+      "expected_count": 3
+    },
+    {
+      "case_id": "C05_03",
+      "description": "STOP_POS breaks NP segment — VERB splits the NP window",
+      "input": {
+        "tokens": [
+          {"text": "ילד", "lemma": "ילד", "pos": "NOUN"},
+          {"text": "רץ", "lemma": "רוץ", "pos": "VERB"},
+          {"text": "מהיר", "lemma": "מהיר", "pos": "ADJ"},
+          {"text": "מאוד", "lemma": "מאוד", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "מהיר מאוד",
+          "token_indices": [2, 3],
+          "length": 2
+        }
+      ],
+      "expected_count": 1,
+      "notes": "VERB at index 1 splits segments. Segment before VERB is only [ילד] (length 1 < min_len=2, skipped). Segment after VERB is [מהיר, מאוד] (ADJ+NOUN = valid, length 2)."
+    },
+    {
+      "case_id": "C05_04",
+      "description": "DET as first token — merge_standalone_articles joins DET+NOUN surface forms",
+      "input": {
+        "tokens": [
+          {"text": "ה", "lemma": "ה", "pos": "DET"},
+          {"text": "ילד", "lemma": "ילד", "pos": "NOUN"},
+          {"text": "הגדול", "lemma": "גדול", "pos": "ADJ"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [
+        {
+          "surface_text": "הילד",
+          "token_indices": [0, 1],
+          "length": 2
+        },
+        {
+          "surface_text": "ילד הגדול",
+          "token_indices": [1, 2],
+          "length": 2
+        },
+        {
+          "surface_text": "הילד הגדול",
+          "token_indices": [0, 1, 2],
+          "length": 3
+        }
+      ],
+      "expected_count": 3,
+      "notes": "merge_standalone_articles merges standalone 'ה' + following NOUN into one token: 'הילד'"
+    },
+    {
+      "case_id": "C05_05",
+      "description": "NP exceeds max_len=2 — only chunks of length 2 are kept",
+      "input": {
+        "tokens": [
+          {"text": "בית", "lemma": "בית", "pos": "NOUN"},
+          {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+          {"text": "גדול", "lemma": "גדול", "pos": "ADJ"},
+          {"text": "חדש", "lemma": "חדש", "pos": "NOUN"}
+        ],
+        "min_len": 2,
+        "max_len": 2
+      },
+      "expected_chunks": [
+        {"surface_text": "בית ספר", "token_indices": [0, 1], "length": 2},
+        {"surface_text": "ספר גדול", "token_indices": [1, 2], "length": 2},
+        {"surface_text": "גדול חדש", "token_indices": [2, 3], "length": 2}
+      ],
+      "expected_count": 3
+    },
+    {
+      "case_id": "C05_06",
+      "description": "All tokens are STOP_POS — no NP chunks",
+      "input": {
+        "tokens": [
+          {"text": "הוא", "lemma": "הוא", "pos": "PRON"},
+          {"text": "ו", "lemma": "ו", "pos": "CCONJ"},
+          {"text": "אני", "lemma": "אני", "pos": "PRON"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks": [],
+      "expected_count": 0
+    },
+    {
+      "case_id": "C05_07",
+      "description": "NP of length 5 (maximum)",
+      "input": {
+        "tokens": [
+          {"text": "מערכת", "lemma": "מערכת", "pos": "NOUN"},
+          {"text": "ניהול", "lemma": "ניהול", "pos": "NOUN"},
+          {"text": "מידע", "lemma": "מידע", "pos": "NOUN"},
+          {"text": "רפואי", "lemma": "רפואי", "pos": "ADJ"},
+          {"text": "מתקדם", "lemma": "מתקדם", "pos": "ADJ"}
+        ],
+        "min_len": 2,
+        "max_len": 5
+      },
+      "expected_chunks_contain": [
+        {"surface_text": "מערכת ניהול מידע רפואי מתקדם", "length": 5}
+      ],
+      "expected_min_count": 7,
+      "notes": "Full 5-token span must be present. Exact count includes all sub-spans: C(5,2)+C(5,3)+C(5,4)+1 minus invalid ones."
+    }
+  ]
+}

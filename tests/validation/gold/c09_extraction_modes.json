@@ -1,0 +1,108 @@
+{
+  "corpus_id": "C09",
+  "description": "Extraction modes: Full Overwrite / Merge / Replace Layer. State transition expectations.",
+  "notes": "overwrite: clears ALL terms then reinserts. merge: adds new without removing existing. replace_layer: deletes only the specified n-size layer, then merges. TM records are NEVER deleted by any mode.",
+  "state_transitions": [
+    {
+      "scenario_id": "S01",
+      "description": "Full Overwrite on clean DB",
+      "initial_state": "empty_db",
+      "action": {
+        "mode": "overwrite",
+        "n_values": [2, 3],
+        "include_np": true,
+        "corpus": "corpus_step1"
+      },
+      "expected_after": {
+        "clusters_count": ">0",
+        "ngrams_contain_only_new": true,
+        "previous_clusters_deleted": true
+      }
+    },
+    {
+      "scenario_id": "S02",
+      "description": "Merge adds new terms, preserves existing",
+      "initial_state": "after_S01",
+      "action": {
+        "mode": "merge",
+        "n_values": [2, 3],
+        "include_np": true,
+        "corpus": "corpus_step2_new_docs"
+      },
+      "expected_after": {
+        "clusters_count": ">=S01_count",
+        "S01_clusters_preserved": true,
+        "new_clusters_added": true
+      }
+    },
+    {
+      "scenario_id": "S03",
+      "description": "Replace Layer (bigrams only) — only bigrams are replaced, trigrams and NP unchanged",
+      "initial_state": "after_S01_with_trigrams_and_NP",
+      "action": {
+        "mode": "replace_layer",
+        "n_values": [2],
+        "include_np": false
+      },
+      "expected_after": {
+        "trigram_clusters_preserved": true,
+        "np_clusters_preserved": true,
+        "bigram_clusters_replaced": true
+      }
+    },
+    {
+      "scenario_id": "S04",
+      "description": "Store hapax OFF — hapax terms not stored",
+      "initial_state": "empty_db",
+      "action": {
+        "mode": "overwrite",
+        "store_hapax": false,
+        "n_values": [2],
+        "corpus": "corpus_with_hapax"
+      },
+      "expected_after": {
+        "hapax_ngrams_in_db": false,
+        "hapax_definition": "freq_abs == 1"
+      }
+    },
+    {
+      "scenario_id": "S05",
+      "description": "Store hapax ON — hapax terms stored but hidden by Min freq=2",
+      "initial_state": "empty_db",
+      "action": {
+        "mode": "overwrite",
+        "store_hapax": true,
+        "n_values": [2],
+        "corpus": "corpus_with_hapax"
+      },
+      "display_filter": {
+        "min_freq": 2
+      },
+      "expected_after": {
+        "hapax_ngrams_in_db": true,
+        "hapax_visible_in_ui": false,
+        "hapax_in_db_count": ">0",
+        "note": "min_freq is a display filter only — hapax are stored but hidden"
+      }
+    },
+    {
+      "scenario_id": "S06",
+      "description": "Idempotency — Full Overwrite twice gives same result",
+      "initial_state": "after_S01",
+      "action": {
+        "mode": "overwrite",
+        "n_values": [2, 3],
+        "include_np": true,
+        "corpus": "corpus_step1"
+      },
+      "expected_after": {
+        "clusters_count_equals_S01": true,
+        "cluster_members_identical_to_S01": true
+      }
+    }
+  ],
+  "tm_preservation_invariant": {
+    "description": "TM records are never deleted by ANY extraction mode",
+    "check": "tm_entry.count after re-extraction >= tm_entry.count before (for non-user-delete actions)"
+  }
+}

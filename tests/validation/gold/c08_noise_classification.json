@@ -1,0 +1,161 @@
+{
+  "corpus_id": "C08",
+  "description": "Noise classification gold standard for classify_text() (lemmas) and classify_phrase() (term clusters).",
+  "notes": "EntityClass values: WORD_HE, WORD_LATIN, MIXED_ALPHA_NUM, NUMBER, QUANTITY_UNIT, MATH_EXPR, SYMBOL, PUNCT, OTHER. is_noise=true for: PUNCT, SYMBOL, NUMBER, QUANTITY_UNIT, MATH_EXPR, MIXED_ALPHA_NUM, OTHER, and for tokens too short or with high non-letter ratio.",
+  "classify_text_cases": [
+    {
+      "case_id": "C08_01",
+      "description": "Pure Hebrew word — valid, not noise",
+      "input": "ילד",
+      "expected": {
+        "entity_class": "WORD_HE",
+        "is_noise": false,
+        "noise_reason": null
+      }
+    },
+    {
+      "case_id": "C08_02",
+      "description": "Punctuation only — noise",
+      "input": "...",
+      "expected": {
+        "entity_class": "PUNCT",
+        "is_noise": true,
+        "noise_reason": "NOISE_RATIO_NON_LETTER_HIGH"
+      },
+      "notes": "All chars are non-letter, so NOISE_RATIO_NON_LETTER_HIGH fires before any PUNCT-specific reason"
+    },
+    {
+      "case_id": "C08_03",
+      "description": "Pure number — noise",
+      "input": "123",
+      "expected": {
+        "entity_class": "NUMBER",
+        "is_noise": true,
+        "noise_reason": "NOISE_RATIO_NON_LETTER_HIGH"
+      },
+      "notes": "Digits are non-letter chars, ratio=1.0 → NOISE_RATIO_NON_LETTER_HIGH"
+    },
+    {
+      "case_id": "C08_04",
+      "description": "Pure Latin word — valid, not noise",
+      "input": "Israel",
+      "expected": {
+        "entity_class": "WORD_LATIN",
+        "is_noise": false,
+        "noise_reason": null
+      }
+    },
+    {
+      "case_id": "C08_05",
+      "description": "Math expression — noise",
+      "input": "x+y=z",
+      "expected": {
+        "entity_class": "MATH_EXPR",
+        "is_noise": true,
+        "noise_reason": "NOISE_MATH_EXPR"
+      }
+    },
+    {
+      "case_id": "C08_06",
+      "description": "Symbol (single char) — noise",
+      "input": "©",
+      "expected": {
+        "entity_class": "SYMBOL",
+        "is_noise": true,
+        "noise_reason": "NOISE_TOO_SHORT"
+      },
+      "notes": "© is 1 char — NOISE_TOO_SHORT fires before NOISE_SYMBOL_ONLY"
+    },
+    {
+      "case_id": "C08_07",
+      "description": "Single character Hebrew letter — classified as WORD_HE, not noise",
+      "input": "א",
+      "expected": {
+        "entity_class": "WORD_HE",
+        "is_noise": false,
+        "noise_reason": null
+      },
+      "notes": "Classifier does not apply min-length noise rule to single Hebrew chars by default"
+    },
+    {
+      "case_id": "C08_08",
+      "description": "Hebrew word with leading/trailing punctuation — noise",
+      "input": "..ילד..",
+      "expected": {
+        "is_noise": true,
+        "noise_reason": "NOISE_LEADING_TRAILING_PUNCT_HEAVY"
+      }
+    },
+    {
+      "case_id": "C08_09",
+      "description": "Normal multi-char Hebrew word — valid",
+      "input": "ירושלים",
+      "expected": {
+        "entity_class": "WORD_HE",
+        "is_noise": false,
+        "noise_reason": null
+      }
+    },
+    {
+      "case_id": "C08_10",
+      "description": "Quantity unit (number + word) — noise",
+      "input": "3 שנים",
+      "expected": {
+        "entity_class": "QUANTITY_UNIT",
+        "is_noise": true
+      }
+    }
+  ],
+  "classify_phrase_cases": [
+    {
+      "case_id": "C08_P01",
+      "description": "All-Hebrew phrase — not noise",
+      "input": "בית ספר",
+      "expected": {
+        "is_noise": false
+      }
+    },
+    {
+      "case_id": "C08_P02",
+      "description": "Phrase where majority tokens are noise — phrase is noise",
+      "input": "... 123 ©",
+      "expected": {
+        "is_noise": true
+      },
+      "notes": "3 tokens, all noise → ≥50% noise → phrase is noise"
+    },
+    {
+      "case_id": "C08_P03",
+      "description": "Mixed phrase — 1 noise token out of 3 — not necessarily noise",
+      "input": "ילד 5 גדול",
+      "expected": {
+        "is_noise": false
+      },
+      "notes": "1/3 tokens are noise (the number 5) — less than 50% → phrase not noise"
+    },
+    {
+      "case_id": "C08_P04",
+      "description": "Pure punctuation phrase — noise",
+      "input": "- / .",
+      "expected": {
+        "is_noise": true
+      }
+    }
+  ],
+  "noise_profiles": {
+    "conservative": {
+      "description": "Only obvious structural noise: PUNCT, SYMBOL, single-char, math",
+      "noise_classes": ["PUNCT", "SYMBOL", "MATH_EXPR"],
+      "noise_reasons": ["NOISE_PUNCT_ONLY", "NOISE_SYMBOL_ONLY", "NOISE_MATH_EXPR", "NOISE_TOO_SHORT"]
+    },
+    "balanced": {
+      "description": "Standard product profile — all auto-classified noise reasons",
+      "noise_classes": ["PUNCT", "SYMBOL", "NUMBER", "QUANTITY_UNIT", "MATH_EXPR", "MIXED_ALPHA_NUM", "OTHER"],
+      "noise_reasons": "all"
+    },
+    "aggressive": {
+      "description": "Maximum cleanup — also marks very short words and high-ratio non-letter",
+      "additional_rules": ["len<=2 for WORD_HE", "non_letter_ratio > 0.4"]
+    }
+  }
+}

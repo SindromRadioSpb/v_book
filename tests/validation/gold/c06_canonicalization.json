@@ -1,0 +1,111 @@
+{
+  "corpus_id": "C06",
+  "description": "Hebrew term canonicalization gold standard. Tests canonicalize_hebrew_term() and choose_representative_term().",
+  "notes": "Pipeline: strip_nikud → strip_cantillation → normalize_quotes → normalize_whitespace → filter standalone single-char Hebrew prefix tokens → strip_prefixes per token (need 3+ chars remaining) → join with _ → lowercase → strip non-Hebrew/number/Latin chars.",
+  "canonicalize_cases": [
+    {
+      "case_id": "C06_01",
+      "description": "Bare form — no prefixes, no nikud",
+      "surface_text": "בית ספר",
+      "lemma_phrase": "בית ספר",
+      "expected_canonical": "בית_ספר"
+    },
+    {
+      "case_id": "C06_02",
+      "description": "With definite article ה on second word",
+      "surface_text": "בית הספר",
+      "lemma_phrase": "בית ספר",
+      "expected_canonical": "בית_ספר"
+    },
+    {
+      "case_id": "C06_03",
+      "description": "With prefix ב on first word (בבית → בית after stripping)",
+      "surface_text": "בבית ספר",
+      "lemma_phrase": "בית ספר",
+      "expected_canonical": "בית_ספר"
+    },
+    {
+      "case_id": "C06_04",
+      "description": "With prefix ל on first word",
+      "surface_text": "לבית ספר",
+      "lemma_phrase": "בית ספר",
+      "expected_canonical": "בית_ספר"
+    },
+    {
+      "case_id": "C06_05",
+      "description": "Single-char standalone prefix token is filtered",
+      "surface_text": "ו ילד גדול",
+      "lemma_phrase": "ו ילד גדול",
+      "expected_canonical": "ילד_גדול"
+    },
+    {
+      "case_id": "C06_06",
+      "description": "Nikud stripped; then prefix מ stripped from מדינה (≥3 chars remain)",
+      "surface_text": "מְדִינָה",
+      "lemma_phrase": "מדינה",
+      "expected_canonical": "דינה",
+      "notes": "After nikud removal: מדינה. Prefix מ is stripped (מ→ removes, leaving דינה ≥3 chars). Known limitation: word-meaning not considered."
+    },
+    {
+      "case_id": "C06_07",
+      "description": "Hebrew gershayim normalized to ASCII quote; quote stripped; ר retained",
+      "surface_text": "ד״ר לוי",
+      "lemma_phrase": "ד״ר לוי",
+      "expected_canonical": "דר_לוי",
+      "notes": "Gershayim ״ → ASCII \"; the \" is stripped, leaving 'דר' for first token"
+    },
+    {
+      "case_id": "C06_08",
+      "description": "Proper noun pair — no prefix stripping on PROPN",
+      "surface_text": "תל אביב",
+      "lemma_phrase": "תל אביב",
+      "expected_canonical": "תל_אביב"
+    },
+    {
+      "case_id": "C06_09",
+      "description": "Short word (2 chars) — prefix NOT stripped (would leave <3 chars)",
+      "surface_text": "בו",
+      "lemma_phrase": "בו",
+      "expected_canonical": "בו"
+    }
+  ],
+  "representative_term_cases": [
+    {
+      "case_id": "C06_R01",
+      "description": "Prefer term without standalone function tokens",
+      "candidates": [
+        {"surface_text": "ו בית ספר", "freq_abs": 10, "lemma_phrase": "בית ספר"},
+        {"surface_text": "בית ספר", "freq_abs": 8, "lemma_phrase": "בית ספר"}
+      ],
+      "expected_representative": "בית ספר",
+      "notes": "First candidate has standalone 'ו' prefix; second is cleaner and preferred"
+    },
+    {
+      "case_id": "C06_R02",
+      "description": "Same cleanliness — prefer highest freq",
+      "candidates": [
+        {"surface_text": "בית ספר", "freq_abs": 5, "lemma_phrase": "בית ספר"},
+        {"surface_text": "בית ספרים", "freq_abs": 12, "lemma_phrase": "בית ספר"}
+      ],
+      "expected_representative": "בית ספרים"
+    },
+    {
+      "case_id": "C06_R03",
+      "description": "Same freq — prefer shortest surface form",
+      "candidates": [
+        {"surface_text": "בית ספר גדול", "freq_abs": 5, "lemma_phrase": "בית ספר גדול"},
+        {"surface_text": "בית ספר", "freq_abs": 5, "lemma_phrase": "בית ספר"}
+      ],
+      "expected_representative": "בית ספר"
+    },
+    {
+      "case_id": "C06_R04",
+      "description": "Same freq, same length — prefer alphabetically first",
+      "candidates": [
+        {"surface_text": "גן ילדים", "freq_abs": 3, "lemma_phrase": "גן ילדים"},
+        {"surface_text": "אם ילדים", "freq_abs": 3, "lemma_phrase": "אם ילדים"}
+      ],
+      "expected_representative": "אם ילדים"
+    }
+  ]
+}
