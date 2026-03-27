@@ -172,3 +172,44 @@ def test_process_document_records_configured_vs_effective_runtime_note(monkeypat
     finally:
         _reset_db_service()
         db_path.unlink(missing_ok=True)
+
+
+def test_resolve_nlp_runtime_converts_live_engine_init_failure_to_runtime_block(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.process_service.DBService.get_instance", lambda: SimpleNamespace()
+    )
+    service = ProcessService()
+    stanza_status = NlpRuntimeStatus(
+        configured_engine_id="stanza",
+        effective_engine_id="stanza",
+        package_installed=True,
+        model_present=True,
+        pipeline_init_ok=True,
+        smoke_ok=True,
+        cuda_available=False,
+        runtime_mode="cpu",
+        fallback_used=False,
+        error_code=None,
+        error_detail=None,
+        remediation="Inspect runtime",
+        engine_version="1.11.1",
+        model_id="he/tokenize,pos,lemma",
+        model_path="C:/fake/he",
+    )
+    monkeypatch.setattr(service.runtime_probe, "probe_stanza", lambda **kwargs: stanza_status)
+    monkeypatch.setattr(
+        service,
+        "get_nlp_engine",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("WinError 1114")),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="live engine initialization failed in the current process",
+    ):
+        service._resolve_nlp_runtime(
+            use_gpu=False,
+            use_mock=False,
+            configured_engine_id="stanza",
+            allow_mock_fallback=False,
+        )

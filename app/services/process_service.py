@@ -231,7 +231,30 @@ class ProcessService:
         if not use_mock:
             if not stanza_status.stanza_ready:
                 raise RuntimeError(self._format_runtime_block_message(stanza_status))
-            return self.get_nlp_engine(use_gpu=use_gpu, use_mock=False), stanza_status
+            try:
+                return self.get_nlp_engine(use_gpu=use_gpu, use_mock=False), stanza_status
+            except Exception as exc:
+                failure_code = (
+                    "hostile_torch_state" if isinstance(exc, OSError) else "runtime_import_failed"
+                )
+                failure_status = NlpRuntimeStatus(
+                    configured_engine_id="stanza",
+                    effective_engine_id=None,
+                    package_installed=True,
+                    model_present=stanza_status.model_present,
+                    pipeline_init_ok=False,
+                    smoke_ok=False,
+                    cuda_available=stanza_status.cuda_available,
+                    runtime_mode=stanza_status.runtime_mode,
+                    fallback_used=False,
+                    error_code=failure_code,
+                    error_detail=str(exc),
+                    remediation=stanza_status.remediation,
+                    engine_version=stanza_status.engine_version,
+                    model_id=stanza_status.model_id,
+                    model_path=stanza_status.model_path,
+                )
+                raise RuntimeError(self._format_runtime_block_message(failure_status)) from exc
 
         if not allow_mock_fallback:
             raise RuntimeError("Explicit mock fallback is disabled for this processing request.")
@@ -279,6 +302,12 @@ class ProcessService:
             return (
                 "Stanza initialized but failed the smoke test.\n\n"
                 "Inspect the runtime environment or explicitly confirm Mock fallback."
+                f"{suffix}"
+            )
+        if status.error_code in {"hostile_torch_state", "runtime_import_failed"}:
+            return (
+                "Stanza probe reported ready, but live engine initialization failed in the current process.\n\n"
+                "Fix the local Torch/Stanza runtime or explicitly confirm Mock fallback."
                 f"{suffix}"
             )
         return (

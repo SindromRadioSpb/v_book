@@ -153,6 +153,19 @@
   - `.\.venv\Scripts\python.exe -m pytest tests/test_nlp_runtime_probe.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py -q` -> `17 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `39 passed`
 
+## Step 9 — Live Engine Init Divergence Fix
+- Status: completed
+- Trigger:
+  - probe reported Stanza ready, but live in-process `create_stanza_engine()` could still fail with `WinError 1114` during `torch` DLL initialization.
+- Code deliverables:
+  - `app/services/process_service.py`
+  - `tests/test_process_service_nlp_runtime.py`
+- Confirmed behavior changes:
+  - live engine-init failures are now converted into the same runtime-block contract instead of surfacing as a raw traceback from `create_stanza_engine()`
+  - the runtime-block message now explicitly distinguishes subprocess-probe success from live process initialization failure
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `40 passed`
+
 ## Next Step
 - Wave 4 candidate:
   - consider promoting structured runtime provenance from nested note payloads into dedicated schema fields once the contract proves stable

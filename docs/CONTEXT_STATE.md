@@ -59,3 +59,7 @@
 - `RuntimeProbe` now exposes a shared guided repair plan derived from the machine-readable error taxonomy.
 - Documents tooltips, Health Check remediation, and Resources Manager repair guidance now point to the same next-step route.
 - The guided route distinguishes runtime repair from managed Hebrew resource repair without introducing fake in-place package installation.
+
+## Confirmed Current State After Live Engine Init Divergence Fix
+- `ProcessService` now treats probe/runtime divergence as a managed runtime-block condition.
+- A live `create_stanza_engine()` failure no longer escapes as a raw traceback from the worker path when the subprocess probe had previously reported ready.

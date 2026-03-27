@@ -23,6 +23,7 @@
 - Documents and Health Check now use the same runtime/resource vocabulary.
 - `ProcessorRun.note` now includes a stable nested `runtime` provenance envelope alongside legacy flat keys.
 - Guided repair routing is now shared across Documents, Health Check, and Resources Manager.
+- Live engine-init failures after a successful subprocess probe now collapse into the managed runtime-block path instead of surfacing as raw worker tracebacks.
 
 ## In Progress
 - No active implementation in this patch series.
