@@ -177,11 +177,12 @@
 - Confirmed behavior changes:
   - controlled runtime-block errors are no longer collapsed into a generic `"NLP engine error"` string inside `ProcessWorker`
   - controlled runtime-block errors are logged as warnings instead of full worker tracebacks
-  - `DocumentsView` now offers an explicit Mock fallback retry when a live Stanza init failure occurs after the worker has already started
-  - the retry reuses the same document selection, forces CPU Mock mode, and keeps the fallback explicit
+  - `DocumentsView` now offers a guided recovery router when a live Stanza init failure occurs after the worker has already started
+  - the recovery router offers `Use Mock Once`, `Open NLP Setup`, `Run Health Check`, and `Cancel`
+  - the explicit Mock retry reuses the same document selection, forces CPU Mock mode, and keeps the fallback explicit
 - Test evidence:
-  - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_process_progress_ui.py tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `28 passed`
-  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `42 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_process_progress_ui.py tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `30 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `44 passed`
 
 ## Next Step
 - Wave 4 candidate:

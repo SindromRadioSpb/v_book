@@ -1682,7 +1682,7 @@ class DocumentsView(QWidget):
         self._cleanup_process_worker()
 
     def _handle_runtime_block_retry(self, error_msg: str, operation_label: str) -> bool:
-        """Offer explicit Mock fallback when Stanza fails after a ready probe."""
+        """Offer guided recovery when Stanza fails after a ready probe."""
         worker = self.process_worker
         if worker is None:
             return False
@@ -1693,43 +1693,72 @@ class DocumentsView(QWidget):
         if "explicitly confirm mock fallback" not in error_lower:
             return False
 
-        detail_lines = [
-            f"{operation_label} could not start with the configured Stanza runtime.",
-            "",
-            "You can:",
-            "1. Fix the runtime in Tools > Run Health Check or Tools > Resources Manager",
-            "2. Continue once with explicit Mock fallback for diagnostic/demo use",
-            "",
-            "Mock fallback degrades persisted NLP quality.",
-            "",
-            "Continue with Mock fallback now?",
-        ]
-        reply = QMessageBox.warning(
-            self,
-            f"{operation_label} Runtime Blocked",
-            "\n".join(detail_lines),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return False
-
         doc_ids = list(worker.doc_ids)
         configured_engine_id = str(worker.configured_engine_id or "stanza")
         is_reprocess = bool(worker.is_reprocess)
+        action = self._present_runtime_block_recovery_dialog(error_msg, operation_label)
 
-        self._cleanup_process_worker()
-        self.status_label.setText(
-            f"Retrying {operation_label.lower()} with explicit Mock fallback..."
+        if action == "mock":
+            self._cleanup_process_worker()
+            self.status_label.setText(
+                f"Retrying {operation_label.lower()} with explicit Mock fallback..."
+            )
+            self._start_process_worker(
+                doc_ids,
+                use_mock=True,
+                use_gpu=False,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=True,
+                is_reprocess=is_reprocess,
+            )
+            return True
+        if action == "setup":
+            self._cleanup_process_worker()
+            self.status_label.setText(f"{operation_label} blocked by NLP runtime setup issue")
+            self.on_open_nlp_setup()
+            return True
+        if action == "health":
+            self._cleanup_process_worker()
+            self.status_label.setText(f"{operation_label} blocked by NLP runtime health issue")
+            self.on_diagnose_nlp()
+            return True
+        if action == "cancel":
+            self._cleanup_process_worker()
+            self.status_label.setText(f"{operation_label} cancelled")
+            return True
+        return False
+
+    def _present_runtime_block_recovery_dialog(self, error_msg: str, operation_label: str) -> str:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(f"{operation_label} Runtime Blocked")
+        dialog.setText(f"{operation_label} could not start with the configured Stanza runtime.")
+        dialog.setInformativeText(
+            "Choose a recovery path:\n"
+            "- Use Mock Once: continue in diagnostic/demo mode\n"
+            "- Open NLP Setup: inspect runtime and managed Hebrew resources\n"
+            "- Run Health Check: diagnose the external runtime dependency\n\n"
+            "Mock fallback degrades persisted NLP quality."
         )
-        self._start_process_worker(
-            doc_ids,
-            use_mock=True,
-            use_gpu=False,
-            configured_engine_id=configured_engine_id,
-            allow_mock_fallback=True,
-            is_reprocess=is_reprocess,
-        )
-        return True
+        dialog.setDetailedText(str(error_msg or "").strip())
+
+        mock_btn = dialog.addButton("Use Mock Once", QMessageBox.ButtonRole.AcceptRole)
+        setup_btn = dialog.addButton("Open NLP Setup", QMessageBox.ButtonRole.ActionRole)
+        health_btn = dialog.addButton("Run Health Check", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(mock_btn)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is mock_btn:
+            return "mock"
+        if clicked is setup_btn:
+            return "setup"
+        if clicked is health_btn:
+            return "health"
+        if clicked is cancel_btn:
+            return "cancel"
+        return "cancel"
 
     def _cleanup_process_worker(self) -> None:
         self._set_process_ui_busy(False)

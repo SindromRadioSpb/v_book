@@ -316,8 +316,6 @@ def test_documents_stop_process_worker_uses_cancel_only():
 
 
 def test_documents_process_error_offers_explicit_mock_retry(monkeypatch):
-    from PyQt6.QtWidgets import QMessageBox
-
     view = DocumentsView.__new__(DocumentsView)
     view.progress_bar = _FakeProgressBar()
     view.status_label = _FakeLabel()
@@ -340,10 +338,7 @@ def test_documents_process_error_offers_explicit_mock_retry(monkeypatch):
     start_calls = []
     error_calls = []
 
-    monkeypatch.setattr(
-        "app.ui.documents_view.QMessageBox.warning",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
+    monkeypatch.setattr(view, "_present_runtime_block_recovery_dialog", lambda *args: "mock")
     monkeypatch.setattr("app.ui.documents_view.show_error", lambda *args: error_calls.append(args))
     original_cleanup = DocumentsView._cleanup_process_worker.__get__(view, DocumentsView)
     view._cleanup_process_worker = original_cleanup
@@ -365,6 +360,80 @@ def test_documents_process_error_offers_explicit_mock_retry(monkeypatch):
     assert start_calls[0][1]["use_gpu"] is False
     assert start_calls[0][1]["allow_mock_fallback"] is True
     assert start_calls[0][1]["is_reprocess"] is True
+
+
+def test_documents_process_error_routes_to_nlp_setup(monkeypatch):
+    view = DocumentsView.__new__(DocumentsView)
+    view.progress_bar = _FakeProgressBar()
+    view.status_label = _FakeLabel()
+    view.process_progress_dialog = _FakeDialog(operation_label="Processing")
+    view.process_worker = _FakeWorker(
+        running=False,
+        doc_ids=[33],
+        use_mock=False,
+        use_gpu=False,
+        configured_engine_id="stanza",
+        allow_mock_fallback=False,
+        is_reprocess=False,
+    )
+    view._process_worker_active = True
+    view.process_btn = _FakeToggle()
+    view.reprocess_btn = _FakeToggle()
+    view.delete_btn = _FakeToggle()
+    view.on_selection_changed = lambda: None
+
+    events = []
+    monkeypatch.setattr(view, "_present_runtime_block_recovery_dialog", lambda *args: "setup")
+    monkeypatch.setattr("app.ui.documents_view.show_error", lambda *args: events.append(("error", args)))
+    view.on_open_nlp_setup = lambda: events.append(("setup", None))
+
+    DocumentsView.on_process_error(
+        view,
+        "Stanza probe reported ready, but live engine initialization failed in the current process.\n\n"
+        "Fix the local Torch/Stanza runtime or explicitly confirm Mock fallback.",
+    )
+
+    assert view.process_worker is None
+    assert view.process_progress_dialog is None
+    assert view.status_label.text == "Processing blocked by NLP runtime setup issue"
+    assert events == [("setup", None)]
+
+
+def test_documents_process_error_routes_to_health_check(monkeypatch):
+    view = DocumentsView.__new__(DocumentsView)
+    view.progress_bar = _FakeProgressBar()
+    view.status_label = _FakeLabel()
+    view.process_progress_dialog = _FakeDialog(operation_label="Processing")
+    view.process_worker = _FakeWorker(
+        running=False,
+        doc_ids=[33],
+        use_mock=False,
+        use_gpu=False,
+        configured_engine_id="stanza",
+        allow_mock_fallback=False,
+        is_reprocess=False,
+    )
+    view._process_worker_active = True
+    view.process_btn = _FakeToggle()
+    view.reprocess_btn = _FakeToggle()
+    view.delete_btn = _FakeToggle()
+    view.on_selection_changed = lambda: None
+
+    events = []
+    monkeypatch.setattr(view, "_present_runtime_block_recovery_dialog", lambda *args: "health")
+    monkeypatch.setattr("app.ui.documents_view.show_error", lambda *args: events.append(("error", args)))
+    view.on_diagnose_nlp = lambda: events.append(("health", None))
+
+    DocumentsView.on_process_error(
+        view,
+        "Stanza probe reported ready, but live engine initialization failed in the current process.\n\n"
+        "Fix the local Torch/Stanza runtime or explicitly confirm Mock fallback.",
+    )
+
+    assert view.process_worker is None
+    assert view.process_progress_dialog is None
+    assert view.status_label.text == "Processing blocked by NLP runtime health issue"
+    assert events == [("health", None)]
 
 
 def test_process_worker_preserves_controlled_runtime_block_message():

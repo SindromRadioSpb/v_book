@@ -67,4 +67,5 @@
 ## Confirmed Current State After Documents Retry Flow Fix
 - `ProcessWorker` now preserves controlled runtime-block messages instead of collapsing them into a generic Stanza error.
 - Controlled runtime-block failures are logged as warnings rather than full worker tracebacks.
-- `DocumentsView` can now convert a late live-init Stanza failure into an explicit Mock fallback retry prompt without forcing the user to restart the action manually.
+- `DocumentsView` can now convert a late live-init Stanza failure into a guided recovery dialog without forcing the user to restart the action manually.
+- The guided recovery dialog routes the user to `Use Mock Once`, `Open NLP Setup`, `Run Health Check`, or `Cancel`.
