@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- PATCH-03 official setup / repair flow completed
+- PATCH-04 release-grade smoke validation completed
 
 ## Completed
 - Audit completed and recorded.
@@ -33,6 +33,10 @@
 - The isolated runtime probe now uses the sibling `app.main --stanza-probe` path, so diagnostics and production processing share the same ownership model.
 - Resources Manager now exposes an official `Install / Repair NLP Runtime` action for the managed runtime path.
 - Documents and Health Check now point to that same official `Install / Repair NLP Runtime` action, so the repair route is shared across the primary UI surfaces.
+- Managed runtime bootstrap now rejects partial Hebrew payloads and repairs them from a valid bundled/legacy source instead of reusing a broken copy.
+- The app-owned probe/worker runtime now prepares Torch/CUDA DLL search paths before importing `stanza/torch`, eliminating the observed `WinError 1114` blocker in the managed subprocess path.
+- `scripts/release_smoke_nlp_runtime.py` now provides the release smoke gate for hostile in-process Qt launch, managed subprocess startup, Hebrew sample processing, and DB-copy `Re-process`.
+- Release smoke has confirmed a real `Re-process` success on a copied DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -41,9 +45,9 @@
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
-- The runtime recovery path is thread-safe now, but it is still diagnosis/setup/fallback orchestration only; it does not yet establish a product-owned managed Stanza runtime/bootstrap path.
 - The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
-- Release-grade smoke artifacts and handoff still need one final sync pass around the new app-owned runtime path.
 
 ## Next Step
-- PATCH-04: add release-grade smoke validation, final docs sync, and short handoff for the managed Windows Stanza runtime.
+- Final handoff only:
+  - preserve the managed runtime/model payload in release packaging
+  - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate

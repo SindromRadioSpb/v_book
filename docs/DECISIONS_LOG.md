@@ -134,3 +134,28 @@
   - Documents, Health Check, and Resources Manager should all route runtime repair to one official action: `Install / Repair NLP Runtime`.
 - Rationale:
   - once the product owns the managed runtime path, the user should not be left to infer which button or screen is the authoritative recovery path.
+
+## D-019 — Managed runtime bootstrap must reject partial Hebrew payloads
+- Status: accepted and implemented
+- Decision:
+  - the managed `stanza_resources/he` copy is considered valid only when `resources.json` and the required Hebrew model payload entries are present; otherwise bootstrap must repair from a valid bundled/legacy source.
+- Rationale:
+  - a partial managed copy produced a green manifest/probe path but failed real worker startup with missing `backward_charlm`, which is worse than an explicit missing-resource signal.
+
+## D-020 — Windows subprocess runtime must pre-register Torch/CUDA DLL paths
+- Status: accepted and implemented
+- Decision:
+  - before importing `stanza/torch` in the app-owned probe/worker runtime, register Torch `lib` and discovered CUDA `bin` directories via `os.add_dll_directory` and PATH prefixing.
+- Rationale:
+  - on the target Windows machine, this is the difference between a recoverable app-owned subprocess runtime and `WinError 1114` on `torch\lib\c10.dll`.
+
+## D-021 — Release gate for managed runtime is app-like smoke, not unit tests only
+- Status: accepted and implemented
+- Decision:
+  - the managed Windows Stanza runtime is not considered release-ready until it passes:
+    - hostile in-process Qt smoke,
+    - managed subprocess startup,
+    - Hebrew sample processing,
+    - DB-copy `Re-process` smoke.
+- Rationale:
+  - unit tests alone did not expose the incomplete managed payload and Windows DLL path behavior seen in the live application.

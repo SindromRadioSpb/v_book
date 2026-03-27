@@ -287,3 +287,33 @@
   - `.\.venv\Scripts\python.exe -m py_compile app\ui\documents_view.py app\ui\resources_manager_dialog.py app\services\health_check_service.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_resources_manager_dialog.py` -> `OK`
   - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_resources_manager_dialog.py -q` -> `14 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `63 passed`
+
+## Step 15 — PATCH-04 Release-grade Smoke Validation
+- Status: completed
+- Trigger:
+  - the managed runtime path existed, but we still needed release-grade proof that Windows hostile in-process `torch/stanza` state does not block real Stanza processing and does not regress into incomplete managed resource payloads.
+- Code deliverables:
+  - `app/services/nlp_runtime/managed_runtime.py`
+  - `app/infra/nlp_engines/stanza_engine.py`
+  - `app/services/nlp_runtime/stanza_probe_worker.py`
+  - `scripts/release_smoke_nlp_runtime.py`
+  - `tests/test_managed_stanza_runtime.py`
+  - `tests/test_stanza_engine_subprocess.py`
+- Confirmed behavior changes:
+  - managed runtime bootstrap now treats the local managed copy as valid only when the full Hebrew Stanza payload is present (`resources.json` + required model entries), so an incomplete copy is repaired from a valid bundled/legacy source instead of being reused
+  - Windows runtime preparation now registers Torch/CUDA DLL directories before importing `stanza/torch`, allowing the app-owned probe/worker subprocess to initialize successfully even when the live Qt process remains hostile
+  - release smoke now covers both:
+    - hostile in-process runtime -> managed subprocess success path
+    - real `reprocess_document()` on a copied DB with `runtime_effective='stanza'`
+  - the smoke script is now UTF-8 safe and selects the newly created `ProcessorRun` deterministically instead of assuming the table contains only one row
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\nlp_runtime\managed_runtime.py app\infra\nlp_engines\stanza_engine.py app\services\nlp_runtime\stanza_probe_worker.py scripts\release_smoke_nlp_runtime.py tests\test_managed_stanza_runtime.py tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py -q` -> `15 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `66 passed`
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --force-hostile-inprocess` -> managed subprocess `stanza` processed Hebrew sample successfully after forced in-process failure
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --db-path "E:\projects\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --copy-db-to "E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_runtime_smoke_copy.db" --doc-id 1` -> `ok=True`, `document_status='processed'`, `run_engine='stanza'`, `run_status='ok'`, `runtime_effective='stanza'`
+
+## Next Step
+- Final handoff only:
+  - preserve the managed runtime/model payload in release packaging
+  - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 
+from app.infra.nlp_engines.stanza_engine import prepare_torch_runtime_paths
 from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
 
 
@@ -19,6 +20,7 @@ def main() -> int:
     bootstrap = runtime.bootstrap_runtime(force_repair=False)
     mode = os.getenv("HDLE_STANZA_PROBE_MODE", "cpu").strip().lower() or "cpu"
     smoke = os.getenv("HDLE_STANZA_PROBE_SMOKE", "0") == "1"
+    prepare_torch_runtime_paths()
 
     payload: dict[str, object] = {
         "package_installed": False,

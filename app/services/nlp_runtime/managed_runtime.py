@@ -6,13 +6,13 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.infra.resource_paths import ResourcePaths
-from app.infra.settings import SettingsService
 
 
 def _utc_now_iso() -> str:
@@ -55,18 +55,35 @@ class ManagedStanzaRuntime:
     """Application-owned runtime/bootstrap contract for Stanza subprocess paths."""
 
     SETTINGS_KEY_MANAGED_RUNTIME_ROOT = "nlp_runtime/managed_root"
+    _REQUIRED_MODEL_ENTRIES = (
+        "backward_charlm",
+        "forward_charlm",
+        "lemma",
+        "mwt",
+        "pos",
+        "pretrain",
+        "tokenize",
+        "default.zip",
+    )
 
-    def __init__(self, *, settings: SettingsService | None = None):
-        self.settings = settings or SettingsService.get_instance()
+    def __init__(self, *, settings: Any | None = None):
+        self.settings = settings
 
     def runtime_root(self) -> Path:
-        explicit = (self.settings.get_string(self.SETTINGS_KEY_MANAGED_RUNTIME_ROOT, "") or "").strip()
+        explicit = ""
+        if self.settings is not None and hasattr(self.settings, "get_string"):
+            explicit = str(self.settings.get_string(self.SETTINGS_KEY_MANAGED_RUNTIME_ROOT, "") or "").strip()
         if explicit:
-            root = Path(explicit).expanduser()
+            preferred = Path(explicit).expanduser()
         else:
-            root = ResourcePaths.build(settings=self.settings, create=True).data_root / "nlp_runtime"
-        root.mkdir(parents=True, exist_ok=True)
-        return root
+            preferred = ResourcePaths.build(settings=self.settings, create=True).data_root / "nlp_runtime"
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            return preferred
+        except OSError:
+            fallback = Path(tempfile.gettempdir()) / "HDLE" / "nlp_runtime"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
 
     def resources_root(self) -> Path:
         root = self.runtime_root() / "stanza_resources"
@@ -104,6 +121,8 @@ class ManagedStanzaRuntime:
         env["HDLE_STANZA_PROBE_MODE"] = "gpu" if use_gpu else "cpu"
         env["HDLE_STANZA_PROBE_SMOKE"] = "1" if run_smoke else "0"
         env["STANZA_RESOURCES_DIR"] = str(self.resources_root())
+        data_root = str(self.runtime_root().parent)
+        env[ResourcePaths.ENV_KEY_DATA_ROOT] = data_root
         return env
 
     def bootstrap_runtime(self, *, force_repair: bool = False) -> ManagedRuntimeBootstrapResult:
@@ -114,20 +133,25 @@ class ManagedStanzaRuntime:
 
         source_kind = "missing"
         source_path: str | None = None
+        runtime_ready = self._managed_runtime_ready(resources_root, model_path)
 
-        if model_path.exists() and self._dir_has_contents(model_path) and not force_repair:
+        if runtime_ready and not force_repair:
             source_kind = "managed_existing"
         else:
-            if model_path.exists() and force_repair:
+            resources_json = resources_root / "resources.json"
+            if model_path.exists() and (force_repair or not runtime_ready):
                 shutil.rmtree(model_path, ignore_errors=True)
+            if resources_json.exists() and (force_repair or not runtime_ready):
+                resources_json.unlink(missing_ok=True)
 
-            source = self._resolve_bootstrap_source()
+            source = self._resolve_bootstrap_source(include_managed=False)
             if source is not None:
                 source_kind, source_dir = source
                 source_path = str(source_dir)
-                self._copy_model_tree(source_dir, model_path)
+                self._copy_resources_payload(source_dir, resources_root)
 
-        model_present = model_path.exists() and self._dir_has_contents(model_path)
+        resources_json = resources_root / "resources.json"
+        model_present = self._managed_runtime_ready(resources_root, model_path)
         message = (
             "Managed Stanza runtime is ready."
             if model_present
@@ -142,6 +166,7 @@ class ManagedStanzaRuntime:
             "resources_root": str(resources_root),
             "model_path": str(model_path),
             "model_present": bool(model_present),
+            "resources_json_present": bool(resources_json.exists()),
             "model_source_kind": source_kind,
             "model_source_path": source_path,
             "runtime_command": self.build_worker_command(),
@@ -176,7 +201,7 @@ class ManagedStanzaRuntime:
 
     def detect_best_model_path(self) -> str | None:
         managed = self.model_path()
-        if managed.exists() and self._dir_has_contents(managed):
+        if self._managed_runtime_ready(self.resources_root(), managed):
             return str(managed)
 
         source = self._resolve_bootstrap_source(include_managed=False)
@@ -189,7 +214,7 @@ class ManagedStanzaRuntime:
 
         if include_managed:
             managed = self.model_path()
-            if managed.exists() and self._dir_has_contents(managed):
+            if self._managed_runtime_ready(self.resources_root(), managed):
                 candidates.append(("managed_existing", managed))
 
         for candidate in self._bundled_model_candidates():
@@ -230,14 +255,28 @@ class ManagedStanzaRuntime:
         return candidates
 
     @staticmethod
-    def _copy_model_tree(source_dir: Path, target_dir: Path) -> None:
-        target_dir.parent.mkdir(parents=True, exist_ok=True)
-        if target_dir.exists():
-            shutil.rmtree(target_dir, ignore_errors=True)
-        shutil.copytree(source_dir, target_dir)
+    def _copy_resources_payload(source_dir: Path, target_resources_root: Path) -> None:
+        target_resources_root.mkdir(parents=True, exist_ok=True)
+        target_model_dir = target_resources_root / "he"
+        if target_model_dir.exists():
+            shutil.rmtree(target_model_dir, ignore_errors=True)
+        shutil.copytree(source_dir, target_model_dir)
+
+        source_root = source_dir if source_dir.name != "he" else source_dir.parent
+        resources_json = source_root / "resources.json"
+        if resources_json.exists():
+            shutil.copy2(resources_json, target_resources_root / "resources.json")
 
     @staticmethod
     def _dir_has_contents(path: Path) -> bool:
         if not path.exists() or not path.is_dir():
             return False
         return any(path.iterdir())
+
+    def _managed_runtime_ready(self, resources_root: Path, model_path: Path) -> bool:
+        resources_json = resources_root / "resources.json"
+        if not resources_json.exists():
+            return False
+        if not self._dir_has_contents(model_path):
+            return False
+        return all((model_path / entry).exists() for entry in self._REQUIRED_MODEL_ENTRIES)

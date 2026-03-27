@@ -171,3 +171,14 @@ def test_subprocess_stanza_engine_requires_managed_model(monkeypatch):
 
     with pytest.raises(RuntimeError, match="missing the Hebrew model resources"):
         SubprocessStanzaEngine(use_gpu=False)
+
+
+def test_windows_create_stanza_engine_ignores_forced_inprocess_failure(monkeypatch):
+    subprocess_engine = object()
+    monkeypatch.setenv("HDLE_FORCE_STANZA_INPROCESS_FAILURE", "1")
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.SubprocessStanzaEngine",
+        lambda use_gpu=False: subprocess_engine,
+    )
+
+    assert create_stanza_engine(use_gpu=False) is subprocess_engine

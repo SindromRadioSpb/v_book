@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import logging
 import os
 import subprocess
@@ -13,6 +14,60 @@ from app.infra.nlp_engines.base import NLPEngine, Sentence, Token
 from app.services.nlp_runtime import ManagedStanzaRuntime
 
 logger = logging.getLogger(__name__)
+_TORCH_DLL_HANDLES: list[object] = []
+_TORCH_DLL_KEYS: set[str] = set()
+
+
+def _register_dll_directory(path: Path) -> None:
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+    try:
+        resolved = str(path.resolve())
+    except Exception:
+        resolved = str(path)
+    key = resolved.lower()
+    if key in _TORCH_DLL_KEYS or not Path(resolved).exists():
+        return
+    try:
+        handle = os.add_dll_directory(resolved)
+    except Exception:
+        return
+    _TORCH_DLL_HANDLES.append(handle)
+    _TORCH_DLL_KEYS.add(key)
+
+
+def prepare_torch_runtime_paths() -> None:
+    """Prepare Windows DLL search paths for Torch before importing stanza/torch."""
+    if os.name != "nt":
+        return
+
+    candidates: list[Path] = []
+    spec = importlib.util.find_spec("torch")
+    origin = getattr(spec, "origin", None)
+    if origin:
+        candidates.append(Path(origin).resolve().parent / "lib")
+
+    for key, value in os.environ.items():
+        if key.upper().startswith("CUDA_PATH") and value:
+            candidates.append(Path(value) / "bin")
+
+    existing_path = os.environ.get("PATH", "")
+    normalized_path = existing_path.lower()
+    prefix_parts: list[str] = []
+    for candidate in candidates:
+        try:
+            resolved = str(candidate.resolve())
+        except Exception:
+            resolved = str(candidate)
+        if not Path(resolved).exists():
+            continue
+        _register_dll_directory(Path(resolved))
+        if resolved.lower() not in normalized_path and resolved not in prefix_parts:
+            prefix_parts.append(resolved)
+    if prefix_parts:
+        os.environ["PATH"] = (
+            ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
+        )
 
 
 class StanzaEngine(NLPEngine):
@@ -39,6 +94,11 @@ class StanzaEngine(NLPEngine):
             RuntimeError: If Hebrew model is not downloaded
         """
         logger.info("Initializing StanzaEngine...")
+
+        if os.getenv("HDLE_FORCE_STANZA_INPROCESS_FAILURE", "").strip() == "1":
+            raise OSError("Forced hostile in-process Stanza failure for smoke/testing.")
+
+        prepare_torch_runtime_paths()
 
         try:
             import stanza

@@ -93,3 +93,13 @@
 - `Install / Repair NLP Runtime` is now the explicit product-owned recovery action surfaced by Resources Manager.
 - Documents runtime tooltips and runtime-block dialogs now point to the same official setup action instead of only generic setup wording.
 - Health Check remediation now references the same official setup action, so the guided route is consistent across the three primary surfaces.
+
+## Confirmed Current State After PATCH-04 Release-grade Smoke Validation
+- `ManagedStanzaRuntime` now rejects partial managed Hebrew payloads and repairs them from a valid bundled/legacy source instead of reusing a broken local copy.
+- The app-owned probe/worker runtime now prepares Torch/CUDA DLL search paths before importing `stanza/torch`, which allows the managed subprocess runtime to initialize successfully on the target Windows machine.
+- `scripts/release_smoke_nlp_runtime.py` now provides the release smoke contract for this subsystem:
+  - hostile in-process Qt launch with forced Stanza failure
+  - managed subprocess startup
+  - Hebrew sample processing
+  - DB-copy `Re-process` with `runtime_effective='stanza'`
+- Release smoke has now confirmed a real `Re-process` success on a copied DB while the effective runtime remained `stanza`.
