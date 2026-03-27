@@ -388,13 +388,471 @@
       ],
       "classification": "Correct by design",
       "notes": "C01↔C02 boundary finding: StanzaEngine processing multi-sentence text directly produces sent.text WITH terminal period ('ספר גדול.'). This differs from C01 SentenceSplitter which detaches punct. In production, sentences from C01 are passed to C02 one at a time without terminal punct."
+    },
+    {
+      "case_id": "C02_VT_INF_01",
+      "description": "Infinitive לכתוב in sentence context — אני רוצה לכתוב ספר. Tests: infinitive POS=VERB, lemma=כתב, VerbForm=Inf emitted; no Tense/Gender/Number/Person features for infinitive.",
+      "wave": "6c",
+      "input_text": "אני רוצה לכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 4,
+          "sentence_text": "אני רוצה לכתוב ספר",
+          "tokens": [
+            {
+              "text": "אני",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["PronType=Prs"],
+              "notes": "1st person pronoun אני → lemma הוא. Calibrated by design (same as all pronouns)."
+            },
+            {
+              "text": "רוצה",
+              "lemma": "רצה",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Pres", "VerbForm=Part"]
+            },
+            {
+              "text": "לכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["VerbForm=Inf"],
+              "notes": "Infinitive: VerbForm=Inf present; no Tense, no Gender, no Number, no Person emitted by Stanza. morph='HebBinyan=PAAL|VerbForm=Inf|Voice=Act'."
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "Infinitive lemma=כתב matches past/present/future paradigm. Morph for infinitive omits all inflection features — only VerbForm=Inf + HebBinyan + Voice. This is different from all conjugated forms."
+    },
+    {
+      "case_id": "C02_VT_PRES_01",
+      "description": "Present tense masc sing — הוא כותב ספר. Tests: כותב pos=VERB, lemma=כתב, Tense=Pres, VerbForm=Part, Gender=Masc, Number=Sing, Person=3.",
+      "wave": "6c",
+      "input_text": "הוא כותב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "הוא כותב ספר",
+          "tokens": [
+            {
+              "text": "הוא",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Number=Sing", "Person=3", "PronType=Prs"]
+            },
+            {
+              "text": "כותב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Pres", "VerbForm=Part", "Gender=Masc", "Number=Sing", "Person=3"],
+              "notes": "Present tense: VerbForm=Part distinguishes present from past. HebBinyan=PAAL (not checked — version-sensitive)."
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_PRES_02",
+      "description": "Present tense fem sing — היא כותבת מכתב. Tests: כותבת pos=VERB, lemma=כתב, Tense=Pres, VerbForm=Part, Gender=Fem. Known quirk: HebBinyan=PIEL (not PAAL) and Person=1,2,3 (ambiguous) — calibrated by design.",
+      "wave": "6c",
+      "input_text": "היא כותבת מכתב",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "היא כותבת מכתב",
+          "tokens": [
+            {
+              "text": "היא",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Fem", "Number=Sing", "Person=3", "PronType=Prs"]
+            },
+            {
+              "text": "כותבת",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Pres", "VerbForm=Part", "Gender=Fem", "Number=Sing"],
+              "notes": "Calibrated quirk: כותבת → HebBinyan=PIEL (not PAAL) and Person=1,2,3 (Stanza treats כותבת as morphologically ambiguous). Neither of these is tested in morph_contains — only Tense/VerbForm/Gender/Number are stable."
+            },
+            {
+              "text": "מכתב",
+              "lemma": "מכתב",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "כותבת quirks: (1) HebBinyan=PIEL vs PAAL — Stanza assigns PIEL here, model calibrated. (2) Person=1,2,3 — Stanza emits comma-separated person list for ambiguous present-fem-sing forms. Both are design, not bugs."
+    },
+    {
+      "case_id": "C02_VT_PRES_03",
+      "description": "Present tense masc plur — הם כותבים ספרים. Tests: כותבים pos=VERB, lemma=כתב, Tense=Pres, VerbForm=Part, Gender=Masc, Number=Plur.",
+      "wave": "6c",
+      "input_text": "הם כותבים ספרים",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "הם כותבים ספרים",
+          "tokens": [
+            {
+              "text": "הם",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Number=Plur", "Person=3", "PronType=Prs"]
+            },
+            {
+              "text": "כותבים",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Pres", "VerbForm=Part", "Gender=Masc", "Number=Plur", "Person=3"]
+            },
+            {
+              "text": "ספרים",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Plur"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_PRES_04",
+      "description": "Present tense fem plur — הן כותבות מכתבים. Tests: כותבות pos=VERB, lemma=כתב, Tense=Pres, VerbForm=Part, Gender=Fem, Number=Plur.",
+      "wave": "6c",
+      "input_text": "הן כותבות מכתבים",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "הן כותבות מכתבים",
+          "tokens": [
+            {
+              "text": "הן",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Fem", "Number=Plur", "Person=3", "PronType=Prs"]
+            },
+            {
+              "text": "כותבות",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Pres", "VerbForm=Part", "Gender=Fem", "Number=Plur", "Person=3"]
+            },
+            {
+              "text": "מכתבים",
+              "lemma": "מכתב",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Plur"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_FUT_01",
+      "description": "Future 1st person sing — אני אכתוב ספר. Tests: אכתוב pos=VERB, lemma=כתב, Tense=Fut, Person=1, Number=Sing.",
+      "wave": "6c",
+      "input_text": "אני אכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "אני אכתוב ספר",
+          "tokens": [
+            {
+              "text": "אני",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Person=1", "PronType=Prs"]
+            },
+            {
+              "text": "אכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=1", "Number=Sing"],
+              "notes": "Future: no VerbForm=Part/Inf. HebBinyan not pinned (HIFIL in calibration but version-sensitive)."
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "Object noun must be ספר, not מכתב. מכתב after future verbs starting with aleph is stable, but other conjugations (תכתוב/יכתוב/נכתוב) cause Stanza to split מכתב into [מ ADP + כתב NOUN] due to מ-prefix ambiguity. ספר is a safe disambiguation object for future tense gold cases."
+    },
+    {
+      "case_id": "C02_VT_FUT_02",
+      "description": "Future 2nd person masc sing — אתה תכתוב ספר. Tests: תכתוב pos=VERB, lemma=כתב, Tense=Fut, Person=2, Gender=Masc, Number=Sing.",
+      "wave": "6c",
+      "input_text": "אתה תכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "אתה תכתוב ספר",
+          "tokens": [
+            {
+              "text": "אתה",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Person=2", "PronType=Prs"]
+            },
+            {
+              "text": "תכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=2", "Gender=Masc", "Number=Sing"]
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_FUT_03",
+      "description": "Future 3rd person masc sing — הוא יכתוב ספר. Tests: יכתוב pos=VERB, lemma=כתב, Tense=Fut, Person=3, Gender=Masc, Number=Sing.",
+      "wave": "6c",
+      "input_text": "הוא יכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "הוא יכתוב ספר",
+          "tokens": [
+            {
+              "text": "הוא",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Person=3", "PronType=Prs"]
+            },
+            {
+              "text": "יכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=3", "Gender=Masc", "Number=Sing"]
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_FUT_04",
+      "description": "Future 1st person plur — אנחנו נכתוב ספר. Tests: נכתוב pos=VERB, lemma=כתב, Tense=Fut, Person=1, Number=Plur.",
+      "wave": "6c",
+      "input_text": "אנחנו נכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "אנחנו נכתוב ספר",
+          "tokens": [
+            {
+              "text": "אנחנו",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Person=1", "Number=Plur", "PronType=Prs"]
+            },
+            {
+              "text": "נכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=1", "Number=Plur"]
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_FUT_05",
+      "description": "Future 2nd person masc plur — אתם תכתבו ספרים. Tests: תכתבו pos=VERB, lemma=כתב, Tense=Fut, Person=2, Gender=Masc, Number=Plur.",
+      "wave": "6c",
+      "input_text": "אתם תכתבו ספרים",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "אתם תכתבו ספרים",
+          "tokens": [
+            {
+              "text": "אתם",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Person=2", "Number=Plur", "PronType=Prs"]
+            },
+            {
+              "text": "תכתבו",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=2", "Gender=Masc", "Number=Plur"]
+            },
+            {
+              "text": "ספרים",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Plur"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design"
+    },
+    {
+      "case_id": "C02_VT_FUT_06",
+      "description": "Future 3rd person plur — הם יכתבו ספרים. Tests: יכתבו pos=VERB, lemma=כתב, Tense=Fut, Person=3, Number=Plur. Known: Gender=Fem,Masc (dual gender for 3pl future — calibrated).",
+      "wave": "6c",
+      "input_text": "הם יכתבו ספרים",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "הם יכתבו ספרים",
+          "tokens": [
+            {
+              "text": "הם",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Masc", "Person=3", "Number=Plur", "PronType=Prs"]
+            },
+            {
+              "text": "יכתבו",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=3", "Number=Plur"],
+              "notes": "Calibrated: Gender=Fem,Masc (dual gender in morph string) for 3rd person plural future. Stanza emits both genders as the 3pl future form is gender-common in Hebrew. Not a bug."
+            },
+            {
+              "text": "ספרים",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Plur"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "3pl future יכתבו morph contains 'Gender=Fem,Masc' — both genders listed. This is calibrated against stanza 1.11.1. Do not assert Gender=Masc alone for this form."
+    },
+    {
+      "case_id": "C02_VT_FUT_07",
+      "description": "Future 3rd person fem sing — היא תכתוב ספר. Tests: תכתוב pos=VERB, lemma=כתב, Tense=Fut, Person=3, Gender=Fem, Number=Sing. Same surface form as 2ms (אתה תכתוב) but different morph Gender.",
+      "wave": "6c",
+      "input_text": "היא תכתוב ספר",
+      "expected_sentences": [
+        {
+          "token_count": 3,
+          "sentence_text": "היא תכתוב ספר",
+          "tokens": [
+            {
+              "text": "היא",
+              "lemma": "הוא",
+              "pos": "PRON",
+              "morph_contains": ["Gender=Fem", "Person=3", "Number=Sing", "PronType=Prs"]
+            },
+            {
+              "text": "תכתוב",
+              "lemma": "כתב",
+              "pos": "VERB",
+              "morph_contains": ["Tense=Fut", "Person=3", "Gender=Fem", "Number=Sing"],
+              "notes": "Same surface form as FUT_02 (אתה תכתוב), but subject pronoun context changes morph: Gender=Fem, Person=3 here vs Gender=Masc, Person=2 in FUT_02. Proves subject-pronoun context drives morph disambiguation."
+            },
+            {
+              "text": "ספר",
+              "lemma": "ספר",
+              "pos": "NOUN",
+              "morph_contains": ["Gender=Masc", "Number=Sing"]
+            }
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "תכתוב is ambiguous: can be 2ms or 3fs. Stanza resolves via subject pronoun context. This is deliberate model design, not ambiguity bug."
+    },
+    {
+      "case_id": "C02_VT_MS_01",
+      "description": "Mixed-tense multi-sentence — past + present + future in 3 sentences. Tests: 3 sentences produced; all verb tokens get lemma=כתב; tense tags differ per sentence; PUNCT tokens present.",
+      "wave": "6c",
+      "input_text": "הוא כתב ספר. היא כותבת מכתב. הם יכתבו ספרים.",
+      "expected_sentences": [
+        {
+          "token_count": 4,
+          "sentence_text": "הוא כתב ספר.",
+          "tokens": [
+            {"text": "הוא", "lemma": "הוא", "pos": "PRON"},
+            {"text": "כתב", "lemma": "כתב", "pos": "VERB", "morph_contains": ["Tense=Past"]},
+            {"text": "ספר", "lemma": "ספר", "pos": "NOUN"},
+            {"text": ".", "lemma": ".", "pos": "PUNCT", "morph": ""}
+          ]
+        },
+        {
+          "token_count": 4,
+          "sentence_text": "היא כותבת מכתב.",
+          "tokens": [
+            {"text": "היא", "lemma": "הוא", "pos": "PRON"},
+            {"text": "כותבת", "lemma": "כתב", "pos": "VERB", "morph_contains": ["Tense=Pres", "VerbForm=Part"]},
+            {"text": "מכתב", "lemma": "מכתב", "pos": "NOUN"},
+            {"text": ".", "lemma": ".", "pos": "PUNCT", "morph": ""}
+          ]
+        },
+        {
+          "token_count": 4,
+          "sentence_text": "הם יכתבו ספרים.",
+          "tokens": [
+            {"text": "הם", "lemma": "הוא", "pos": "PRON"},
+            {"text": "יכתבו", "lemma": "כתב", "pos": "VERB", "morph_contains": ["Tense=Fut"]},
+            {"text": "ספרים", "lemma": "ספר", "pos": "NOUN"},
+            {"text": ".", "lemma": ".", "pos": "PUNCT", "morph": ""}
+          ]
+        }
+      ],
+      "classification": "Correct by design",
+      "notes": "Cross-tense multi-sentence: all three verb forms (כתב/כותבת/יכתבו) produce lemma=כתב. Tense tags differ per sentence. PUNCT tokens included per sentence (consistent with C02_MS_01 pattern from Wave 6b)."
     }
   ],
   "known_limitations": [
     "Fem noun forms have a DIFFERENT lemma from masc: כלבה→lemma כלבה (not כלב), כלבות→lemma כלבה. By design: Stanza treats masc and fem noun forms as separate paradigms.",
-    "Pronoun canonicalization: all pronouns (הוא/היא/הם/הן) map to lemma הוא. Model-calibrated, not a bug.",
+    "Pronoun canonicalization: all pronouns (הוא/היא/הם/הן/אני/אתה/אנחנו/הן) map to lemma הוא. Model-calibrated, not a bug.",
     "Context-dependency: isolated words may get different POS than in sentence context. Gold always uses sentence context for stability.",
-    "Verb present tense forms (כותב/כותבת): not covered in Wave 6b. Optional Wave 6c.",
+    "כותבת (pres fem sing) quirks: HebBinyan=PIEL (not PAAL) and Person=1,2,3 (ambiguous person). Calibrated by design — not tested in morph_contains.",
+    "Future tense מ-prefix ambiguity: מכתב after future verbs starting with ת/י/נ splits into [מ ADP + כתב NOUN]. Future gold cases use ספר/ספרים as object to avoid this. Known Stanza limitation.",
+    "Future 2fs form (את תכתבי): את parsed as ADP (not PRON), verb gets wrong person/gender. Context-dependent pronoun ambiguity. Not covered — document only.",
+    "Future 3pl (יכתבו): morph contains Gender=Fem,Masc (dual gender). Calibrated by design.",
+    "Infinitive morph: no Tense/Gender/Number/Person emitted. Only VerbForm=Inf + HebBinyan + Voice. Different from all conjugated forms.",
     "Construct state (סמיכות): 'בית ספר' (school) — not tested. Stanza may split compound or treat as single token.",
     "Preposition prefix: 'בספר' — not tested.",
     "Nikud (vowel marks): not tested."

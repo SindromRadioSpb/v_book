@@ -81,7 +81,14 @@ cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/test_v02_token_morph.py tests/validation/test_v02v2_token_morph.py -v
 ```
 
-Expected: `10 passed` (Wave 6a), `30 passed` (Wave 6b), `40 passed` (combined).
+Expected: `10 passed` (Wave 6a), `30 passed` (Wave 6b), `40 passed` (combined 6a+6b).
+
+```powershell
+# Wave 6c — verb tense contract (53 tests)
+.\.venv\Scripts\python.exe -m pytest tests/validation/test_v02v3_token_morph.py -v
+```
+
+Expected: `53 passed` (Wave 6c).
 
 ---
 
@@ -92,7 +99,7 @@ cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -m requires_stanza
 ```
 
-Expected: `40 passed` when stanza + he model available; `40 skipped` otherwise.
+Expected: `93 passed` (10 Wave 6a + 30 Wave 6b + 53 Wave 6c) when stanza + he model available; `93 skipped` otherwise.
 
 ---
 
@@ -114,8 +121,8 @@ cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v
 ```
 
-Expected (stanza + model available): `287 passed` (247 non-Stanza + 40 C02).
-Expected (stanza not available): `247 passed, 40 skipped`.
+Expected (stanza + model available): `340 passed` (247 non-Stanza + 93 C02).
+Expected (stanza not available): `247 passed, 93 skipped`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Validation Audit Index
 
-> Last updated: 2026-03-27 (C02 Wave 6b — morphology contract validated)
+> Last updated: 2026-03-27 (C02 Wave 6c — verb tense contract; all four tense families validated)
 > Maintainer: update after every completed corpus wave
 > Rule: status "Validated" requires all tests passing + core contract proven; "Partial" means tests pass but known contract gaps exist; "Deferred" means no tests yet
 
@@ -11,7 +11,7 @@
 | Corpus | Stage | Status | Audit doc | Next required action | Last meaningful update | Notes |
 |---|---|---|---|---|---|---|
 | C01 | Sentence splitting | Validated | [C01_AUDIT.md](audits/C01_AUDIT.md) | Optional: Latin abbreviation expansion, ellipsis exception | 2026-03-26 | Wave 2: abbreviation bug fixed + borderline cases; known limitations documented (Latin abbrev, ellipsis) |
-| C02 | Tokenization + morphology | Validated | [C02_AUDIT.md](audits/C02_AUDIT.md) | Optional: Wave 6c present-tense verbs; C10 round-trip | 2026-03-27 | Wave 6a: stanza infra (10 tests). Wave 6b: lemma paradigms, POS consistency, morph features, multi-sentence, determinism (30 tests). 40 total. Known limitations documented. |
+| C02 | Tokenization + morphology | Validated | [C02_AUDIT.md](audits/C02_AUDIT.md) | Optional: C10 round-trip | 2026-03-27 | Wave 6a: stanza infra (10 tests). Wave 6b: lemma paradigms, morph features, multi-sentence (30 tests). Wave 6c: verb tense (inf/pres/fut/cross-tense, 53 tests). 93 total. All known limitations documented. |
 | C03 | Lemma aggregation | Validated | [C03_AUDIT.md](audits/C03_AUDIT.md) | Optional: DB-level aggregation service integration test if service becomes independently testable | 2026-03-26 | Wave 2: hapax in isolation, all-doc lemma (non-uniform freq), empty document, stress, all-empty corpus; parametrized invariants (3×6=18); oracle extra-aggregate check |
 | C04 | N-gram extraction | Validated | [C04_AUDIT.md](audits/C04_AUDIT.md) | Optional: unigram extraction if added, nikud in pre-tokenized input | 2026-03-26 | Wave 2: NOUN+ADJ+NOUN trigram positive case, PUNCT boundary, mixed-script PROPN+PROPN, validate_ngram_lemmas() secondary oracle (lemma divergence) |
 | C05 | NP chunk extraction | Validated | [C05_AUDIT.md](audits/C05_AUDIT.md) | Optional: token index validation if position-based clustering added | 2026-03-26 | Wave 2: DET non-first rejection, multiple DET bridge blocking, ADJ-led NP, C05_07 exact match (9 chunks, no phantom gap) |
@@ -53,5 +53,6 @@
 | Validation non-Stanza | 247 passed, 0 failed | Green (C02 deselected by -k filter) |
 | Validation C02 Wave 6a (requires stanza + he model) | 10 passed (or 10 skipped if model unavailable) | Green when infra available |
 | Validation C02 Wave 6b (requires stanza + he model) | 30 passed (or 30 skipped if model unavailable) | Green when infra available |
-| Total C02 | 40 tests | Green when infra available |
-| Combined when all available | 2038 (1751 main + 247 non-Stanza + 40 C02) | No combined run due to torch DLL in headless context |
+| Validation C02 Wave 6c (requires stanza + he model) | 53 passed (or 53 skipped if model unavailable) | Green when infra available |
+| Total C02 | 93 tests | Green when infra available |
+| Combined when all available | 2091 (1751 main + 247 non-Stanza + 93 C02) | No combined run due to torch DLL in headless context |

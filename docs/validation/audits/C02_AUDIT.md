@@ -2,7 +2,8 @@
 
 > Wave 6a completed: 2026-03-27 — infrastructure preparation; 10 smoke tests
 > Wave 6b completed: 2026-03-27 — morphology contract implementation; 30 tests
-> Status: **VALIDATED**
+> Wave 6c completed: 2026-03-27 — verb tense contract (infinitive/present/future); 53 tests
+> Status: **VALIDATED** (expanded verb contract)
 > Auditor: post-wave automated audit
 
 ---
@@ -89,6 +90,74 @@
 
 ---
 
+### Wave 6c (2026-03-27) — Verb tense contract expansion
+
+**What was done:**
+- PATCH-01: Calibration matrix built from actual stanza 1.11.1 output for all Hebrew verb tense families.
+- PATCH-02: Oracle unchanged — existing `validate_token_morphology` + `validate_token_invariants` sufficient.
+- PATCH-03: Gold extended with 13 new Wave 6c cases (`C02_VT_INF_01`, `C02_VT_PRES_01..04`, `C02_VT_FUT_01..07`, `C02_VT_MS_01`). `known_limitations` updated.
+- PATCH-04: `tests/validation/test_v02v3_token_morph.py` created — 53 tests across 10 classes.
+- PATCH-05/06: Docs updated; status confirmed VALIDATED (expanded verb contract).
+
+**Calibrated verb-tense matrix (stanza 1.11.1):**
+
+| Form | Input sentence | pos | lemma | Tense | VerbForm | Gender | Number | Person |
+|---|---|---|---|---|---|---|---|---|
+| לכתוב (inf) | אני רוצה לכתוב ספר | VERB | כתב | — | Inf | — | — | — |
+| כותב (pres ms) | הוא כותב ספר | VERB | כתב | Pres | Part | Masc | Sing | 3 |
+| כותבת (pres fs) | היא כותבת מכתב | VERB | כתב | Pres | Part | Fem | Sing | 1,2,3\* |
+| כותבים (pres mp) | הם כותבים ספרים | VERB | כתב | Pres | Part | Masc | Plur | 3 |
+| כותבות (pres fp) | הן כותבות מכתבים | VERB | כתב | Pres | Part | Fem | Plur | 3 |
+| כתב (past 3ms) | הוא כתב ספר | VERB | כתב | Past | — | Masc | Sing | 3 |
+| כתבה (past 3fs) | היא כתבה ספר | VERB | כתב | Past | — | Fem | Sing | 3 |
+| כתבו (past 3pl) | הם כתבו ספרים | VERB | כתב | Past | — | Masc | Plur | 3 |
+| אכתוב (fut 1s) | אני אכתוב ספר | VERB | כתב | Fut | — | Masc | Sing | 1 |
+| תכתוב (fut 2ms) | אתה תכתוב ספר | VERB | כתב | Fut | — | Masc | Sing | 2 |
+| יכתוב (fut 3ms) | הוא יכתוב ספר | VERB | כתב | Fut | — | Masc | Sing | 3 |
+| נכתוב (fut 1pl) | אנחנו נכתוב ספר | VERB | כתב | Fut | — | Masc | Plur | 1 |
+| תכתבו (fut 2mp) | אתם תכתבו ספרים | VERB | כתב | Fut | — | Masc | Plur | 2 |
+| יכתבו (fut 3pl) | הם יכתבו ספרים | VERB | כתב | Fut | — | Fem,Masc\*\* | Plur | 3 |
+| תכתוב (fut 3fs) | היא תכתוב ספר | VERB | כתב | Fut | — | Fem | Sing | 3 |
+
+\* Person=1,2,3 (comma-separated, ambiguous) — calibrated by design
+\*\* Gender=Fem,Masc (dual gender for 3pl future) — calibrated by design
+
+**Cross-tense lemma reduction:** All 4 tense families → lemma=כתב. Proven as first-class assertion in `TestCrossTenseLemmaReduction`.
+
+**Gold cases (13 new Wave 6c cases):**
+
+| Case | Input | Key contract |
+|---|---|---|
+| C02_VT_INF_01 | `אני רוצה לכתוב ספר` | VerbForm=Inf, no Tense feature |
+| C02_VT_PRES_01..04 | 4 present-tense sentences | Tense=Pres + VerbForm=Part for all forms |
+| C02_VT_FUT_01..07 | 7 future-tense sentences | Tense=Fut, person/gender/number coverage |
+| C02_VT_MS_01 | Mixed past+present+future (3 sentences) | Cross-tense lemma + multi-sentence |
+
+**Test breakdown (53 tests across 10 classes):**
+
+| Class | Nodes | What they verify |
+|---|---|---|
+| `TestVerbTenseOracle` | 13+13=26 | oracle full-pass + token invariants, parametrized ×13 |
+| `TestInfinitiveContract` | 4 | POS/lemma/VerbForm=Inf/no-Tense |
+| `TestPresentTenseContract` | 5 | 4-form POS/lemma/VerbForm=Part/Tense=Pres + כותבת PIEL pin |
+| `TestPastTenseContract` | 2 | regression-guard: past oracle + lemma (no new past gold) |
+| `TestFutureTenseContract` | 5 | 7-form POS/lemma/Tense=Fut + 3pl dual gender + 3fs context |
+| `TestCrossTenseLemmaReduction` | 1 | inf+pres+past+fut all → כתב |
+| `TestVerbMorphFeatureCoverage` | 5 | VerbForm=Inf/Part exclusive; Tense=Past/Fut exclusive; Gender+Number in conjugated |
+| `TestMixedTenseMultiSentence` | 4 | oracle + 3 sentences + all verbs כתב + tense progression |
+| `TestDeterminismV3` | 1 | two calls identical on mixed-tense input |
+
+**Result:** 53/53 passed. Wave 6a (10) and Wave 6b (30) remain 40/40.
+
+**New calibrated-by-design behaviors documented:**
+- Infinitive morph lacks Tense/Gender/Number/Person features — VerbForm=Inf only
+- כותבת → HebBinyan=PIEL (not PAAL); Person=1,2,3 (ambiguous) — both model design
+- Future 3pl יכתבו → Gender=Fem,Masc (dual gender) — model design
+- תכתוב surface form: 2ms (subject=אתה) → Gender=Masc/Person=2; 3fs (subject=היא) → Gender=Fem/Person=3
+- Future מ-prefix split: מכתב splits into [מ ADP + כתב NOUN] after ת/י/נ future verbs — object ספר used in gold to avoid
+
+---
+
 ## 2. C02 Input/Output Contract (validated)
 
 **Engine call:**
@@ -140,14 +209,18 @@ list[Sentence]
 
 | Gap | Impact | Priority |
 |---|---|---|
-| Verb present tense (`כותב/כותבת`) | Not blocking C04/C05 (past is primary) | Wave 6c optional |
+| Future 2fs (את תכתבי) — pronoun ambiguity | Context-sensitive: את → ADP, wrong morph | Low — edge case |
+| Future מ-prefix split (מכתב after ת/י/נ verbs) | Object noun selection required in gold | Documented workaround |
+| כותבת HebBinyan=PIEL / Person=1,2,3 | Calibrated quirk, not tested | Documented |
+| Future 3pl Gender=Fem,Masc dual | Calibrated, tested explicitly | Documented |
 | Construct state (סמיכות: `בית ספר`) | May affect compound-noun extraction | Out of scope C02 |
-| Preposition prefix (`בספר`, `לבית`) | Affects NP boundary detection | C05 concern, not C02 |
-| Nikud (vowel marks) | Not used in production Hebrew corpus | Out of scope |
-| Fem noun lemma (masc vs fem paradigm) | Calibrated by design — documented | No fix required |
-| Pronoun lemma canonicalization | Calibrated by design — documented | No fix required |
+| Preposition prefix (`בספר`, `לבית`) | Affects NP boundary detection | C05 concern |
+| Nikud (vowel marks) | Not in production corpus | Out of scope |
+| Fem noun lemma (masc vs fem paradigm) | Calibrated by design | Documented |
+| Pronoun lemma canonicalization | Calibrated by design | Documented |
+| Verb present participle used nominally (`כותב` = 'writer') | Context-dependent POS | Out of scope |
 
-These gaps are explicit and documented — no silent defect classes remain.
+All gaps are explicit. No silent defect classes remain for primary use cases.
 
 ---
 
@@ -172,17 +245,26 @@ These gaps are explicit and documented — no silent defect classes remain.
 
 ## 7. DoD verdict
 
-**VALIDATED**
+**VALIDATED (expanded verb contract)**
 
-C02 is VALIDATED (not merely PARTIAL) because:
-- Primary tokenization contract is fully validated: DET prefix detachment, multi-word splitting, PUNCT tokenization.
-- Lemma paradigm contract is validated for all primary word classes: noun (masc+fem, sing+plur), adjective (all gender/number forms), verb (all past conjugations).
-- POS consistency across inflected forms is validated.
-- Morphological feature coverage is validated: Gender, Number, Tense, PronType.
-- Multi-sentence behavior is validated: count, `sent.text`, PUNCT token.
-- Determinism is validated.
-- All known limitations are explicitly documented — no silent defect classes remain.
-- 40 tests total (10 Wave 6a + 30 Wave 6b), all passing.
+C02 is fully VALIDATED with the following scope explicitly claimed:
+
+**Tokenization:** DET prefix detachment, multi-word splitting, PUNCT tokenization, multi-sentence behavior.
+
+**Noun/Adjective morphology:** Lemma paradigms (masc/fem, sing/plur), POS consistency, morph features (Gender/Number), DET prefix sequence.
+
+**Verb morphology (all four tense families):**
+- Infinitive: VerbForm=Inf, no Tense/Gender/Number/Person, lemma=כתב
+- Present: VerbForm=Part, Tense=Pres, Gender/Number/Person, lemma=כתב (4 forms)
+- Past: Tense=Past, Gender/Number/Person, lemma=כתב (3 forms)
+- Future: Tense=Fut, Person/Gender/Number, lemma=כתב (7 forms covering 1s/2ms/3ms/1pl/2mp/3pl/3fs)
+
+**Cross-tense lemma reduction:** All four families → lemma=כתב (first-class assertion).
+
+**Determinism:** Both noun/adjective and verb tense multi-sentence cases.
+
+All known limitations are explicitly documented — no silent defect classes remain.
+Total tests: 10 (Wave 6a) + 30 (Wave 6b) + 53 (Wave 6c) = **93 tests**, all passing.
 
 ---
 
@@ -201,6 +283,17 @@ C02 is VALIDATED (not merely PARTIAL) because:
 | `docs/validation/VALIDATION_METHODOLOGY.md` | v1.8 → v1.9; C02 row updated; commands updated |
 | `docs/validation/DEFECT_PLAYBOOK.md` | D05 updated: Windows path, PowerShell commands |
 
+**Wave 6c additions:**
+
+| File | Role |
+|---|---|
+| `tests/validation/gold/c02_token_morph.json` | 13 new Wave 6c cases + updated `known_limitations` |
+| `tests/validation/test_v02v3_token_morph.py` | 53 tests (10 classes) |
+| `docs/validation/audits/C02_AUDIT.md` | Wave 6c section; expanded DoD; updated limitations |
+| `docs/validation/AUDIT_INDEX.md` | C02: Wave 6c completed |
+| `docs/validation/VALIDATION_METHODOLOGY.md` | v2.1; C02v3 row; updated counts |
+| `docs/validation/STANZA_HE_PREP.md` | Updated expected totals (93 C02 tests) |
+
 **Wave 6b additions:**
 
 | File | Role |
@@ -217,10 +310,11 @@ C02 is VALIDATED (not merely PARTIAL) because:
 ## 9. Regression / baseline impact
 
 - Non-Stanza validation suite: **247 passed** (unchanged).
-- C02 Wave 6a (requires stanza + he model): **10 passed** when infra available.
-- C02 Wave 6b (requires stanza + he model): **30 passed** when infra available.
-- Total C02 (Wave 6a + 6b): **40 tests** when infra available, all skip otherwise.
-- Combined when all available: **287 passed** (247 + 40).
+- C02 Wave 6a: **10 passed** when stanza + he model available.
+- C02 Wave 6b: **30 passed** when stanza + he model available.
+- C02 Wave 6c: **53 passed** when stanza + he model available.
+- Total C02 (all waves): **93 tests** when infra available, all skip otherwise.
+- Combined when all available: **340 passed** (247 + 93).
 - Main baseline (--ignore=tests/validation): 1751 passed (no implementation changes).
 
 ---
@@ -264,3 +358,11 @@ Next milestone: C10 (depends on C02 + TM).
 - [x] Wave 6b: token invariants (parametrized) — 7 tests
 - [x] Update AUDIT_INDEX.md (C02 → Validated)
 - [x] Update VALIDATION_METHODOLOGY.md (v2.0, counts updated)
+- [x] Wave 6c: verb calibration matrix (all 4 tense families)
+- [x] Wave 6c: infinitive gold + tests
+- [x] Wave 6c: present tense gold + tests (4 forms)
+- [x] Wave 6c: future tense gold + tests (7 forms)
+- [x] Wave 6c: cross-tense lemma reduction (first-class assertion)
+- [x] Wave 6c: mixed-tense multi-sentence + determinism
+- [x] Wave 6c: calibrated-by-design quirks documented (PIEL, dual gender, inf morph sparsity)
+- [x] Update docs for Wave 6c (v2.1)

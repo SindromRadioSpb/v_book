@@ -1,6 +1,6 @@
 # Validation Methodology — HDLE Premium NLP Pipeline
 
-> Version: 2.0 (updated 2026-03-27: C02 Wave 6b — morphology contract validated; 30 tests; C02 status → Validated; combined C02 = 40 tests)
+> Version: 2.1 (updated 2026-03-27: C02 Wave 6c — verb tense contract; 53 tests; all four tense families validated; combined C02 = 93 tests)
 > Scope: Reproducible, database-free validation of the Hebrew NLP extraction pipeline.
 
 ---
@@ -38,6 +38,7 @@ Each test category has three independent verification sources:
 | Sentence splitting borderline + abbreviation fix | C01v2 | oracle_sentence | test_v01v2 | No |
 | Tokenization + morphology — infra smoke (Wave 6a) | C02 | oracle_token_morph | test_v02_token_morph | **Yes** |
 | Tokenization + morphology — lemma paradigms, POS, morph, multi-sentence, determinism (Wave 6b) | C02v2 | oracle_token_morph | test_v02v2_token_morph | **Yes** |
+| Tokenization + morphology — verb tense (infinitive, present, future, cross-tense lemma, determinism) (Wave 6c) | C02v3 | oracle_token_morph | test_v02v3_token_morph | **Yes** |
 | Lemma aggregation | C03 | oracle_lemma_agg | test_v03 | No |
 | Lemma aggregation edge cases (hapax, all-doc lemma, empty doc, stress, all-empty; parametrized invariants) | C03v2 | oracle_lemma_agg | test_v03v2 | No |
 | N-gram extraction | C04 | oracle_ngram | test_v04 | No |
@@ -118,7 +119,7 @@ Expected: **247 passed, 0 failed** (non-Stanza baseline; C02 deselected by -k fi
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -m requires_stanza
 ```
-Expected: **40 passed** (10 Wave 6a + 30 Wave 6b) when stanza + he model available; **40 skipped** otherwise.
+Expected: **93 passed** (10 Wave 6a + 30 Wave 6b + 53 Wave 6c) when stanza + he model available; **93 skipped** otherwise.
 
 See `docs/validation/STANZA_HE_PREP.md` for setup commands.
 
@@ -145,7 +146,7 @@ A pipeline component is considered **validated** when:
 
 | Item | Status | Reason |
 |------|--------|--------|
-| C02 tokenization + morphology | **Validated** (2026-03-27) | Wave 6a: infra (10 tests). Wave 6b: lemma paradigms (noun/adj/verb), POS consistency, morph features (Gender/Number/Tense/PronType), multi-sentence, determinism (30 tests). Known limitations: fem noun paradigm, pronoun canonicalization, present-tense verbs — all documented. |
+| C02 tokenization + morphology | **Validated** (2026-03-27) | Wave 6a: infra (10 tests). Wave 6b: lemma paradigms (noun/adj/verb), POS consistency, morph features, multi-sentence, determinism (30 tests). Wave 6c: full verb tense coverage (infinitive/present/future/cross-tense, 53 tests). Total C02: 93 tests. All limitations documented. |
 | C10 full pipeline | Deferred | Requires Stanza + populated corpus |
 | C09 extraction modes | **Validated** (2026-03-26) | 23 tests, In-Memory SQLite; TM creation layer not in scope |
 | TM projection (lemma) | **Partial** (2026-03-26) | Wave 1: 27 tests (kind='lemma' batch materialize); Wave 2: 25 tests (user_dict pathway, _attach_source_links, tm_global propagation). Inline_edit + batch_MT deferred (require UI/worker fixtures). |
