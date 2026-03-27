@@ -1,7 +1,29 @@
 # Stanza Hebrew Model — Setup Guide (PowerShell)
 
-> This guide covers installing Stanza and preparing the Hebrew model for C02 validation tests.
+> This guide covers installing Stanza and preparing the Hebrew model for C02/C10 validation tests.
 > All commands are PowerShell-only (Windows 11).
+
+---
+
+## 0. Validated runtime environment (pinned 2026-03-27)
+
+This is the environment against which all gold cases are calibrated.
+**Do not upgrade stanza or torch without re-running calibration on affected gold files.**
+
+| Component | Version / Path |
+|-----------|----------------|
+| Python venv | `E:\projects\Project_Vibe\V_book\.venv\Scripts\python.exe` |
+| stanza | **1.11.1** — `E:\projects\Project_Vibe\V_book\.venv\Lib\site-packages\stanza\` |
+| torch | **2.10.0+cu128** — same venv |
+| CUDA | **12.8** (NVIDIA GeForce RTX 3070, 8 GB VRAM) |
+| Stanza model cache | `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\` |
+| Hebrew model dir | `…\Cache\1.11.0\resources\he\` (exists, `default.zip` ~328 MB) |
+| `he/` subdirs | `tokenize/`, `pos/`, `lemma/`, `depparse/`, `mwt/`, `ner/`, `pretrain/`, `forward_charlm/`, `backward_charlm/` |
+
+**Stanza inference device:** GPU (CUDA 12.8) when available; CPU fallback transparent.
+
+**Gold version pin:** `stanza_version_calibrated: "1.11.1"` in all C02 gold files.
+If stanza is upgraded, run the preflight calibration script (§4) and diff output before trusting existing gold.
 
 ---
 
@@ -99,7 +121,7 @@ cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v -m requires_stanza
 ```
 
-Expected: `93 passed` (10 Wave 6a + 30 Wave 6b + 53 Wave 6c) when stanza + he model available; `93 skipped` otherwise.
+Expected: `98 passed` (93 C02 + 5 C10) when stanza + he model available; `98 skipped` otherwise.
 
 ---
 
@@ -107,10 +129,10 @@ Expected: `93 passed` (10 Wave 6a + 30 Wave 6b + 53 Wave 6c) when stanza + he mo
 
 ```powershell
 cd E:\projects\Project_Vibe\V_book
-.\.venv\Scripts\python.exe -m pytest tests/validation/ -q -k "not v02 and not stanza"
+.\.venv\Scripts\python.exe -m pytest tests/validation/ -q -m "not requires_stanza"
 ```
 
-Expected: `247 passed` (Wave 5b baseline).
+Expected: `249 passed` (247 prior baseline + 2 TM v3 headless tests).
 
 ---
 
@@ -121,8 +143,17 @@ cd E:\projects\Project_Vibe\V_book
 .\.venv\Scripts\python.exe -m pytest tests/validation/ -v
 ```
 
-Expected (stanza + model available): `340 passed` (247 non-Stanza + 93 C02).
-Expected (stanza not available): `247 passed, 93 skipped`.
+Expected (stanza + model available): `347 passed` (249 non-Stanza + 93 C02 + 5 C10).
+Expected (stanza not available): `249 passed, 98 skipped`.
+
+## 8a. Run C10 round-trip validation only
+
+```powershell
+cd E:\projects\Project_Vibe\V_book
+.\.venv\Scripts\python.exe -m pytest tests/validation/test_v10_pipeline_roundtrip.py -v
+```
+
+Expected: `5 passed` when stanza + model available; `5 skipped` otherwise.
 
 ---
 
@@ -139,8 +170,8 @@ Expected (stanza not available): `247 passed, 93 skipped`.
 check (`he/` directory existence). It does NOT load the pipeline. The `stanza_engine` fixture
 is the authoritative gate for actual pipeline availability.
 
-**CI environments:** C02 tests are expected to skip in CI without model download. Do NOT treat
-C02 skips as failures in CI. The non-Stanza baseline (247 tests) must always pass.
+**CI environments:** C02 and C10 tests are expected to skip in CI without model download. Do NOT treat
+these skips as failures in CI. The non-Stanza baseline (249 tests) must always pass.
 
 **Model size:** ~700 MB. Do NOT include in repo or Docker image. Download once per dev machine.
 
