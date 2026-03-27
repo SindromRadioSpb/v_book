@@ -132,7 +132,7 @@ class ProcessWorker(QThread):
 
     progress = pyqtSignal(int, int, str)  # current, total, doc_name
     state_changed = pyqtSignal(object)  # Structured NLP batch progress state
-    finished = pyqtSignal(object)  # {success_count, error_count, cancelled, ...}
+    result_ready = pyqtSignal(object)  # {success_count, error_count, cancelled, ...}
     error = pyqtSignal(str)
     paused = pyqtSignal()
     resumed = pyqtSignal()
@@ -205,7 +205,7 @@ class ProcessWorker(QThread):
                     source_label="documents_ui",
                 )
 
-            self.finished.emit(
+            self.result_ready.emit(
                 {
                     "success_count": int(success_count),
                     "error_count": int(error_count),
@@ -4927,3 +4927,4 @@ class RecalculateKeynessWorker(QThread):
         except Exception as exc:
             logger.exception("RecalculateKeynessWorker error")
             self.error.emit(str(exc))
+

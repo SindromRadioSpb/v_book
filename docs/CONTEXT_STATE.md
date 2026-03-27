@@ -103,3 +103,8 @@
   - Hebrew sample processing
   - DB-copy `Re-process` with `runtime_effective='stanza'`
 - Release smoke has now confirmed a real `Re-process` success on a copied DB while the effective runtime remained `stanza`.
+
+## Confirmed Current State After P0 Re-process Lifecycle Hotfix
+- `ProcessWorker` now emits `result_ready` for business results and no longer shadows the base `QThread.finished` signal.
+- `DocumentsView` now waits for the real thread-finished callback before deleting the worker object or launching an explicit Mock retry.
+- The `Re-process` cleanup path is now aligned with the earlier owner-shutdown contract instead of tearing down a still-running worker from an early payload signal.

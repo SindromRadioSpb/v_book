@@ -196,7 +196,7 @@ def test_process_worker_emits_structured_state_and_finished_report(monkeypatch):
         lambda current, total, doc_name: progress_events.append((current, total, doc_name))
     )
     worker.state_changed.connect(states.append)
-    worker.finished.connect(finished_reports.append)
+    worker.result_ready.connect(finished_reports.append)
 
     worker.run()
 
@@ -459,3 +459,39 @@ def test_process_worker_preserves_controlled_runtime_block_message():
     )
 
     assert worker._make_user_friendly_error(message) == message
+
+
+def test_documents_process_finished_defers_worker_deletion_until_thread_finished():
+    view = DocumentsView.__new__(DocumentsView)
+    view.progress_bar = _FakeProgressBar()
+    view.status_label = _FakeLabel()
+    view.process_btn = _FakeToggle()
+    view.reprocess_btn = _FakeToggle()
+    view.delete_btn = _FakeToggle()
+    view.process_progress_dialog = _FakeDialog()
+    worker = _FakeWorker(running=True)
+    view.process_worker = worker
+    view._process_worker_active = True
+    view._pending_process_retry = None
+    view.on_selection_changed = lambda: None
+    view.processing_completed = _FakeSignal()
+    view.load_documents = lambda: None
+    view.refresh_snapshot_readiness = lambda: None
+
+    DocumentsView.on_process_finished(
+        view,
+        {
+            "success_count": 1,
+            "error_count": 0,
+            "cancelled": False,
+        },
+    )
+
+    assert view.process_progress_dialog is None
+    assert view.process_worker is worker
+    assert worker.deleted is False
+
+    DocumentsView._on_process_worker_thread_finished(view, worker)
+
+    assert view.process_worker is None
+    assert worker.deleted is True

@@ -159,3 +159,10 @@
     - DB-copy `Re-process` smoke.
 - Rationale:
   - unit tests alone did not expose the incomplete managed payload and Windows DLL path behavior seen in the live application.
+
+## D-022 — Business result signals must not mask `QThread.finished`
+- Status: accepted and implemented
+- Decision:
+  - `ProcessWorker` must use a separate business-result signal (`result_ready`) and keep the base `QThread.finished` signal available for deterministic cleanup.
+- Rationale:
+  - emitting a custom `finished` payload from inside `run()` caused UI cleanup to happen before the thread had actually terminated, which is exactly how `QThread: Destroyed while thread is still running` escaped the earlier hardening pass.

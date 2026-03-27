@@ -1,4 +1,4 @@
-﻿"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
+"""Documents view - file import and management with metadata (Tag/Link/Level/Topic)."""
 
 import logging
 import time
@@ -223,6 +223,7 @@ class DocumentsView(QWidget):
         self.process_worker = None
         self.process_progress_dialog: NLPProcessProgressDialog | None = None
         self._process_worker_active = False
+        self._pending_process_retry: dict | None = None
         self.documents_worker: DocumentsPageWorker | None = None
         self.delete_worker: DocumentDeleteWorker | None = None
         self.delete_progress: QProgressDialog | None = None
@@ -1559,6 +1560,7 @@ class DocumentsView(QWidget):
             return
 
         operation_label = "Re-processing" if is_reprocess else "Processing"
+        self._pending_process_retry = None
 
         self.process_worker = ProcessWorker(
             doc_ids=doc_ids,
@@ -1570,8 +1572,11 @@ class DocumentsView(QWidget):
         )
         self.process_worker.progress.connect(self.on_process_progress)
         self.process_worker.state_changed.connect(self.on_process_state)
-        self.process_worker.finished.connect(self.on_process_finished)
+        self.process_worker.result_ready.connect(self.on_process_finished)
         self.process_worker.error.connect(self.on_process_error)
+        self.process_worker.finished.connect(
+            lambda current=self.process_worker: self._on_process_worker_thread_finished(current)
+        )
 
         if self.process_progress_dialog is not None:
             self.process_progress_dialog.deleteLater()
@@ -1646,12 +1651,10 @@ class DocumentsView(QWidget):
                 self.process_progress_dialog.set_completed()
                 self.process_progress_dialog.accept()
 
-        # Reload documents to show updated status
         self.load_documents()
         if success_count > 0 or docs_processed > 0:
             self.refresh_snapshot_readiness()
 
-        # Emit signal to update other views (e.g., Dictionary)
         if success_count > 0:
             self.processing_completed.emit()
 
@@ -1670,7 +1673,7 @@ class DocumentsView(QWidget):
                 f"{error_count} document(s) failed to process. Check logs for details.",
             )
 
-        self._cleanup_process_worker()
+        self._request_process_worker_cleanup()
 
     def on_process_error(self, error_msg: str):
         """Handle processing error."""
@@ -1687,7 +1690,7 @@ class DocumentsView(QWidget):
         if self._handle_runtime_block_retry(error_msg, operation_label):
             return
         show_error(self, f"{operation_label} Error", error_msg)
-        self._cleanup_process_worker()
+        self._request_process_worker_cleanup()
 
     def _handle_runtime_block_retry(self, error_msg: str, operation_label: str) -> bool:
         """Offer guided recovery when Stanza fails after a ready probe."""
@@ -1707,32 +1710,35 @@ class DocumentsView(QWidget):
         action = self._present_runtime_block_recovery_dialog(error_msg, operation_label)
 
         if action == "mock":
-            self._cleanup_process_worker()
+            self._pending_process_retry = {
+                "doc_ids": doc_ids,
+                "use_mock": True,
+                "use_gpu": False,
+                "configured_engine_id": configured_engine_id,
+                "allow_mock_fallback": True,
+                "is_reprocess": is_reprocess,
+            }
             self.status_label.setText(
                 f"Retrying {operation_label.lower()} with explicit Mock fallback..."
             )
-            self._start_process_worker(
-                doc_ids,
-                use_mock=True,
-                use_gpu=False,
-                configured_engine_id=configured_engine_id,
-                allow_mock_fallback=True,
-                is_reprocess=is_reprocess,
-            )
+            self._request_process_worker_cleanup()
             return True
         if action == "setup":
-            self._cleanup_process_worker()
+            self._pending_process_retry = None
             self.status_label.setText(f"{operation_label} blocked by NLP runtime setup issue")
+            self._request_process_worker_cleanup()
             self.on_open_nlp_setup()
             return True
         if action == "health":
-            self._cleanup_process_worker()
+            self._pending_process_retry = None
             self.status_label.setText(f"{operation_label} blocked by NLP runtime health issue")
+            self._request_process_worker_cleanup()
             self.on_diagnose_nlp()
             return True
         if action == "cancel":
-            self._cleanup_process_worker()
+            self._pending_process_retry = None
             self.status_label.setText(f"{operation_label} cancelled")
+            self._request_process_worker_cleanup()
             return True
         return False
 
@@ -1768,7 +1774,33 @@ class DocumentsView(QWidget):
             return "cancel"
         return "cancel"
 
+    def _request_process_worker_cleanup(self) -> None:
+        self._set_process_ui_busy(False)
+        if self.process_progress_dialog is not None:
+            self.process_progress_dialog.deleteLater()
+            self.process_progress_dialog = None
+        worker = self.process_worker
+        if worker is None:
+            self._pending_process_retry = None
+            return
+        if not worker.isRunning():
+            self._on_process_worker_thread_finished(worker)
+
+    def _on_process_worker_thread_finished(self, worker: ProcessWorker) -> None:
+        retry_payload = None
+        if self.process_worker is worker:
+            retry_payload = self.__dict__.get("_pending_process_retry")
+            self._pending_process_retry = None
+            self.process_worker = None
+        try:
+            worker.deleteLater()
+        except Exception:
+            logger.debug("Failed to delete process worker after thread finish", exc_info=True)
+        if retry_payload:
+            self._start_process_worker(**dict(retry_payload))
+
     def _cleanup_process_worker(self) -> None:
+        self._pending_process_retry = None
         self._set_process_ui_busy(False)
         if self.process_worker is not None:
             self.process_worker.deleteLater()
@@ -2184,3 +2216,4 @@ class DocumentsView(QWidget):
 
         self._cleanup_process_worker()
         return True
+

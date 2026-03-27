@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- PATCH-04 release-grade smoke validation completed
+- P0 re-process lifecycle hotfix completed after PATCH-04
 
 ## Completed
 - Audit completed and recorded.
@@ -37,6 +37,7 @@
 - The app-owned probe/worker runtime now prepares Torch/CUDA DLL search paths before importing `stanza/torch`, eliminating the observed `WinError 1114` blocker in the managed subprocess path.
 - `scripts/release_smoke_nlp_runtime.py` now provides the release smoke gate for hostile in-process Qt launch, managed subprocess startup, Hebrew sample processing, and DB-copy `Re-process`.
 - Release smoke has confirmed a real `Re-process` success on a copied DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
+- ProcessWorker no longer shadows QThread.finished; DocumentsView now deletes the worker only from the real thread-finished callback.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -46,8 +47,10 @@
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
+- The live GUI Documents -> Re-process scenario for project 6, document 387646 still needs one post-hotfix confirmation run on the target machine.
 
 ## Next Step
 - Final handoff only:
   - preserve the managed runtime/model payload in release packaging
   - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate
+

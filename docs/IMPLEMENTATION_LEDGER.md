@@ -317,3 +317,23 @@
 - Final handoff only:
   - preserve the managed runtime/model payload in release packaging
   - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate
+
+## Step 16 — P0 Hotfix: ProcessWorker lifecycle must wait for real QThread finish
+- Status: completed
+- Trigger:
+  - live `Documents -> Re-process` on project `6`, document `387646` still crashed with `QThread: Destroyed while thread '' is still running` even after the broader thread-hardening patch.
+- Code deliverables:
+  - `app/ui/workers.py`
+  - `app/ui/documents_view.py`
+  - `tests/test_documents_process_progress_ui.py`
+- Confirmed behavior changes:
+  - `ProcessWorker` no longer masks the base `QThread.finished` signal with its result payload signal; it now emits `result_ready` for business results and leaves `QThread.finished` available for lifecycle cleanup
+  - `DocumentsView` now tears down the process dialog immediately but defers `ProcessWorker.deleteLater()` until the real `QThread.finished` fires
+  - explicit Mock retry after a runtime block is now scheduled only after the previous process thread has actually finished, instead of being started from an early result/error callback while the previous `QThread` may still be running
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\ui\workers.py app\ui\documents_view.py tests\test_documents_process_progress_ui.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_process_progress_ui.py -q` -> `11 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `67 passed`
+
+## Next Step
+- Re-run the live GUI scenario for `Documents -> Re-process` and confirm the prior `QThread` destruction crash is gone.
