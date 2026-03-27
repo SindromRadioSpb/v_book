@@ -101,8 +101,25 @@
   - `.\.venv\Scripts\python.exe -m pytest tests/test_nlp_runtime_probe.py tests/test_resources_manager_dialog.py tests/test_health_check_service.py tests/test_documents_engine_readiness.py -q` -> `15 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `37 passed`
 
+## Step 6 — Wave 3 PATCH-01 Runtime/Resource UX Split
+- Status: completed
+- Baseline note:
+  - Wave 2 is now treated as the stable checkpoint for subprocess probe isolation, packaging-aware remediation, and guarded setup/repair flow.
+- Code deliverables:
+  - `app/ui/resources_manager_dialog.py`
+  - `app/services/health_check_service.py`
+  - `app/ui/documents_view.py`
+  - `tests/test_resources_manager_dialog.py`
+  - `tests/test_health_check_service.py`
+  - `tests/test_documents_engine_readiness.py`
+- Confirmed behavior changes:
+  - Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`
+  - Documents and Health Check now use the same runtime/resource vocabulary
+  - the UI continues to guide the user without implying one-click Python package installation
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py -q` -> `12 passed`
+
 ## Next Step
-- Wave 3 UX remediation hardening:
-  - expand setup/repair guidance into a more guided in-product flow
-  - differentiate external runtime dependency issues from managed Hebrew model/resource actions more explicitly
-  - consider structured provenance beyond `ProcessorRun.note` once the Wave 1/2 contract stabilizes
+- Wave 3 PATCH-02 structured provenance:
+  - move from additive free-form note semantics toward a stable machine-readable provenance envelope
+  - preserve backward compatibility with existing `ProcessorRun.note` data

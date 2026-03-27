@@ -43,3 +43,9 @@
 - Documents exposes direct `Diagnose NLP` and `Open NLP Setup` actions.
 - `RuntimeProbe` now executes Stanza/Torch checks in an isolated subprocess and returns machine-readable reason codes.
 - Resources Manager exposes packaging-aware repair steps and a guarded NLP model-folder action.
+- Wave 2 is now treated as the stable runtime-management baseline for subsequent UX/provenance work.
+
+## Confirmed Current State After Wave 3 PATCH-01
+- Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`.
+- Documents and Health Check now use the same runtime/resource vocabulary as Resources Manager.
+- The UI continues to provide truthful next steps without promising in-place package installation.

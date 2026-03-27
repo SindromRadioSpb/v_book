@@ -78,3 +78,17 @@
   - remediation text and repair steps must distinguish development-mode interpreter issues from packaged-app runtime limitations.
 - Rationale:
   - the user needs honest next steps; packaged builds must not pretend they can repair Python packages in place.
+
+## D-011 — Wave 2 is the stable runtime-management baseline
+- Status: accepted and implemented
+- Decision:
+  - treat Wave 2 as the current stable checkpoint for subprocess probing, packaging-aware remediation, and guarded Resources Manager repair flow.
+- Rationale:
+  - this is no longer an exploratory midpoint; it is the baseline that future Wave 3 work must preserve.
+
+## D-012 — UX must separate external runtime and managed Hebrew resource
+- Status: accepted and implemented
+- Decision:
+  - the UI must distinguish external runtime dependency issues from managed Hebrew model/resource state.
+- Rationale:
+  - this reduces user confusion and preserves the rule that Resources Manager is not a pseudo package manager.

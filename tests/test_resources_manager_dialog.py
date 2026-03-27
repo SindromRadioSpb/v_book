@@ -86,6 +86,7 @@ def _build_dialog(probe) -> ResourcesManagerDialog:
     dialog = ResourcesManagerDialog.__new__(ResourcesManagerDialog)
     dialog.nlp_probe = probe
     dialog.nlp_runtime_label = _FakeLabel()
+    dialog.hebrew_resource_label = _FakeLabel()
     dialog.open_nlp_model_folder_btn = _FakeButton()
     dialog.show_nlp_guide_btn = _FakeButton()
     dialog._last_nlp_runtime_status = None
@@ -99,8 +100,9 @@ def test_resources_manager_runtime_probe_failure_does_not_crash():
     ResourcesManagerDialog._refresh_nlp_runtime_status(dialog)
 
     assert "runtime_probe_failed" in dialog.nlp_runtime_label.value
-    assert "Stanza Hebrew unavailable" in dialog.nlp_runtime_label.value
+    assert "External runtime dependency is unavailable" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is False
+    assert "Managed Hebrew resource is not detected" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_ready_runtime_enables_model_folder_button():
@@ -109,9 +111,10 @@ def test_resources_manager_ready_runtime_enables_model_folder_button():
 
     ResourcesManagerDialog._refresh_nlp_runtime_status(dialog)
 
-    assert "Stanza Hebrew ready" in dialog.nlp_runtime_label.value
+    assert "External runtime dependency is ready" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is True
     assert "C:/models/he" in dialog.open_nlp_model_folder_btn.tooltip
+    assert "Managed Hebrew resource is present" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_setup_guide_is_packaging_aware():
@@ -122,6 +125,8 @@ def test_resources_manager_setup_guide_is_packaging_aware():
     guide = dialog._build_nlp_setup_guide_text()
 
     assert "Packaged mode" in guide
+    assert "External runtime dependency:" in guide
+    assert "Managed Hebrew resource:" in guide
     assert "Repair steps:" in guide
     assert "1. Environment mode: packaged." in guide
     assert "Persisted processing will not silently switch to Mock." in guide

@@ -148,7 +148,8 @@ def test_documents_view_applies_latest_nlp_engine_readiness_result(monkeypatch, 
     assert "explicit confirmation" in view.nlp_engine_status_label.text()
     assert "explicit Mock fallback confirmation" in view.process_btn.toolTip()
     assert view.gpu_checkbox.isHidden() is True
-    assert "package_missing" in view.nlp_engine_status_label.toolTip()
+    assert "External runtime reason: package_missing" in view.nlp_engine_status_label.toolTip()
+    assert "Remediation: install" in view.nlp_engine_status_label.toolTip()
 
 
 def test_documents_view_open_nlp_setup_routes_to_resources_manager(monkeypatch, qtbot):

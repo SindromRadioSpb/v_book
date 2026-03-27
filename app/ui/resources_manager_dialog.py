@@ -69,9 +69,19 @@ class ResourcesManagerDialog(QDialog):
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
-        self.nlp_runtime_label = QLabel("NLP runtime: checking...")
+        self.nlp_runtime_title_label = QLabel("<b>External Runtime Dependency</b>")
+        root.addWidget(self.nlp_runtime_title_label)
+
+        self.nlp_runtime_label = QLabel("Checking Python runtime, stanza package, and torch state...")
         self.nlp_runtime_label.setWordWrap(True)
         root.addWidget(self.nlp_runtime_label)
+
+        self.hebrew_resource_title_label = QLabel("<b>Managed Hebrew Resource</b>")
+        root.addWidget(self.hebrew_resource_title_label)
+
+        self.hebrew_resource_label = QLabel("Checking Hebrew model path and local resource presence...")
+        self.hebrew_resource_label.setWordWrap(True)
+        root.addWidget(self.hebrew_resource_label)
 
         nlp_actions = QHBoxLayout()
         self.refresh_nlp_btn = QPushButton("Re-run NLP Probe")
@@ -241,18 +251,40 @@ class ResourcesManagerDialog(QDialog):
         if status.stanza_ready:
             runtime = "GPU-capable" if status.cuda_available else "CPU-only"
             return (
-                "NLP runtime: Stanza Hebrew ready. "
+                "External runtime dependency is ready. "
                 f"Environment: {mode}. "
+                "Package: stanza installed. "
                 f"Runtime: {runtime}. "
-                f"Model path: {status.model_path or 'auto-detected during runtime'}."
+                f"Reason code: none."
             )
 
         return (
-            "NLP runtime: Stanza Hebrew unavailable. "
+            "External runtime dependency is unavailable. "
             f"Environment: {mode}. "
             f"Reason: {status.error_code or 'unavailable'}. "
-            f"Model path: {status.model_path or 'not detected'}. "
             f"Remediation: {status.remediation or 'Repair the runtime outside this dialog.'}"
+        )
+
+    @staticmethod
+    def _build_hebrew_resource_message(status) -> str:
+        model_path = getattr(status, "model_path", None) if status is not None else None
+        model_present = bool(getattr(status, "model_present", False)) if status is not None else False
+        if model_present and model_path:
+            return (
+                "Managed Hebrew resource is present. "
+                f"Model path: {model_path}. "
+                "Use Open NLP Model Folder to inspect or replace the local files."
+            )
+        if model_path:
+            return (
+                "Managed Hebrew resource path is known but the resource is not ready. "
+                f"Model path: {model_path}. "
+                "Use offline import or copy the Hebrew model files into this location."
+            )
+        return (
+            "Managed Hebrew resource is not detected. "
+            "No Hebrew model path is currently known. "
+            "Use offline import guidance or configure the resource path first."
         )
 
     def _apply_nlp_runtime_ui_state(self, status, message: str) -> None:
@@ -260,6 +292,9 @@ class ResourcesManagerDialog(QDialog):
         self._last_nlp_runtime_message = message
         self.nlp_runtime_label.setText(message)
         self.nlp_runtime_label.setToolTip(message)
+        resource_message = self._build_hebrew_resource_message(status)
+        self.hebrew_resource_label.setText(resource_message)
+        self.hebrew_resource_label.setToolTip(resource_message)
         model_path = getattr(status, "model_path", None) if status is not None else None
         self.open_nlp_model_folder_btn.setEnabled(bool(model_path))
         if model_path:
@@ -267,13 +302,17 @@ class ResourcesManagerDialog(QDialog):
         else:
             self.open_nlp_model_folder_btn.setToolTip("No Hebrew model path is currently detected.")
         self.show_nlp_guide_btn.setToolTip(
-            "Open packaging-aware repair guidance for the current runtime status."
+            "Open packaging-aware repair guidance for the external runtime and Hebrew model resource."
         )
 
     def _build_nlp_setup_guide_text(self) -> str:
         status = self._last_nlp_runtime_status
         mode = "Packaged mode" if self.nlp_probe.is_packaged_runtime() else "Development mode"
-        sections = [mode, self._last_nlp_runtime_message or "Run the isolated NLP probe first."]
+        sections = [
+            mode,
+            "External runtime dependency:\n" + (self._last_nlp_runtime_message or "Run the isolated NLP probe first."),
+            "Managed Hebrew resource:\n" + self._build_hebrew_resource_message(status),
+        ]
         if status is not None and status.error_detail:
             sections.append(f"Details: {status.error_detail}")
         steps = self.nlp_probe.build_setup_steps(status)
@@ -293,10 +332,9 @@ class ResourcesManagerDialog(QDialog):
             logger.warning("Resources Manager NLP runtime probe failed: %s", exc)
             self._apply_nlp_runtime_ui_state(
                 None,
-                "NLP runtime: Stanza Hebrew unavailable. "
+                "External runtime dependency is unavailable. "
                 "Environment: unknown. "
                 "Reason: runtime_probe_failed. "
-                "Model path: not detected. "
                 "Remediation: Check the local Torch/Stanza runtime and retry.",
             )
 

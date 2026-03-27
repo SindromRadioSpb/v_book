@@ -589,7 +589,7 @@ class DocumentsView(QWidget):
             label.setText("Checking NLP engine readiness...")
             label.setStyleSheet("color: #666;")
             label.setToolTip(
-                "Checking package import, model presence, pipeline initialization, and smoke sentence."
+                "Checking external runtime dependency and managed Hebrew resource readiness: package import, torch state, model presence, pipeline initialization, and smoke sentence."
             )
             if checkbox is not None:
                 checkbox.setVisible(False)
@@ -601,7 +601,9 @@ class DocumentsView(QWidget):
                 f"Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})"
             )
             label.setStyleSheet("color: green;")
-            label.setToolTip("Stanza runtime is ready for persisted processing.")
+            label.setToolTip(
+                "External runtime dependency is ready and the managed Hebrew resource is available for persisted processing."
+            )
             if checkbox is not None:
                 checkbox.setVisible(bool(self.cuda_available))
                 checkbox.setEnabled(bool(self.cuda_available))
@@ -620,11 +622,11 @@ class DocumentsView(QWidget):
 
         if self.diagnose_nlp_btn is not None:
             self.diagnose_nlp_btn.setToolTip(
-                "Run the system health check and inspect NLP runtime issues."
+                "Run the system health check and inspect external runtime dependency issues."
             )
         if self.open_nlp_setup_btn is not None:
             self.open_nlp_setup_btn.setToolTip(
-                "Open Resources Manager to inspect local NLP/model runtime status."
+                "Open Resources Manager to inspect the external runtime dependency and the managed Hebrew resource."
             )
 
     def _build_nlp_runtime_detail_text(self) -> str:
@@ -633,15 +635,15 @@ class DocumentsView(QWidget):
             return "NLP runtime details are not available yet."
         parts = []
         if getattr(status, "error_code", None):
-            parts.append(f"Reason: {status.error_code}")
+            parts.append(f"External runtime reason: {status.error_code}")
         if getattr(status, "error_detail", None):
             parts.append(f"Details: {status.error_detail}")
         if getattr(status, "model_path", None):
-            parts.append(f"Model path: {status.model_path}")
+            parts.append(f"Managed Hebrew resource path: {status.model_path}")
         remediation = getattr(status, "remediation", "")
         if remediation:
             parts.append(f"Remediation: {remediation}")
-        return "\n".join(parts) if parts else "Stanza runtime is unavailable."
+        return "\n".join(parts) if parts else "External runtime dependency is unavailable."
 
     def _update_nlp_process_action_state(
         self,

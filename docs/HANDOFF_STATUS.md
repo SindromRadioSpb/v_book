@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- Wave 2 probe hardening and repair guidance completed
+- Wave 3 PATCH-01 runtime/resource UX split completed
 
 ## Completed
 - Audit completed and recorded.
@@ -18,6 +18,9 @@
 - Documents now exposes direct `Diagnose NLP` and `Open NLP Setup` actions.
 - Stanza/Torch runtime probing is now isolated in a subprocess instead of the live UI process.
 - Resources Manager now exposes packaging-aware repair steps and guarded NLP model-folder access.
+- Wave 2 is now treated as the stable baseline for runtime-management behavior.
+- Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`.
+- Documents and Health Check now use the same runtime/resource vocabulary.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -25,7 +28,7 @@
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Run provenance is still stored additively in `ProcessorRun.note`.
-- Managed Hebrew model actions and external Python runtime diagnostics still share one dialog surface.
+- Structured runtime provenance is not yet available for filtering/audit without parsing note payloads.
 
 ## Next Step
-- Proceed to Wave 3 UX hardening: deepen the guided setup/repair path without turning Resources Manager into a pseudo package manager, and consider structured provenance once the runtime contract stabilizes.
+- Proceed to Wave 3 PATCH-02: introduce structured runtime provenance while preserving backward compatibility with existing run notes.

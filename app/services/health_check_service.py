@@ -68,18 +68,18 @@ class HealthCheckService:
             logger.warning("NLP runtime health probe failed: %s", exc)
             return HealthCheckItem(
                 check_id="nlp_runtime:stanza",
-                title="NLP Runtime: Stanza Hebrew",
+                title="External Runtime Dependency: Stanza Hebrew",
                 status="warn",
                 message=f"runtime_probe_failed: {exc}",
-                remediation="Check the local Torch/Stanza runtime and retry Health Check.",
+                remediation="Check the Python runtime, stanza package, and Torch state, then retry Health Check.",
             )
         if status.stanza_ready:
             mode = "GPU-capable" if status.cuda_available else "CPU-only"
             return HealthCheckItem(
                 check_id="nlp_runtime:stanza",
-                title="NLP Runtime: Stanza Hebrew",
+                title="External Runtime Dependency: Stanza Hebrew",
                 status="ok",
-                message=f"Ready ({mode}).",
+                message=f"Ready ({mode}). package=stanza, reason_code=none",
             )
 
         message = f"{status.error_code or 'unavailable'}"
@@ -87,10 +87,10 @@ class HealthCheckService:
             message = f"{message}: {status.error_detail}"
         return HealthCheckItem(
             check_id="nlp_runtime:stanza",
-            title="NLP Runtime: Stanza Hebrew",
+            title="External Runtime Dependency: Stanza Hebrew",
             status="warn",
             message=message,
-            remediation=status.remediation or "Repair the Stanza runtime and retry Health Check.",
+            remediation=status.remediation or "Repair the external runtime dependency and retry Health Check.",
         )
 
     def _check_required_resources(self) -> list[HealthCheckItem]:

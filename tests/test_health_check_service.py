@@ -44,7 +44,7 @@ def test_pronunciation_bootstrap_health_fails_with_clear_remediation_when_model_
         service = HealthCheckService(settings=settings)
         service._check_nlp_runtime = lambda: HealthCheckItem(
             check_id="nlp_runtime:stanza",
-            title="NLP Runtime: Stanza Hebrew",
+            title="External Runtime Dependency: Stanza Hebrew",
             status="warn",
             message="probe bypassed in test",
             remediation="",
@@ -90,7 +90,7 @@ def test_sentence_niqqud_bootstrap_health_same_behavior(tmp_path):
         service = HealthCheckService(settings=settings)
         service._check_nlp_runtime = lambda: HealthCheckItem(
             check_id="nlp_runtime:stanza",
-            title="NLP Runtime: Stanza Hebrew",
+            title="External Runtime Dependency: Stanza Hebrew",
             status="warn",
             message="probe bypassed in test",
             remediation="",
@@ -179,5 +179,6 @@ def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
     check = _find_check(report, "nlp_runtime:stanza")
     assert check
     assert check["status"] == "warn"
+    assert check["title"] == "External Runtime Dependency: Stanza Hebrew"
     assert "package_missing" in check["message"]
     assert "install stanza" in check["remediation"]
