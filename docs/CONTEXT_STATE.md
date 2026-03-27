@@ -108,3 +108,20 @@
 - `ProcessWorker` now emits `result_ready` for business results and no longer shadows the base `QThread.finished` signal.
 - `DocumentsView` now waits for the real thread-finished callback before deleting the worker object or launching an explicit Mock retry.
 - The `Re-process` cleanup path is now aligned with the earlier owner-shutdown contract instead of tearing down a still-running worker from an early payload signal.
+
+## Confirmed Current State After Live GUI Re-process Confirmation
+- The original live repro path on the target machine now completes successfully:
+  - project `6`
+  - document `387646`
+  - `Documents -> Re-process`
+- The prior `QThread: Destroyed while thread '' is still running` crash is no longer reproducing on that GUI path.
+- The fixed worker lifecycle and the managed subprocess `stanza` runtime now coexist correctly in the real desktop flow, not only in automated regression tests.
+
+## Confirmed Current State After Document-scoped Release Smoke Narrowing
+- `scripts/release_smoke_nlp_runtime.py` no longer depends on copying the whole source DB for the reprocess smoke step.
+- The DB smoke path now builds a tiny migrated target DB for a single document by cloning only the required base tables and then running `reprocess_document()` against that clone.
+- The real Windows source DB smoke now completes successfully with:
+  - `db_copy_strategy = document_scoped_clone`
+  - `run_engine = stanza`
+  - `run_status = ok`
+  - `runtime_effective = stanza`

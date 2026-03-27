@@ -6,7 +6,10 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
@@ -22,9 +25,147 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
-def _copy_db(source: Path, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+@dataclass(frozen=True)
+class _ProjectDocContext:
+    source_project_id: int
+    source_doc_id: int
+    project_name: str
+    corpus_name: str
+    file_name: str
+    sha256: str
+
+
+def _reset_db_service() -> None:
+    DBService.shutdown()
+    DBService._instance = None
+    DBService._db_manager = None
+    DBService._ref_managers = {}
+
+
+def _init_empty_db(db_path: Path) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        for migration_file in sorted(Path("app/infra/migrations").glob("*.sql")):
+            conn.executescript(migration_file.read_text(encoding="utf-8"))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _load_project_doc_context(source_db: Path, doc_id: int) -> _ProjectDocContext:
+    _reset_db_service()
+    DBService.initialize(source_db)
+    db = DBService.get_instance()
+    try:
+        with db.get_session() as session:
+            doc = session.get(SourceDocument, int(doc_id))
+            if doc is None:
+                raise RuntimeError(f"Document not found in source DB: {doc_id}")
+            corpus = doc.corpus
+            if corpus is None:
+                raise RuntimeError(f"Document {doc_id} is missing corpus linkage")
+            project = corpus.project
+            if project is None:
+                raise RuntimeError(f"Document {doc_id} is missing project linkage")
+            return _ProjectDocContext(
+                source_project_id=int(project.project_id),
+                source_doc_id=int(doc.doc_id),
+                project_name=str(project.name),
+                corpus_name=str(corpus.name),
+                file_name=str(doc.file_name),
+                sha256=str(doc.sha256),
+            )
+    finally:
+        _reset_db_service()
+
+
+def _fetch_single_row(conn: sqlite3.Connection, table: str, key_column: str, key_value: int) -> dict[str, object]:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        f"SELECT * FROM {table} WHERE {key_column} = ?",
+        (int(key_value),),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"Missing required row in source DB: {table}.{key_column}={key_value}")
+    return dict(row)
+
+
+def _insert_row(conn: sqlite3.Connection, table: str, row: dict[str, object]) -> None:
+    columns = list(row.keys())
+    placeholders = ", ".join("?" for _ in columns)
+    conn.execute(
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+        tuple(row[column] for column in columns),
+    )
+
+
+def _materialize_project_smoke_db(*, source_db: Path, target_db: Path, doc_id: int) -> _ProjectDocContext:
+    context = _load_project_doc_context(source_db, int(doc_id))
+    source_conn = sqlite3.connect(str(source_db))
+    try:
+        doc_row = _fetch_single_row(source_conn, "source_document", "doc_id", context.source_doc_id)
+        corpus_row = _fetch_single_row(source_conn, "source_corpus", "corpus_id", int(doc_row["corpus_id"]))
+        project_row = _fetch_single_row(source_conn, "dict_project", "project_id", int(corpus_row["project_id"]))
+        library_row = _fetch_single_row(source_conn, "library", "library_id", int(project_row["library_id"]))
+        text_row = source_conn.execute(
+            "SELECT * FROM document_text WHERE doc_id = ?",
+            (int(context.source_doc_id),),
+        ).fetchone()
+        if text_row is None:
+            raise RuntimeError(f"Document text not found in source DB: {context.source_doc_id}")
+        text_payload = dict(text_row)
+    finally:
+        source_conn.close()
+
+    # Keep the clone self-contained: external project links are not part of this smoke DB.
+    if project_row.get("general_corpus_id") not in (None, project_row["project_id"]):
+        project_row["general_corpus_id"] = None
+
+    target_db.unlink(missing_ok=True)
+    _init_empty_db(target_db)
+    target_conn = sqlite3.connect(str(target_db))
+    try:
+        target_conn.execute("PRAGMA foreign_keys = OFF")
+        _insert_row(target_conn, "library", library_row)
+        _insert_row(target_conn, "dict_project", project_row)
+        _insert_row(target_conn, "source_corpus", corpus_row)
+        _insert_row(target_conn, "source_document", doc_row)
+        _insert_row(target_conn, "document_text", text_payload)
+        target_conn.commit()
+        target_conn.execute("PRAGMA foreign_keys = ON")
+        fk_violations = target_conn.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_violations:
+            raise RuntimeError(f"Smoke DB foreign key violations: {fk_violations[:5]}")
+    finally:
+        target_conn.close()
+
+    return context
+
+
+def _resolve_imported_doc_id(target_db: Path, context: _ProjectDocContext) -> tuple[int, int]:
+    _reset_db_service()
+    DBService.initialize(target_db)
+    db = DBService.get_instance()
+    try:
+        with db.get_session() as session:
+            doc = (
+                session.query(SourceDocument)
+                .join(SourceDocument.corpus)
+                .filter(
+                    SourceDocument.sha256 == context.sha256,
+                    SourceDocument.file_name == context.file_name,
+                )
+                .order_by(SourceDocument.doc_id)
+                .first()
+            )
+            if doc is None or doc.corpus is None:
+                raise RuntimeError(
+                    "Imported smoke DB does not contain the requested document after project-scoped import"
+                )
+            return int(doc.doc_id), int(doc.corpus.project_id)
+    finally:
+        _reset_db_service()
 
 
 def _run_engine_smoke(*, sample_text: str, force_hostile: bool) -> dict[str, object]:
@@ -66,28 +207,30 @@ def _run_engine_smoke(*, sample_text: str, force_hostile: bool) -> dict[str, obj
 
 
 def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str, object]:
-    _copy_db(source_db, copy_db_to)
+    context = _materialize_project_smoke_db(
+        source_db=source_db,
+        target_db=copy_db_to,
+        doc_id=int(doc_id),
+    )
+    imported_doc_id, imported_project_id = _resolve_imported_doc_id(copy_db_to, context)
 
-    DBService.shutdown()
-    DBService._instance = None
-    DBService._db_manager = None
-    DBService._ref_managers = {}
+    _reset_db_service()
     DBService.initialize(copy_db_to)
     db = DBService.get_instance()
     service = ProcessService()
 
     try:
         with db.get_session() as session:
-            doc = session.get(SourceDocument, int(doc_id))
+            doc = session.get(SourceDocument, int(imported_doc_id))
             if doc is None:
-                raise RuntimeError(f"Document not found in DB copy: {doc_id}")
+                raise RuntimeError(f"Document not found in project-scoped smoke DB: {imported_doc_id}")
 
             before_run_id = session.execute(select(func.max(ProcessorRun.run_id))).scalar_one()
             before_run_id = int(before_run_id or 0)
 
             ok = service.reprocess_document(
                 session,
-                int(doc_id),
+                int(imported_doc_id),
                 use_gpu=False,
                 use_mock=False,
                 configured_engine_id="stanza",
@@ -104,7 +247,11 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
 
             return {
                 "db_copy": str(copy_db_to),
-                "doc_id": int(doc_id),
+                "db_copy_strategy": "document_scoped_clone",
+                "source_project_id": int(context.source_project_id),
+                "source_doc_id": int(context.source_doc_id),
+                "project_id": int(imported_project_id),
+                "doc_id": int(imported_doc_id),
                 "ok": bool(ok),
                 "document_status": str(doc.status),
                 "run_engine": str(latest_run.engine) if latest_run is not None else None,
@@ -113,10 +260,7 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
                 "created_run_id": int(latest_run.run_id) if latest_run is not None else None,
             }
     finally:
-        DBService.shutdown()
-        DBService._instance = None
-        DBService._db_manager = None
-        DBService._ref_managers = {}
+        _reset_db_service()
 
 
 def _extract_runtime_effective(note_text: str | None) -> str | None:
@@ -136,8 +280,18 @@ def _extract_runtime_effective(note_text: str | None) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Release-grade smoke for managed Stanza runtime")
-    parser.add_argument("--db-path", type=str, default="", help="Optional source DB to copy and re-process")
-    parser.add_argument("--copy-db-to", type=str, default="", help="Target path for DB smoke copy")
+    parser.add_argument(
+        "--db-path",
+        type=str,
+        default="",
+        help="Optional source DB for document-scoped smoke clone before re-process",
+    )
+    parser.add_argument(
+        "--copy-db-to",
+        type=str,
+        default="",
+        help="Target path for the small document-scoped smoke DB",
+    )
     parser.add_argument("--doc-id", type=int, default=1, help="Document ID for DB smoke re-process")
     parser.add_argument(
         "--sample-text",

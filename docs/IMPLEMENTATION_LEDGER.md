@@ -333,7 +333,52 @@
 - Test evidence:
   - `.\.venv\Scripts\python.exe -m py_compile app\ui\workers.py app\ui\documents_view.py tests\test_documents_process_progress_ui.py` -> `OK`
   - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_process_progress_ui.py -q` -> `11 passed`
-  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `67 passed`
+- `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `67 passed`
 
 ## Next Step
 - Re-run the live GUI scenario for `Documents -> Re-process` and confirm the prior `QThread` destruction crash is gone.
+
+## Step 17 — Live GUI Confirmation After P0 Re-process Hotfix
+- Status: completed
+- Trigger:
+  - Step 16 fixed the thread lifecycle bug in code and tests, but the target machine still needed a real GUI confirmation on the original failing scenario.
+- Confirmation evidence:
+  - user re-ran the live desktop flow against:
+    - project `6`
+    - document `387646`
+  - `Documents -> Re-process` completed successfully
+  - the prior `QThread: Destroyed while thread '' is still running` crash did not reproduce
+- Outcome:
+  - the Step 16 lifecycle hotfix is now confirmed both by automated regression coverage and by the original live GUI repro path
+  - the managed subprocess `stanza` runtime remains compatible with the fixed `Documents` worker lifecycle
+- Test evidence:
+  - live GUI confirmation on the target machine: `python -m app.main --db-path "E:\projects\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db"` -> `Documents -> Re-process` succeeded for project `6`, document `387646`
+
+## Next Step
+- Run the release smoke gate again and keep `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release check.
+
+## Step 18 — Release Smoke DB Path Narrowed to Document-scoped Clone
+- Status: completed
+- Trigger:
+  - the release smoke DB step still depended on either a full DB copy or a project-scoped import path, which remained too heavy for the real `hewiki_gpu_processing test.db` source.
+- Code deliverables:
+  - `scripts/release_smoke_nlp_runtime.py`
+  - `tests/test_release_smoke_nlp_runtime.py`
+- Confirmed behavior changes:
+  - the DB smoke path no longer copies the whole source database
+  - the smoke script now builds a tiny migrated target DB containing only the required base rows for one document:
+    - `library`
+    - `dict_project`
+    - `source_corpus`
+    - `source_document`
+    - `document_text`
+  - `reprocess_document()` then rebuilds all derived NLP rows on that small clone instead of depending on a 35GB source DB copy
+  - the smoke report now records `db_copy_strategy = document_scoped_clone`
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile scripts\release_smoke_nlp_runtime.py tests\test_release_smoke_nlp_runtime.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_release_smoke_nlp_runtime.py tests\test_stanza_engine_subprocess.py tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py tests\test_documents_process_progress_ui.py -q` -> `27 passed`
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --force-hostile-inprocess` -> managed subprocess `stanza` processed the Hebrew sample successfully
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --db-path "E:\projects\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --copy-db-to "E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_runtime_smoke_copy.db" --doc-id 1` -> `ok=True`, `db_copy_strategy='document_scoped_clone'`, `run_engine='stanza'`, `run_status='ok'`, `runtime_effective='stanza'`
+
+## Next Step
+- Keep the document-scoped smoke path as the release gate default for large Windows databases.

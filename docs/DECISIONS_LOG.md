@@ -166,3 +166,10 @@
   - `ProcessWorker` must use a separate business-result signal (`result_ready`) and keep the base `QThread.finished` signal available for deterministic cleanup.
 - Rationale:
   - emitting a custom `finished` payload from inside `run()` caused UI cleanup to happen before the thread had actually terminated, which is exactly how `QThread: Destroyed while thread is still running` escaped the earlier hardening pass.
+
+## D-023 — Release smoke must use a document-scoped DB clone, not a full DB copy
+- Status: accepted and implemented
+- Decision:
+  - the DB reprocess smoke path should clone only the minimum base rows required for one document and let `reprocess_document()` rebuild derived NLP state from there.
+- Rationale:
+  - full source DB copies and even project-scoped exports remained too expensive for the real Windows source database; the release gate must validate runtime behavior, not disk throughput on a 35GB file.

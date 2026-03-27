@@ -47,10 +47,18 @@
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
-- The live GUI Documents -> Re-process scenario for project 6, document 387646 still needs one post-hotfix confirmation run on the target machine.
 
 ## Next Step
 - Final handoff only:
   - preserve the managed runtime/model payload in release packaging
   - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate
+
+## Latest Confirmation
+- The original live GUI repro path is now confirmed fixed on the target machine:
+  - project `6`
+  - document `387646`
+  - `Documents -> Re-process` completed successfully
+- The `QThread: Destroyed while thread '' is still running` crash no longer reproduces on that path.
+- The release smoke DB step is now narrowed to a `document_scoped_clone` path, so the runtime gate no longer depends on copying the full 35GB source DB.
+- The narrowed DB smoke has now succeeded on the real Windows source DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
 
