@@ -85,8 +85,24 @@
   - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_engine_readiness.py tests/test_resources_manager_dialog.py -q` -> `5 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py -q` -> `32 passed`
 
+## Step 5 — Wave 2 Probe Hardening + Repair Flow
+- Status: completed
+- Code deliverables:
+  - `app/services/nlp_runtime/runtime_probe.py`
+  - `app/ui/resources_manager_dialog.py`
+  - `tests/test_nlp_runtime_probe.py`
+  - `tests/test_resources_manager_dialog.py`
+- Confirmed behavior changes:
+  - Stanza readiness probing now runs in an isolated subprocess instead of importing `stanza/torch` in the UI process
+  - probe results now classify `package_missing`, `runtime_import_failed`, `hostile_torch_state`, `model_missing`, `pipeline_init_failed`, `smoke_failed`, `probe_timeout`, `probe_subprocess_failed`, and `probe_invalid_output`
+  - remediation text now distinguishes development vs packaged runtime expectations
+  - Resources Manager now exposes packaging-aware repair guidance and enables the NLP model-folder action only when a model path is actually detected
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_nlp_runtime_probe.py tests/test_resources_manager_dialog.py tests/test_health_check_service.py tests/test_documents_engine_readiness.py -q` -> `15 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `37 passed`
+
 ## Next Step
-- Wave 2 diagnostics truth hardening:
-  - make runtime probe itself more resilient around hostile Torch import states, ideally via subprocess isolation
-  - extend runtime status into richer packaging-aware remediation text
-  - turn Resources Manager status visibility into a fuller setup/repair workflow
+- Wave 3 UX remediation hardening:
+  - expand setup/repair guidance into a more guided in-product flow
+  - differentiate external runtime dependency issues from managed Hebrew model/resource actions more explicitly
+  - consider structured provenance beyond `ProcessorRun.note` once the Wave 1/2 contract stabilizes

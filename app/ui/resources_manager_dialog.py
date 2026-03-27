@@ -50,6 +50,8 @@ class ResourcesManagerDialog(QDialog):
         self._health_worker = None
         self._import_worker = None
         self._progress_dialog: QProgressDialog | None = None
+        self._last_nlp_runtime_status = None
+        self._last_nlp_runtime_message = ""
 
         self._init_ui()
         self._load_data_root()
@@ -70,6 +72,22 @@ class ResourcesManagerDialog(QDialog):
         self.nlp_runtime_label = QLabel("NLP runtime: checking...")
         self.nlp_runtime_label.setWordWrap(True)
         root.addWidget(self.nlp_runtime_label)
+
+        nlp_actions = QHBoxLayout()
+        self.refresh_nlp_btn = QPushButton("Re-run NLP Probe")
+        self.refresh_nlp_btn.clicked.connect(self._refresh_nlp_runtime_status)
+        nlp_actions.addWidget(self.refresh_nlp_btn)
+
+        self.show_nlp_guide_btn = QPushButton("Show Repair Steps")
+        self.show_nlp_guide_btn.clicked.connect(self._show_nlp_setup_guide)
+        nlp_actions.addWidget(self.show_nlp_guide_btn)
+
+        self.open_nlp_model_folder_btn = QPushButton("Open NLP Model Folder")
+        self.open_nlp_model_folder_btn.clicked.connect(self._open_nlp_model_folder)
+        self.open_nlp_model_folder_btn.setEnabled(False)
+        nlp_actions.addWidget(self.open_nlp_model_folder_btn)
+        nlp_actions.addStretch()
+        root.addLayout(nlp_actions)
 
         data_row = QGridLayout()
         data_row.addWidget(QLabel("Data folder:"), 0, 0)
@@ -218,34 +236,90 @@ class ResourcesManagerDialog(QDialog):
         self.table.resizeColumnsToContents()
         self._set_status("Resources list refreshed.")
 
+    def _build_nlp_runtime_message(self, status) -> str:
+        mode = "Packaged" if self.nlp_probe.is_packaged_runtime() else "Development"
+        if status.stanza_ready:
+            runtime = "GPU-capable" if status.cuda_available else "CPU-only"
+            return (
+                "NLP runtime: Stanza Hebrew ready. "
+                f"Environment: {mode}. "
+                f"Runtime: {runtime}. "
+                f"Model path: {status.model_path or 'auto-detected during runtime'}."
+            )
+
+        return (
+            "NLP runtime: Stanza Hebrew unavailable. "
+            f"Environment: {mode}. "
+            f"Reason: {status.error_code or 'unavailable'}. "
+            f"Model path: {status.model_path or 'not detected'}. "
+            f"Remediation: {status.remediation or 'Repair the runtime outside this dialog.'}"
+        )
+
+    def _apply_nlp_runtime_ui_state(self, status, message: str) -> None:
+        self._last_nlp_runtime_status = status
+        self._last_nlp_runtime_message = message
+        self.nlp_runtime_label.setText(message)
+        self.nlp_runtime_label.setToolTip(message)
+        model_path = getattr(status, "model_path", None) if status is not None else None
+        self.open_nlp_model_folder_btn.setEnabled(bool(model_path))
+        if model_path:
+            self.open_nlp_model_folder_btn.setToolTip(f"Open {model_path}")
+        else:
+            self.open_nlp_model_folder_btn.setToolTip("No Hebrew model path is currently detected.")
+        self.show_nlp_guide_btn.setToolTip(
+            "Open packaging-aware repair guidance for the current runtime status."
+        )
+
+    def _build_nlp_setup_guide_text(self) -> str:
+        status = self._last_nlp_runtime_status
+        mode = "Packaged mode" if self.nlp_probe.is_packaged_runtime() else "Development mode"
+        sections = [mode, self._last_nlp_runtime_message or "Run the isolated NLP probe first."]
+        if status is not None and status.error_detail:
+            sections.append(f"Details: {status.error_detail}")
+        steps = self.nlp_probe.build_setup_steps(status)
+        sections.append(
+            "Repair steps:\n" + "\n".join(
+                f"{index}. {step}" for index, step in enumerate(steps, start=1)
+            )
+        )
+        return "\n\n".join(sections)
+
     def _refresh_nlp_runtime_status(self) -> None:
         try:
             status = self.nlp_probe.probe_stanza(use_gpu=False, run_smoke=True)
+            self._apply_nlp_runtime_ui_state(status, self._build_nlp_runtime_message(status))
+            return
         except Exception as exc:
             logger.warning("Resources Manager NLP runtime probe failed: %s", exc)
-            self.nlp_runtime_label.setText(
+            self._apply_nlp_runtime_ui_state(
+                None,
                 "NLP runtime: Stanza Hebrew unavailable. "
+                "Environment: unknown. "
                 "Reason: runtime_probe_failed. "
                 "Model path: not detected. "
-                "Remediation: Check the local Torch/Stanza runtime and retry."
+                "Remediation: Check the local Torch/Stanza runtime and retry.",
             )
-            return
-        if status.stanza_ready:
-            mode = "GPU-capable" if status.cuda_available else "CPU-only"
-            self.nlp_runtime_label.setText(
-                "NLP runtime: Stanza Hebrew ready "
-                f"({mode}). Model path: {status.model_path or 'auto-detected during runtime'}"
+
+    def _show_nlp_setup_guide(self) -> None:
+        QMessageBox.information(self, "NLP Setup Guide", self._build_nlp_setup_guide_text())
+
+    def _open_nlp_model_folder(self) -> None:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        status = self._last_nlp_runtime_status
+        model_path = getattr(status, "model_path", None) if status is not None else None
+        if not model_path:
+            QMessageBox.information(
+                self,
+                "NLP Model Folder",
+                "No Hebrew model path is currently detected. Run the NLP probe or import the model first.",
             )
             return
 
-        detail = status.error_code or "unavailable"
-        remediation = status.remediation or "Repair the runtime outside this dialog."
-        self.nlp_runtime_label.setText(
-            "NLP runtime: Stanza Hebrew unavailable. "
-            f"Reason: {detail}. "
-            f"Model path: {status.model_path or 'not detected'}. "
-            f"Remediation: {remediation}"
-        )
+        target = Path(model_path)
+        folder = target if target.is_dir() else target.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _selected_entry_id(self) -> str | None:
         row = self.table.currentRow()
@@ -479,3 +553,5 @@ class ResourcesManagerDialog(QDialog):
 def show_resources_manager(parent=None) -> int:
     dialog = ResourcesManagerDialog(parent=parent)
     return int(dialog.exec())
+
+

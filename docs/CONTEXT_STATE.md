@@ -17,9 +17,9 @@
   - `app/resources/resource_manifest.json`
 
 ## Confirmed Gaps
-- Resources Manager still exposes NLP only as a runtime status summary, not as a full setup/repair workflow.
-- Documents still lacks a dedicated `Diagnose NLP` / `Open NLP Setup` CTA.
-- Dev-mode vs packaged-mode remediation semantics are not yet documented in-product.
+- Resources Manager still does not provide a true install wizard; it provides status, repair guidance, and model-path actions only.
+- Run-level provenance is still additive text in `ProcessorRun.note`, not structured relational metadata.
+- External runtime dependency repair and managed model import are still surfaced in one dialog, though now with clearer boundaries.
 
 ## Constraints
 - PowerShell-only workflow.
@@ -28,13 +28,12 @@
 - Documentation must be updated after each logically completed step.
 
 ## Current Delivery Intent
-- Wave 1:
-  - safety-first invariant
-  - runtime truth layer
-  - run-level provenance
-  - initial NLP visibility in health/resources UX
+- Wave 2:
+  - subprocess-isolated runtime truth
+  - packaging-aware remediation
+  - stronger setup/repair guidance in Resources Manager
 
-## Confirmed Current State After Wave 1
+## Confirmed Current State After Wave 2
 - `ProcessService` no longer silently converts Stanza failures into Mock runs.
 - Documents UI requires explicit fallback confirmation before running persisted processing on Mock.
 - `ProcessorRun.note` now records configured/effective engine and fallback provenance.
@@ -42,3 +41,5 @@
 - Resources Manager shows current Stanza runtime status text.
 - Resources Manager no longer crashes if the NLP runtime probe itself raises.
 - Documents exposes direct `Diagnose NLP` and `Open NLP Setup` actions.
+- `RuntimeProbe` now executes Stanza/Torch checks in an isolated subprocess and returns machine-readable reason codes.
+- Resources Manager exposes packaging-aware repair steps and a guarded NLP model-folder action.

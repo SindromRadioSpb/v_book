@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import json
+import subprocess
+
+from app.services.nlp_runtime.runtime_probe import NlpRuntimeProbe
+
+
+class _Completed:
+    def __init__(self, *, stdout: str = "", stderr: str = "", returncode: int = 0):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def test_probe_stanza_uses_subprocess_payload(monkeypatch):
+    payload = {
+        "package_installed": True,
+        "model_present": True,
+        "pipeline_init_ok": False,
+        "smoke_ok": False,
+        "cuda_available": False,
+        "engine_version": "1.11.1",
+        "model_path": "C:/models/he",
+        "smoke_requested": True,
+        "error_code": "hostile_torch_state",
+        "error_detail": "WinError 1114",
+    }
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: _Completed(stdout=json.dumps(payload, ensure_ascii=False) + "\n"),
+    )
+
+    status = NlpRuntimeProbe().probe_stanza(use_gpu=False, run_smoke=True)
+
+    assert status.error_code == "hostile_torch_state"
+    assert status.package_installed is True
+    assert status.effective_engine_id is None
+    assert "DLL initialization" in status.remediation or "Torch failed" in status.remediation
+
+
+def test_probe_stanza_timeout_becomes_machine_readable_status(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="probe", timeout=45)),
+    )
+
+    status = NlpRuntimeProbe().probe_stanza(use_gpu=False, run_smoke=True)
+
+    assert status.error_code == "probe_timeout"
+    assert status.effective_engine_id is None
+    assert "timed out" in status.remediation.lower() or "timed out" in (status.error_detail or "").lower()
+
+
+def test_probe_stanza_packaged_mode_changes_package_missing_remediation(monkeypatch):
+    payload = {
+        "package_installed": False,
+        "model_present": False,
+        "pipeline_init_ok": False,
+        "smoke_ok": False,
+        "cuda_available": False,
+        "engine_version": None,
+        "model_path": None,
+        "smoke_requested": True,
+        "error_code": "package_missing",
+        "error_detail": "No module named stanza",
+    }
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: _Completed(stdout=json.dumps(payload, ensure_ascii=False) + "\n"),
+    )
+    monkeypatch.setattr(NlpRuntimeProbe, "_is_packaged_runtime", staticmethod(lambda: True))
+
+    status = NlpRuntimeProbe().probe_stanza(use_gpu=False, run_smoke=True)
+
+    assert status.error_code == "package_missing"
+    assert "Packaged mode detected" in status.remediation

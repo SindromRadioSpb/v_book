@@ -2,110 +2,71 @@
 
 from __future__ import annotations
 
-import logging
+import json
 import os
-from dataclasses import replace
+import subprocess
+import sys
 from pathlib import Path
 
-from app.infra.nlp_engines.stanza_engine import create_stanza_engine
-
 from .dto import NlpRuntimeStatus
-
-logger = logging.getLogger(__name__)
 
 
 class NlpRuntimeProbe:
     """Best-effort runtime diagnostics for the current machine/environment."""
 
     STANZA_MODEL_ID = "he/tokenize,pos,lemma"
+    _PROBE_TIMEOUT_SECONDS = 45
 
     def probe_stanza(self, *, use_gpu: bool = False, run_smoke: bool = True) -> NlpRuntimeStatus:
         runtime_mode = "gpu" if use_gpu else "cpu"
-        cuda_available = self._probe_cuda_available()
-        model_path = self._detect_stanza_model_path()
-        model_present = bool(model_path and Path(model_path).exists())
+        payload = self._run_subprocess_probe(use_gpu=use_gpu, run_smoke=run_smoke)
+        return self._status_from_payload(payload, runtime_mode=runtime_mode)
 
-        try:
-            import stanza
-        except ImportError as exc:
-            return NlpRuntimeStatus(
-                configured_engine_id="stanza",
-                effective_engine_id=None,
-                package_installed=False,
-                model_present=model_present,
-                pipeline_init_ok=False,
-                smoke_ok=False,
-                cuda_available=cuda_available,
-                runtime_mode=runtime_mode,
-                fallback_used=False,
-                error_code="package_missing",
-                error_detail=str(exc),
-                remediation="Install the Python package in the active environment: pip install stanza",
-                model_id=self.STANZA_MODEL_ID,
-                model_path=model_path,
-            )
+    def is_packaged_runtime(self) -> bool:
+        return self._is_packaged_runtime()
 
-        try:
-            engine = create_stanza_engine(use_gpu=use_gpu)
-        except RuntimeError as exc:
-            error_detail = str(exc)
-            error_code = "model_missing" if self._looks_like_missing_model(error_detail) else "pipeline_init_failed"
-            remediation = (
-                "Install or import the Hebrew Stanza model resources, then retry."
-                if error_code == "model_missing"
-                else "Check the active interpreter, model path, and runtime environment, then retry."
-            )
-            return NlpRuntimeStatus(
-                configured_engine_id="stanza",
-                effective_engine_id=None,
-                package_installed=True,
-                model_present=model_present,
-                pipeline_init_ok=False,
-                smoke_ok=False,
-                cuda_available=cuda_available,
-                runtime_mode=runtime_mode,
-                fallback_used=False,
-                error_code=error_code,
-                error_detail=error_detail,
-                remediation=remediation,
-                engine_version=getattr(stanza, "__version__", None),
-                model_id=self.STANZA_MODEL_ID,
-                model_path=model_path,
-            )
+    def build_setup_steps(self, status: NlpRuntimeStatus | None) -> list[str]:
+        mode = "packaged" if self.is_packaged_runtime() else "development"
+        steps = [
+            f"Environment mode: {mode}.",
+            "Persisted processing will not silently switch to Mock. Fix the runtime or explicitly confirm Mock fallback.",
+        ]
 
-        status = NlpRuntimeStatus(
-            configured_engine_id="stanza",
-            effective_engine_id="stanza",
-            package_installed=True,
-            model_present=True if model_path else True,
-            pipeline_init_ok=True,
-            smoke_ok=not run_smoke,
-            cuda_available=cuda_available,
-            runtime_mode=runtime_mode,
-            fallback_used=False,
-            remediation="",
-            engine_version=engine.get_version(),
-            model_id=self.STANZA_MODEL_ID,
-            model_path=model_path,
-        )
+        if status is None:
+            steps.append("Run the isolated NLP probe again to capture the current runtime truth.")
+            return steps
 
-        if not run_smoke:
-            return status
+        if status.model_path:
+            steps.append(f"Detected Hebrew model path: {status.model_path}")
+        else:
+            steps.append("No Hebrew model path is currently detected.")
 
-        try:
-            engine.process("שלום עולם.")
-        except Exception as exc:
-            logger.warning("Stanza smoke probe failed: %s", exc)
-            return replace(
-                status,
-                effective_engine_id=None,
-                smoke_ok=False,
-                error_code="smoke_failed",
-                error_detail=str(exc),
-                remediation="The pipeline initialized but failed the smoke sentence. Reinstall the model or inspect the runtime logs.",
-            )
+        error_code = status.error_code or ""
+        if error_code == "package_missing":
+            if self.is_packaged_runtime():
+                steps.append("This packaged build cannot repair Python packages in place; reinstall the app or use a dev environment.")
+            else:
+                steps.append("Verify the active interpreter/venv and install `stanza` into that exact environment.")
+        elif error_code == "hostile_torch_state":
+            steps.append("Torch DLL initialization failed inside the isolated probe; check CUDA, VC++ runtime, driver compatibility, and local Torch build.")
+        elif error_code == "runtime_import_failed":
+            steps.append("The package exists but runtime import failed; inspect the interpreter, PATH, and Torch/Stanza dependency chain.")
+        elif error_code == "model_missing":
+            steps.append("Import or copy the Hebrew Stanza resources into the detected cache path or point STANZA_RESOURCES_DIR to them.")
+        elif error_code == "pipeline_init_failed":
+            steps.append("The Hebrew resources were found, but pipeline initialization failed; verify resource integrity and compatible package versions.")
+        elif error_code == "smoke_failed":
+            steps.append("The pipeline initialized but failed the smoke sentence; rerun the probe after reinstalling the Hebrew resources.")
+        elif error_code == "probe_timeout":
+            steps.append("The isolated probe timed out; retry diagnostics and inspect slow or blocking runtime initialization.")
+        elif error_code == "probe_subprocess_failed":
+            steps.append("The isolated probe could not complete; inspect local environment restrictions and retry diagnostics.")
+        elif error_code == "probe_invalid_output":
+            steps.append("The isolated probe returned invalid output; inspect stderr/log output and retry diagnostics.")
 
-        return replace(status, smoke_ok=True)
+        if status.remediation:
+            steps.append(f"Remediation summary: {status.remediation}")
+        return steps
 
     @staticmethod
     def build_mock_status(
@@ -133,19 +94,165 @@ class NlpRuntimeProbe:
             model_path=None,
         )
 
-    @staticmethod
-    def _probe_cuda_available() -> bool:
+    def _run_subprocess_probe(self, *, use_gpu: bool, run_smoke: bool) -> dict[str, object]:
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["HDLE_STANZA_PROBE_MODE"] = "gpu" if use_gpu else "cpu"
+        env["HDLE_STANZA_PROBE_SMOKE"] = "1" if run_smoke else "0"
+
+        cmd = [sys.executable, "-u", "-c", self._build_probe_script()]
+        model_path = self._detect_stanza_model_path()
+
         try:
-            import torch
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=self._PROBE_TIMEOUT_SECONDS,
+                cwd=Path(__file__).resolve().parents[3],
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "error_code": "probe_timeout",
+                "error_detail": f"Subprocess probe timed out after {self._PROBE_TIMEOUT_SECONDS} seconds.",
+                "package_installed": False,
+                "model_present": bool(model_path),
+                "pipeline_init_ok": False,
+                "smoke_ok": False,
+                "cuda_available": False,
+                "model_path": model_path,
+                "smoke_requested": bool(run_smoke),
+            }
+        except Exception as exc:
+            return {
+                "error_code": "probe_subprocess_failed",
+                "error_detail": str(exc),
+                "package_installed": False,
+                "model_present": bool(model_path),
+                "pipeline_init_ok": False,
+                "smoke_ok": False,
+                "cuda_available": False,
+                "model_path": model_path,
+                "smoke_requested": bool(run_smoke),
+            }
 
-            return bool(torch.cuda.is_available())
-        except Exception:
-            return False
+        first_line = ""
+        for line in completed.stdout.splitlines():
+            if line.strip():
+                first_line = line.strip()
+                break
+
+        if not first_line:
+            return {
+                "error_code": "probe_subprocess_failed",
+                "error_detail": completed.stderr.strip() or f"Probe exited with code {completed.returncode}",
+                "package_installed": False,
+                "model_present": bool(model_path),
+                "pipeline_init_ok": False,
+                "smoke_ok": False,
+                "cuda_available": False,
+                "model_path": model_path,
+                "smoke_requested": bool(run_smoke),
+            }
+
+        try:
+            payload = json.loads(first_line)
+        except json.JSONDecodeError as exc:
+            return {
+                "error_code": "probe_invalid_output",
+                "error_detail": str(exc),
+                "package_installed": False,
+                "model_present": bool(model_path),
+                "pipeline_init_ok": False,
+                "smoke_ok": False,
+                "cuda_available": False,
+                "model_path": model_path,
+                "smoke_requested": bool(run_smoke),
+            }
+
+        if not payload.get("model_path"):
+            payload["model_path"] = model_path
+        if "smoke_requested" not in payload:
+            payload["smoke_requested"] = bool(run_smoke)
+        return payload
+
+    def _status_from_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        runtime_mode: str,
+    ) -> NlpRuntimeStatus:
+        error_code = self._normalize_error_code(payload.get("error_code"))
+        package_installed = bool(payload.get("package_installed"))
+        model_present = bool(payload.get("model_present"))
+        pipeline_init_ok = bool(payload.get("pipeline_init_ok"))
+        smoke_requested = bool(payload.get("smoke_requested", True))
+        smoke_ok = bool(payload.get("smoke_ok")) if smoke_requested else True
+        cuda_available = bool(payload.get("cuda_available"))
+        model_path = str(payload.get("model_path") or "") or self._detect_stanza_model_path()
+        engine_version = str(payload.get("engine_version") or "") or None
+        error_detail = str(payload.get("error_detail") or "").strip() or None
+        effective_engine_id = None
+        if not error_code and package_installed and pipeline_init_ok and smoke_ok:
+            effective_engine_id = "stanza"
+
+        return NlpRuntimeStatus(
+            configured_engine_id="stanza",
+            effective_engine_id=effective_engine_id,
+            package_installed=package_installed,
+            model_present=model_present,
+            pipeline_init_ok=pipeline_init_ok,
+            smoke_ok=smoke_ok,
+            cuda_available=cuda_available,
+            runtime_mode=runtime_mode,
+            fallback_used=False,
+            error_code=error_code,
+            error_detail=error_detail,
+            remediation=self._build_remediation(error_code, model_path=model_path),
+            engine_version=engine_version,
+            model_id=self.STANZA_MODEL_ID,
+            model_path=model_path,
+        )
 
     @staticmethod
-    def _looks_like_missing_model(message: str) -> bool:
-        text = str(message or "").lower()
-        return "download" in text or "model" in text or "resource" in text
+    def _normalize_error_code(error_code: object) -> str | None:
+        text = str(error_code or "").strip().lower()
+        return text or None
+
+    def _build_remediation(self, error_code: str | None, *, model_path: str | None) -> str:
+        model_hint = f" Model path: {model_path}." if model_path else ""
+        if self._is_packaged_runtime():
+            package_help = (
+                "Packaged mode detected. This build cannot repair Python packages in place. "
+                "Use the bundled runtime, reinstall the app, or switch to a development environment."
+            )
+        else:
+            package_help = (
+                "Development mode detected. Verify the active interpreter/venv and install missing Python packages there."
+            )
+
+        remediation_map = {
+            "package_missing": f"{package_help} Expected package: stanza.{model_hint}",
+            "runtime_import_failed": f"The Python package exists but failed during runtime import. Check the local interpreter and Torch/CUDA environment.{model_hint}",
+            "hostile_torch_state": f"Torch failed during DLL initialization inside the probe subprocess. Check CUDA, VC++ runtime, and local driver compatibility.{model_hint}",
+            "model_missing": f"Install or import the Hebrew Stanza model resources. Use Resources Manager for model paths and offline import guidance.{model_hint}",
+            "pipeline_init_failed": f"Stanza package is present, but pipeline initialization failed. Verify model files, cache paths, and runtime compatibility.{model_hint}",
+            "smoke_failed": f"The pipeline initialized but the smoke sentence failed. Reinstall model resources and inspect runtime logs.{model_hint}",
+            "probe_timeout": "The isolated probe timed out. Retry diagnostics in CPU mode and inspect startup cost or blocking dependencies.",
+            "probe_subprocess_failed": "The isolated probe process could not complete. Retry diagnostics and inspect local runtime dependencies.",
+            "probe_invalid_output": "The isolated probe returned invalid output. Retry diagnostics and inspect stderr/log output.",
+        }
+        return remediation_map.get(
+            error_code or "",
+            f"Runtime status is unavailable. Retry diagnostics and inspect the active environment.{model_hint}",
+        )
+
+    @staticmethod
+    def _is_packaged_runtime() -> bool:
+        return os.name == "nt" and bool(getattr(sys, "frozen", False))
 
     @staticmethod
     def _detect_stanza_model_path() -> str | None:
@@ -170,3 +277,113 @@ class NlpRuntimeProbe:
             if candidate.exists():
                 return str(candidate)
         return None
+
+    @staticmethod
+    def _build_probe_script() -> str:
+        return r'''
+import json
+import os
+from pathlib import Path
+
+
+def _detect_stanza_model_path():
+    candidates = []
+    explicit = os.getenv("STANZA_RESOURCES_DIR", "").strip()
+    if explicit:
+        candidates.append(Path(explicit) / "he")
+        candidates.append(Path(explicit))
+    candidates.append(Path.home() / "stanza_resources" / "he")
+    local_appdata = os.getenv("LOCALAPPDATA", "").strip()
+    if local_appdata:
+        cache_root = Path(local_appdata) / "StanfordNLP" / "stanza" / "Cache"
+        if cache_root.exists():
+            for version_dir in sorted(cache_root.iterdir(), reverse=True):
+                if version_dir.is_dir():
+                    candidates.append(version_dir / "resources" / "he")
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+mode = os.getenv("HDLE_STANZA_PROBE_MODE", "cpu").strip().lower() or "cpu"
+smoke = os.getenv("HDLE_STANZA_PROBE_SMOKE", "0") == "1"
+payload = {
+    "package_installed": False,
+    "model_present": bool(_detect_stanza_model_path()),
+    "pipeline_init_ok": False,
+    "smoke_ok": False,
+    "cuda_available": False,
+    "engine_version": None,
+    "model_path": _detect_stanza_model_path(),
+    "smoke_requested": smoke,
+    "error_code": None,
+    "error_detail": None,
+}
+
+try:
+    import stanza
+except ImportError as exc:
+    payload["error_code"] = "package_missing"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+except OSError as exc:
+    payload["package_installed"] = True
+    payload["error_code"] = "hostile_torch_state"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+except Exception as exc:
+    payload["package_installed"] = True
+    payload["error_code"] = "runtime_import_failed"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+
+payload["package_installed"] = True
+payload["engine_version"] = getattr(stanza, "__version__", None)
+
+try:
+    import torch
+    payload["cuda_available"] = bool(torch.cuda.is_available())
+except OSError as exc:
+    payload["error_code"] = "hostile_torch_state"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+except Exception:
+    payload["cuda_available"] = False
+
+try:
+    pipeline = stanza.Pipeline(
+        lang="he",
+        processors="tokenize,pos,lemma",
+        use_gpu=(mode == "gpu"),
+        download_method=None,
+    )
+except Exception as exc:
+    payload["error_code"] = "model_missing" if any(token in str(exc).lower() for token in ("download", "model", "resource")) else "pipeline_init_failed"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+
+payload["pipeline_init_ok"] = True
+
+if not smoke:
+    payload["smoke_ok"] = True
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+
+try:
+    pipeline("שלום עולם.")
+except Exception as exc:
+    payload["error_code"] = "smoke_failed"
+    payload["error_detail"] = str(exc)
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(0)
+
+payload["smoke_ok"] = True
+print(json.dumps(payload, ensure_ascii=False))
+'''
+

@@ -64,3 +64,17 @@
   - Wave 1 stores configured/effective runtime provenance in `ProcessorRun.note` instead of introducing a schema migration immediately.
 - Rationale:
   - This keeps the safety patch small, additive, and testable while preserving audit-grade run truth.
+
+## D-009 — Probe isolation must be subprocess-based
+- Status: accepted and implemented
+- Decision:
+  - `RuntimeProbe` must inspect `stanza/torch` from an isolated subprocess instead of importing them into the live UI process.
+- Rationale:
+  - hostile Torch DLL/import state must degrade to diagnostics, not destabilize Documents, Health Check, or Resources Manager.
+
+## D-010 — Repair guidance must be packaging-aware
+- Status: accepted and implemented
+- Decision:
+  - remediation text and repair steps must distinguish development-mode interpreter issues from packaged-app runtime limitations.
+- Rationale:
+  - the user needs honest next steps; packaged builds must not pretend they can repair Python packages in place.
