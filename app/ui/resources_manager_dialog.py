@@ -255,6 +255,7 @@ class ResourcesManagerDialog(QDialog):
                 f"Environment: {mode}. "
                 "Package: stanza installed. "
                 f"Runtime: {runtime}. "
+                "No bundled installer file is managed in this dialog for Python packages. "
                 f"Reason code: none."
             )
 
@@ -262,6 +263,7 @@ class ResourcesManagerDialog(QDialog):
             "External runtime dependency is unavailable. "
             f"Environment: {mode}. "
             f"Reason: {status.error_code or 'unavailable'}. "
+            "This dialog does not ship a one-click Python package installer. "
             f"Remediation: {status.remediation or 'Repair the runtime outside this dialog.'}"
         )
 
@@ -273,17 +275,20 @@ class ResourcesManagerDialog(QDialog):
             return (
                 "Managed Hebrew resource is present. "
                 f"Model path: {model_path}. "
+                "This is a directory-based resource, not a single installer file. "
                 "Use Open NLP Model Folder to inspect or replace the local files."
             )
         if model_path:
             return (
                 "Managed Hebrew resource path is known but the resource is not ready. "
                 f"Model path: {model_path}. "
+                "This is a directory-based resource, not a single installer file. "
                 "Use offline import or copy the Hebrew model files into this location."
             )
         return (
             "Managed Hebrew resource is not detected. "
             "No Hebrew model path is currently known. "
+            "No single installer file is currently bundled here. "
             "Use offline import guidance or configure the resource path first."
         )
 
@@ -340,6 +345,7 @@ class ResourcesManagerDialog(QDialog):
                 "External runtime dependency is unavailable. "
                 "Environment: unknown. "
                 "Reason: runtime_probe_failed. "
+                "This dialog does not ship a one-click Python package installer. "
                 "Remediation: Check the local Torch/Stanza runtime and retry.",
             )
 

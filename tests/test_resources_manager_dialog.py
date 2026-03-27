@@ -130,8 +130,10 @@ def test_resources_manager_runtime_probe_failure_does_not_crash():
 
     assert "runtime_probe_failed" in dialog.nlp_runtime_label.value
     assert "External runtime dependency is unavailable" in dialog.nlp_runtime_label.value
+    assert "does not ship a one-click Python package installer" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is False
     assert "Managed Hebrew resource is not detected" in dialog.hebrew_resource_label.value
+    assert "No single installer file" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_ready_runtime_enables_model_folder_button():
@@ -141,9 +143,11 @@ def test_resources_manager_ready_runtime_enables_model_folder_button():
     ResourcesManagerDialog._refresh_nlp_runtime_status(dialog)
 
     assert "External runtime dependency is ready" in dialog.nlp_runtime_label.value
+    assert "No bundled installer file is managed in this dialog" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is True
     assert "C:/models/he" in dialog.open_nlp_model_folder_btn.tooltip
     assert "Managed Hebrew resource is present" in dialog.hebrew_resource_label.value
+    assert "directory-based resource" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_setup_guide_is_packaging_aware():

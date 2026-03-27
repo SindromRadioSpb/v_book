@@ -184,6 +184,32 @@
   - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_process_progress_ui.py tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `30 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `44 passed`
 
+## Step 11 — Production Subprocess Stanza Runtime
+- Status: completed
+- Trigger:
+  - the product still depended on in-process `torch/stanza` initialization inside the Qt application process, so the UI recovery flow could only route around the failure instead of restoring real Stanza processing.
+- Code deliverables:
+  - `app/infra/nlp_engines/stanza_engine.py`
+  - `app/infra/nlp_engines/stanza_subprocess_worker.py`
+  - `app/ui/resources_manager_dialog.py`
+  - `tests/test_stanza_engine_subprocess.py`
+  - `tests/test_resources_manager_dialog.py`
+- Confirmed behavior changes:
+  - `create_stanza_engine()` now falls back to a subprocess-backed Stanza engine when in-process runtime initialization fails with hostile DLL/runtime conditions
+  - the subprocess engine preserves the same `NLPEngine` contract and returns real sentence/token payloads
+  - Resources Manager now says explicitly that Python runtime dependencies are not represented as a bundled install file in this dialog
+  - Resources Manager now says explicitly that the Hebrew model is a directory-based resource, not a single installer file
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_stanza_engine_subprocess.py tests/test_resources_manager_dialog.py tests/test_documents_process_progress_ui.py tests/test_process_service_nlp_runtime.py tests/test_nlp_runtime_probe.py -q` -> `24 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py tests/test_stanza_engine_subprocess.py -q` -> `47 passed`
+- Live smoke evidence:
+  - App-like Qt process (`QApplication` + `QMediaPlayer`) now auto-falls back from in-process Stanza to `SubprocessStanzaEngine` after a real `WinError 1114` and still processes Hebrew text successfully
+  - Real reprocess succeeded on a copy of the user DB:
+    - DB copy: `E:\projects\Project_Vibe\V_book\reports\runtime_smoke\hewiki_gpu_processing_test_copy.db`
+    - Document: `doc_id=1`
+    - Result: `ok=True`, status remained `processed`, latest `ProcessorRun.engine='stanza'`
+    - Detected Hebrew model directory: `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`
+
 ## Next Step
 - Wave 4 candidate:
   - consider promoting structured runtime provenance from nested note payloads into dedicated schema fields once the contract proves stable

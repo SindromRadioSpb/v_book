@@ -69,3 +69,10 @@
 - Controlled runtime-block failures are logged as warnings rather than full worker tracebacks.
 - `DocumentsView` can now convert a late live-init Stanza failure into a guided recovery dialog without forcing the user to restart the action manually.
 - The guided recovery dialog routes the user to `Use Mock Once`, `Open NLP Setup`, `Run Health Check`, or `Cancel`.
+
+## Confirmed Current State After Production Subprocess Stanza Fix
+- `create_stanza_engine()` can now recover from hostile in-process `torch/stanza` initialization by spawning a clean subprocess-backed Stanza engine instead of hard-failing the processing request.
+- The subprocess-backed engine preserves the `NLPEngine` contract and returns real sentence/token payloads to the existing pipeline.
+- A live app-like Qt process (`QApplication` + `QMediaPlayer`) now auto-falls back to `SubprocessStanzaEngine` after a real `WinError 1114` and still processes Hebrew text successfully.
+- A real `reprocess_document()` run succeeded on a copy of the user DB while using this subprocess runtime recovery path.
+- The detected Hebrew model resource is currently a directory at `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`; there is no single bundled installer file for it inside the dialog.
