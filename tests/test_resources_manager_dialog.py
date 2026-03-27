@@ -160,6 +160,7 @@ def _build_dialog(probe) -> ResourcesManagerDialog:
     dialog._download_worker = None
     dialog._import_worker = None
     dialog._health_worker = None
+    dialog._runtime_setup_worker = None
     dialog._progress_dialog = None
     return dialog
 
@@ -213,9 +214,11 @@ def test_resources_manager_shutdown_stops_owned_workers():
     download_worker = _FakeWorker(running=True, wait_result=True)
     import_worker = _FakeWorker(running=True, wait_result=False)
     health_worker = _FakeWorker(running=True, wait_result=True)
+    setup_worker = _FakeWorker(running=True, wait_result=True)
     dialog._download_worker = download_worker
     dialog._import_worker = import_worker
     dialog._health_worker = health_worker
+    dialog._runtime_setup_worker = setup_worker
     dialog._progress_dialog = _FakeProgressDialog()
 
     ok = ResourcesManagerDialog._shutdown_background_workers(dialog)
@@ -225,4 +228,33 @@ def test_resources_manager_shutdown_stops_owned_workers():
     assert import_worker.cancel_called is True
     assert import_worker.terminate_called is True
     assert health_worker.cancel_called is False
+    assert setup_worker.cancel_called is True
     assert dialog._progress_dialog is None
+
+
+def test_resources_manager_runtime_setup_finish_refreshes_status(monkeypatch):
+    dialog = _build_dialog(_FailingProbe())
+    refreshed = {"count": 0}
+    messages = []
+    statuses = []
+
+    monkeypatch.setattr(
+        "app.ui.resources_manager_dialog.QMessageBox.information",
+        lambda *args: messages.append(args[2]),
+    )
+    dialog._refresh_nlp_runtime_status = lambda: refreshed.__setitem__("count", refreshed["count"] + 1)
+    dialog._set_status = lambda text: statuses.append(text)
+    dialog._runtime_setup_worker = object()
+
+    ResourcesManagerDialog._on_nlp_runtime_setup_finished(
+        dialog,
+        {
+            "model_present": True,
+            "source_kind": "legacy",
+            "model_path": "C:/managed/stanza_resources/he",
+        },
+    )
+
+    assert refreshed["count"] == 1
+    assert any("Managed NLP runtime ready" in text for text in statuses)
+    assert messages

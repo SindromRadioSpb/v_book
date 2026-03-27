@@ -113,3 +113,17 @@
   - dialog/window owners of background QThreads must perform deterministic shutdown before destruction: cooperative stop, bounded wait, force terminate only during owner shutdown, and refuse close if the thread is still alive.
 - Rationale:
   - the Windows runtime recovery path already uses more background orchestration; a leaked owner-bound QThread is now a P0 crash source (`QThread: Destroyed while thread is still running`).
+
+## D-016 — Windows production Stanza uses an app-owned subprocess runtime
+- Status: accepted and implemented
+- Decision:
+  - on Windows, production Stanza processing should prefer an application-controlled subprocess runtime launched via `app.main --stanza-worker`, with the probe using the sibling `app.main --stanza-probe` path.
+- Rationale:
+  - the Qt UI process must not be the critical path for successful `torch/stanza` imports; the product executable itself is the honest runtime owner in packaged mode.
+
+## D-017 — Hebrew Stanza resources are bootstrap-managed into app data
+- Status: accepted and implemented
+- Decision:
+  - the product-owned runtime bootstraps a managed `stanza_resources/he` tree under the app data root and records ownership/paths in a runtime manifest.
+- Rationale:
+  - this gives the product a stable resource root without pretending that a single install file exists for the Hebrew model.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
+from types import SimpleNamespace
 
 from app.services.nlp_runtime.runtime_probe import NlpRuntimeProbe
 
@@ -11,6 +13,19 @@ class _Completed:
         self.stdout = stdout
         self.stderr = stderr
         self.returncode = returncode
+
+
+def _bootstrap():
+    return SimpleNamespace(
+        ok=True,
+        model_present=True,
+        model_path=Path("C:/managed/stanza_resources/he"),
+        to_dict=lambda: {
+            "ok": True,
+            "model_present": True,
+            "model_path": "C:/managed/stanza_resources/he",
+        },
+    )
 
 
 def test_probe_stanza_uses_subprocess_payload(monkeypatch):
@@ -28,6 +43,18 @@ def test_probe_stanza_uses_subprocess_payload(monkeypatch):
     }
 
     monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap(),
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_probe_command",
+        lambda self: ["python", "-m", "app.main", "--stanza-probe"],
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {},
+    )
+    monkeypatch.setattr(
         subprocess,
         "run",
         lambda *args, **kwargs: _Completed(stdout=json.dumps(payload, ensure_ascii=False) + "\n"),
@@ -42,6 +69,18 @@ def test_probe_stanza_uses_subprocess_payload(monkeypatch):
 
 
 def test_probe_stanza_timeout_becomes_machine_readable_status(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap(),
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_probe_command",
+        lambda self: ["python", "-m", "app.main", "--stanza-probe"],
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {},
+    )
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -70,11 +109,26 @@ def test_probe_stanza_packaged_mode_changes_package_missing_remediation(monkeypa
     }
 
     monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap(),
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_probe_command",
+        lambda self: ["app.exe", "--stanza-probe"],
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {},
+    )
+    monkeypatch.setattr(
         subprocess,
         "run",
         lambda *args, **kwargs: _Completed(stdout=json.dumps(payload, ensure_ascii=False) + "\n"),
     )
-    monkeypatch.setattr(NlpRuntimeProbe, "_is_packaged_runtime", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.is_packaged_runtime",
+        staticmethod(lambda: True),
+    )
 
     status = NlpRuntimeProbe().probe_stanza(use_gpu=False, run_smoke=True)
 
@@ -133,3 +187,28 @@ def test_guided_repair_plan_routes_model_failures_to_resource():
 
     assert plan["route"] == "resource"
     assert "Managed Hebrew Resource" in plan["next_action"]
+
+
+def test_build_setup_steps_mentions_official_runtime_repair():
+    probe = NlpRuntimeProbe()
+    status = type(probe.build_mock_status())(
+        configured_engine_id="stanza",
+        effective_engine_id=None,
+        package_installed=True,
+        model_present=False,
+        pipeline_init_ok=False,
+        smoke_ok=False,
+        cuda_available=False,
+        runtime_mode="cpu",
+        fallback_used=False,
+        error_code="model_missing",
+        error_detail="missing",
+        remediation="Import model.",
+        engine_version="1.11.1",
+        model_id="he/tokenize,pos,lemma",
+        model_path="C:/managed/stanza_resources/he",
+    )
+
+    steps = probe.build_setup_steps(status)
+
+    assert any("Install / Repair NLP Runtime" in step for step in steps)

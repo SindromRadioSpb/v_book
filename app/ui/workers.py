@@ -9,7 +9,7 @@ from typing import Any, Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.domain.normalization.normalizer import normalize_for_tm
-from app.services.nlp_runtime import NlpRuntimeProbe
+from app.services.nlp_runtime import ManagedStanzaRuntime, NlpRuntimeProbe
 
 logger = logging.getLogger(__name__)
 
@@ -969,6 +969,37 @@ class NLPEngineReadinessWorker(QThread):
 
         if not self._cancelled:
             self.result_ready.emit(self.request_id, status)
+
+
+class NlpRuntimeBootstrapWorker(QThread):
+    """Bootstrap or repair the product-owned Stanza runtime in the background."""
+
+    status = pyqtSignal(str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, *, force_repair: bool = False):
+        super().__init__()
+        self.force_repair = bool(force_repair)
+        self._cancelled = False
+        self.runtime = ManagedStanzaRuntime()
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        if self._cancelled:
+            return
+        try:
+            self.status.emit("Preparing managed NLP runtime...")
+            result = self.runtime.bootstrap_runtime(force_repair=self.force_repair)
+            if self._cancelled:
+                return
+            self.finished.emit(result.to_dict())
+        except Exception as exc:
+            logger.exception("Managed NLP runtime bootstrap failed")
+            if not self._cancelled:
+                self.error.emit(str(exc))
 
 
 class DocumentsPageWorker(QThread):

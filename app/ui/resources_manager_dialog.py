@@ -29,7 +29,11 @@ from app.services.project_exchange.worker import ProjectImportWorker
 from app.services.nlp_runtime import NlpRuntimeProbe
 from app.services.resources import ResourceRegistry
 from app.ui.thread_lifecycle import shutdown_qthread
-from app.ui.workers import ResourceDownloadWorker, UnifiedHealthCheckWorker
+from app.ui.workers import (
+    NlpRuntimeBootstrapWorker,
+    ResourceDownloadWorker,
+    UnifiedHealthCheckWorker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,7 @@ class ResourcesManagerDialog(QDialog):
         self._download_worker = None
         self._health_worker = None
         self._import_worker = None
+        self._runtime_setup_worker = None
         self._progress_dialog: QProgressDialog | None = None
         self._last_nlp_runtime_status = None
         self._last_nlp_runtime_message = ""
@@ -92,6 +97,10 @@ class ResourcesManagerDialog(QDialog):
         self.show_nlp_guide_btn = QPushButton("Show Repair Steps")
         self.show_nlp_guide_btn.clicked.connect(self._show_nlp_setup_guide)
         nlp_actions.addWidget(self.show_nlp_guide_btn)
+
+        self.install_nlp_runtime_btn = QPushButton("Install / Repair NLP Runtime")
+        self.install_nlp_runtime_btn.clicked.connect(self._install_or_repair_nlp_runtime)
+        nlp_actions.addWidget(self.install_nlp_runtime_btn)
 
         self.open_nlp_model_folder_btn = QPushButton("Open NLP Model Folder")
         self.open_nlp_model_folder_btn.clicked.connect(self._open_nlp_model_folder)
@@ -209,6 +218,7 @@ class ResourcesManagerDialog(QDialog):
             ("resource download", "_download_worker", True),
             ("baseline import", "_import_worker", True),
             ("health check", "_health_worker", False),
+            ("nlp runtime setup", "_runtime_setup_worker", True),
         )
         ok = True
         for label, attr, cancel_first in checks:
@@ -372,6 +382,58 @@ class ResourcesManagerDialog(QDialog):
             )
         )
         return "\n\n".join(sections)
+
+    def _install_or_repair_nlp_runtime(self) -> None:
+        if self._runtime_setup_worker and self._runtime_setup_worker.isRunning():
+            QMessageBox.information(
+                self,
+                "NLP Runtime Setup",
+                "Install / Repair NLP Runtime is already in progress.",
+            )
+            return
+
+        worker = NlpRuntimeBootstrapWorker(force_repair=True)
+        self._runtime_setup_worker = worker
+        worker.status.connect(self._set_status)
+        worker.finished.connect(self._on_nlp_runtime_setup_finished)
+        worker.error.connect(self._on_nlp_runtime_setup_error)
+
+        self._progress_dialog = QProgressDialog(
+            "Installing or repairing the managed NLP runtime...",
+            "Cancel",
+            0,
+            0,
+            self,
+        )
+        self._progress_dialog.setWindowTitle("NLP Runtime Setup")
+        self._progress_dialog.setAutoClose(False)
+        self._progress_dialog.setAutoReset(False)
+        self._progress_dialog.canceled.connect(worker.cancel)
+        self._progress_dialog.show()
+
+        worker.start()
+
+    def _on_nlp_runtime_setup_finished(self, payload: dict) -> None:
+        self._close_progress_dialog()
+        self._runtime_setup_worker = None
+        model_present = bool(payload.get("model_present"))
+        source_kind = str(payload.get("source_kind") or "unknown")
+        model_path = str(payload.get("model_path") or "").strip()
+        summary = (
+            f"Managed NLP runtime ready ({source_kind}). Model path: {model_path}"
+            if model_present
+            else f"Managed NLP runtime still missing Hebrew resources. Expected model path: {model_path}"
+        )
+        self._set_status(summary)
+        self._refresh_nlp_runtime_status()
+        QMessageBox.information(self, "NLP Runtime Setup", summary)
+
+    def _on_nlp_runtime_setup_error(self, message: str) -> None:
+        self._close_progress_dialog()
+        self._runtime_setup_worker = None
+        self._set_status(f"NLP runtime setup failed: {message}")
+        QMessageBox.warning(self, "NLP Runtime Setup Failed", str(message))
+        self._refresh_nlp_runtime_status()
 
     def _refresh_nlp_runtime_status(self) -> None:
         try:

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 from .dto import NlpRuntimeStatus
+from .managed_runtime import ManagedStanzaRuntime
 
 
 class NlpRuntimeProbe:
@@ -17,19 +16,23 @@ class NlpRuntimeProbe:
     STANZA_MODEL_ID = "he/tokenize,pos,lemma"
     _PROBE_TIMEOUT_SECONDS = 45
 
+    def __init__(self):
+        self.runtime = ManagedStanzaRuntime()
+
     def probe_stanza(self, *, use_gpu: bool = False, run_smoke: bool = True) -> NlpRuntimeStatus:
         runtime_mode = "gpu" if use_gpu else "cpu"
         payload = self._run_subprocess_probe(use_gpu=use_gpu, run_smoke=run_smoke)
         return self._status_from_payload(payload, runtime_mode=runtime_mode)
 
     def is_packaged_runtime(self) -> bool:
-        return self._is_packaged_runtime()
+        return self.runtime.is_packaged_runtime()
 
     def build_setup_steps(self, status: NlpRuntimeStatus | None) -> list[str]:
         mode = "packaged" if self.is_packaged_runtime() else "development"
         steps = [
             f"Environment mode: {mode}.",
             "Persisted processing will not silently switch to Mock. Fix the runtime or explicitly confirm Mock fallback.",
+            "Use Install / Repair NLP Runtime to bootstrap the product-owned runtime and managed Hebrew model path.",
         ]
 
         if status is None:
@@ -44,19 +47,19 @@ class NlpRuntimeProbe:
         error_code = status.error_code or ""
         if error_code == "package_missing":
             if self.is_packaged_runtime():
-                steps.append("This packaged build cannot repair Python packages in place; reinstall the app or use a dev environment.")
+                steps.append("This packaged build cannot repair Python packages in place; repair or reinstall the product-owned runtime payload.")
             else:
-                steps.append("Verify the active interpreter/venv and install `stanza` into that exact environment.")
+                steps.append("Verify the active interpreter/venv for the development app runtime and install `stanza` into that exact environment.")
         elif error_code == "hostile_torch_state":
-            steps.append("Torch DLL initialization failed inside the isolated probe; check CUDA, VC++ runtime, driver compatibility, and local Torch build.")
+            steps.append("Torch DLL initialization failed inside the isolated probe; check the product-owned runtime payload, VC++ runtime, driver compatibility, and local Torch build.")
         elif error_code == "runtime_import_failed":
-            steps.append("The package exists but runtime import failed; inspect the interpreter, PATH, and Torch/Stanza dependency chain.")
+            steps.append("The package exists but runtime import failed; inspect the managed runtime executable, PATH, and Torch/Stanza dependency chain.")
         elif error_code == "model_missing":
-            steps.append("Import or copy the Hebrew Stanza resources into the detected cache path or point STANZA_RESOURCES_DIR to them.")
+            steps.append("Run Install / Repair NLP Runtime to restore the managed Hebrew resources into the product-owned runtime path.")
         elif error_code == "pipeline_init_failed":
-            steps.append("The Hebrew resources were found, but pipeline initialization failed; verify resource integrity and compatible package versions.")
+            steps.append("The Hebrew resources were found, but pipeline initialization failed; verify managed resource integrity and compatible package versions.")
         elif error_code == "smoke_failed":
-            steps.append("The pipeline initialized but failed the smoke sentence; rerun the probe after reinstalling the Hebrew resources.")
+            steps.append("The pipeline initialized but failed the smoke sentence; rerun Install / Repair NLP Runtime and then re-run diagnostics.")
         elif error_code == "probe_timeout":
             steps.append("The isolated probe timed out; retry diagnostics and inspect slow or blocking runtime initialization.")
         elif error_code == "probe_subprocess_failed":
@@ -98,7 +101,7 @@ class NlpRuntimeProbe:
                 "next_action": "No repair is required. Persisted processing can use Stanza directly.",
                 "steps": [
                     "Run Health Check only if you want to verify the current environment again.",
-                    "Open Resources Manager only if you want to inspect the Hebrew model files manually.",
+                    "Open Resources Manager only if you want to inspect the managed runtime manifest or Hebrew model files manually.",
                 ],
             }
 
@@ -109,9 +112,10 @@ class NlpRuntimeProbe:
                 "next_action": "Start in Resources Manager and inspect the Managed Hebrew Resource section before retrying processing.",
                 "steps": [
                     "Open Resources Manager from Documents or Tools.",
+                    "Run Install / Repair NLP Runtime to restore the product-owned Hebrew model path.",
                     "Inspect the Managed Hebrew Resource section for the detected model path.",
-                    "Open the model folder or import/copy the Hebrew model files into the expected location.",
-                    "Re-run the isolated NLP probe after the model files are repaired.",
+                    "Open the model folder if you need to verify or replace the local files manually.",
+                    "Re-run the isolated NLP probe after the managed model files are repaired.",
                     "Run Health Check if you need a consolidated report before retrying persisted processing.",
                 ],
             }
@@ -123,6 +127,7 @@ class NlpRuntimeProbe:
             "steps": [
                 "Run Health Check to confirm the current reason code and remediation summary.",
                 "Open Resources Manager and inspect the External Runtime Dependency section.",
+                "Run Install / Repair NLP Runtime to refresh the product-owned runtime manifest and managed resources.",
                 "Fix the active interpreter, stanza package, torch state, or packaged runtime issue.",
                 "Re-run the isolated NLP probe after the runtime dependency is repaired.",
                 "Retry persisted processing only after the runtime reports ready or after explicit Mock fallback confirmation.",
@@ -156,14 +161,9 @@ class NlpRuntimeProbe:
         )
 
     def _run_subprocess_probe(self, *, use_gpu: bool, run_smoke: bool) -> dict[str, object]:
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["HDLE_STANZA_PROBE_MODE"] = "gpu" if use_gpu else "cpu"
-        env["HDLE_STANZA_PROBE_SMOKE"] = "1" if run_smoke else "0"
-
-        cmd = [sys.executable, "-u", "-c", self._build_probe_script()]
-        model_path = self._detect_stanza_model_path()
+        bootstrap = self.runtime.bootstrap_runtime(force_repair=False)
+        cmd = self.runtime.build_probe_command()
+        env = self.runtime.build_runtime_env(use_gpu=use_gpu, run_smoke=run_smoke)
 
         try:
             completed = subprocess.run(
@@ -180,24 +180,26 @@ class NlpRuntimeProbe:
                 "error_code": "probe_timeout",
                 "error_detail": f"Subprocess probe timed out after {self._PROBE_TIMEOUT_SECONDS} seconds.",
                 "package_installed": False,
-                "model_present": bool(model_path),
+                "model_present": bool(bootstrap.model_present),
                 "pipeline_init_ok": False,
                 "smoke_ok": False,
                 "cuda_available": False,
-                "model_path": model_path,
+                "model_path": str(bootstrap.model_path),
                 "smoke_requested": bool(run_smoke),
+                "managed_runtime": bootstrap.to_dict(),
             }
         except Exception as exc:
             return {
                 "error_code": "probe_subprocess_failed",
                 "error_detail": str(exc),
                 "package_installed": False,
-                "model_present": bool(model_path),
+                "model_present": bool(bootstrap.model_present),
                 "pipeline_init_ok": False,
                 "smoke_ok": False,
                 "cuda_available": False,
-                "model_path": model_path,
+                "model_path": str(bootstrap.model_path),
                 "smoke_requested": bool(run_smoke),
+                "managed_runtime": bootstrap.to_dict(),
             }
 
         first_line = ""
@@ -211,12 +213,13 @@ class NlpRuntimeProbe:
                 "error_code": "probe_subprocess_failed",
                 "error_detail": completed.stderr.strip() or f"Probe exited with code {completed.returncode}",
                 "package_installed": False,
-                "model_present": bool(model_path),
+                "model_present": bool(bootstrap.model_present),
                 "pipeline_init_ok": False,
                 "smoke_ok": False,
                 "cuda_available": False,
-                "model_path": model_path,
+                "model_path": str(bootstrap.model_path),
                 "smoke_requested": bool(run_smoke),
+                "managed_runtime": bootstrap.to_dict(),
             }
 
         try:
@@ -226,18 +229,21 @@ class NlpRuntimeProbe:
                 "error_code": "probe_invalid_output",
                 "error_detail": str(exc),
                 "package_installed": False,
-                "model_present": bool(model_path),
+                "model_present": bool(bootstrap.model_present),
                 "pipeline_init_ok": False,
                 "smoke_ok": False,
                 "cuda_available": False,
-                "model_path": model_path,
+                "model_path": str(bootstrap.model_path),
                 "smoke_requested": bool(run_smoke),
+                "managed_runtime": bootstrap.to_dict(),
             }
 
         if not payload.get("model_path"):
-            payload["model_path"] = model_path
+            payload["model_path"] = str(bootstrap.model_path)
         if "smoke_requested" not in payload:
             payload["smoke_requested"] = bool(run_smoke)
+        if "managed_runtime" not in payload:
+            payload["managed_runtime"] = bootstrap.to_dict()
         return payload
 
     def _status_from_payload(
@@ -253,7 +259,7 @@ class NlpRuntimeProbe:
         smoke_requested = bool(payload.get("smoke_requested", True))
         smoke_ok = bool(payload.get("smoke_ok")) if smoke_requested else True
         cuda_available = bool(payload.get("cuda_available"))
-        model_path = str(payload.get("model_path") or "") or self._detect_stanza_model_path()
+        model_path = str(payload.get("model_path") or "") or self.runtime.detect_best_model_path()
         engine_version = str(payload.get("engine_version") or "") or None
         error_detail = str(payload.get("error_detail") or "").strip() or None
         effective_engine_id = None
@@ -285,23 +291,23 @@ class NlpRuntimeProbe:
 
     def _build_remediation(self, error_code: str | None, *, model_path: str | None) -> str:
         model_hint = f" Model path: {model_path}." if model_path else ""
-        if self._is_packaged_runtime():
+        if self.is_packaged_runtime():
             package_help = (
                 "Packaged mode detected. This build cannot repair Python packages in place. "
-                "Use the bundled runtime, reinstall the app, or switch to a development environment."
+                "Use Install / Repair NLP Runtime, reinstall the app, or switch to a development environment."
             )
         else:
             package_help = (
-                "Development mode detected. Verify the active interpreter/venv and install missing Python packages there."
+                "Development mode detected. Use Install / Repair NLP Runtime first, then verify the active interpreter/venv if package import is still failing."
             )
 
         remediation_map = {
             "package_missing": f"{package_help} Expected package: stanza.{model_hint}",
-            "runtime_import_failed": f"The Python package exists but failed during runtime import. Check the local interpreter and Torch/CUDA environment.{model_hint}",
-            "hostile_torch_state": f"Torch failed during DLL initialization inside the probe subprocess. Check CUDA, VC++ runtime, and local driver compatibility.{model_hint}",
-            "model_missing": f"Install or import the Hebrew Stanza model resources. Use Resources Manager for model paths and offline import guidance.{model_hint}",
-            "pipeline_init_failed": f"Stanza package is present, but pipeline initialization failed. Verify model files, cache paths, and runtime compatibility.{model_hint}",
-            "smoke_failed": f"The pipeline initialized but the smoke sentence failed. Reinstall model resources and inspect runtime logs.{model_hint}",
+            "runtime_import_failed": f"The Python package exists but failed during runtime import. Check the managed runtime executable and Torch/CUDA environment.{model_hint}",
+            "hostile_torch_state": f"Torch failed during DLL initialization inside the probe subprocess. Check the managed runtime payload, VC++ runtime, and local driver compatibility.{model_hint}",
+            "model_missing": f"Run Install / Repair NLP Runtime to restore the managed Hebrew model resources. Use Resources Manager for model paths and offline guidance.{model_hint}",
+            "pipeline_init_failed": f"Stanza package is present, but pipeline initialization failed. Verify managed model files, cache paths, and runtime compatibility.{model_hint}",
+            "smoke_failed": f"The pipeline initialized but the smoke sentence failed. Reinstall the managed model resources and inspect runtime logs.{model_hint}",
             "probe_timeout": "The isolated probe timed out. Retry diagnostics in CPU mode and inspect startup cost or blocking dependencies.",
             "probe_subprocess_failed": "The isolated probe process could not complete. Retry diagnostics and inspect local runtime dependencies.",
             "probe_invalid_output": "The isolated probe returned invalid output. Retry diagnostics and inspect stderr/log output.",
@@ -310,142 +316,3 @@ class NlpRuntimeProbe:
             error_code or "",
             f"Runtime status is unavailable. Retry diagnostics and inspect the active environment.{model_hint}",
         )
-
-    @staticmethod
-    def _is_packaged_runtime() -> bool:
-        return os.name == "nt" and bool(getattr(sys, "frozen", False))
-
-    @staticmethod
-    def _detect_stanza_model_path() -> str | None:
-        candidates: list[Path] = []
-
-        explicit = os.getenv("STANZA_RESOURCES_DIR", "").strip()
-        if explicit:
-            candidates.append(Path(explicit) / "he")
-            candidates.append(Path(explicit))
-
-        candidates.append(Path.home() / "stanza_resources" / "he")
-
-        local_appdata = os.getenv("LOCALAPPDATA", "").strip()
-        if local_appdata:
-            cache_root = Path(local_appdata) / "StanfordNLP" / "stanza" / "Cache"
-            if cache_root.exists():
-                for version_dir in sorted(cache_root.iterdir(), reverse=True):
-                    if version_dir.is_dir():
-                        candidates.append(version_dir / "resources" / "he")
-
-        for candidate in candidates:
-            if candidate.exists():
-                return str(candidate)
-        return None
-
-    @staticmethod
-    def _build_probe_script() -> str:
-        return r'''
-import json
-import os
-from pathlib import Path
-
-
-def _detect_stanza_model_path():
-    candidates = []
-    explicit = os.getenv("STANZA_RESOURCES_DIR", "").strip()
-    if explicit:
-        candidates.append(Path(explicit) / "he")
-        candidates.append(Path(explicit))
-    candidates.append(Path.home() / "stanza_resources" / "he")
-    local_appdata = os.getenv("LOCALAPPDATA", "").strip()
-    if local_appdata:
-        cache_root = Path(local_appdata) / "StanfordNLP" / "stanza" / "Cache"
-        if cache_root.exists():
-            for version_dir in sorted(cache_root.iterdir(), reverse=True):
-                if version_dir.is_dir():
-                    candidates.append(version_dir / "resources" / "he")
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-    return None
-
-
-mode = os.getenv("HDLE_STANZA_PROBE_MODE", "cpu").strip().lower() or "cpu"
-smoke = os.getenv("HDLE_STANZA_PROBE_SMOKE", "0") == "1"
-payload = {
-    "package_installed": False,
-    "model_present": bool(_detect_stanza_model_path()),
-    "pipeline_init_ok": False,
-    "smoke_ok": False,
-    "cuda_available": False,
-    "engine_version": None,
-    "model_path": _detect_stanza_model_path(),
-    "smoke_requested": smoke,
-    "error_code": None,
-    "error_detail": None,
-}
-
-try:
-    import stanza
-except ImportError as exc:
-    payload["error_code"] = "package_missing"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-except OSError as exc:
-    payload["package_installed"] = True
-    payload["error_code"] = "hostile_torch_state"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-except Exception as exc:
-    payload["package_installed"] = True
-    payload["error_code"] = "runtime_import_failed"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-
-payload["package_installed"] = True
-payload["engine_version"] = getattr(stanza, "__version__", None)
-
-try:
-    import torch
-    payload["cuda_available"] = bool(torch.cuda.is_available())
-except OSError as exc:
-    payload["error_code"] = "hostile_torch_state"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-except Exception:
-    payload["cuda_available"] = False
-
-try:
-    pipeline = stanza.Pipeline(
-        lang="he",
-        processors="tokenize,pos,lemma",
-        use_gpu=(mode == "gpu"),
-        download_method=None,
-    )
-except Exception as exc:
-    payload["error_code"] = "model_missing" if any(token in str(exc).lower() for token in ("download", "model", "resource")) else "pipeline_init_failed"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-
-payload["pipeline_init_ok"] = True
-
-if not smoke:
-    payload["smoke_ok"] = True
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-
-try:
-    pipeline("שלום עולם.")
-except Exception as exc:
-    payload["error_code"] = "smoke_failed"
-    payload["error_detail"] = str(exc)
-    print(json.dumps(payload, ensure_ascii=False))
-    raise SystemExit(0)
-
-payload["smoke_ok"] = True
-print(json.dumps(payload, ensure_ascii=False))
-'''
-
-

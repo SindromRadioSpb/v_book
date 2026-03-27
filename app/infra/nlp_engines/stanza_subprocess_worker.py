@@ -12,6 +12,7 @@ import os
 import sys
 
 from app.infra.nlp_engines.stanza_engine import StanzaEngine
+from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
 
 
 def _emit(payload: dict) -> None:
@@ -21,6 +22,9 @@ def _emit(payload: dict) -> None:
 
 def main() -> int:
     use_gpu = os.getenv("HDLE_STANZA_WORKER_MODE", "cpu").strip().lower() == "gpu"
+    runtime = ManagedStanzaRuntime()
+    bootstrap = runtime.bootstrap_runtime(force_repair=False)
+    os.environ["STANZA_RESOURCES_DIR"] = str(bootstrap.resources_root)
 
     try:
         engine = StanzaEngine(use_gpu=use_gpu)
@@ -28,7 +32,14 @@ def main() -> int:
         _emit({"ok": False, "error": str(exc)})
         return 1
 
-    _emit({"ok": True, "name": engine.get_name(), "version": engine.get_version()})
+    _emit(
+        {
+            "ok": True,
+            "name": engine.get_name(),
+            "version": engine.get_version(),
+            "model_path": str(bootstrap.model_path),
+        }
+    )
 
     for line in sys.stdin:
         line = line.strip()
@@ -48,7 +59,14 @@ def main() -> int:
                 return 0
 
             if command == "metadata":
-                _emit({"ok": True, "name": engine.get_name(), "version": engine.get_version()})
+                _emit(
+                    {
+                        "ok": True,
+                        "name": engine.get_name(),
+                        "version": engine.get_version(),
+                        "model_path": str(bootstrap.model_path),
+                    }
+                )
                 continue
 
             if command == "process":

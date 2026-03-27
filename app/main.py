@@ -1003,6 +1003,16 @@ def main():
         type=str,
         help="Optional path to write self-check JSON payload",
     )
+    parser.add_argument(
+        "--stanza-worker",
+        action="store_true",
+        help="Run the managed Stanza worker subprocess and exit",
+    )
+    parser.add_argument(
+        "--stanza-probe",
+        action="store_true",
+        help="Run the managed Stanza probe subprocess and exit",
+    )
     args = parser.parse_args()
 
     if args.self_check:
@@ -1010,6 +1020,16 @@ def main():
         exit_code, payload = run_self_check(args.self_check, db_path_arg=args.db_path)
         _emit_self_check(payload, out_path=args.self_check_out)
         return exit_code
+
+    if args.stanza_worker:
+        from app.infra.nlp_engines.stanza_subprocess_worker import main as stanza_worker_main
+
+        return int(stanza_worker_main())
+
+    if args.stanza_probe:
+        from app.services.nlp_runtime.stanza_probe_worker import main as stanza_probe_main
+
+        return int(stanza_probe_main())
 
     # Import heavy Qt/UI modules only for normal app startup.
     # Keep self-check and subprocess bridge paths independent from GUI imports.

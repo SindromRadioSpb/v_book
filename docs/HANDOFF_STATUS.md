@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- PATCH-01 thread lifecycle hardening completed
+- PATCH-02 managed subprocess runtime completed
 
 ## Completed
 - Audit completed and recorded.
@@ -28,6 +28,10 @@
 - Real Stanza processing can now continue even when the Qt process cannot import Torch directly, because `create_stanza_engine()` falls back to a subprocess-backed runtime.
 - Resources Manager now says explicitly that Python runtime dependencies are external to the dialog and that the Hebrew model is a directory-based resource.
 - Owner-bound runtime workers now shut down deterministically before `Resources Manager`, `DocumentsView`, or `AppWindow` are destroyed.
+- The product now owns a managed Stanza runtime root under app data, with a runtime manifest and a managed `stanza_resources/he` path.
+- Windows production processing now prefers an app-owned subprocess runtime launched through `app.main --stanza-worker`.
+- The isolated runtime probe now uses the sibling `app.main --stanza-probe` path, so diagnostics and production processing share the same ownership model.
+- Resources Manager now exposes an official `Install / Repair NLP Runtime` action for the managed runtime path.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -37,7 +41,8 @@
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - The runtime recovery path is thread-safe now, but it is still diagnosis/setup/fallback orchestration only; it does not yet establish a product-owned managed Stanza runtime/bootstrap path.
-- The current successful live runtime depends on the already-installed Hebrew model directory at `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`; there is still no bundled downloadable model archive inside the dialog.
+- The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
+- Health Check, Documents, and Resources Manager wording still needs one more sync pass around the new official `Install / Repair NLP Runtime` action.
 
 ## Next Step
-- PATCH-02: formalize the managed subprocess Stanza runtime so production processing uses an application-owned runtime path by default instead of relying on emergency fallback semantics.
+- PATCH-03: complete the shared product wording/routing for the official `Install / Repair NLP Runtime` flow and then add release-grade smoke validation.

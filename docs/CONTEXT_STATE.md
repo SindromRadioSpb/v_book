@@ -81,3 +81,10 @@
 - `Resources Manager`, `DocumentsView`, and `AppWindow` now enforce deterministic QThread shutdown before owner destruction.
 - Runtime recovery, health-check, and resource-management flows no longer rely on owner deletion while a worker is still running.
 - The remaining runtime gap is no longer thread ownership; it is product ownership of the Stanza subprocess runtime/bootstrap path itself.
+
+## Confirmed Current State After PATCH-02 Managed Subprocess Runtime
+- Windows production Stanza now prefers an app-owned subprocess runtime launched through `app.main --stanza-worker`.
+- The isolated probe now uses the sibling `app.main --stanza-probe` path, so diagnostics and production processing share the same runtime ownership model.
+- `ManagedStanzaRuntime` now owns a writable runtime root, a managed `stanza_resources/he` path, and a runtime manifest under the app data tree.
+- The managed runtime can bootstrap the Hebrew model from either bundled resources or an existing legacy Stanza cache and then use that managed copy as the product-owned resource path.
+- Resources Manager now exposes an official `Install / Repair NLP Runtime` action for this managed runtime path.

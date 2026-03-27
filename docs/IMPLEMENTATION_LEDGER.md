@@ -235,3 +235,35 @@
 ## Next Step
 - PATCH-02:
   - promote the subprocess-backed Stanza runtime from recovery-only fallback to an application-controlled managed runtime path with explicit ownership metadata and out-of-box bootstrap semantics
+
+## Step 13 — PATCH-02 Managed Subprocess Runtime
+- Status: completed
+- Trigger:
+  - production processing still depended on ad-hoc fallback semantics instead of an app-owned managed runtime path; `Qt` should not need to import `torch/stanza` successfully for normal Stanza processing on Windows.
+- Code deliverables:
+  - `app/services/nlp_runtime/managed_runtime.py`
+  - `app/services/nlp_runtime/stanza_probe_worker.py`
+  - `app/services/nlp_runtime/runtime_probe.py`
+  - `app/main.py`
+  - `app/infra/nlp_engines/stanza_engine.py`
+  - `app/infra/nlp_engines/stanza_subprocess_worker.py`
+  - `app/ui/resources_manager_dialog.py`
+  - `app/ui/workers.py`
+  - `tests/test_managed_stanza_runtime.py`
+  - `tests/test_nlp_runtime_probe.py`
+  - `tests/test_stanza_engine_subprocess.py`
+  - `tests/test_resources_manager_dialog.py`
+- Confirmed behavior changes:
+  - `app.main` now exposes headless `--stanza-worker` and `--stanza-probe` entry points, so the product executable itself becomes the app-owned runtime command surface
+  - `ManagedStanzaRuntime` now owns:
+    - runtime root
+    - managed `stanza_resources/he` path
+    - runtime manifest
+    - bootstrap from bundled or legacy Hebrew model sources
+  - Windows `create_stanza_engine()` now prefers the managed subprocess runtime as the normal success path instead of waiting for an in-process failure first
+  - `RuntimeProbe` now probes the same app-owned runtime path and the same managed Hebrew resource path used by production processing
+  - Resources Manager now has an official `Install / Repair NLP Runtime` action for the product-owned runtime path
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\nlp_runtime\managed_runtime.py app\services\nlp_runtime\stanza_probe_worker.py app\services\nlp_runtime\runtime_probe.py app\main.py app\infra\nlp_engines\stanza_engine.py app\infra\nlp_engines\stanza_subprocess_worker.py app\ui\resources_manager_dialog.py app\ui\workers.py tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_resources_manager_dialog.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_resources_manager_dialog.py -q` -> `17 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `63 passed`

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,6 +67,14 @@ class _FakeProcess:
         self._poll = -9
 
 
+def _bootstrap_result(*, model_present: bool = True):
+    return SimpleNamespace(
+        model_present=model_present,
+        model_path=Path("C:/managed/stanza_resources/he"),
+        resources_root=Path("C:/managed/stanza_resources"),
+    )
+
+
 def test_create_stanza_engine_falls_back_to_subprocess(monkeypatch):
     subprocess_engine = object()
 
@@ -110,6 +120,18 @@ def test_subprocess_stanza_engine_processes_json_protocol(monkeypatch):
         "app.infra.nlp_engines.stanza_engine.subprocess.Popen",
         lambda *args, **kwargs: fake_process,
     )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap_result(),
+    )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {"STANZA_RESOURCES_DIR": "C:/managed/stanza_resources"},
+    )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.build_worker_command",
+        lambda self: ["python", "-m", "app.main", "--stanza-worker"],
+    )
 
     engine = SubprocessStanzaEngine(use_gpu=False)
     sentences = engine.process("הילד קורא ספר.")
@@ -129,13 +151,23 @@ def test_subprocess_stanza_engine_processes_json_protocol(monkeypatch):
 
 def test_create_stanza_engine_reports_both_failures(monkeypatch):
     monkeypatch.setattr(
-        "app.infra.nlp_engines.stanza_engine.StanzaEngine",
-        lambda use_gpu=False: (_ for _ in ()).throw(OSError("WinError 1114")),
-    )
-    monkeypatch.setattr(
         "app.infra.nlp_engines.stanza_engine.SubprocessStanzaEngine",
         lambda use_gpu=False: (_ for _ in ()).throw(RuntimeError("worker failed")),
     )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.StanzaEngine",
+        lambda use_gpu=False: (_ for _ in ()).throw(OSError("WinError 1114")),
+    )
 
-    with pytest.raises(RuntimeError, match="subprocess fallback also failed"):
+    with pytest.raises(RuntimeError, match="Managed Stanza subprocess runtime and in-process fallback both failed"):
         create_stanza_engine(use_gpu=False)
+
+
+def test_subprocess_stanza_engine_requires_managed_model(monkeypatch):
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap_result(model_present=False),
+    )
+
+    with pytest.raises(RuntimeError, match="missing the Hebrew model resources"):
+        SubprocessStanzaEngine(use_gpu=False)

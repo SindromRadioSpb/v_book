@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from app.infra.nlp_engines.base import NLPEngine, Sentence, Token
+from app.services.nlp_runtime import ManagedStanzaRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ class SubprocessStanzaEngine(NLPEngine):
         self._name = "stanza"
         self._version = "unknown"
         self._use_gpu = bool(use_gpu)
+        self._runtime = ManagedStanzaRuntime()
         self._start_worker()
 
     def get_name(self) -> str:
@@ -237,13 +239,18 @@ class SubprocessStanzaEngine(NLPEngine):
             pass
 
     def _start_worker(self) -> None:
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["HDLE_STANZA_WORKER_MODE"] = "gpu" if self._use_gpu else "cpu"
+        bootstrap = self._runtime.bootstrap_runtime(force_repair=False)
+        if not bootstrap.model_present:
+            raise RuntimeError(
+                "Managed Stanza runtime is missing the Hebrew model resources.\n\n"
+                f"Expected model path: {bootstrap.model_path}"
+            )
+
+        env = self._runtime.build_runtime_env(use_gpu=self._use_gpu, run_smoke=False)
+        cmd = self._runtime.build_worker_command()
 
         process = subprocess.Popen(
-            [sys.executable, "-u", "-m", "app.infra.nlp_engines.stanza_subprocess_worker"],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -315,6 +322,20 @@ def create_stanza_engine(use_gpu: bool = False) -> NLPEngine:
         ImportError: If stanza not available
         RuntimeError: If model not downloaded
     """
+    if os.name == "nt":
+        try:
+            return SubprocessStanzaEngine(use_gpu=use_gpu)
+        except Exception as sub_exc:
+            logger.warning("Managed Stanza subprocess startup failed; trying in-process fallback: %s", sub_exc)
+            try:
+                return StanzaEngine(use_gpu=use_gpu)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Managed Stanza subprocess runtime and in-process fallback both failed.\n\n"
+                    f"Managed subprocess error: {sub_exc}\n\n"
+                    f"In-process error: {exc}"
+                ) from exc
+
     try:
         return StanzaEngine(use_gpu=use_gpu)
     except Exception as exc:
