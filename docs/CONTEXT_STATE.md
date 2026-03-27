@@ -63,3 +63,8 @@
 ## Confirmed Current State After Live Engine Init Divergence Fix
 - `ProcessService` now treats probe/runtime divergence as a managed runtime-block condition.
 - A live `create_stanza_engine()` failure no longer escapes as a raw traceback from the worker path when the subprocess probe had previously reported ready.
+
+## Confirmed Current State After Documents Retry Flow Fix
+- `ProcessWorker` now preserves controlled runtime-block messages instead of collapsing them into a generic Stanza error.
+- Controlled runtime-block failures are logged as warnings rather than full worker tracebacks.
+- `DocumentsView` can now convert a late live-init Stanza failure into an explicit Mock fallback retry prompt without forcing the user to restart the action manually.

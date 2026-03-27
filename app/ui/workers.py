@@ -227,9 +227,12 @@ class ProcessWorker(QThread):
         except OperationsCenterBusyError as e:
             self.error.emit(_format_heavy_operation_busy_error("NLP Process", e))
         except Exception as e:
-            logger.exception("Process worker error")
             # Make error message user-friendly
             error_msg = self._make_user_friendly_error(str(e))
+            if self._is_controlled_runtime_block_error(str(e)):
+                logger.warning("Process worker runtime block: %s", str(e))
+            else:
+                logger.exception("Process worker error")
             self.error.emit(error_msg)
         finally:
             if op_id:
@@ -243,6 +246,9 @@ class ProcessWorker(QThread):
     def _make_user_friendly_error(self, error: str) -> str:
         """Convert technical error to user-friendly message."""
         error_lower = error.lower()
+
+        if self._is_controlled_runtime_block_error(error):
+            return error
 
         if "rollback" in error_lower or "flush" in error_lower:
             return (
@@ -277,6 +283,11 @@ class ProcessWorker(QThread):
                 f"{error[:200]}\n\n"
                 f"Check the logs for more details."
             )
+
+    @staticmethod
+    def _is_controlled_runtime_block_error(error: str) -> bool:
+        error_lower = str(error or "").lower()
+        return "explicitly confirm mock fallback" in error_lower
 
 
 class ExtractionWorker(QThread):

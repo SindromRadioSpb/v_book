@@ -1676,8 +1676,60 @@ class DocumentsView(QWidget):
         if self.process_progress_dialog is not None:
             self.process_progress_dialog.set_failed(error_msg)
             self.process_progress_dialog.accept()
+        if self._handle_runtime_block_retry(error_msg, operation_label):
+            return
         show_error(self, f"{operation_label} Error", error_msg)
         self._cleanup_process_worker()
+
+    def _handle_runtime_block_retry(self, error_msg: str, operation_label: str) -> bool:
+        """Offer explicit Mock fallback when Stanza fails after a ready probe."""
+        worker = self.process_worker
+        if worker is None:
+            return False
+        if worker.use_mock or worker.allow_mock_fallback:
+            return False
+
+        error_lower = str(error_msg or "").lower()
+        if "explicitly confirm mock fallback" not in error_lower:
+            return False
+
+        detail_lines = [
+            f"{operation_label} could not start with the configured Stanza runtime.",
+            "",
+            "You can:",
+            "1. Fix the runtime in Tools > Run Health Check or Tools > Resources Manager",
+            "2. Continue once with explicit Mock fallback for diagnostic/demo use",
+            "",
+            "Mock fallback degrades persisted NLP quality.",
+            "",
+            "Continue with Mock fallback now?",
+        ]
+        reply = QMessageBox.warning(
+            self,
+            f"{operation_label} Runtime Blocked",
+            "\n".join(detail_lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+
+        doc_ids = list(worker.doc_ids)
+        configured_engine_id = str(worker.configured_engine_id or "stanza")
+        is_reprocess = bool(worker.is_reprocess)
+
+        self._cleanup_process_worker()
+        self.status_label.setText(
+            f"Retrying {operation_label.lower()} with explicit Mock fallback..."
+        )
+        self._start_process_worker(
+            doc_ids,
+            use_mock=True,
+            use_gpu=False,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=True,
+            is_reprocess=is_reprocess,
+        )
+        return True
 
     def _cleanup_process_worker(self) -> None:
         self._set_process_ui_busy(False)

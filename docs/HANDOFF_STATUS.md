@@ -24,6 +24,7 @@
 - `ProcessorRun.note` now includes a stable nested `runtime` provenance envelope alongside legacy flat keys.
 - Guided repair routing is now shared across Documents, Health Check, and Resources Manager.
 - Live engine-init failures after a successful subprocess probe now collapse into the managed runtime-block path instead of surfacing as raw worker tracebacks.
+- Documents can now recover from that managed runtime-block by offering an explicit Mock fallback retry from the main-thread error flow.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -32,6 +33,7 @@
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
+- The fallback retry still depends on an explicit user confirmation dialog; there is no single-click remediation path.
 
 ## Next Step
 - Proceed only if needed to Wave 4: decide whether stable structured provenance should graduate from nested note payloads into dedicated schema fields.

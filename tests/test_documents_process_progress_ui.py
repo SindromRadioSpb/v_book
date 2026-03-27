@@ -40,7 +40,7 @@ class _FakeProgressBar:
 
 
 class _FakeDialog:
-    def __init__(self):
+    def __init__(self, operation_label="Processing"):
         self.states = []
         self.messages = []
         self.completed = False
@@ -48,6 +48,7 @@ class _FakeDialog:
         self.failed = None
         self.accepted = False
         self.deleted = False
+        self.operation_label = operation_label
 
     def append_activity(self, message):
         self.messages.append(message)
@@ -72,12 +73,29 @@ class _FakeDialog:
 
 
 class _FakeWorker:
-    def __init__(self, running=True, wait_result=True):
+    def __init__(
+        self,
+        running=True,
+        wait_result=True,
+        *,
+        doc_ids=None,
+        use_mock=False,
+        use_gpu=False,
+        configured_engine_id="stanza",
+        allow_mock_fallback=False,
+        is_reprocess=False,
+    ):
         self._running = running
         self._wait_result = wait_result
         self.cancel_called = False
         self.deleted = False
         self.wait_calls = []
+        self.doc_ids = list(doc_ids or [])
+        self.use_mock = use_mock
+        self.use_gpu = use_gpu
+        self.configured_engine_id = configured_engine_id
+        self.allow_mock_fallback = allow_mock_fallback
+        self.is_reprocess = is_reprocess
 
     def isRunning(self):
         return self._running
@@ -295,3 +313,66 @@ def test_documents_stop_process_worker_uses_cancel_only():
     assert view.process_worker.cancel_called is True
     assert view.process_worker.wait_calls == [100]
     assert "cooperative cancellation" in view.process_progress_dialog.messages[0]
+
+
+def test_documents_process_error_offers_explicit_mock_retry(monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    view = DocumentsView.__new__(DocumentsView)
+    view.progress_bar = _FakeProgressBar()
+    view.status_label = _FakeLabel()
+    view.process_progress_dialog = _FakeDialog(operation_label="Re-processing")
+    view.process_worker = _FakeWorker(
+        running=False,
+        doc_ids=[11, 12],
+        use_mock=False,
+        use_gpu=True,
+        configured_engine_id="stanza",
+        allow_mock_fallback=False,
+        is_reprocess=True,
+    )
+    view._process_worker_active = True
+    view.process_btn = _FakeToggle()
+    view.reprocess_btn = _FakeToggle()
+    view.delete_btn = _FakeToggle()
+    view.on_selection_changed = lambda: None
+
+    start_calls = []
+    error_calls = []
+
+    monkeypatch.setattr(
+        "app.ui.documents_view.QMessageBox.warning",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr("app.ui.documents_view.show_error", lambda *args: error_calls.append(args))
+    original_cleanup = DocumentsView._cleanup_process_worker.__get__(view, DocumentsView)
+    view._cleanup_process_worker = original_cleanup
+    view._start_process_worker = lambda doc_ids, **kwargs: start_calls.append((doc_ids, kwargs))
+
+    DocumentsView.on_process_error(
+        view,
+        "Stanza probe reported ready, but live engine initialization failed in the current process.\n\n"
+        "Fix the local Torch/Stanza runtime or explicitly confirm Mock fallback.",
+    )
+
+    assert view.progress_bar.visible is False
+    assert view.process_worker is None
+    assert view.process_progress_dialog is None
+    assert error_calls == []
+    assert len(start_calls) == 1
+    assert start_calls[0][0] == [11, 12]
+    assert start_calls[0][1]["use_mock"] is True
+    assert start_calls[0][1]["use_gpu"] is False
+    assert start_calls[0][1]["allow_mock_fallback"] is True
+    assert start_calls[0][1]["is_reprocess"] is True
+
+
+def test_process_worker_preserves_controlled_runtime_block_message():
+    worker = ProcessWorker(doc_ids=[1], use_mock=False)
+
+    message = (
+        "Stanza probe reported ready, but live engine initialization failed in the current process.\n\n"
+        "Fix the local Torch/Stanza runtime or explicitly confirm Mock fallback."
+    )
+
+    assert worker._make_user_friendly_error(message) == message
