@@ -133,7 +133,26 @@
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py -q` -> `16 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `37 passed`
 
+## Step 8 — Wave 3 PATCH-03 Guided Repair Journey
+- Status: completed
+- Code deliverables:
+  - `app/services/nlp_runtime/runtime_probe.py`
+  - `app/ui/documents_view.py`
+  - `app/services/health_check_service.py`
+  - `app/ui/resources_manager_dialog.py`
+  - `tests/test_nlp_runtime_probe.py`
+  - `tests/test_documents_engine_readiness.py`
+  - `tests/test_health_check_service.py`
+  - `tests/test_resources_manager_dialog.py`
+- Confirmed behavior changes:
+  - `RuntimeProbe` now exposes a shared guided repair plan based on runtime vs resource routes
+  - Documents tooltips now include a recommended route and next action
+  - Health Check remediation now carries the same guided route context
+  - Resources Manager repair guide now presents the shared route and next action before the detailed steps
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_nlp_runtime_probe.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py -q` -> `17 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `39 passed`
+
 ## Next Step
-- Wave 3 PATCH-03 guided repair flow hardening:
-  - turn the separated runtime/resource surfaces into a more explicit user journey
-  - keep remediation truthful in dev and packaged environments
+- Wave 4 candidate:
+  - consider promoting structured runtime provenance from nested note payloads into dedicated schema fields once the contract proves stable

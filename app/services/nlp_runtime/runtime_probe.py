@@ -68,6 +68,67 @@ class NlpRuntimeProbe:
             steps.append(f"Remediation summary: {status.remediation}")
         return steps
 
+    def classify_repair_route(self, status: NlpRuntimeStatus | None) -> str:
+        if status is None:
+            return "runtime"
+        if status.stanza_ready:
+            return "ready"
+        error_code = str(status.error_code or "").strip().lower()
+        if error_code in {
+            "package_missing",
+            "runtime_import_failed",
+            "hostile_torch_state",
+            "probe_timeout",
+            "probe_subprocess_failed",
+            "probe_invalid_output",
+        }:
+            return "runtime"
+        if error_code in {"model_missing", "pipeline_init_failed", "smoke_failed"}:
+            return "resource"
+        if status.model_path:
+            return "resource"
+        return "runtime"
+
+    def build_guided_repair_plan(self, status: NlpRuntimeStatus | None) -> dict[str, object]:
+        route = self.classify_repair_route(status)
+        if route == "ready":
+            return {
+                "route": "ready",
+                "title": "Runtime ready",
+                "next_action": "No repair is required. Persisted processing can use Stanza directly.",
+                "steps": [
+                    "Run Health Check only if you want to verify the current environment again.",
+                    "Open Resources Manager only if you want to inspect the Hebrew model files manually.",
+                ],
+            }
+
+        if route == "resource":
+            return {
+                "route": "resource",
+                "title": "Repair the managed Hebrew resource",
+                "next_action": "Start in Resources Manager and inspect the Managed Hebrew Resource section before retrying processing.",
+                "steps": [
+                    "Open Resources Manager from Documents or Tools.",
+                    "Inspect the Managed Hebrew Resource section for the detected model path.",
+                    "Open the model folder or import/copy the Hebrew model files into the expected location.",
+                    "Re-run the isolated NLP probe after the model files are repaired.",
+                    "Run Health Check if you need a consolidated report before retrying persisted processing.",
+                ],
+            }
+
+        return {
+            "route": "runtime",
+            "title": "Repair the external runtime dependency",
+            "next_action": "Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
+            "steps": [
+                "Run Health Check to confirm the current reason code and remediation summary.",
+                "Open Resources Manager and inspect the External Runtime Dependency section.",
+                "Fix the active interpreter, stanza package, torch state, or packaged runtime issue.",
+                "Re-run the isolated NLP probe after the runtime dependency is repaired.",
+                "Retry persisted processing only after the runtime reports ready or after explicit Mock fallback confirmation.",
+            ],
+        }
+
     @staticmethod
     def build_mock_status(
         *,
@@ -386,4 +447,5 @@ except Exception as exc:
 payload["smoke_ok"] = True
 print(json.dumps(payload, ensure_ascii=False))
 '''
+
 

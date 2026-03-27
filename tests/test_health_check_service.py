@@ -181,4 +181,6 @@ def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
     assert check["status"] == "warn"
     assert check["title"] == "External Runtime Dependency: Stanza Hebrew"
     assert "package_missing" in check["message"]
+    assert "route=runtime" in check["message"]
     assert "install stanza" in check["remediation"]
+    assert "Next action:" in check["remediation"]

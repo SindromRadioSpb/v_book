@@ -40,6 +40,15 @@ class _FailingProbe:
         _ = status
         return ["Retry the isolated probe."]
 
+    def build_guided_repair_plan(self, status):
+        _ = status
+        return {
+            "route": "runtime",
+            "title": "Repair the external runtime dependency",
+            "next_action": "Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
+            "steps": ["Retry the isolated probe."],
+        }
+
 
 class _StatusProbe:
     def __init__(self, status: NlpRuntimeStatus, *, packaged: bool = False):
@@ -60,6 +69,26 @@ class _StatusProbe:
             f"Environment mode: {mode}.",
             "Persisted processing will not silently switch to Mock.",
         ]
+
+    def build_guided_repair_plan(self, status):
+        assert status is self.status
+        route = "resource" if status.error_code == "model_missing" else "runtime"
+        title = (
+            "Repair the managed Hebrew resource"
+            if route == "resource"
+            else "Repair the external runtime dependency"
+        )
+        next_action = (
+            "Start in Resources Manager and inspect the Managed Hebrew Resource section before retrying processing."
+            if route == "resource"
+            else "Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing."
+        )
+        return {
+            "route": route,
+            "title": title,
+            "next_action": next_action,
+            "steps": self.build_setup_steps(status),
+        }
 
 
 def _make_status(*, ready: bool, model_path: str | None, error_code: str | None = None) -> NlpRuntimeStatus:
@@ -127,6 +156,8 @@ def test_resources_manager_setup_guide_is_packaging_aware():
     assert "Packaged mode" in guide
     assert "External runtime dependency:" in guide
     assert "Managed Hebrew resource:" in guide
+    assert "Recommended route: Repair the external runtime dependency" in guide
+    assert "Next action: Start with Health Check" in guide
     assert "Repair steps:" in guide
     assert "1. Environment mode: packaged." in guide
     assert "Persisted processing will not silently switch to Mock." in guide

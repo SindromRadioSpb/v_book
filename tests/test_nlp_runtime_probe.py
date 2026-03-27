@@ -80,3 +80,56 @@ def test_probe_stanza_packaged_mode_changes_package_missing_remediation(monkeypa
 
     assert status.error_code == "package_missing"
     assert "Packaged mode detected" in status.remediation
+
+
+def test_guided_repair_plan_routes_runtime_failures():
+    probe = NlpRuntimeProbe()
+    status = probe.build_mock_status(error_code="hostile_torch_state", error_detail="WinError 1114")
+    status = type(status)(
+        configured_engine_id="stanza",
+        effective_engine_id=None,
+        package_installed=True,
+        model_present=False,
+        pipeline_init_ok=False,
+        smoke_ok=False,
+        cuda_available=False,
+        runtime_mode="cpu",
+        fallback_used=False,
+        error_code="hostile_torch_state",
+        error_detail="WinError 1114",
+        remediation="Inspect runtime.",
+        engine_version=None,
+        model_id="he/tokenize,pos,lemma",
+        model_path=None,
+    )
+
+    plan = probe.build_guided_repair_plan(status)
+
+    assert plan["route"] == "runtime"
+    assert "Health Check" in plan["next_action"]
+
+
+def test_guided_repair_plan_routes_model_failures_to_resource():
+    probe = NlpRuntimeProbe()
+    status = type(probe.build_mock_status())(
+        configured_engine_id="stanza",
+        effective_engine_id=None,
+        package_installed=True,
+        model_present=False,
+        pipeline_init_ok=False,
+        smoke_ok=False,
+        cuda_available=False,
+        runtime_mode="cpu",
+        fallback_used=False,
+        error_code="model_missing",
+        error_detail="missing",
+        remediation="Import model.",
+        engine_version="1.11.1",
+        model_id="he/tokenize,pos,lemma",
+        model_path="C:/models/he",
+    )
+
+    plan = probe.build_guided_repair_plan(status)
+
+    assert plan["route"] == "resource"
+    assert "Managed Hebrew Resource" in plan["next_action"]

@@ -70,27 +70,32 @@ class HealthCheckService:
                 check_id="nlp_runtime:stanza",
                 title="External Runtime Dependency: Stanza Hebrew",
                 status="warn",
-                message=f"runtime_probe_failed: {exc}",
-                remediation="Check the Python runtime, stanza package, and Torch state, then retry Health Check.",
+                message=f"runtime_probe_failed: {exc} | route=runtime",
+                remediation="Check the Python runtime, stanza package, and Torch state, then retry Health Check. Next action: Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
             )
         if status.stanza_ready:
             mode = "GPU-capable" if status.cuda_available else "CPU-only"
+            plan = self.nlp_probe.build_guided_repair_plan(status)
             return HealthCheckItem(
                 check_id="nlp_runtime:stanza",
                 title="External Runtime Dependency: Stanza Hebrew",
                 status="ok",
-                message=f"Ready ({mode}). package=stanza, reason_code=none",
+                message=f"Ready ({mode}). package=stanza, reason_code=none, route={plan['route']}",
             )
 
         message = f"{status.error_code or 'unavailable'}"
         if status.error_detail:
             message = f"{message}: {status.error_detail}"
+        plan = self.nlp_probe.build_guided_repair_plan(status)
         return HealthCheckItem(
             check_id="nlp_runtime:stanza",
             title="External Runtime Dependency: Stanza Hebrew",
             status="warn",
-            message=message,
-            remediation=status.remediation or "Repair the external runtime dependency and retry Health Check.",
+            message=f"{message} | route={plan['route']}",
+            remediation=(
+                f"{status.remediation or 'Repair the external runtime dependency and retry Health Check.'} "
+                f"Next action: {plan['next_action']}"
+            ),
         )
 
     def _check_required_resources(self) -> list[HealthCheckItem]:

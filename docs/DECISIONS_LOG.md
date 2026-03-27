@@ -99,3 +99,10 @@
   - structured runtime provenance is introduced as a backward-compatible envelope inside `ProcessorRun.note` before any schema migration is considered.
 - Rationale:
   - this preserves historical compatibility while enabling filtering and audit on stable machine-readable fields.
+
+## D-014 — Guided repair flow must reuse runtime taxonomy
+- Status: accepted and implemented
+- Decision:
+  - Documents, Health Check, and Resources Manager must route the user through one shared guided repair plan derived from the runtime probe taxonomy.
+- Rationale:
+  - this strengthens self-service behavior without adding pseudo-package-manager semantics or duplicating routing logic in each surface.

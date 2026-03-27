@@ -308,14 +308,19 @@ class ResourcesManagerDialog(QDialog):
     def _build_nlp_setup_guide_text(self) -> str:
         status = self._last_nlp_runtime_status
         mode = "Packaged mode" if self.nlp_probe.is_packaged_runtime() else "Development mode"
+        plan = self.nlp_probe.build_guided_repair_plan(status)
         sections = [
             mode,
             "External runtime dependency:\n" + (self._last_nlp_runtime_message or "Run the isolated NLP probe first."),
             "Managed Hebrew resource:\n" + self._build_hebrew_resource_message(status),
+            f"Recommended route: {plan['title']}",
+            f"Next action: {plan['next_action']}",
         ]
         if status is not None and status.error_detail:
             sections.append(f"Details: {status.error_detail}")
-        steps = self.nlp_probe.build_setup_steps(status)
+        steps = self.nlp_probe.build_setup_steps(status) + [
+            f"Guided flow: {step}" for step in plan["steps"]
+        ]
         sections.append(
             "Repair steps:\n" + "\n".join(
                 f"{index}. {step}" for index, step in enumerate(steps, start=1)

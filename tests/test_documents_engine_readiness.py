@@ -150,6 +150,8 @@ def test_documents_view_applies_latest_nlp_engine_readiness_result(monkeypatch, 
     assert view.gpu_checkbox.isHidden() is True
     assert "External runtime reason: package_missing" in view.nlp_engine_status_label.toolTip()
     assert "Remediation: install" in view.nlp_engine_status_label.toolTip()
+    assert "Recommended route: Repair the external runtime dependency" in view.nlp_engine_status_label.toolTip()
+    assert "Next action: Start with Health Check" in view.nlp_engine_status_label.toolTip()
 
 
 def test_documents_view_open_nlp_setup_routes_to_resources_manager(monkeypatch, qtbot):

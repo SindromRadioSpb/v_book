@@ -33,6 +33,7 @@ from app.infra.settings import SettingsService
 from app.services.db_service import DBService
 from app.services.document_service import DocumentService
 from app.services.ingest_service import IngestService
+from app.services.nlp_runtime import NlpRuntimeProbe
 from app.services.project_service import ProjectService
 from app.ui.dialogs import show_error, show_info, show_warning
 from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
@@ -633,6 +634,7 @@ class DocumentsView(QWidget):
         status = self.nlp_runtime_status
         if status is None:
             return "NLP runtime details are not available yet."
+        plan = NlpRuntimeProbe().build_guided_repair_plan(status)
         parts = []
         if getattr(status, "error_code", None):
             parts.append(f"External runtime reason: {status.error_code}")
@@ -643,6 +645,8 @@ class DocumentsView(QWidget):
         remediation = getattr(status, "remediation", "")
         if remediation:
             parts.append(f"Remediation: {remediation}")
+        parts.append(f"Recommended route: {plan['title']}")
+        parts.append(f"Next action: {plan['next_action']}")
         return "\n".join(parts) if parts else "External runtime dependency is unavailable."
 
     def _update_nlp_process_action_state(

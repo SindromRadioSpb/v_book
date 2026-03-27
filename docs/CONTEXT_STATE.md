@@ -54,3 +54,8 @@
 - `ProcessorRun.note` now carries a stable nested `runtime` provenance envelope in addition to the legacy flat fields.
 - The structured envelope records `configured_engine_id`, `effective_engine_id`, `fallback_used`, `reason_code`, `runtime_mode`, and `probe_summary`.
 - Batch and single-document processing now share the same machine-readable runtime provenance shape.
+
+## Confirmed Current State After Wave 3 PATCH-03
+- `RuntimeProbe` now exposes a shared guided repair plan derived from the machine-readable error taxonomy.
+- Documents tooltips, Health Check remediation, and Resources Manager repair guidance now point to the same next-step route.
+- The guided route distinguishes runtime repair from managed Hebrew resource repair without introducing fake in-place package installation.

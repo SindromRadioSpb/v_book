@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- Wave 3 PATCH-02 structured runtime provenance completed
+- Wave 3 PATCH-03 guided repair journey completed
 
 ## Completed
 - Audit completed and recorded.
@@ -22,6 +22,7 @@
 - Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`.
 - Documents and Health Check now use the same runtime/resource vocabulary.
 - `ProcessorRun.note` now includes a stable nested `runtime` provenance envelope alongside legacy flat keys.
+- Guided repair routing is now shared across Documents, Health Check, and Resources Manager.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -29,7 +30,7 @@
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
-- Guided repair flow is still spread across Documents, Health Check, and Resources Manager rather than one coherent step-by-step route.
+- The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 
 ## Next Step
-- Proceed to Wave 3 PATCH-03: harden the guided repair journey across Documents, Health Check, and Resources Manager without adding pseudo-package-manager semantics.
+- Proceed only if needed to Wave 4: decide whether stable structured provenance should graduate from nested note payloads into dedicated schema fields.
