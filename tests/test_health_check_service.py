@@ -1,5 +1,6 @@
 """Tests for unified health check remediation behavior."""
 
+from app.services.health_check_service import HealthCheckItem
 from app.infra.settings import SettingsService
 from app.services.health_check_service import HealthCheckService
 
@@ -40,7 +41,15 @@ def test_pronunciation_bootstrap_health_fails_with_clear_remediation_when_model_
     original = module.PhonikudAdapter
     module.PhonikudAdapter = _FakeAdapter
     try:
-        report = HealthCheckService(settings=settings).run_all()
+        service = HealthCheckService(settings=settings)
+        service._check_nlp_runtime = lambda: HealthCheckItem(
+            check_id="nlp_runtime:stanza",
+            title="NLP Runtime: Stanza Hebrew",
+            status="warn",
+            message="probe bypassed in test",
+            remediation="",
+        )
+        report = service.run_all()
     finally:
         module.PhonikudAdapter = original
     check = _find_check(report, "bootstrap:pronunciation")
@@ -78,7 +87,15 @@ def test_sentence_niqqud_bootstrap_health_same_behavior(tmp_path):
     original = module.PhonikudAdapter
     module.PhonikudAdapter = _FakeAdapter
     try:
-        report = HealthCheckService(settings=settings).run_all()
+        service = HealthCheckService(settings=settings)
+        service._check_nlp_runtime = lambda: HealthCheckItem(
+            check_id="nlp_runtime:stanza",
+            title="NLP Runtime: Stanza Hebrew",
+            status="warn",
+            message="probe bypassed in test",
+            remediation="",
+        )
+        report = service.run_all()
     finally:
         module.PhonikudAdapter = original
     check = _find_check(report, "bootstrap:sentence_niqqud")
@@ -129,3 +146,38 @@ def test_mt_health_warns_when_enabled_in_chain_without_credentials(tmp_path):
     )
     assert cloud_mt["status"] == "warn"
     assert "credentials are missing" in cloud_mt["message"].lower()
+
+
+def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
+    SettingsService.reset_instance()
+    settings = SettingsService.get_instance()
+    settings._settings.clear()
+    settings.set_value("resources/data_root", str(tmp_path / "data"))
+    settings.sync()
+
+    from app.services.nlp_runtime import NlpRuntimeStatus
+
+    monkeypatch.setattr(
+        "app.services.health_check_service.NlpRuntimeProbe.probe_stanza",
+        lambda self, **kwargs: NlpRuntimeStatus(
+            configured_engine_id="stanza",
+            effective_engine_id=None,
+            package_installed=False,
+            model_present=False,
+            pipeline_init_ok=False,
+            smoke_ok=False,
+            cuda_available=False,
+            runtime_mode="cpu",
+            fallback_used=False,
+            error_code="package_missing",
+            error_detail="missing",
+            remediation="install stanza",
+        ),
+    )
+
+    report = HealthCheckService(settings=settings).run_all()
+    check = _find_check(report, "nlp_runtime:stanza")
+    assert check
+    assert check["status"] == "warn"
+    assert "package_missing" in check["message"]
+    assert "install stanza" in check["remediation"]

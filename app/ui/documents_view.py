@@ -209,6 +209,7 @@ class DocumentsView(QWidget):
         self.is_reference_corpus = False  # Track if this is a reference corpus
         self.stanza_available = False
         self.cuda_available = False
+        self.nlp_runtime_status = None
 
         self.db_service = DBService.get_instance()
         self.project_service = ProjectService()
@@ -228,6 +229,8 @@ class DocumentsView(QWidget):
         self.snapshot_readiness_panel: SnapshotReadinessPanel | None = None
         self.nlp_engine_status_label: QLabel | None = None
         self.gpu_checkbox: QCheckBox | None = None
+        self.diagnose_nlp_btn: QPushButton | None = None
+        self.open_nlp_setup_btn: QPushButton | None = None
 
         self._current_dtos: list = []  # PATCH-G: DTO cache for current page
         self._request_seq = 0
@@ -366,6 +369,14 @@ class DocumentsView(QWidget):
             "GPU option appears after NLP engine readiness check completes."
         )
         nlp_layout.addWidget(self.gpu_checkbox)
+
+        self.diagnose_nlp_btn = QPushButton("Diagnose NLP")
+        self.diagnose_nlp_btn.clicked.connect(self.on_diagnose_nlp)
+        nlp_layout.addWidget(self.diagnose_nlp_btn)
+
+        self.open_nlp_setup_btn = QPushButton("Open NLP Setup")
+        self.open_nlp_setup_btn.clicked.connect(self.on_open_nlp_setup)
+        nlp_layout.addWidget(self.open_nlp_setup_btn)
 
         nlp_layout.addStretch()
         layout.addLayout(nlp_layout)
@@ -550,7 +561,12 @@ class DocumentsView(QWidget):
             if self.cuda_available:
                 return "Stanza engine ready. GPU NLP is available."
             return "Stanza engine ready. CUDA unavailable; processing will use CPU NLP."
-        return "Stanza not available; processing will use Mock engine."
+        if self.nlp_runtime_status is not None and self.nlp_runtime_status.error_code:
+            return (
+                "Stanza unavailable: "
+                f"{self.nlp_runtime_status.error_code}. Processing requires an explicit Mock fallback confirmation."
+            )
+        return "Stanza not available. Processing requires an explicit Mock fallback confirmation."
 
     def _reprocess_tooltip_for_current_engine(self) -> str:
         if self.is_reference_corpus:
@@ -561,7 +577,7 @@ class DocumentsView(QWidget):
             if self.cuda_available:
                 return "Re-process selected documents with Stanza NLP (GPU available)."
             return "Re-process selected documents with Stanza NLP (CPU only)."
-        return "Re-process selected documents with Mock engine (updates statistics)."
+        return "Re-process selected documents only after explicit Mock fallback confirmation."
 
     def _apply_nlp_engine_ui_state(self) -> None:
         label = self.__dict__.get("nlp_engine_status_label")
@@ -572,6 +588,9 @@ class DocumentsView(QWidget):
         if self._nlp_engine_check_pending:
             label.setText("Checking NLP engine readiness...")
             label.setStyleSheet("color: #666;")
+            label.setToolTip(
+                "Checking package import, model presence, pipeline initialization, and smoke sentence."
+            )
             if checkbox is not None:
                 checkbox.setVisible(False)
                 checkbox.setEnabled(False)
@@ -582,17 +601,47 @@ class DocumentsView(QWidget):
                 f"Stanza engine available (GPU: {'Yes' if self.cuda_available else 'No'})"
             )
             label.setStyleSheet("color: green;")
+            label.setToolTip("Stanza runtime is ready for persisted processing.")
             if checkbox is not None:
                 checkbox.setVisible(bool(self.cuda_available))
                 checkbox.setEnabled(bool(self.cuda_available))
                 if self.cuda_available and not checkbox.isChecked():
                     checkbox.setChecked(True)
         else:
-            label.setText("Stanza not available - using Mock engine")
+            detail = ""
+            if self.nlp_runtime_status is not None and self.nlp_runtime_status.error_code:
+                detail = f" ({self.nlp_runtime_status.error_code})"
+            label.setText(f"Stanza unavailable{detail} - Mock requires explicit confirmation")
             label.setStyleSheet("color: orange;")
+            label.setToolTip(self._build_nlp_runtime_detail_text())
             if checkbox is not None:
                 checkbox.setVisible(False)
                 checkbox.setEnabled(False)
+
+        if self.diagnose_nlp_btn is not None:
+            self.diagnose_nlp_btn.setToolTip(
+                "Run the system health check and inspect NLP runtime issues."
+            )
+        if self.open_nlp_setup_btn is not None:
+            self.open_nlp_setup_btn.setToolTip(
+                "Open Resources Manager to inspect local NLP/model runtime status."
+            )
+
+    def _build_nlp_runtime_detail_text(self) -> str:
+        status = self.nlp_runtime_status
+        if status is None:
+            return "NLP runtime details are not available yet."
+        parts = []
+        if getattr(status, "error_code", None):
+            parts.append(f"Reason: {status.error_code}")
+        if getattr(status, "error_detail", None):
+            parts.append(f"Details: {status.error_detail}")
+        if getattr(status, "model_path", None):
+            parts.append(f"Model path: {status.model_path}")
+        remediation = getattr(status, "remediation", "")
+        if remediation:
+            parts.append(f"Remediation: {remediation}")
+        return "\n".join(parts) if parts else "Stanza runtime is unavailable."
 
     def _update_nlp_process_action_state(
         self,
@@ -639,18 +688,39 @@ class DocumentsView(QWidget):
     def on_nlp_engine_readiness_loaded(
         self,
         request_id: int,
-        stanza_available: bool,
-        cuda_available: bool,
+        runtime_status,
     ) -> None:
         if int(request_id) != self._active_nlp_engine_request_id:
             return
 
         self._nlp_engine_check_pending = False
-        self.stanza_available = bool(stanza_available)
-        self.cuda_available = bool(cuda_available) if self.stanza_available else False
+        self.nlp_runtime_status = runtime_status
+        self.stanza_available = bool(getattr(runtime_status, "stanza_ready", False))
+        self.cuda_available = (
+            bool(getattr(runtime_status, "cuda_available", False))
+            if self.stanza_available
+            else False
+        )
         self.nlp_engine_check_worker = None
         self._apply_nlp_engine_ui_state()
         self.on_selection_changed()
+
+    def on_diagnose_nlp(self) -> None:
+        window = self.window()
+        callback = getattr(window, "open_system_health_check", None)
+        if callable(callback):
+            callback()
+            return
+        show_info(
+            self,
+            "Diagnose NLP",
+            "System health check is unavailable from this context.\nOpen Tools > Run Health Check.",
+        )
+
+    def on_open_nlp_setup(self) -> None:
+        from app.ui.resources_manager_dialog import show_resources_manager
+
+        show_resources_manager(parent=self)
 
     def load_corpus(self):
         """Load the default corpus for this project."""
@@ -1394,7 +1464,9 @@ class DocumentsView(QWidget):
             return
 
         # Determine engine and GPU settings
-        use_mock = not self.stanza_available
+        configured_engine_id = "stanza"
+        allow_mock_fallback = False
+        use_mock = False
         use_gpu = False
         if self.stanza_available and self.gpu_checkbox and self.gpu_checkbox.isChecked():
             use_gpu = True
@@ -1402,12 +1474,27 @@ class DocumentsView(QWidget):
         # Build confirmation message
         from PyQt6.QtWidgets import QMessageBox
 
-        if use_mock:
-            engine_info = (
-                "Note: Using Mock engine (rule-based).\nFor production accuracy, install Stanza."
-            )
-        else:
+        if self.stanza_available:
             engine_info = f"Using Stanza engine (GPU: {'Yes' if use_gpu else 'No'}).\nThis will provide accurate lemmatization and POS tagging."
+        else:
+            detail = ""
+            if self.nlp_runtime_status is not None and self.nlp_runtime_status.error_code:
+                detail = f"Detected issue: {self.nlp_runtime_status.error_code}.\n"
+            reply = QMessageBox.warning(
+                self,
+                "Stanza Unavailable",
+                "Stanza is unavailable for persisted processing.\n\n"
+                f"{detail}"
+                "Continuing with Mock will degrade persisted NLP quality.\n\n"
+                "Choose Yes only if you explicitly want diagnostic/demo fallback.\n"
+                "Choose No to cancel and repair the NLP runtime first.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            use_mock = True
+            allow_mock_fallback = True
+            engine_info = "Using Mock engine by explicit fallback confirmation."
 
         reply = QMessageBox.question(
             self,
@@ -1429,6 +1516,8 @@ class DocumentsView(QWidget):
                 doc_ids,
                 use_mock=use_mock,
                 use_gpu=use_gpu,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 is_reprocess=False,
             )
 
@@ -1447,6 +1536,8 @@ class DocumentsView(QWidget):
         *,
         use_mock: bool,
         use_gpu: bool,
+        configured_engine_id: str,
+        allow_mock_fallback: bool,
         is_reprocess: bool,
     ) -> None:
         if self.process_worker and self.process_worker.isRunning():
@@ -1459,6 +1550,8 @@ class DocumentsView(QWidget):
             doc_ids=doc_ids,
             use_mock=use_mock,
             use_gpu=use_gpu,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=allow_mock_fallback,
             is_reprocess=is_reprocess,
         )
         self.process_worker.progress.connect(self.on_process_progress)
@@ -1629,17 +1722,36 @@ class DocumentsView(QWidget):
             return
 
         # Determine engine and GPU settings
-        use_mock = not self.stanza_available
+        configured_engine_id = "stanza"
+        allow_mock_fallback = False
+        use_mock = False
         use_gpu = False
         if self.stanza_available and self.gpu_checkbox and self.gpu_checkbox.isChecked():
             use_gpu = True
 
         # Build confirmation message
 
-        if use_mock:
-            engine_info = "Note: Using Mock engine (rule-based)."
-        else:
+        if self.stanza_available:
             engine_info = f"Using Stanza engine (GPU: {'Yes' if use_gpu else 'No'})."
+        else:
+            detail = ""
+            if self.nlp_runtime_status is not None and self.nlp_runtime_status.error_code:
+                detail = f"Detected issue: {self.nlp_runtime_status.error_code}.\n"
+            reply = QMessageBox.warning(
+                self,
+                "Stanza Unavailable",
+                "Stanza is unavailable for persisted re-processing.\n\n"
+                f"{detail}"
+                "Continuing with Mock will degrade persisted NLP quality.\n\n"
+                "Choose Yes only if you explicitly want diagnostic/demo fallback.\n"
+                "Choose No to cancel and repair the NLP runtime first.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            use_mock = True
+            allow_mock_fallback = True
+            engine_info = "Using Mock engine by explicit fallback confirmation."
 
         reply = QMessageBox.question(
             self,
@@ -1666,6 +1778,8 @@ class DocumentsView(QWidget):
                 doc_ids,
                 use_mock=use_mock,
                 use_gpu=use_gpu,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 is_reprocess=True,
             )
 

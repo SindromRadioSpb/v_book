@@ -1,4 +1,4 @@
-"""Mock NLP engine for testing without Stanza."""
+"""Mock NLP engine for diagnostic/demo and explicit fallback use."""
 
 import logging
 import re
@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 
 class MockEngine(NLPEngine):
     """
-    Mock NLP engine for testing.
+    Mock NLP engine for diagnostic/demo and explicit fallback use.
 
     This is a simple rule-based engine that:
     - Tokenizes by whitespace
     - Uses basic Hebrew lemmatization rules
     - Assigns simple POS tags
 
-    Use this for testing when Stanza is not available.
+    Use this only for testing, demo flows, or explicitly confirmed fallback.
     """
 
     def __init__(self):

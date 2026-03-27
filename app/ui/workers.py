@@ -9,6 +9,7 @@ from typing import Any, Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.domain.normalization.normalizer import normalize_for_tm
+from app.services.nlp_runtime import NlpRuntimeProbe
 
 logger = logging.getLogger(__name__)
 
@@ -141,12 +142,16 @@ class ProcessWorker(QThread):
         doc_ids: list[int],
         use_mock: bool = True,
         use_gpu: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         is_reprocess: bool = False,
     ):
         super().__init__()
         self.doc_ids = doc_ids
         self.use_mock = use_mock
         self.use_gpu = use_gpu
+        self.configured_engine_id = configured_engine_id
+        self.allow_mock_fallback = allow_mock_fallback
         self.is_reprocess = is_reprocess
         self._cancel_requested = False
         self._pause_requested = False
@@ -187,6 +192,8 @@ class ProcessWorker(QThread):
                     self.doc_ids,
                     use_gpu=self.use_gpu,
                     use_mock=self.use_mock,
+                    configured_engine_id=self.configured_engine_id,
+                    allow_mock_fallback=self.allow_mock_fallback,
                     is_reprocess=self.is_reprocess,
                     progress_callback=lambda current, total, doc_name: self.progress.emit(
                         current, total, doc_name
@@ -256,7 +263,7 @@ class ProcessWorker(QThread):
                 "This may happen if:\n"
                 "- Stanza models are not properly installed\n"
                 "- The text contains unsupported characters\n\n"
-                "The application will use Mock engine as fallback."
+                "Fix the runtime or explicitly confirm Mock fallback before retrying."
             )
         elif "memory" in error_lower:
             return (
@@ -926,58 +933,31 @@ class TMSearchWorker(QThread):
 class NLPEngineReadinessWorker(QThread):
     """Background worker for optional NLP engine capability checks."""
 
-    result_ready = pyqtSignal(int, bool, bool)  # request_id, stanza_available, cuda_available
+    result_ready = pyqtSignal(int, object)  # request_id, NlpRuntimeStatus
 
     def __init__(self, *, request_id: int):
         super().__init__()
         self.request_id = int(request_id)
         self._cancelled = False
+        self.probe = NlpRuntimeProbe()
 
     def cancel(self) -> None:
         self._cancelled = True
 
-    def _probe_stanza_available(self) -> bool:
-        try:
-            import stanza  # noqa: F401
-
-            return True
-        except ImportError:
-            return False
-        except Exception as exc:
-            logger.warning(
-                "Stanza readiness check failed; DocumentsView will use Mock engine: %s",
-                exc,
-            )
-            return False
-
-    def _probe_cuda_available(self) -> bool:
-        try:
-            import torch
-
-            return bool(torch.cuda.is_available())
-        except ImportError:
-            return False
-        except Exception as exc:
-            logger.warning("CUDA readiness check failed; GPU NLP disabled: %s", exc)
-            return False
-
     def run(self) -> None:
         try:
-            stanza_available = self._probe_stanza_available()
-            if self._cancelled:
-                return
-            cuda_available = self._probe_cuda_available() if stanza_available else False
+            status = self.probe.probe_stanza(use_gpu=False, run_smoke=True)
         except Exception:
             logger.exception("NLP engine readiness worker failed")
-            stanza_available = False
-            cuda_available = False
+            status = self.probe.build_mock_status(
+                configured_engine_id="stanza",
+                fallback_used=False,
+                error_code="probe_failed",
+                error_detail="Unexpected readiness worker failure",
+            )
 
         if not self._cancelled:
-            self.result_ready.emit(
-                self.request_id,
-                bool(stanza_available),
-                bool(cuda_available),
-            )
+            self.result_ready.emit(self.request_id, status)
 
 
 class DocumentsPageWorker(QThread):
@@ -4883,15 +4863,19 @@ class RecalculateKeynessWorker(QThread):
                 )
 
                 # Update reference_project_id snapshot in the most recent completed run.
-                run = session.execute(
-                    select(TermExtractRun)
-                    .where(
-                        TermExtractRun.project_id == self.project_id,
-                        TermExtractRun.status == "ok",
+                run = (
+                    session.execute(
+                        select(TermExtractRun)
+                        .where(
+                            TermExtractRun.project_id == self.project_id,
+                            TermExtractRun.status == "ok",
+                        )
+                        .order_by(TermExtractRun.run_id.desc())
+                        .limit(1)
                     )
-                    .order_by(TermExtractRun.run_id.desc())
-                    .limit(1)
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
                 if run is not None:
                     run.reference_project_id = ref_id
                     session.commit()

@@ -26,6 +26,7 @@ from app.infra.resource_paths import ResourcePaths
 from app.infra.settings import SettingsService
 from app.services.project_exchange.dto import ImportOptions
 from app.services.project_exchange.worker import ProjectImportWorker
+from app.services.nlp_runtime import NlpRuntimeProbe
 from app.services.resources import ResourceRegistry
 from app.ui.workers import ResourceDownloadWorker, UnifiedHealthCheckWorker
 
@@ -42,6 +43,7 @@ class ResourcesManagerDialog(QDialog):
 
         self.settings = SettingsService.get_instance()
         self.registry = ResourceRegistry(settings=self.settings)
+        self.nlp_probe = NlpRuntimeProbe()
         self._entries = {}
         self._statuses = {}
         self._download_worker = None
@@ -64,6 +66,10 @@ class ResourcesManagerDialog(QDialog):
         )
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
+
+        self.nlp_runtime_label = QLabel("NLP runtime: checking...")
+        self.nlp_runtime_label.setWordWrap(True)
+        root.addWidget(self.nlp_runtime_label)
 
         data_row = QGridLayout()
         data_row.addWidget(QLabel("Data folder:"), 0, 0)
@@ -185,6 +191,7 @@ class ResourcesManagerDialog(QDialog):
         statuses = {entry.id: self.registry.get_status(entry.id) for entry in entries}
         self._entries = {entry.id: entry for entry in entries}
         self._statuses = statuses
+        self._refresh_nlp_runtime_status()
 
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
@@ -210,6 +217,35 @@ class ResourcesManagerDialog(QDialog):
 
         self.table.resizeColumnsToContents()
         self._set_status("Resources list refreshed.")
+
+    def _refresh_nlp_runtime_status(self) -> None:
+        try:
+            status = self.nlp_probe.probe_stanza(use_gpu=False, run_smoke=True)
+        except Exception as exc:
+            logger.warning("Resources Manager NLP runtime probe failed: %s", exc)
+            self.nlp_runtime_label.setText(
+                "NLP runtime: Stanza Hebrew unavailable. "
+                "Reason: runtime_probe_failed. "
+                "Model path: not detected. "
+                "Remediation: Check the local Torch/Stanza runtime and retry."
+            )
+            return
+        if status.stanza_ready:
+            mode = "GPU-capable" if status.cuda_available else "CPU-only"
+            self.nlp_runtime_label.setText(
+                "NLP runtime: Stanza Hebrew ready "
+                f"({mode}). Model path: {status.model_path or 'auto-detected during runtime'}"
+            )
+            return
+
+        detail = status.error_code or "unavailable"
+        remediation = status.remediation or "Repair the runtime outside this dialog."
+        self.nlp_runtime_label.setText(
+            "NLP runtime: Stanza Hebrew unavailable. "
+            f"Reason: {detail}. "
+            f"Model path: {status.model_path or 'not detected'}. "
+            f"Remediation: {remediation}"
+        )
 
     def _selected_entry_id(self) -> str | None:
         row = self.table.currentRow()

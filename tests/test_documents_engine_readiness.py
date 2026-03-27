@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtCore import QItemSelectionModel
 
+from app.services.nlp_runtime import NlpRuntimeStatus
 from app.ui.documents_view import DocumentsView
 from app.ui.workers import NLPEngineReadinessWorker
 
@@ -44,21 +45,33 @@ def test_nlp_engine_readiness_worker_skips_cuda_when_stanza_missing(monkeypatch)
     worker = NLPEngineReadinessWorker(request_id=7)
     events = []
 
-    monkeypatch.setattr(worker, "_probe_stanza_available", lambda: False)
     monkeypatch.setattr(
-        worker,
-        "_probe_cuda_available",
-        lambda: (_ for _ in ()).throw(AssertionError("CUDA probe must be skipped")),
+        worker.probe,
+        "probe_stanza",
+        lambda **kwargs: NlpRuntimeStatus(
+            configured_engine_id="stanza",
+            effective_engine_id=None,
+            package_installed=False,
+            model_present=False,
+            pipeline_init_ok=False,
+            smoke_ok=False,
+            cuda_available=False,
+            runtime_mode="cpu",
+            fallback_used=False,
+            error_code="package_missing",
+            error_detail="missing",
+            remediation="install",
+        ),
     )
     worker.result_ready.connect(
-        lambda request_id, stanza_available, cuda_available: events.append(
-            (request_id, stanza_available, cuda_available)
+        lambda request_id, status: events.append(
+            (request_id, status.error_code, status.cuda_available)
         )
     )
 
     worker.run()
 
-    assert events == [(7, False, False)]
+    assert events == [(7, "package_missing", False)]
 
 
 def test_documents_view_keeps_nlp_actions_disabled_while_engine_check_pending(monkeypatch, qtbot):
@@ -74,6 +87,8 @@ def test_documents_view_keeps_nlp_actions_disabled_while_engine_check_pending(mo
     assert view._nlp_engine_check_pending is True
     assert view.process_btn.isEnabled() is False
     assert view.reprocess_btn.isEnabled() is False
+    assert view.diagnose_nlp_btn.isEnabled() is True
+    assert view.open_nlp_setup_btn.isEnabled() is True
     assert "Checking NLP engine readiness" in view.nlp_engine_status_label.text()
     assert "Checking NLP engine readiness" in view.process_btn.toolTip()
 
@@ -87,18 +102,64 @@ def test_documents_view_applies_latest_nlp_engine_readiness_result(monkeypatch, 
     )
 
     view._active_nlp_engine_request_id = 2
-    DocumentsView.on_nlp_engine_readiness_loaded(view, 1, True, True)
+    DocumentsView.on_nlp_engine_readiness_loaded(
+        view,
+        1,
+        NlpRuntimeStatus(
+            configured_engine_id="stanza",
+            effective_engine_id="stanza",
+            package_installed=True,
+            model_present=True,
+            pipeline_init_ok=True,
+            smoke_ok=True,
+            cuda_available=True,
+            runtime_mode="cpu",
+            fallback_used=False,
+        ),
+    )
 
     assert view._nlp_engine_check_pending is True
     assert view.process_btn.isEnabled() is False
 
-    DocumentsView.on_nlp_engine_readiness_loaded(view, 2, False, False)
+    DocumentsView.on_nlp_engine_readiness_loaded(
+        view,
+        2,
+        NlpRuntimeStatus(
+            configured_engine_id="stanza",
+            effective_engine_id=None,
+            package_installed=False,
+            model_present=False,
+            pipeline_init_ok=False,
+            smoke_ok=False,
+            cuda_available=False,
+            runtime_mode="cpu",
+            fallback_used=False,
+            error_code="package_missing",
+            error_detail="missing",
+            remediation="install",
+        ),
+    )
 
     assert view._nlp_engine_check_pending is False
     assert view.stanza_available is False
     assert view.cuda_available is False
     assert view.process_btn.isEnabled() is True
     assert view.reprocess_btn.isEnabled() is False
-    assert "Mock engine" in view.nlp_engine_status_label.text()
-    assert "Mock engine" in view.process_btn.toolTip()
+    assert "explicit confirmation" in view.nlp_engine_status_label.text()
+    assert "explicit Mock fallback confirmation" in view.process_btn.toolTip()
     assert view.gpu_checkbox.isHidden() is True
+    assert "package_missing" in view.nlp_engine_status_label.toolTip()
+
+
+def test_documents_view_open_nlp_setup_routes_to_resources_manager(monkeypatch, qtbot):
+    view = _make_view(monkeypatch, qtbot)
+    events = []
+
+    monkeypatch.setattr(
+        "app.ui.resources_manager_dialog.show_resources_manager",
+        lambda parent=None: events.append(parent),
+    )
+
+    view.on_open_nlp_setup()
+
+    assert events == [view]

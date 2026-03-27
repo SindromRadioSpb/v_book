@@ -14,6 +14,7 @@ from app.infra.settings import SettingsService
 from app.infra.translators.provider_config import ProviderAuthMode
 from app.infra.translators.provider_config_manager import ProviderConfigManager
 from app.services.db_service import DBService
+from app.services.nlp_runtime import NlpRuntimeProbe
 from app.services.resources import ResourceRegistry
 
 logger = logging.getLogger(__name__)
@@ -39,10 +40,12 @@ class HealthCheckService:
         self.resources = ResourceRegistry(settings=self.settings)
         self.audio_cfg = AudioProviderConfigManager(settings=self.settings)
         self.mt_cfg = ProviderConfigManager(settings=self.settings)
+        self.nlp_probe = NlpRuntimeProbe()
 
     def run_all(self) -> dict[str, object]:
         items: list[HealthCheckItem] = []
         items.extend(self._check_required_resources())
+        items.append(self._check_nlp_runtime())
         items.append(self._check_pronunciation_bootstrap())
         items.append(self._check_sentence_niqqud_bootstrap())
         items.extend(self._check_cloud_providers())
@@ -57,6 +60,38 @@ class HealthCheckService:
             "overall": overall,
             "items": [item.to_dict() for item in items],
         }
+
+    def _check_nlp_runtime(self) -> HealthCheckItem:
+        try:
+            status = self.nlp_probe.probe_stanza(use_gpu=False, run_smoke=True)
+        except Exception as exc:
+            logger.warning("NLP runtime health probe failed: %s", exc)
+            return HealthCheckItem(
+                check_id="nlp_runtime:stanza",
+                title="NLP Runtime: Stanza Hebrew",
+                status="warn",
+                message=f"runtime_probe_failed: {exc}",
+                remediation="Check the local Torch/Stanza runtime and retry Health Check.",
+            )
+        if status.stanza_ready:
+            mode = "GPU-capable" if status.cuda_available else "CPU-only"
+            return HealthCheckItem(
+                check_id="nlp_runtime:stanza",
+                title="NLP Runtime: Stanza Hebrew",
+                status="ok",
+                message=f"Ready ({mode}).",
+            )
+
+        message = f"{status.error_code or 'unavailable'}"
+        if status.error_detail:
+            message = f"{message}: {status.error_detail}"
+        return HealthCheckItem(
+            check_id="nlp_runtime:stanza",
+            title="NLP Runtime: Stanza Hebrew",
+            status="warn",
+            message=message,
+            remediation=status.remediation or "Repair the Stanza runtime and retry Health Check.",
+        )
 
     def _check_required_resources(self) -> list[HealthCheckItem]:
         checks: list[HealthCheckItem] = []
@@ -309,8 +344,7 @@ class HealthCheckService:
             try:
                 with DBService.get_instance().get_session() as session:
                     row = session.execute(
-                        text(
-                            """
+                        text("""
                             SELECT
                                 (SELECT COUNT(*) FROM source_document d
                                   JOIN source_corpus c ON d.corpus_id = c.corpus_id
@@ -320,8 +354,7 @@ class HealthCheckService:
                                   JOIN source_corpus c ON d.corpus_id = c.corpus_id
                                   WHERE c.project_id = :pid) AS sentences,
                                 (SELECT COUNT(*) FROM lemma WHERE project_id = :pid) AS lemmas
-                            """
-                        ),
+                            """),
                         {"pid": baseline_project_id},
                     ).fetchone()
             except Exception as exc:

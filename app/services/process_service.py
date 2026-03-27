@@ -43,6 +43,7 @@ from app.infra.sa_models import (
 )
 from app.services.db_service import DBService
 from app.services.entity_classifier import classify_text
+from app.services.nlp_runtime import NlpRuntimeProbe, NlpRuntimeStatus
 from app.services.snapshot_doc_stats_service import SnapshotDocStatsService
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,9 @@ class ProcessService:
     def __init__(self):
         self.db_service = DBService.get_instance()
         self._engine: NLPEngine | None = None
+        self._engine_key: tuple[str, bool] | None = None
         self.snapshot_doc_stats_service = SnapshotDocStatsService()
+        self.runtime_probe = NlpRuntimeProbe()
         logger.info("ProcessService initialized")
 
     def get_nlp_engine(self, use_gpu: bool = False, use_mock: bool = False) -> NLPEngine:
@@ -73,22 +76,17 @@ class ProcessService:
         Raises:
             RuntimeError: If engine initialization fails
         """
-        if self._engine is None:
+        desired_key = ("mock" if use_mock else "stanza", bool(use_gpu) if not use_mock else False)
+        if self._engine is None or self._engine_key != desired_key:
             if use_mock:
-                logger.info("Creating Mock NLP engine (rule-based)...")
+                logger.info("Creating Mock NLP engine (diagnostic/explicit-fallback)...")
                 from app.infra.nlp_engines.mock_engine import create_mock_engine
 
                 self._engine = create_mock_engine()
             else:
                 logger.info("Creating Stanza NLP engine...")
-                try:
-                    self._engine = create_stanza_engine(use_gpu=use_gpu)
-                except (ImportError, RuntimeError) as e:
-                    logger.warning(f"Stanza not available: {e}")
-                    logger.info("Falling back to Mock engine")
-                    from app.infra.nlp_engines.mock_engine import create_mock_engine
-
-                    self._engine = create_mock_engine()
+                self._engine = create_stanza_engine(use_gpu=use_gpu)
+            self._engine_key = desired_key
 
             logger.info(
                 f"NLP engine ready: {self._engine.get_name()} v{self._engine.get_version()}"
@@ -99,21 +97,152 @@ class ProcessService:
         self,
         *,
         engine: NLPEngine,
+        configured_engine_id: str,
+        effective_engine_id: str,
         use_gpu: bool,
         use_mock: bool,
+        fallback_used: bool,
         is_reprocess: bool,
         contract: str = "process_document_v2",
     ) -> str:
         payload = {
             "contract": str(contract or "process_document_v2"),
+            "configured_engine_id": str(configured_engine_id or engine.get_name()),
+            "effective_engine_id": str(effective_engine_id or engine.get_name()),
             "engine": engine.get_name(),
             "engine_version": engine.get_version(),
             "use_gpu": bool(use_gpu),
             "use_mock": bool(use_mock),
+            "fallback_used": bool(fallback_used),
             "is_reprocess": bool(is_reprocess),
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _build_runtime_note_payload(
+        *,
+        runtime_status: NlpRuntimeStatus,
+        use_gpu: bool,
+        use_mock: bool,
+        is_reprocess: bool,
+        source_label: str,
+        kind: str,
+    ) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "source": str(source_label or "unknown"),
+            "configured_engine_id": runtime_status.configured_engine_id,
+            "effective_engine_id": runtime_status.effective_engine_id,
+            "fallback_used": bool(runtime_status.fallback_used),
+            "runtime_mode": runtime_status.runtime_mode,
+            "engine_version": runtime_status.engine_version,
+            "model_id": runtime_status.model_id,
+            "model_path": runtime_status.model_path,
+            "package_installed": bool(runtime_status.package_installed),
+            "model_present": bool(runtime_status.model_present),
+            "pipeline_init_ok": bool(runtime_status.pipeline_init_ok),
+            "smoke_ok": bool(runtime_status.smoke_ok),
+            "error_code": runtime_status.error_code,
+            "error_detail": runtime_status.error_detail,
+            "use_gpu": bool(use_gpu),
+            "use_mock": bool(use_mock),
+            "is_reprocess": bool(is_reprocess),
+        }
+
+    def _build_single_run_note(
+        self,
+        *,
+        runtime_status: NlpRuntimeStatus,
+        use_gpu: bool,
+        use_mock: bool,
+        is_reprocess: bool,
+        source_label: str = "single_document",
+    ) -> str:
+        payload = self._build_runtime_note_payload(
+            runtime_status=runtime_status,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=is_reprocess,
+            source_label=source_label,
+            kind="single_nlp",
+        )
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    def _resolve_nlp_runtime(
+        self,
+        *,
+        use_gpu: bool,
+        use_mock: bool,
+        configured_engine_id: str | None,
+        allow_mock_fallback: bool,
+    ) -> tuple[NLPEngine, NlpRuntimeStatus]:
+        configured = str(configured_engine_id or ("mock" if use_mock else "stanza")).strip().lower()
+        if configured == "mock":
+            return (
+                self.get_nlp_engine(use_gpu=False, use_mock=True),
+                self.runtime_probe.build_mock_status(configured_engine_id="mock"),
+            )
+
+        stanza_status = self.runtime_probe.probe_stanza(use_gpu=use_gpu, run_smoke=True)
+        if not use_mock:
+            if not stanza_status.stanza_ready:
+                raise RuntimeError(self._format_runtime_block_message(stanza_status))
+            return self.get_nlp_engine(use_gpu=use_gpu, use_mock=False), stanza_status
+
+        if not allow_mock_fallback:
+            raise RuntimeError("Explicit mock fallback is disabled for this processing request.")
+
+        return (
+            self.get_nlp_engine(use_gpu=False, use_mock=True),
+            NlpRuntimeStatus(
+                configured_engine_id="stanza",
+                effective_engine_id="mock",
+                package_installed=stanza_status.package_installed,
+                model_present=stanza_status.model_present,
+                pipeline_init_ok=stanza_status.pipeline_init_ok,
+                smoke_ok=stanza_status.smoke_ok,
+                cuda_available=stanza_status.cuda_available,
+                runtime_mode="cpu",
+                fallback_used=True,
+                error_code=stanza_status.error_code or "fallback_requested",
+                error_detail=stanza_status.error_detail,
+                remediation=(
+                    "Mock runtime is active only because the user explicitly confirmed fallback."
+                ),
+                engine_version="1.0.0",
+                model_id=stanza_status.model_id,
+                model_path=stanza_status.model_path,
+            ),
+        )
+
+    @staticmethod
+    def _format_runtime_block_message(status: NlpRuntimeStatus) -> str:
+        detail = str(status.error_detail or "").strip()
+        suffix = f"\n\nDetails: {detail[:300]}" if detail else ""
+        if status.error_code == "package_missing":
+            return (
+                "Stanza runtime is not installed in the active environment.\n\n"
+                "Install the Python package and retry, or explicitly confirm Mock fallback."
+                f"{suffix}"
+            )
+        if status.error_code == "model_missing":
+            return (
+                "Stanza package is present, but the Hebrew model resources are missing.\n\n"
+                "Install or import the Hebrew model and retry, or explicitly confirm Mock fallback."
+                f"{suffix}"
+            )
+        if status.error_code == "smoke_failed":
+            return (
+                "Stanza initialized but failed the smoke test.\n\n"
+                "Inspect the runtime environment or explicitly confirm Mock fallback."
+                f"{suffix}"
+            )
+        return (
+            "Stanza runtime is unavailable for persisted processing.\n\n"
+            "Fix the runtime or explicitly confirm Mock fallback."
+            f"{suffix}"
+        )
 
     @staticmethod
     def _build_doc_ids_hash(doc_ids: list[int]) -> str:
@@ -295,6 +424,8 @@ class ProcessService:
         doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         *,
         is_reprocess: bool = False,
         source_label: str = "batch",
@@ -311,11 +442,19 @@ class ProcessService:
             raise ValueError("doc_ids must not be empty")
 
         project_id = self._resolve_project_id_for_docs(session, ordered_ids)
-        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
-        params_hash = self._build_run_params_hash(
-            engine=engine,
+        engine, runtime_status = self._resolve_nlp_runtime(
             use_gpu=use_gpu,
             use_mock=use_mock,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=allow_mock_fallback,
+        )
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            configured_engine_id=runtime_status.configured_engine_id,
+            effective_engine_id=runtime_status.effective_engine_id or engine.get_name(),
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            fallback_used=runtime_status.fallback_used,
             is_reprocess=is_reprocess,
             contract=contract,
         )
@@ -805,6 +944,7 @@ class ProcessService:
         *,
         project_id: int,
         engine: NLPEngine,
+        runtime_status: NlpRuntimeStatus,
         doc_id: int,
         use_gpu: bool,
         use_mock: bool,
@@ -824,6 +964,15 @@ class ProcessService:
             last_doc_id=doc_id,
             params_hash=self._build_run_params_hash(
                 engine=engine,
+                configured_engine_id=runtime_status.configured_engine_id,
+                effective_engine_id=runtime_status.effective_engine_id or engine.get_name(),
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                fallback_used=runtime_status.fallback_used,
+                is_reprocess=is_reprocess,
+            ),
+            note=self._build_single_run_note(
+                runtime_status=runtime_status,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
                 is_reprocess=is_reprocess,
@@ -839,6 +988,8 @@ class ProcessService:
         doc_id: int,
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         is_reprocess: bool = False,
         track_run: bool = True,
         batch_run_id: int | None = None,
@@ -883,7 +1034,12 @@ class ProcessService:
         project_id = corpus.project_id
 
         # Start processor run
-        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
+        engine, runtime_status = self._resolve_nlp_runtime(
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=allow_mock_fallback,
+        )
 
         # Update project's NLP engine (for term extraction to use same engine)
         project = session.get(DictProject, project_id)
@@ -898,6 +1054,7 @@ class ProcessService:
                 session,
                 project_id=project_id,
                 engine=engine,
+                runtime_status=runtime_status,
                 doc_id=doc_id,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
@@ -1391,6 +1548,8 @@ class ProcessService:
         doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         *,
         chunk_size: int = 50,
         chunk_sleep: float = 0.0,
@@ -1426,11 +1585,19 @@ class ProcessService:
             raise ValueError("segment_quick_check_timeout must be >= 0")
 
         project_id = self._resolve_project_id_for_docs(session, ordered_ids)
-        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
-        params_hash = self._build_run_params_hash(
-            engine=engine,
+        engine, runtime_status = self._resolve_nlp_runtime(
             use_gpu=use_gpu,
             use_mock=use_mock,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=allow_mock_fallback,
+        )
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            configured_engine_id=runtime_status.configured_engine_id,
+            effective_engine_id=runtime_status.effective_engine_id or engine.get_name(),
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            fallback_used=runtime_status.fallback_used,
             is_reprocess=False,
             contract="snapshot_backfill_v1",
         )
@@ -1446,6 +1613,8 @@ class ProcessService:
                 ordered_ids,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 source_label=source_label,
                 resume_run_id=resume_run_id,
                 contract="snapshot_backfill_v1",
@@ -1461,6 +1630,8 @@ class ProcessService:
                 ordered_ids,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 source_label=source_label,
                 resume_latest=True,
                 contract="snapshot_backfill_v1",
@@ -1488,6 +1659,14 @@ class ProcessService:
                     is_reprocess=False,
                     extra_note={
                         "contract": "snapshot_backfill_v1",
+                        "runtime": self._build_runtime_note_payload(
+                            runtime_status=runtime_status,
+                            use_gpu=use_gpu,
+                            use_mock=use_mock,
+                            is_reprocess=False,
+                            source_label=source_label,
+                            kind="batch_nlp",
+                        ),
                         "validation_scope": "bounded" if bounded_validation else "limited",
                         "validated_doc_count": len(ordered_ids) if bounded_validation else 0,
                         "selected_doc_count": len(ordered_ids),
@@ -1845,6 +2024,8 @@ class ProcessService:
         doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         *,
         is_reprocess: bool = False,
         chunk_size: int = 50,
@@ -1889,11 +2070,19 @@ class ProcessService:
             raise ValueError("chunk_size must be >= 1")
 
         project_id = self._resolve_project_id_for_docs(session, ordered_ids)
-        engine = self.get_nlp_engine(use_gpu=use_gpu, use_mock=use_mock)
-        params_hash = self._build_run_params_hash(
-            engine=engine,
+        engine, runtime_status = self._resolve_nlp_runtime(
             use_gpu=use_gpu,
             use_mock=use_mock,
+            configured_engine_id=configured_engine_id,
+            allow_mock_fallback=allow_mock_fallback,
+        )
+        params_hash = self._build_run_params_hash(
+            engine=engine,
+            configured_engine_id=runtime_status.configured_engine_id,
+            effective_engine_id=runtime_status.effective_engine_id or engine.get_name(),
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            fallback_used=runtime_status.fallback_used,
             is_reprocess=is_reprocess,
         )
         total_chunks = math.ceil(len(ordered_ids) / chunk_size)
@@ -1908,6 +2097,8 @@ class ProcessService:
                 ordered_ids,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 is_reprocess=is_reprocess,
                 source_label=source_label,
                 resume_run_id=resume_run_id,
@@ -1921,6 +2112,8 @@ class ProcessService:
                 ordered_ids,
                 use_gpu=use_gpu,
                 use_mock=use_mock,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
                 is_reprocess=is_reprocess,
                 source_label=source_label,
                 resume_latest=True,
@@ -1946,6 +2139,16 @@ class ProcessService:
                     chunk_size=chunk_size,
                     source_label=source_label,
                     is_reprocess=is_reprocess,
+                    extra_note={
+                        "runtime": self._build_runtime_note_payload(
+                            runtime_status=runtime_status,
+                            use_gpu=use_gpu,
+                            use_mock=use_mock,
+                            is_reprocess=is_reprocess,
+                            source_label=source_label,
+                            kind="batch_nlp",
+                        ),
+                    },
                 ),
             )
             session.add(run)
@@ -2091,6 +2294,8 @@ class ProcessService:
                         doc_id,
                         use_gpu=use_gpu,
                         use_mock=use_mock,
+                        configured_engine_id=configured_engine_id,
+                        allow_mock_fallback=allow_mock_fallback,
                         track_run=False,
                         batch_run_id=int(run.run_id),
                     )
@@ -2100,6 +2305,8 @@ class ProcessService:
                         doc_id,
                         use_gpu=use_gpu,
                         use_mock=use_mock,
+                        configured_engine_id=configured_engine_id,
+                        allow_mock_fallback=allow_mock_fallback,
                         is_reprocess=is_reprocess,
                         track_run=False,
                         batch_run_id=int(run.run_id),
@@ -2377,6 +2584,8 @@ class ProcessService:
         doc_id: int,
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
         track_run: bool = True,
         batch_run_id: int | None = None,
     ) -> bool:
@@ -2447,6 +2656,8 @@ class ProcessService:
             process_kwargs = {
                 "use_gpu": use_gpu,
                 "use_mock": use_mock,
+                "configured_engine_id": configured_engine_id,
+                "allow_mock_fallback": allow_mock_fallback,
             }
             if "is_reprocess" in inspect.signature(self.process_document).parameters:
                 process_kwargs["is_reprocess"] = True
@@ -2484,6 +2695,8 @@ class ProcessService:
         doc_ids: list[int],
         use_gpu: bool = False,
         use_mock: bool = False,
+        configured_engine_id: str | None = None,
+        allow_mock_fallback: bool = False,
     ) -> tuple[int, int]:
         """
         Re-process multiple documents with delta statistics.
@@ -2503,7 +2716,14 @@ class ProcessService:
         logger.info(f"Bulk re-processing {len(doc_ids)} documents")
 
         for doc_id in doc_ids:
-            if self.reprocess_document(session, doc_id, use_gpu=use_gpu, use_mock=use_mock):
+            if self.reprocess_document(
+                session,
+                doc_id,
+                use_gpu=use_gpu,
+                use_mock=use_mock,
+                configured_engine_id=configured_engine_id,
+                allow_mock_fallback=allow_mock_fallback,
+            ):
                 success += 1
             else:
                 errors += 1
