@@ -71,7 +71,7 @@ class HealthCheckService:
                 title="External Runtime Dependency: Stanza Hebrew",
                 status="warn",
                 message=f"runtime_probe_failed: {exc} | route=runtime",
-                remediation="Check the Python runtime, stanza package, and Torch state, then retry Health Check. Next action: Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
+                remediation="Use Install / Repair NLP Runtime in Resources Manager, then re-run Health Check. Next action: Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
             )
         if status.stanza_ready:
             mode = "GPU-capable" if status.cuda_available else "CPU-only"
@@ -94,7 +94,8 @@ class HealthCheckService:
             message=f"{message} | route={plan['route']}",
             remediation=(
                 f"{status.remediation or 'Repair the external runtime dependency and retry Health Check.'} "
-                f"Next action: {plan['next_action']}"
+                f"Next action: {plan['next_action']} "
+                "Official setup action: Install / Repair NLP Runtime in Resources Manager."
             ),
         )
 

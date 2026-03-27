@@ -127,3 +127,10 @@
   - the product-owned runtime bootstraps a managed `stanza_resources/he` tree under the app data root and records ownership/paths in a runtime manifest.
 - Rationale:
   - this gives the product a stable resource root without pretending that a single install file exists for the Hebrew model.
+
+## D-018 — One official setup action must be shared across UI surfaces
+- Status: accepted and implemented
+- Decision:
+  - Documents, Health Check, and Resources Manager should all route runtime repair to one official action: `Install / Repair NLP Runtime`.
+- Rationale:
+  - once the product owns the managed runtime path, the user should not be left to infer which button or screen is the authoritative recovery path.

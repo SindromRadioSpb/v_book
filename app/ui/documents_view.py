@@ -628,7 +628,7 @@ class DocumentsView(QWidget):
             )
         if self.open_nlp_setup_btn is not None:
             self.open_nlp_setup_btn.setToolTip(
-                "Open Resources Manager to inspect the external runtime dependency and the managed Hebrew resource."
+                "Open Resources Manager and use Install / Repair NLP Runtime for the official product-owned setup path."
             )
 
     def _build_nlp_runtime_detail_text(self) -> str:
@@ -648,6 +648,7 @@ class DocumentsView(QWidget):
             parts.append(f"Remediation: {remediation}")
         parts.append(f"Recommended route: {plan['title']}")
         parts.append(f"Next action: {plan['next_action']}")
+        parts.append("Official setup action: Install / Repair NLP Runtime in Resources Manager")
         return "\n".join(parts) if parts else "External runtime dependency is unavailable."
 
     def _update_nlp_process_action_state(
@@ -1743,7 +1744,7 @@ class DocumentsView(QWidget):
         dialog.setInformativeText(
             "Choose a recovery path:\n"
             "- Use Mock Once: continue in diagnostic/demo mode\n"
-            "- Open NLP Setup: inspect runtime and managed Hebrew resources\n"
+            "- Open NLP Setup: open Resources Manager and run Install / Repair NLP Runtime\n"
             "- Run Health Check: diagnose the external runtime dependency\n\n"
             "Mock fallback degrades persisted NLP quality."
         )

@@ -267,3 +267,23 @@
   - `.\.venv\Scripts\python.exe -m py_compile app\services\nlp_runtime\managed_runtime.py app\services\nlp_runtime\stanza_probe_worker.py app\services\nlp_runtime\runtime_probe.py app\main.py app\infra\nlp_engines\stanza_engine.py app\infra\nlp_engines\stanza_subprocess_worker.py app\ui\resources_manager_dialog.py app\ui\workers.py tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_resources_manager_dialog.py` -> `OK`
   - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_resources_manager_dialog.py -q` -> `17 passed`
   - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `63 passed`
+
+## Step 14 — PATCH-03 Official Setup / Repair Flow
+- Status: completed
+- Trigger:
+  - the managed runtime existed, but Documents, Health Check, and Resources Manager still did not point the user clearly enough to one official product-owned recovery action.
+- Code deliverables:
+  - `app/ui/resources_manager_dialog.py`
+  - `app/services/health_check_service.py`
+  - `app/ui/documents_view.py`
+  - `tests/test_documents_engine_readiness.py`
+  - `tests/test_health_check_service.py`
+  - `tests/test_resources_manager_dialog.py`
+- Confirmed behavior changes:
+  - Resources Manager now promotes `Install / Repair NLP Runtime` as the official product-owned bootstrap path
+  - Documents tooltips and runtime-block recovery text now point to the same official action
+  - Health Check remediation now references the same official setup action instead of leaving the user with only generic runtime advice
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\ui\documents_view.py app\ui\resources_manager_dialog.py app\services\health_check_service.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_resources_manager_dialog.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_resources_manager_dialog.py -q` -> `14 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py tests\test_managed_stanza_runtime.py -q` -> `63 passed`

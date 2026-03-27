@@ -184,3 +184,4 @@ def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
     assert "route=runtime" in check["message"]
     assert "install stanza" in check["remediation"]
     assert "Next action:" in check["remediation"]
+    assert "Install / Repair NLP Runtime" in check["remediation"]

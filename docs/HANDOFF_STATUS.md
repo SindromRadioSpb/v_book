@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- PATCH-02 managed subprocess runtime completed
+- PATCH-03 official setup / repair flow completed
 
 ## Completed
 - Audit completed and recorded.
@@ -32,6 +32,7 @@
 - Windows production processing now prefers an app-owned subprocess runtime launched through `app.main --stanza-worker`.
 - The isolated runtime probe now uses the sibling `app.main --stanza-probe` path, so diagnostics and production processing share the same ownership model.
 - Resources Manager now exposes an official `Install / Repair NLP Runtime` action for the managed runtime path.
+- Documents and Health Check now point to that same official `Install / Repair NLP Runtime` action, so the repair route is shared across the primary UI surfaces.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -42,7 +43,7 @@
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - The runtime recovery path is thread-safe now, but it is still diagnosis/setup/fallback orchestration only; it does not yet establish a product-owned managed Stanza runtime/bootstrap path.
 - The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
-- Health Check, Documents, and Resources Manager wording still needs one more sync pass around the new official `Install / Repair NLP Runtime` action.
+- Release-grade smoke artifacts and handoff still need one final sync pass around the new app-owned runtime path.
 
 ## Next Step
-- PATCH-03: complete the shared product wording/routing for the official `Install / Repair NLP Runtime` flow and then add release-grade smoke validation.
+- PATCH-04: add release-grade smoke validation, final docs sync, and short handoff for the managed Windows Stanza runtime.

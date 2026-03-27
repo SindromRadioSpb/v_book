@@ -88,3 +88,8 @@
 - `ManagedStanzaRuntime` now owns a writable runtime root, a managed `stanza_resources/he` path, and a runtime manifest under the app data tree.
 - The managed runtime can bootstrap the Hebrew model from either bundled resources or an existing legacy Stanza cache and then use that managed copy as the product-owned resource path.
 - Resources Manager now exposes an official `Install / Repair NLP Runtime` action for this managed runtime path.
+
+## Confirmed Current State After PATCH-03 Official Setup / Repair Flow
+- `Install / Repair NLP Runtime` is now the explicit product-owned recovery action surfaced by Resources Manager.
+- Documents runtime tooltips and runtime-block dialogs now point to the same official setup action instead of only generic setup wording.
+- Health Check remediation now references the same official setup action, so the guided route is consistent across the three primary surfaces.

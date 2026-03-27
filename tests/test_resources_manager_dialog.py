@@ -155,6 +155,7 @@ def _build_dialog(probe) -> ResourcesManagerDialog:
     dialog.hebrew_resource_label = _FakeLabel()
     dialog.open_nlp_model_folder_btn = _FakeButton()
     dialog.show_nlp_guide_btn = _FakeButton()
+    dialog.install_nlp_runtime_btn = _FakeButton()
     dialog._last_nlp_runtime_status = None
     dialog._last_nlp_runtime_message = ""
     dialog._download_worker = None
@@ -172,6 +173,7 @@ def test_resources_manager_runtime_probe_failure_does_not_crash():
 
     assert "runtime_probe_failed" in dialog.nlp_runtime_label.value
     assert "External runtime dependency is unavailable" in dialog.nlp_runtime_label.value
+    assert "Install / Repair NLP Runtime" in dialog.nlp_runtime_label.value
     assert "does not ship a one-click Python package installer" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is False
     assert "Managed Hebrew resource is not detected" in dialog.hebrew_resource_label.value
@@ -185,6 +187,7 @@ def test_resources_manager_ready_runtime_enables_model_folder_button():
     ResourcesManagerDialog._refresh_nlp_runtime_status(dialog)
 
     assert "External runtime dependency is ready" in dialog.nlp_runtime_label.value
+    assert "app-owned managed subprocess runtime path" in dialog.nlp_runtime_label.value
     assert "No bundled installer file is managed in this dialog" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is True
     assert "C:/models/he" in dialog.open_nlp_model_folder_btn.tooltip
@@ -204,6 +207,7 @@ def test_resources_manager_setup_guide_is_packaging_aware():
     assert "Managed Hebrew resource:" in guide
     assert "Recommended route: Repair the external runtime dependency" in guide
     assert "Next action: Start with Health Check" in guide
+    assert "Official action: Install / Repair NLP Runtime" in guide
     assert "Repair steps:" in guide
     assert "1. Environment mode: packaged." in guide
     assert "Persisted processing will not silently switch to Mock." in guide

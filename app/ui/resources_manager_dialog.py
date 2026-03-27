@@ -305,6 +305,7 @@ class ResourcesManagerDialog(QDialog):
                 f"Environment: {mode}. "
                 "Package: stanza installed. "
                 f"Runtime: {runtime}. "
+                "This product now uses an app-owned managed subprocess runtime path. "
                 "No bundled installer file is managed in this dialog for Python packages. "
                 f"Reason code: none."
             )
@@ -313,6 +314,7 @@ class ResourcesManagerDialog(QDialog):
             "External runtime dependency is unavailable. "
             f"Environment: {mode}. "
             f"Reason: {status.error_code or 'unavailable'}. "
+            "Use Install / Repair NLP Runtime for the official product-owned bootstrap path. "
             "This dialog does not ship a one-click Python package installer. "
             f"Remediation: {status.remediation or 'Repair the runtime outside this dialog.'}"
         )
@@ -359,6 +361,9 @@ class ResourcesManagerDialog(QDialog):
         self.show_nlp_guide_btn.setToolTip(
             "Open packaging-aware repair guidance for the external runtime and Hebrew model resource."
         )
+        self.install_nlp_runtime_btn.setToolTip(
+            "Bootstrap or repair the product-owned Stanza runtime and managed Hebrew resource."
+        )
 
     def _build_nlp_setup_guide_text(self) -> str:
         status = self._last_nlp_runtime_status
@@ -370,6 +375,7 @@ class ResourcesManagerDialog(QDialog):
             "Managed Hebrew resource:\n" + self._build_hebrew_resource_message(status),
             f"Recommended route: {plan['title']}",
             f"Next action: {plan['next_action']}",
+            "Official action: Install / Repair NLP Runtime",
         ]
         if status is not None and status.error_detail:
             sections.append(f"Details: {status.error_detail}")
@@ -447,6 +453,7 @@ class ResourcesManagerDialog(QDialog):
                 "External runtime dependency is unavailable. "
                 "Environment: unknown. "
                 "Reason: runtime_probe_failed. "
+                "Use Install / Repair NLP Runtime for the official product-owned bootstrap path. "
                 "This dialog does not ship a one-click Python package installer. "
                 "Remediation: Check the local Torch/Stanza runtime and retry.",
             )
