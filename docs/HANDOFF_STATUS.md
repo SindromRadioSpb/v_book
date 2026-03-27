@@ -4,7 +4,7 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- Wave 3 PATCH-03 guided repair journey completed
+- PATCH-01 thread lifecycle hardening completed
 
 ## Completed
 - Audit completed and recorded.
@@ -27,6 +27,7 @@
 - Documents can now recover from that managed runtime-block by offering a guided recovery dialog from the main-thread error flow.
 - Real Stanza processing can now continue even when the Qt process cannot import Torch directly, because `create_stanza_engine()` falls back to a subprocess-backed runtime.
 - Resources Manager now says explicitly that Python runtime dependencies are external to the dialog and that the Hebrew model is a directory-based resource.
+- Owner-bound runtime workers now shut down deterministically before `Resources Manager`, `DocumentsView`, or `AppWindow` are destroyed.
 
 ## In Progress
 - No active implementation in this patch series.
@@ -35,8 +36,8 @@
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
-- The runtime recovery path is still diagnosis/setup/fallback orchestration only; it does not auto-repair the external `torch/stanza` environment.
+- The runtime recovery path is thread-safe now, but it is still diagnosis/setup/fallback orchestration only; it does not yet establish a product-owned managed Stanza runtime/bootstrap path.
 - The current successful live runtime depends on the already-installed Hebrew model directory at `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`; there is still no bundled downloadable model archive inside the dialog.
 
 ## Next Step
-- Proceed only if needed to Wave 4: decide whether stable structured provenance should graduate from nested note payloads into dedicated schema fields.
+- PATCH-02: formalize the managed subprocess Stanza runtime so production processing uses an application-owned runtime path by default instead of relying on emergency fallback semantics.

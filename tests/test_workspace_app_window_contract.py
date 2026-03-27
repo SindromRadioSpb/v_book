@@ -30,6 +30,27 @@ class _StubProjectView(QWidget):
         self.load_project_calls += 1
 
 
+class _FakeWorker:
+    def __init__(self, *, running=True, wait_result=False):
+        self._running = running
+        self._wait_result = wait_result
+        self.wait_calls = []
+        self.terminate_called = False
+
+    def isRunning(self):
+        return self._running
+
+    def wait(self, timeout):
+        self.wait_calls.append(timeout)
+        if self._wait_result:
+            self._running = False
+        return self._wait_result
+
+    def terminate(self):
+        self.terminate_called = True
+        self._running = False
+
+
 def _fresh_window(monkeypatch, qtbot):
     SettingsService.reset_instance()
     settings = SettingsService.get_instance()
@@ -237,3 +258,14 @@ def test_deferred_reconnect_prompt_mentions_single_restart_path(monkeypatch, qtb
     assert "longer restart while backup and migration finish" in text
     assert "safer option until you intentionally reconnect" in text
     assert "Deferred reason: legacy startup guard" in text
+
+
+def test_app_window_close_event_waits_for_health_worker(monkeypatch, qtbot):
+    window = _fresh_window(monkeypatch, qtbot)
+    worker = _FakeWorker(running=True, wait_result=False)
+    window._health_check_worker = worker
+
+    window.close()
+
+    assert worker.wait_calls == [1000, 1000]
+    assert worker.terminate_called is True

@@ -28,6 +28,7 @@ from app.services.project_exchange.dto import ImportOptions
 from app.services.project_exchange.worker import ProjectImportWorker
 from app.services.nlp_runtime import NlpRuntimeProbe
 from app.services.resources import ResourceRegistry
+from app.ui.thread_lifecycle import shutdown_qthread
 from app.ui.workers import ResourceDownloadWorker, UnifiedHealthCheckWorker
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,45 @@ class ResourcesManagerDialog(QDialog):
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
         self._append_log(text)
+
+    def _close_progress_dialog(self) -> None:
+        dialog = self._progress_dialog
+        self._progress_dialog = None
+        if dialog is None:
+            return
+        try:
+            dialog.close()
+        except Exception:
+            logger.debug("Failed to close resource progress dialog", exc_info=True)
+        try:
+            dialog.deleteLater()
+        except Exception:
+            logger.debug("Failed to delete resource progress dialog", exc_info=True)
+
+    def _shutdown_background_workers(self) -> bool:
+        self._close_progress_dialog()
+
+        checks = (
+            ("resource download", "_download_worker", True),
+            ("baseline import", "_import_worker", True),
+            ("health check", "_health_worker", False),
+        )
+        ok = True
+        for label, attr, cancel_first in checks:
+            worker = getattr(self, attr, None)
+            if worker is None:
+                continue
+            stopped = shutdown_qthread(
+                worker,
+                label=f"Resources Manager {label}",
+                cancel_first=cancel_first,
+                wait_timeout_ms=1500,
+                terminate_timeout_ms=1500,
+            )
+            ok = ok and stopped
+            if stopped:
+                setattr(self, attr, None)
+        return ok
 
     def _load_data_root(self) -> None:
         root = self.settings.get_string(ResourcePaths.SETTINGS_KEY_DATA_ROOT, "")
@@ -444,8 +484,7 @@ class ResourcesManagerDialog(QDialog):
     def _on_download_finished(self, result: dict) -> None:
         if self._progress_dialog:
             self._progress_dialog.setValue(100)
-            self._progress_dialog.close()
-            self._progress_dialog = None
+        self._close_progress_dialog()
         self._download_worker = None
         if result.get("cancelled"):
             self._set_status("Download cancelled.")
@@ -454,9 +493,7 @@ class ResourcesManagerDialog(QDialog):
         self.refresh_resources()
 
     def _on_download_error(self, message: str) -> None:
-        if self._progress_dialog:
-            self._progress_dialog.close()
-            self._progress_dialog = None
+        self._close_progress_dialog()
         self._download_worker = None
         QMessageBox.warning(self, "Download Failed", str(message))
         self._set_status(f"Download failed: {message}")
@@ -597,6 +634,13 @@ class ResourcesManagerDialog(QDialog):
     def _on_health_error(self, message: str) -> None:
         self._set_status(f"Health check failed: {message}")
         QMessageBox.warning(self, "Health Check", str(message))
+
+    def closeEvent(self, event) -> None:
+        if not self._shutdown_background_workers():
+            logger.warning("Resources Manager close deferred until worker shutdown completes")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 def show_resources_manager(parent=None) -> int:

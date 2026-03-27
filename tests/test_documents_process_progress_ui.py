@@ -89,6 +89,7 @@ class _FakeWorker:
         self._wait_result = wait_result
         self.cancel_called = False
         self.deleted = False
+        self.terminate_called = False
         self.wait_calls = []
         self.doc_ids = list(doc_ids or [])
         self.use_mock = use_mock
@@ -109,6 +110,10 @@ class _FakeWorker:
 
     def deleteLater(self):
         self.deleted = True
+
+    def terminate(self):
+        self.terminate_called = True
+        self._running = False
 
 
 class _FakeSignal:
@@ -303,16 +308,25 @@ def test_documents_process_finished_cancelled_cleans_dialog_and_refreshes(monkey
     assert info_calls
 
 
-def test_documents_stop_process_worker_uses_cancel_only():
+def test_documents_stop_process_worker_terminates_if_cooperative_wait_times_out():
     view = DocumentsView.__new__(DocumentsView)
     view.process_progress_dialog = _FakeDialog()
-    view.process_worker = _FakeWorker(running=True, wait_result=False)
+    worker = _FakeWorker(running=True, wait_result=False)
+    view.process_worker = worker
+    view.process_btn = _FakeToggle()
+    view.reprocess_btn = _FakeToggle()
+    view.delete_btn = _FakeToggle()
+    view._process_worker_active = True
+    view.on_selection_changed = lambda: None
 
-    DocumentsView._stop_process_worker(view)
+    stopped = DocumentsView._stop_process_worker(view)
 
-    assert view.process_worker.cancel_called is True
-    assert view.process_worker.wait_calls == [100]
-    assert "cooperative cancellation" in view.process_progress_dialog.messages[0]
+    assert stopped is True
+    assert worker.cancel_called is True
+    assert worker.terminate_called is True
+    assert worker.wait_calls == [500, 1000]
+    assert view.process_worker is None
+    assert view.process_progress_dialog is None
 
 
 def test_documents_process_error_offers_explicit_mock_retry(monkeypatch):

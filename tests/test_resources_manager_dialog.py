@@ -28,6 +28,43 @@ class _FakeButton:
         self.tooltip = value
 
 
+class _FakeWorker:
+    def __init__(self, *, running=True, wait_result=True):
+        self._running = running
+        self._wait_result = wait_result
+        self.cancel_called = False
+        self.terminate_called = False
+        self.wait_calls = []
+
+    def isRunning(self):
+        return self._running
+
+    def cancel(self):
+        self.cancel_called = True
+
+    def wait(self, timeout):
+        self.wait_calls.append(timeout)
+        if self._wait_result:
+            self._running = False
+        return self._wait_result
+
+    def terminate(self):
+        self.terminate_called = True
+        self._running = False
+
+
+class _FakeProgressDialog:
+    def __init__(self):
+        self.closed = False
+        self.deleted = False
+
+    def close(self):
+        self.closed = True
+
+    def deleteLater(self):
+        self.deleted = True
+
+
 class _FailingProbe:
     def probe_stanza(self, **kwargs):
         _ = kwargs
@@ -120,6 +157,10 @@ def _build_dialog(probe) -> ResourcesManagerDialog:
     dialog.show_nlp_guide_btn = _FakeButton()
     dialog._last_nlp_runtime_status = None
     dialog._last_nlp_runtime_message = ""
+    dialog._download_worker = None
+    dialog._import_worker = None
+    dialog._health_worker = None
+    dialog._progress_dialog = None
     return dialog
 
 
@@ -165,3 +206,23 @@ def test_resources_manager_setup_guide_is_packaging_aware():
     assert "Repair steps:" in guide
     assert "1. Environment mode: packaged." in guide
     assert "Persisted processing will not silently switch to Mock." in guide
+
+
+def test_resources_manager_shutdown_stops_owned_workers():
+    dialog = _build_dialog(_FailingProbe())
+    download_worker = _FakeWorker(running=True, wait_result=True)
+    import_worker = _FakeWorker(running=True, wait_result=False)
+    health_worker = _FakeWorker(running=True, wait_result=True)
+    dialog._download_worker = download_worker
+    dialog._import_worker = import_worker
+    dialog._health_worker = health_worker
+    dialog._progress_dialog = _FakeProgressDialog()
+
+    ok = ResourcesManagerDialog._shutdown_background_workers(dialog)
+
+    assert ok is True
+    assert download_worker.cancel_called is True
+    assert import_worker.cancel_called is True
+    assert import_worker.terminate_called is True
+    assert health_worker.cancel_called is False
+    assert dialog._progress_dialog is None

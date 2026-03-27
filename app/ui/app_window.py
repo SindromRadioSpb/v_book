@@ -23,6 +23,7 @@ from app.ui.import_wizard import ImportWizard
 from app.ui.project_dashboard import ProjectDashboard
 from app.ui.project_view import ProjectView
 from app.ui.translation_management_panel import TranslationManagementPanel
+from app.ui.thread_lifecycle import shutdown_qthread
 from app.ui.user_dictionaries_view import UserDictionariesView
 from app.ui.verification_panel import VerificationPanel
 from app.ui.widgets.audio_player_panel import AudioPlayerPanel
@@ -1918,6 +1919,18 @@ class AppWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close."""
         logger.info("Application closing")
+
+        if not shutdown_qthread(
+            self._health_check_worker,
+            label="AppWindow health check",
+            cancel_first=False,
+            wait_timeout_ms=1000,
+            terminate_timeout_ms=1000,
+        ):
+            logger.warning("Application close deferred until health-check worker stops")
+            event.ignore()
+            return
+        self._health_check_worker = None
 
         # Save window geometry and workspace layout
         self.settings.save_window_geometry(self)

@@ -76,3 +76,8 @@
 - A live app-like Qt process (`QApplication` + `QMediaPlayer`) now auto-falls back to `SubprocessStanzaEngine` after a real `WinError 1114` and still processes Hebrew text successfully.
 - A real `reprocess_document()` run succeeded on a copy of the user DB while using this subprocess runtime recovery path.
 - The detected Hebrew model resource is currently a directory at `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`; there is no single bundled installer file for it inside the dialog.
+
+## Confirmed Current State After PATCH-01 Thread Lifecycle Hardening
+- `Resources Manager`, `DocumentsView`, and `AppWindow` now enforce deterministic QThread shutdown before owner destruction.
+- Runtime recovery, health-check, and resource-management flows no longer rely on owner deletion while a worker is still running.
+- The remaining runtime gap is no longer thread ownership; it is product ownership of the Stanza subprocess runtime/bootstrap path itself.

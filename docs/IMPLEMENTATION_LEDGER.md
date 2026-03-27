@@ -210,6 +210,28 @@
     - Result: `ok=True`, status remained `processed`, latest `ProcessorRun.engine='stanza'`
     - Detected Hebrew model directory: `C:\Users\lletp\AppData\Local\StanfordNLP\stanza\Cache\1.11.0\resources\he`
 
+## Step 12 — PATCH-01 Thread Lifecycle Hardening
+- Status: completed
+- Trigger:
+  - live Windows scenario could still end in `QThread: Destroyed while thread '' is still running` during runtime recovery / dialog shutdown paths.
+- Code deliverables:
+  - `app/ui/thread_lifecycle.py`
+  - `app/ui/resources_manager_dialog.py`
+  - `app/ui/documents_view.py`
+  - `app/ui/app_window.py`
+  - `tests/test_documents_process_progress_ui.py`
+  - `tests/test_resources_manager_dialog.py`
+  - `tests/test_workspace_app_window_contract.py`
+- Confirmed behavior changes:
+  - UI owners now have an explicit shutdown contract for background QThreads: cooperative cancel/quit, bounded `wait()`, force `terminate()` only during owner shutdown, and close deferral if a worker still refuses to stop
+  - `Resources Manager` now closes its progress dialog and stops download/import/health workers before dialog destruction
+  - `DocumentsView` no longer leaves process/readiness/snapshot/page workers running past widget close
+  - `AppWindow.closeEvent()` now waits for the global health-check worker before allowing window destruction
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\ui\thread_lifecycle.py app\ui\resources_manager_dialog.py app\ui\documents_view.py app\ui\app_window.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_workspace_app_window_contract.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_workspace_app_window_contract.py -q` -> `24 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_resources_manager_dialog.py tests\test_nlp_runtime_probe.py tests\test_stanza_engine_subprocess.py tests\test_workspace_app_window_contract.py -q` -> `58 passed`
+
 ## Next Step
-- Wave 4 candidate:
-  - consider promoting structured runtime provenance from nested note payloads into dedicated schema fields once the contract proves stable
+- PATCH-02:
+  - promote the subprocess-backed Stanza runtime from recovery-only fallback to an application-controlled managed runtime path with explicit ownership metadata and out-of-box bootstrap semantics

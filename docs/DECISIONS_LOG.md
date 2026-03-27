@@ -106,3 +106,10 @@
   - Documents, Health Check, and Resources Manager must route the user through one shared guided repair plan derived from the runtime probe taxonomy.
 - Rationale:
   - this strengthens self-service behavior without adding pseudo-package-manager semantics or duplicating routing logic in each surface.
+
+## D-015 — UI owners must never outlive active QThreads
+- Status: accepted and implemented
+- Decision:
+  - dialog/window owners of background QThreads must perform deterministic shutdown before destruction: cooperative stop, bounded wait, force terminate only during owner shutdown, and refuse close if the thread is still alive.
+- Rationale:
+  - the Windows runtime recovery path already uses more background orchestration; a leaked owner-bound QThread is now a P0 crash source (`QThread: Destroyed while thread is still running`).

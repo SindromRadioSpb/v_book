@@ -39,6 +39,7 @@ from app.ui.dialogs import show_error, show_info, show_warning
 from app.ui.dialogs.nlp_process_progress_dialog import NLPProcessProgressDialog
 from app.ui.models_qt import DocumentsTableModel
 from app.ui.table_layout_controller import TableLayoutController
+from app.ui.thread_lifecycle import shutdown_qthread
 from app.ui.widgets.snapshot_readiness_panel import SnapshotReadinessPanel
 from app.ui.workers import (
     DocumentDeleteWorker,
@@ -870,24 +871,30 @@ class DocumentsView(QWidget):
         status_timer = self.__dict__.get("_snapshot_status_timer")
         if status_timer is not None:
             status_timer.stop()
-        if self.snapshot_readiness_worker and self.snapshot_readiness_worker.isRunning():
-            logger.info("Stopping snapshot readiness worker on close")
-            self.snapshot_readiness_worker.cancel()
-            if not self.snapshot_readiness_worker.wait(100):
-                logger.info("Snapshot readiness worker will finish cooperatively after close")
+        worker = self.snapshot_readiness_worker
+        if worker is None:
+            return
+        if shutdown_qthread(
+            worker,
+            label="Documents snapshot readiness",
+            cancel_first=True,
+            wait_timeout_ms=500,
+            terminate_timeout_ms=1000,
+        ):
+            self.snapshot_readiness_worker = None
 
     def _stop_nlp_engine_check_worker(self) -> None:
         worker = self.__dict__.get("nlp_engine_check_worker")
         if worker is None:
             return
-        if worker.isRunning():
-            logger.info("Stopping NLP engine readiness worker on close")
-            worker.cancel()
-            if not worker.wait(3000):
-                logger.info("NLP engine readiness worker will finish after close")
-                self.nlp_engine_check_worker = None
-                return
-        self.nlp_engine_check_worker = None
+        if shutdown_qthread(
+            worker,
+            label="Documents NLP readiness",
+            cancel_first=True,
+            wait_timeout_ms=1000,
+            terminate_timeout_ms=1000,
+        ):
+            self.nlp_engine_check_worker = None
 
     def _refresh_snapshot_staleness_label(self) -> None:
         panel = self.__dict__.get("snapshot_readiness_panel")
@@ -2106,46 +2113,73 @@ class DocumentsView(QWidget):
     def closeEvent(self, event):
         """Handle widget close - ensure workers are stopped."""
         # Stop ingest worker if running
-        if self.current_worker and self.current_worker.isRunning():
-            logger.info("Stopping ingest worker on close")
-            self.current_worker.quit()
-            self.current_worker.wait(1000)
-            if self.current_worker.isRunning():
-                self.current_worker.terminate()
+        current_worker_ok = shutdown_qthread(
+            self.current_worker,
+            label="Documents ingest",
+            cancel_first=True,
+            wait_timeout_ms=1000,
+            terminate_timeout_ms=1000,
+        )
+        if current_worker_ok:
+            self.current_worker = None
 
         # Stop process worker if running
-        self._stop_process_worker()
+        process_worker_ok = self._stop_process_worker()
 
         # Stop documents page worker if running
-        if self.documents_worker and self.documents_worker.isRunning():
-            logger.info("Stopping documents page worker on close")
-            self.documents_worker.cancel()
-            self.documents_worker.wait(1000)
-            if self.documents_worker.isRunning():
-                self.documents_worker.terminate()
+        documents_worker_ok = shutdown_qthread(
+            self.documents_worker,
+            label="Documents page load",
+            cancel_first=True,
+            wait_timeout_ms=1000,
+            terminate_timeout_ms=1000,
+        )
+        if documents_worker_ok:
+            self.documents_worker = None
 
         self._stop_nlp_engine_check_worker()
         self._stop_snapshot_readiness_worker()
+
+        if not all(
+            (
+                current_worker_ok,
+                process_worker_ok,
+                documents_worker_ok,
+                self.current_worker is None,
+                self.process_worker is None,
+                self.documents_worker is None,
+                self.nlp_engine_check_worker is None,
+                self.snapshot_readiness_worker is None,
+            )
+        ):
+            logger.warning("Documents view close deferred until background workers stop")
+            event.ignore()
+            return
 
         self.table_layout_controller.save_now()
 
         super().closeEvent(event)
 
-    def _stop_process_worker(self) -> None:
+    def _stop_process_worker(self) -> bool:
         """Request cooperative stop for NLP processing worker."""
         if not self.process_worker:
-            return
+            return True
 
         if self.process_progress_dialog is not None:
             self.process_progress_dialog.append_activity(
                 "View is closing; requesting cooperative cancellation."
             )
 
-        if self.process_worker.isRunning():
-            logger.info("Stopping process worker on close")
-            self.process_worker.cancel()
-            if not self.process_worker.wait(100):
-                logger.info("Process worker will finish cooperatively after close")
-                return
+        stopped = shutdown_qthread(
+            self.process_worker,
+            label="Documents NLP process",
+            cancel_first=True,
+            wait_timeout_ms=500,
+            terminate_timeout_ms=1000,
+        )
+        if not stopped:
+            logger.warning("Documents process worker refused to stop during close")
+            return False
 
         self._cleanup_process_worker()
+        return True
