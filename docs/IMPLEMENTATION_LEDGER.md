@@ -119,7 +119,21 @@
 - Test evidence:
   - `.\.venv\Scripts\python.exe -m pytest tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_resources_manager_dialog.py -q` -> `12 passed`
 
+## Step 7 — Wave 3 PATCH-02 Structured Runtime Provenance
+- Status: completed
+- Code deliverables:
+  - `app/services/process_service.py`
+  - `tests/test_process_service_nlp_runtime.py`
+  - `tests/test_process_batch_run_state.py`
+- Confirmed behavior changes:
+  - single-document processing now writes a stable nested `runtime` provenance envelope inside `ProcessorRun.note`
+  - batch processing now records the same structured runtime envelope under `note["runtime"]`
+  - legacy flat note keys remain present for backward compatibility
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py -q` -> `16 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests/test_process_service_nlp_runtime.py tests/test_documents_engine_readiness.py tests/test_health_check_service.py tests/test_process_run_state_foundation.py tests/test_process_batch_run_state.py tests/test_documents_process_progress_ui.py tests/test_resources_manager_dialog.py tests/test_nlp_runtime_probe.py -q` -> `37 passed`
+
 ## Next Step
-- Wave 3 PATCH-02 structured provenance:
-  - move from additive free-form note semantics toward a stable machine-readable provenance envelope
-  - preserve backward compatibility with existing `ProcessorRun.note` data
+- Wave 3 PATCH-03 guided repair flow hardening:
+  - turn the separated runtime/resource surfaces into a more explicit user journey
+  - keep remediation truthful in dev and packaged environments

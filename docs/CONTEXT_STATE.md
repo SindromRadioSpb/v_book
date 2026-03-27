@@ -49,3 +49,8 @@
 - Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`.
 - Documents and Health Check now use the same runtime/resource vocabulary as Resources Manager.
 - The UI continues to provide truthful next steps without promising in-place package installation.
+
+## Confirmed Current State After Wave 3 PATCH-02
+- `ProcessorRun.note` now carries a stable nested `runtime` provenance envelope in addition to the legacy flat fields.
+- The structured envelope records `configured_engine_id`, `effective_engine_id`, `fallback_used`, `reason_code`, `runtime_mode`, and `probe_summary`.
+- Batch and single-document processing now share the same machine-readable runtime provenance shape.

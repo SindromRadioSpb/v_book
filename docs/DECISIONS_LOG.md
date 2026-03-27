@@ -92,3 +92,10 @@
   - the UI must distinguish external runtime dependency issues from managed Hebrew model/resource state.
 - Rationale:
   - this reduces user confusion and preserves the rule that Resources Manager is not a pseudo package manager.
+
+## D-013 — Structured provenance must be additive-first
+- Status: accepted and implemented
+- Decision:
+  - structured runtime provenance is introduced as a backward-compatible envelope inside `ProcessorRun.note` before any schema migration is considered.
+- Rationale:
+  - this preserves historical compatibility while enabling filtering and audit on stable machine-readable fields.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -136,6 +137,11 @@ def test_batch_run_resumes_latest_cancelled_run(monkeypatch) -> None:
         assert runs_after_first[0].status == "cancelled"
         assert runs_after_first[0].docs_processed == 1
         assert runs_after_first[0].last_doc_id == doc_ids[0]
+        first_note = json.loads(runs_after_first[0].note)
+        assert first_note["runtime"]["configured_engine_id"] == "mock"
+        assert first_note["runtime"]["effective_engine_id"] == "mock"
+        assert first_note["runtime"]["reason_code"] is None
+        assert first_note["runtime"]["probe_summary"]["engine_version"] == "1.0.0"
         assert any(state.get("phase") == "cancelled" for state in first_states)
 
         second_states: list[dict] = []

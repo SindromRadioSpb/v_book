@@ -120,7 +120,7 @@ class ProcessService:
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
-    def _build_runtime_note_payload(
+    def _build_runtime_provenance_payload(
         *,
         runtime_status: NlpRuntimeStatus,
         use_gpu: bool,
@@ -130,6 +130,40 @@ class ProcessService:
         kind: str,
     ) -> dict[str, Any]:
         return {
+            "schema_version": 1,
+            "kind": kind,
+            "source": str(source_label or "unknown"),
+            "configured_engine_id": runtime_status.configured_engine_id,
+            "effective_engine_id": runtime_status.effective_engine_id,
+            "fallback_used": bool(runtime_status.fallback_used),
+            "reason_code": runtime_status.error_code,
+            "runtime_mode": runtime_status.runtime_mode,
+            "use_gpu": bool(use_gpu),
+            "use_mock": bool(use_mock),
+            "is_reprocess": bool(is_reprocess),
+            "probe_summary": {
+                "package_installed": bool(runtime_status.package_installed),
+                "model_present": bool(runtime_status.model_present),
+                "pipeline_init_ok": bool(runtime_status.pipeline_init_ok),
+                "smoke_ok": bool(runtime_status.smoke_ok),
+                "error_detail": runtime_status.error_detail,
+                "engine_version": runtime_status.engine_version,
+                "model_id": runtime_status.model_id,
+                "model_path": runtime_status.model_path,
+            },
+        }
+
+    @staticmethod
+    def _build_runtime_note_payload(
+        *,
+        runtime_status: NlpRuntimeStatus,
+        use_gpu: bool,
+        use_mock: bool,
+        is_reprocess: bool,
+        source_label: str,
+        kind: str,
+    ) -> dict[str, Any]:
+        payload = {
             "kind": kind,
             "source": str(source_label or "unknown"),
             "configured_engine_id": runtime_status.configured_engine_id,
@@ -149,6 +183,15 @@ class ProcessService:
             "use_mock": bool(use_mock),
             "is_reprocess": bool(is_reprocess),
         }
+        payload["runtime"] = ProcessService._build_runtime_provenance_payload(
+            runtime_status=runtime_status,
+            use_gpu=use_gpu,
+            use_mock=use_mock,
+            is_reprocess=is_reprocess,
+            source_label=source_label,
+            kind=kind,
+        )
+        return payload
 
     def _build_single_run_note(
         self,
@@ -1659,7 +1702,7 @@ class ProcessService:
                     is_reprocess=False,
                     extra_note={
                         "contract": "snapshot_backfill_v1",
-                        "runtime": self._build_runtime_note_payload(
+                        "runtime": self._build_runtime_provenance_payload(
                             runtime_status=runtime_status,
                             use_gpu=use_gpu,
                             use_mock=use_mock,
@@ -2140,7 +2183,7 @@ class ProcessService:
                     source_label=source_label,
                     is_reprocess=is_reprocess,
                     extra_note={
-                        "runtime": self._build_runtime_note_payload(
+                        "runtime": self._build_runtime_provenance_payload(
                             runtime_status=runtime_status,
                             use_gpu=use_gpu,
                             use_mock=use_mock,
