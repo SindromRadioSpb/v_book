@@ -17,6 +17,7 @@ _NIKUD_RE = re.compile(r"[\u0591-\u05c7]")
 _DEFAULT_SAMPLE_TEXT = "\u05d1\u05d9\u05ea \u05e1\u05e4\u05e8"
 _DLL_DIR_HANDLES: list[object] = []
 _DLL_DIR_KEYS: set[str] = set()
+_TRACE_ENV_KEY = "HDLE_ONNX_PROBE_TRACE_PATH"
 
 
 def _sanitize_model_path(raw_value: str) -> str:
@@ -24,6 +25,25 @@ def _sanitize_model_path(raw_value: str) -> str:
     if not value:
         return ""
     return value.strip("\"'").rstrip(" .")
+
+
+def _trace_probe(stage: str, **details: object) -> None:
+    trace_target = (os.getenv(_TRACE_ENV_KEY) or "").strip()
+    if not trace_target:
+        return
+    try:
+        trace_path = Path(trace_target).expanduser().resolve()
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "ts": time.time(),
+            "pid": os.getpid(),
+            "stage": stage,
+            "details": details,
+        }
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        return
 
 
 def _register_dll_directory(path: Path) -> None:
@@ -47,6 +67,7 @@ def _register_dll_directory(path: Path) -> None:
 
 
 def _prepare_runtime_dll_paths() -> None:
+    _trace_probe("prepare_runtime_dll_paths:start")
     candidates: list[Path] = []
 
     meipass = getattr(sys, "_MEIPASS", None)
@@ -88,6 +109,11 @@ def _prepare_runtime_dll_paths() -> None:
         os.environ["PATH"] = (
             ";".join(prefix_parts + [existing_path]) if existing_path else ";".join(prefix_parts)
         )
+    _trace_probe(
+        "prepare_runtime_dll_paths:done",
+        prefix_parts=prefix_parts,
+        meipass=str(getattr(sys, "_MEIPASS", "") or ""),
+    )
 
 
 def _contains_niqqud(text: str) -> bool:
@@ -132,18 +158,36 @@ def _discover_default_model_path() -> Path | None:
 
 
 def _ensure_hf_home() -> None:
+    _trace_probe("ensure_hf_home:start", configured=(os.getenv("HF_HOME") or "").strip())
     configured = (os.getenv("HF_HOME") or "").strip()
     if configured:
         configured_path = Path(configured)
         try:
-            configured_path.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                dir=str(configured_path), prefix="hf_write_test_", delete=True
-            ):
+            if configured_path.exists() and configured_path.is_dir():
+                os.environ["HF_HOME"] = str(configured_path)
+                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+                _trace_probe("ensure_hf_home:configured_ready", path=str(configured_path))
+                return
+            _trace_probe("ensure_hf_home:configured_missing", path=str(configured_path))
+        except Exception as exc:
+            _trace_probe("ensure_hf_home:configured_unusable", error=str(exc))
+        if not bool(getattr(sys, "frozen", False)):
+            try:
+                configured_path.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    dir=str(configured_path), prefix="hf_write_test_", delete=True
+                ):
+                    pass
+                os.environ["HF_HOME"] = str(configured_path)
+                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+                _trace_probe("ensure_hf_home:configured_created", path=str(configured_path))
+                return
+            except Exception:
                 pass
-            return
-        except Exception:
-            pass
 
     candidates = [
         Path.cwd() / "build" / "hf_cache",
@@ -162,9 +206,13 @@ def _ensure_hf_home() -> None:
                 pass
             os.environ["HF_HOME"] = str(candidate)
             os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+            os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+            os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+            _trace_probe("ensure_hf_home:fallback_ready", path=str(candidate))
             return
         except Exception:
             continue
+    _trace_probe("ensure_hf_home:failed")
 
 
 def _resolve_model_path(model_path_arg: str) -> Path | None:
@@ -219,18 +267,24 @@ def _base_report(mode: str) -> dict[str, Any]:
 def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[str, Any]]:
     started = time.perf_counter()
     report = _base_report(mode)
+    _trace_probe("run:start", mode=mode)
 
     _prepare_runtime_dll_paths()
     _ensure_hf_home()
 
     try:
+        _trace_probe("import:onnxruntime:start")
         ort_module = importlib.import_module("onnxruntime")
         report["onnxruntime_origin"] = str(getattr(ort_module, "__file__", "") or "")
+        _trace_probe("import:onnxruntime:done", origin=report["onnxruntime_origin"])
+        _trace_probe("import:phonikud_onnx:start")
         phonikud_onnx = importlib.import_module("phonikud_onnx")
         phonikud_cls = getattr(phonikud_onnx, "Phonikud", None)
         if phonikud_cls is None:
             raise RuntimeError("phonikud_onnx.Phonikud not found")
+        _trace_probe("import:phonikud_onnx:done")
     except Exception as exc:
+        _trace_probe("import:error", error=str(exc))
         report["stage"] = "import"
         report["error"] = str(exc)
         report["details"] = "Failed to import ONNX runtime backend."
@@ -238,6 +292,7 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
         return 1, report
 
     if mode == "import":
+        _trace_probe("run:import_mode_ok")
         report["ok"] = True
         report["stage"] = "import"
         report["details"] = "onnxruntime and phonikud_onnx imports succeeded"
@@ -246,6 +301,7 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
 
     model_path = _resolve_model_path(model_path_arg)
     if model_path is None:
+        _trace_probe("model_path:missing", arg=model_path_arg)
         report["stage"] = "model_load"
         report["error"] = "Phonikud ONNX model path is not configured or not found."
         report["details"] = (
@@ -257,8 +313,11 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
     report["model_path"] = str(model_path)
 
     try:
+        _trace_probe("model_load:start", model_path=report["model_path"])
         model = phonikud_cls(str(model_path))
+        _trace_probe("model_load:done")
     except Exception as exc:
+        _trace_probe("model_load:error", error=str(exc), model_path=report["model_path"])
         report["stage"] = "model_load"
         report["error"] = str(exc)
         report["details"] = "Failed to initialize phonikud ONNX model."
@@ -266,6 +325,7 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
         return 1, report
 
     if mode == "infer":
+        _trace_probe("infer:batch:start")
         report["stage"] = "infer"
         texts = _read_infer_payload()
         outputs: list[str] = []
@@ -276,6 +336,7 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
             except Exception:
                 rendered = ""
             outputs.append(rendered or source)
+        _trace_probe("infer:batch:done", outputs=len(outputs))
         report["outputs"] = outputs
         report["ok"] = True
         report["details"] = "inference completed"
@@ -285,8 +346,11 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
     report["stage"] = "infer"
     report["sample_input"] = str(sample_text or _DEFAULT_SAMPLE_TEXT)
     try:
+        _trace_probe("infer:sample:start", sample_input=report["sample_input"])
         sample_output = str(model.add_diacritics(report["sample_input"]) or "").strip()
+        _trace_probe("infer:sample:done", sample_output=sample_output)
     except Exception as exc:
+        _trace_probe("infer:sample:error", error=str(exc))
         report["error"] = str(exc)
         report["details"] = "Failed to run ONNX sample inference."
         report["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
@@ -303,6 +367,7 @@ def run(mode: str, *, model_path_arg: str, sample_text: str) -> tuple[int, dict[
     report["ok"] = True
     report["details"] = "real_inference"
     report["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+    _trace_probe("run:done", mode=mode, elapsed_ms=report["elapsed_ms"])
     return 0, report
 
 
@@ -324,6 +389,7 @@ def main() -> int:
     parser.add_argument("--timeout-ms", type=int, default=3000)
     parser.add_argument("--out", type=str, default="")
     args = parser.parse_args()
+    _trace_probe("main:args", mode=args.mode, out=bool(args.out))
 
     # Timeout is enforced by caller; keep flag for explicit IO contract stability.
     _ = args.timeout_ms

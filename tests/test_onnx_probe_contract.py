@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -97,3 +98,47 @@ def test_onnx_probe_discovers_bundled_model_when_data_root_missing(monkeypatch, 
 
     assert isinstance(discovered, Path)
     assert discovered == preferred
+
+
+def test_ensure_hf_home_accepts_existing_configured_path_without_write_probe(
+    monkeypatch, tmp_path: Path
+):
+    configured = tmp_path / "hf_home"
+    configured.mkdir()
+    sentinel = configured / "keep.txt"
+    sentinel.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setenv("HF_HOME", str(configured))
+    monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+    monkeypatch.delenv("HF_HUB_DISABLE_TELEMETRY", raising=False)
+    monkeypatch.delenv("HF_HUB_DISABLE_SYMLINKS_WARNING", raising=False)
+
+    def _fail_named_tempfile(*args, **kwargs):
+        raise AssertionError("configured HF_HOME must not use NamedTemporaryFile probe")
+
+    monkeypatch.setattr(onnx_probe.tempfile, "NamedTemporaryFile", _fail_named_tempfile)
+    monkeypatch.setattr(onnx_probe.sys, "frozen", True, raising=False)
+
+    onnx_probe._ensure_hf_home()
+
+    assert os.environ["HF_HOME"] == str(configured)
+    assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+    assert os.environ["HF_HUB_DISABLE_TELEMETRY"] == "1"
+    assert os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] == "1"
+
+
+def test_ensure_hf_home_frozen_missing_configured_path_falls_back_without_touching_it(
+    monkeypatch, tmp_path: Path
+):
+    missing_configured = tmp_path / "missing_hf_home"
+    fallback_root = tmp_path / "cwd"
+    fallback_root.mkdir()
+
+    monkeypatch.setenv("HF_HOME", str(missing_configured))
+    monkeypatch.setattr(onnx_probe.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(onnx_probe.Path, "cwd", staticmethod(lambda: fallback_root))
+
+    onnx_probe._ensure_hf_home()
+
+    assert os.environ["HF_HOME"] == str(fallback_root / "build" / "hf_cache")
+    assert not missing_configured.exists()
