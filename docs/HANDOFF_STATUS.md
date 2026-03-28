@@ -105,3 +105,24 @@
 
 ## Next Step
 - Run the same smoke contract against the actual packaged build and require `bundled_packaged`.
+
+
+## Completed After Packaged Rebuild Audit
+- The packaged artifact has now been rebuilt from the real installer-grade flow (`rebuild.ps1` + `hdle_premium_installer.spec`).
+- The rebuilt `dist` now really contains the bundled Hebrew payload under:
+  - `dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload/...`
+- Packaged bootstrap on a clean workspace-managed root now records:
+  - `ownership = packaged_app`
+  - `model_source_kind = bundled_packaged`
+- This closes the previous gap where the code path existed but the checked `dist` artifact was stale.
+
+## Remaining Risks
+- Packaged Hebrew payload delivery is now confirmed, but the frozen Torch/Stanza runtime is still not release-green.
+- The rebuilt packaged `--stanza-probe` still returns `hostile_torch_state` on `torch\lib\c10.dll`.
+- The rebuilt packaged `--stanza-worker` still fails on the same frozen Torch import path.
+
+## Next Step
+- Investigate frozen Torch dependency loading inside the packaged subprocess path:
+  - determine which DLL dependency of `dist/.../torch/lib/c10.dll` is still unresolved in the frozen layout
+  - fix the packaged worker/probe import chain without regressing the already confirmed `bundled_packaged` ownership path
+

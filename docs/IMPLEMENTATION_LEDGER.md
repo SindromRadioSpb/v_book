@@ -491,3 +491,31 @@
 - Release engineering only:
   - verify the same smoke contract on the actual packaged build with `--require-source-kind bundled_packaged`
   - keep the staged bundled Hebrew payload as part of the release artifact pipeline
+
+
+## Step 18 — Packaged Rebuild Audit for Bundled Hebrew Payload
+- Status: completed
+- Trigger:
+  - the code path for `bundled_packaged` existed, but the previously checked `dist` artifact was stale and could not prove packaged ownership.
+- Audit findings:
+  - the canonical build flow is `rebuild.ps1` + `hdle_premium_installer.spec`
+  - `scripts/build_windows.ps1` is an older standalone build helper and is not the current source of truth for installer-grade packaging
+  - fast pre-build gates are currently blocked by unrelated dirty validation/runtime files, so packaged verification had to use `rebuild.ps1 -SkipFastGates`
+- Confirmed packaging results:
+  - `scripts/stage_stanza_hebrew_payload.py` stages the Hebrew payload correctly into `installer/resources/local_models/stanza_hebrew`
+  - rebuilt `dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload/...` now exists and contains the staged Hebrew payload
+  - packaged self-check respects `HDLE_DATA_ROOT` when run with an explicit output file
+  - packaged `--stanza-probe` on a clean workspace-managed root now writes a manifest with:
+    - `ownership = packaged_app`
+    - `model_source_kind = bundled_packaged`
+    - `bundled_payload_root = dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload`
+- Remaining packaged runtime blocker:
+  - the same packaged `--stanza-probe` still reports `error_code = hostile_torch_state`
+  - packaged `--stanza-worker` still fails on the same `torch\lib\c10.dll` import path
+  - this means bundled Hebrew payload delivery is now confirmed, but frozen Torch/Stanza runtime readiness is still not release-green
+- Operational evidence:
+  - `powershell -ExecutionPolicy Bypass -File .\rebuild.ps1 -SkipFastGates` -> build and installer succeeded
+  - `reports/runtime_smoke/packaged_import_check.json` confirms packaged self-check with workspace `HDLE_DATA_ROOT`
+  - `reports/runtime_smoke/packaged_stanza_probe.json` confirms `bundled_packaged` ownership plus `hostile_torch_state`
+  - `reports/runtime_smoke/packaged_stanza_worker.jsonl` confirms packaged worker still fails on `c10.dll`
+

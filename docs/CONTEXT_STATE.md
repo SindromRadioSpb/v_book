@@ -153,3 +153,18 @@
   - `runtime_effective = stanza`
 - Obsolete managed manifests are now upgraded to current bundled ownership when a valid bundled payload is available.
 - Managed payload refresh is overwrite-safe and no longer trips `WinError 183` during release smoke.
+
+
+## Confirmed Current State After Packaged Rebuild Audit
+- The current packaged build is no longer stale: `dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload/...` now exists after a full rebuild.
+- Packaged self-check respects `HDLE_DATA_ROOT` when invoked with an explicit output path.
+- On a clean workspace-managed root, packaged bootstrap now writes:
+  - `ownership = packaged_app`
+  - `model_source_kind = bundled_packaged`
+  - `bundled_payload_root = dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload`
+- This confirms that bundled Hebrew payload delivery into the frozen artifact is working.
+- The remaining release blocker is now narrower and more concrete:
+  - packaged `--stanza-probe` still reports `hostile_torch_state`
+  - packaged `--stanza-worker` still fails on the same `torch\lib\c10.dll` import chain
+- Therefore bundled payload delivery is complete, but packaged Torch/Stanza runtime readiness is not yet release-green.
+

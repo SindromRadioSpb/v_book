@@ -201,3 +201,12 @@
   - if an existing healthy managed copy still carries obsolete ownership labels like `managed_existing`, bootstrap must rebind it to the current bundled source when a valid bundled payload is present.
 - Rationale:
   - otherwise release smoke can report a false non-bundled source even though the release-owned bundled payload is available and should be authoritative.
+
+
+## D-028 — Bundled payload delivery and frozen Torch runtime are separate release gates
+- Status: accepted and implemented
+- Decision:
+  - treat packaged Hebrew payload ownership and packaged Torch/Stanza import readiness as separate release checks.
+- Rationale:
+  - the rebuilt packaged artifact now proves `bundled_packaged` ownership correctly, but the frozen `--stanza-probe` / `--stanza-worker` path can still fail later on `torch\lib\c10.dll`; ownership success alone is not sufficient for release sign-off.
+
