@@ -4,146 +4,41 @@
 - `task31`: product-grade NLP runtime management
 
 ## Current Phase
-- P0 re-process lifecycle hotfix completed after PATCH-04
+- Packaged runtime sign-off is complete for the currently scoped NLP runtime tracks.
+- There is no active implementation blocker in the packaged Hebrew payload, packaged Stanza/Torch runtime, or packaged ONNX helper startup paths.
 
-## Completed
-- Audit completed and recorded.
-- Governance docs created.
-- Product direction and rollout decisions recorded.
-- Silent mock fallback removed from persisted processing.
-- Configured vs effective runtime state added.
-- Run-level runtime provenance added via `ProcessorRun.note`.
-- NLP runtime visibility added to Health Check and Resources Manager.
-- Resources Manager crash on hostile runtime probe was fixed with guarded fallback UI.
-- Documents now exposes direct `Diagnose NLP` and `Open NLP Setup` actions.
-- Stanza/Torch runtime probing is now isolated in a subprocess instead of the live UI process.
-- Resources Manager now exposes packaging-aware repair steps and guarded NLP model-folder access.
-- Wave 2 is now treated as the stable baseline for runtime-management behavior.
-- Resources Manager now separates `External Runtime Dependency` from `Managed Hebrew Resource`.
-- Documents and Health Check now use the same runtime/resource vocabulary.
-- `ProcessorRun.note` now includes a stable nested `runtime` provenance envelope alongside legacy flat keys.
-- Guided repair routing is now shared across Documents, Health Check, and Resources Manager.
-- Live engine-init failures after a successful subprocess probe now collapse into the managed runtime-block path instead of surfacing as raw worker tracebacks.
-- Documents can now recover from that managed runtime-block by offering a guided recovery dialog from the main-thread error flow.
-- Real Stanza processing can now continue even when the Qt process cannot import Torch directly, because `create_stanza_engine()` falls back to a subprocess-backed runtime.
-- Resources Manager now says explicitly that Python runtime dependencies are external to the dialog and that the Hebrew model is a directory-based resource.
-- Owner-bound runtime workers now shut down deterministically before `Resources Manager`, `DocumentsView`, or `AppWindow` are destroyed.
-- The product now owns a managed Stanza runtime root under app data, with a runtime manifest and a managed `stanza_resources/he` path.
-- Windows production processing now prefers an app-owned subprocess runtime launched through `app.main --stanza-worker`.
-- The isolated runtime probe now uses the sibling `app.main --stanza-probe` path, so diagnostics and production processing share the same ownership model.
-- Resources Manager now exposes an official `Install / Repair NLP Runtime` action for the managed runtime path.
-- Documents and Health Check now point to that same official `Install / Repair NLP Runtime` action, so the repair route is shared across the primary UI surfaces.
-- Managed runtime bootstrap now rejects partial Hebrew payloads and repairs them from a valid bundled/legacy source instead of reusing a broken copy.
-- The app-owned probe/worker runtime now prepares Torch/CUDA DLL search paths before importing `stanza/torch`, eliminating the observed `WinError 1114` blocker in the managed subprocess path.
-- `scripts/release_smoke_nlp_runtime.py` now provides the release smoke gate for hostile in-process Qt launch, managed subprocess startup, Hebrew sample processing, and DB-copy `Re-process`.
-- Release smoke has confirmed a real `Re-process` success on a copied DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
-- ProcessWorker no longer shadows QThread.finished; DocumentsView now deletes the worker only from the real thread-finished callback.
+## Closed Tracks
+- Bundled Hebrew payload delivery is complete for packaged release assembly.
+- Managed runtime ownership truth remains explicit and stable:
+  - `bundled_packaged`
+  - `bundled_dev`
+  - `legacy_cache`
+  - `repaired_managed`
+- Packaged Stanza/Torch runtime readiness remains release-green:
+  - packaged `--stanza-probe` was previously confirmed on a clean managed root
+  - packaged `--stanza-worker` was previously confirmed on the same bundled ownership contract
+  - release smoke previously passed with `--require-source-kind bundled_packaged --require-bundled-source`
+- The separate packaged ONNX helper startup issue is now closed:
+  - `HDLE_ONNX_Probe.exe --mode import` succeeds in the rebuilt frozen artifact
+  - packaged `HDLE_Premium.exe --self-check import` now reports `checks.onnxruntime_import.ok = true`
+  - packaged `HDLE_Premium.exe --self-check health` now reports `frozen_onnx_probe.status = ok`
 
-## In Progress
-- No active implementation in this patch series.
+## Latest Confirmation
+- The ONNX helper timeout root cause was localized to `app/tools/onnx_probe.py`:
+  - the helper stalled inside `_ensure_hf_home()`
+  - the stall happened before `import onnxruntime`
+  - the trigger was an inherited `HF_HOME=F:\huggingface` path that was being write-probed during frozen startup
+- Frozen ONNX helper bootstrap now treats an existing configured `HF_HOME` as read-first and only falls back to a local writable cache when the configured path is missing/unusable.
+- This fix did not reopen or redesign the already-green packaged Stanza/Torch runtime path.
 
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
-- The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
-- Runtime/bootstrap still needs to prefer the new bundled packaged payload explicitly and surface that ownership truth in probe/UI/smoke output.
 
 ## Next Step
-- Complete bundled Hebrew payload delivery:
-  - prefer bundled packaged payload during managed bootstrap
-  - expose payload ownership in runtime probe / UI / smoke
-  - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate
-
-## Latest Confirmation
-- The original live GUI repro path is now confirmed fixed on the target machine:
-  - project `6`
-  - document `387646`
-  - `Documents -> Re-process` completed successfully
-- The `QThread: Destroyed while thread '' is still running` crash no longer reproduces on that path.
-- The release smoke DB step is now narrowed to a `document_scoped_clone` path, so the runtime gate no longer depends on copying the full 35GB source DB.
-- The narrowed DB smoke has now succeeded on the real Windows source DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
-- Packaging foundation for bundled Hebrew payload is now in place:
-  - staged source root: `installer/resources/local_models/stanza_hebrew/`
-  - packaged target root: `_internal/resources/nlp_runtime/stanza_payload/`
-
-
-## Completed After PATCH-02 Bundled Payload Ownership Bootstrap
-- Managed runtime bootstrap now prefers bundled packaged Hebrew payloads before dev-staged payloads or legacy caches.
-- Runtime manifest and probe output now record source ownership explicitly:
-  - `bundled_packaged`
-  - `bundled_dev`
-  - `legacy_cache`
-  - `repaired_managed`
-- Bundled payload roots and payload manifests are now part of the machine-readable runtime truth.
-
-## In Progress
-- UI / Health / Resources / smoke alignment for bundled payload ownership.
-
-## Next Step
-- Expose bundled payload ownership in Resources Manager, Health Check, Documents runtime detail text, and release smoke output.
-
-## Completed After PATCH-03 Bundled Ownership UI / Smoke Alignment
-- Resources Manager, Health Check, and Documents now expose managed Hebrew payload ownership and bundled payload roots when known.
-- Release smoke can now assert `source_kind` and bundled payload usage explicitly instead of only checking `runtime_effective='stanza'`.
-
-## In Progress
-- Final regression + smoke validation only.
-
-## Next Step
-- Run full runtime regression and release smoke with `bundled_dev` enforcement, then finish release-grade handoff.
-
-## Completed After Bundled Payload Release Validation
-- Bundled Hebrew payload delivery is now validated on the dev release path with enforced bundled ownership.
-- Engine smoke and DB reprocess smoke both pass with:
-  - `source_kind = bundled_dev`
-  - `runtime_effective = stanza`
-- Remaining release work is only packaged-build confirmation for `bundled_packaged` ownership.
-
-## In Progress
-- No active implementation in this patch series.
-
-## Next Step
-- Run the same smoke contract against the actual packaged build and require `bundled_packaged`.
-
-
-## Completed After Packaged Rebuild Audit
-- The packaged artifact has now been rebuilt from the real installer-grade flow (`rebuild.ps1` + `hdle_premium_installer.spec`).
-- The rebuilt `dist` now really contains the bundled Hebrew payload under:
-  - `dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload/...`
-- Packaged bootstrap on a clean workspace-managed root now records:
-  - `ownership = packaged_app`
-  - `model_source_kind = bundled_packaged`
-- This closes the previous gap where the code path existed but the checked `dist` artifact was stale.
-
-## Remaining Risks
-- Packaged Hebrew payload delivery is now confirmed, but the frozen Torch/Stanza runtime is still not release-green.
-- The rebuilt packaged `--stanza-probe` still returns `hostile_torch_state` on `torch\lib\c10.dll`.
-- The rebuilt packaged `--stanza-worker` still fails on the same frozen Torch import path.
-
-## Next Step
-- Investigate frozen Torch dependency loading inside the packaged subprocess path:
-  - determine which DLL dependency of `dist/.../torch/lib/c10.dll` is still unresolved in the frozen layout
-  - fix the packaged worker/probe import chain without regressing the already confirmed `bundled_packaged` ownership path
-
-## Completed After Frozen Torch Runtime Hook Hardening
-- Current dirty state was preserved first (`backup/pre-rollback-20260329-7e8c9e4-anchor` + named stash), and work resumed from checkpoint `7e8c9e4` on `fix/frozen-runtime-loading`.
-- The packaged `c10.dll` blocker is now closed without changing the bundled payload ownership contract.
-- Frozen Torch bootstrap now runs from `pyi_rth_torch_dll_bootstrap.py` before user-code imports, while app-level bootstrap remains available for dev/in-process safety.
-- The packaged Stanza/Torch release gate is now green:
-  - `dist\HDLE_Premium\HDLE_Premium.exe --stanza-probe` passes on a clean managed root
-  - packaged worker path initializes the managed runtime successfully
-  - release smoke passes with `--require-source-kind bundled_packaged --require-bundled-source`
-  - DB reprocess smoke stays on real `stanza` with `runtime_effective='stanza'`
-
-## Remaining Risks
-- The bundled packaged Stanza/Torch track is closed.
-- A separate frozen validation issue remains in `--self-check import`:
-  - `HDLE_ONNX_Probe.exe` still times out in the packaged ONNX import helper path
-- No new schema, ownership, or payload-delivery risks were introduced by the Torch runtime hook hardening patch.
-
-## Next Step
-- If release sign-off requires a fully green import self-check, open a separate track for frozen ONNX helper startup:
-  - inspect `HDLE_ONNX_Probe.exe` startup latency / timeout semantics
-  - fix the ONNX helper without touching the now-green packaged Stanza/Torch path
-
+- No packaged NLP runtime blocker is currently open.
+- If a future release wave requires installer-path reconfirmation, rerun:
+  - packaged `HDLE_Premium.exe --self-check import`
+  - packaged `HDLE_Premium.exe --self-check health`
+  - packaged Stanza release smoke on a clean `HDLE_DATA_ROOT`

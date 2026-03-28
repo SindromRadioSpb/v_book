@@ -182,3 +182,13 @@
 - The remaining frozen validation item is outside this track:
   - `--self-check import` still reports an ONNX helper timeout for `HDLE_ONNX_Probe.exe`
 
+## Confirmed Current State After Frozen ONNX Helper HF Home Hardening
+- The packaged `HDLE_ONNX_Probe.exe` timeout was not a Torch/Stanza regression and not an ONNX DLL bootstrap failure.
+- The frozen helper was stalling inside `_ensure_hf_home()` before `import onnxruntime`, while trying to write-probe an inherited `HF_HOME=F:\huggingface`.
+- The helper now accepts an existing configured `HF_HOME` as a read-first cache root and only falls back to a local writable cache when the configured path is missing or unusable.
+- The frozen ONNX helper track is now green again:
+  - `HDLE_ONNX_Probe.exe --mode import` succeeds in the rebuilt packaged artifact
+  - packaged `--self-check import` now reports `checks.onnxruntime_import.ok = true`
+  - packaged `--self-check health` now reports a successful `frozen_onnx_probe`
+- The already closed packaged Stanza/Torch track remains conceptually separate and was not redesigned by this fix.
+

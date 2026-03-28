@@ -218,3 +218,11 @@
 - Rationale:
   - app-level `prepare_torch_runtime_paths()` was already correct in principle, but it executed too late for the frozen packaged process; moving the bootstrap into a runtime hook is what closed the packaged `WinError 1114` failure while preserving the existing managed ownership contract.
 
+## D-030 — Frozen ONNX helper must not block on inherited HF cache writability probes
+- Status: accepted and implemented
+- Decision:
+  - the packaged ONNX helper may inherit a configured `HF_HOME`, but it must not treat startup writability probing of that path as part of the frozen import gate.
+  - if the configured `HF_HOME` already exists, the helper should accept it as the read-first cache root; only missing or unusable paths should fall back to a local writable cache.
+- Rationale:
+  - the packaged `HDLE_ONNX_Probe.exe` timeout was traced to `_ensure_hf_home()` blocking before `import onnxruntime`, which made `--self-check import` fail even though the actual ONNX runtime/backend imports were healthy once startup moved past that cache-path check.
+

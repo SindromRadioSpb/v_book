@@ -551,3 +551,34 @@
 - Residual note:
   - packaged `--self-check import` still reports a separate ONNX helper timeout for `HDLE_ONNX_Probe.exe`; that is outside the frozen Torch/Stanza runtime track.
 
+## Step 20 — Frozen ONNX Helper HF Home Hardening
+- Status: completed
+- Trigger:
+  - the packaged Stanza/Torch runtime track was already release-green, but packaged `--self-check import` and the frozen ONNX helper still timed out separately.
+- Audit findings:
+  - `HDLE_ONNX_Probe.exe --help` returned immediately, so the bootloader/entrypoint path was alive.
+  - `HDLE_ONNX_Probe.exe --mode import` and `--mode probe` both stalled before emitting JSON.
+  - env-gated helper tracing showed the stall inside `_ensure_hf_home()` before `import onnxruntime`.
+  - the blocking path was an inherited `HF_HOME=F:\huggingface`; write-probing that configured path was the actual startup timeout source.
+- Code deliverables:
+  - `app/tools/onnx_probe.py`
+  - `tests/test_onnx_probe_contract.py`
+  - governance docs in this patch
+- Confirmed behavior changes:
+  - the helper now treats an existing configured `HF_HOME` as a read-first cache root instead of forcing a write probe during frozen startup
+  - missing/unusable configured HF cache paths now fall back to a local writable helper cache
+  - the helper now also sets the Hugging Face startup guard rails needed for deterministic packaged probing:
+    - `HF_HUB_DISABLE_SYMLINKS_WARNING=1`
+    - `HF_HUB_DISABLE_TELEMETRY=1`
+    - `HF_HUB_DISABLE_XET=1`
+  - env-gated helper tracing is now available for future frozen ONNX diagnosis without changing the runtime contract
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\tools\onnx_probe.py tests\test_onnx_probe_contract.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_onnx_probe_contract.py tests\test_main_self_check_helpers.py tests\test_phonikud_adapter_modes.py tests\test_installer_spec_includes_onnx_probe.py -q` -> `38 passed`
+  - `$env:PATH='E:\projects\Project_Vibe\V_book\.venv\Scripts;' + $env:PATH; pyinstaller .\hdle_premium_installer.spec --clean --noconfirm` -> packaged rebuild succeeded
+  - `dist\HDLE_Premium\HDLE_ONNX_Probe.exe --mode import --out reports\runtime_smoke\onnx_probe_import_after_fix.json` -> `ok=true`, `stage='import'`
+  - `dist\HDLE_Premium\HDLE_Premium.exe --self-check import --self-check-out reports\runtime_smoke\packaged_self_check_import_after_fix.json` -> `checks.onnxruntime_import.ok=true`
+  - `dist\HDLE_Premium\HDLE_Premium.exe --self-check health --db-path hdle_premium.db --self-check-out reports\runtime_smoke\packaged_self_check_health_after_fix.json` -> `onnx_probe.ok=true`, `stage='infer'`, `has_niqqud=true`
+- Outcome:
+  - the packaged ONNX helper startup timeout track is now closed without reopening the already-green packaged Stanza/Torch runtime path.
+
