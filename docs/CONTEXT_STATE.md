@@ -125,3 +125,13 @@
   - `run_engine = stanza`
   - `run_status = ok`
   - `runtime_effective = stanza`
+
+## Confirmed Current State After Bundled Hebrew Payload Packaging Foundation
+- The canonical staged Hebrew payload root is now `installer/resources/local_models/stanza_hebrew/`.
+- The staged payload is directory-based and includes:
+  - `payload_manifest.json`
+  - `stanza_resources/resources.json`
+  - `stanza_resources/he/...`
+- `rebuild.ps1` now stages this payload before PyInstaller runs.
+- `hdle_premium_installer.spec` now bundles that staged tree into the frozen app under `_internal/resources/nlp_runtime/stanza_payload/`.
+- The remaining gap is no longer packaging assembly; it is runtime/bootstrap preference and ownership truth for the bundled packaged payload.

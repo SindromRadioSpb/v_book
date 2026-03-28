@@ -111,6 +111,18 @@ if ((Resolve-Path -Path $requiredPhonikudModel).Path -ne (Resolve-Path -Path $st
 }
 Write-Host "[OK] Phonikud model staged: $stagedPhonikudPath" -ForegroundColor Green
 
+Write-Host "Staging bundled Hebrew Stanza payload..." -ForegroundColor Yellow
+$stanzaStageLog = "build\logs\stage_stanza_payload_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+cmd /c "python scripts\stage_stanza_hebrew_payload.py > `"$stanzaStageLog`" 2>&1"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] Bundled Hebrew Stanza payload staging failed." -ForegroundColor Red
+    Write-Host "Set HDLE_REQUIRED_STANZA_HEBREW_SOURCE or provide a valid local cache." -ForegroundColor Yellow
+    Write-Host "See log: $stanzaStageLog" -ForegroundColor Yellow
+    Get-Content $stanzaStageLog -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    exit 1
+}
+Write-Host "[OK] Bundled Hebrew Stanza payload staged - log: $stanzaStageLog" -ForegroundColor Green
+
 Write-Host "Generating build metadata..." -ForegroundColor Yellow
 python scripts/generate_build_meta.py
 if ($LASTEXITCODE -ne 0) {

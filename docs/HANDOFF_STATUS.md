@@ -47,10 +47,12 @@
 - Structured runtime provenance still lives inside `ProcessorRun.note`; it is machine-readable, but not yet promoted to dedicated schema fields.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - The current managed bootstrap can copy from bundled resources or a legacy Stanza cache, but the repo still does not contain a bundled Hebrew model payload for packaged release assembly.
+- Runtime/bootstrap still needs to prefer the new bundled packaged payload explicitly and surface that ownership truth in probe/UI/smoke output.
 
 ## Next Step
-- Final handoff only:
-  - preserve the managed runtime/model payload in release packaging
+- Complete bundled Hebrew payload delivery:
+  - prefer bundled packaged payload during managed bootstrap
+  - expose payload ownership in runtime probe / UI / smoke
   - keep using `scripts/release_smoke_nlp_runtime.py` as the Windows runtime release gate
 
 ## Latest Confirmation
@@ -61,4 +63,7 @@
 - The `QThread: Destroyed while thread '' is still running` crash no longer reproduces on that path.
 - The release smoke DB step is now narrowed to a `document_scoped_clone` path, so the runtime gate no longer depends on copying the full 35GB source DB.
 - The narrowed DB smoke has now succeeded on the real Windows source DB with `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`.
+- Packaging foundation for bundled Hebrew payload is now in place:
+  - staged source root: `installer/resources/local_models/stanza_hebrew/`
+  - packaged target root: `_internal/resources/nlp_runtime/stanza_payload/`
 

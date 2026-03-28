@@ -382,3 +382,30 @@
 
 ## Next Step
 - Keep the document-scoped smoke path as the release gate default for large Windows databases.
+
+## Step 19 — Bundled Hebrew Payload Packaging Source of Truth
+- Status: completed
+- Trigger:
+  - the managed runtime contract was ready, but packaged release assembly still did not guarantee a bundled Hebrew payload inside the release artifact.
+- Code/doc deliverables:
+  - `scripts/stage_stanza_hebrew_payload.py`
+  - `rebuild.ps1`
+  - `hdle_premium_installer.spec`
+  - `installer/resources/README.md`
+  - `docs/BUILD_WINDOWS_INSTALLER.md`
+- Confirmed behavior changes:
+  - `rebuild.ps1` now stages a bundled Hebrew Stanza payload before PyInstaller runs
+  - the canonical staging root is now:
+    - `installer/resources/local_models/stanza_hebrew/`
+  - the canonical packaged root is now:
+    - `dist/HDLE_Premium/_internal/resources/nlp_runtime/stanza_payload/`
+  - the staged payload includes:
+    - `payload_manifest.json`
+    - `stanza_resources/resources.json`
+    - `stanza_resources/he/...`
+  - the PyInstaller spec now collects that staged tree recursively into the frozen app
+- Test evidence:
+  - code review / file-level audit only in this patch foundation step
+
+## Next Step
+- Update managed runtime bootstrap so bundled packaged payload becomes the first-class source and ownership metadata is recorded explicitly.

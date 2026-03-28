@@ -19,6 +19,19 @@ from pathlib import Path
 # Project root
 project_root = Path.cwd()
 
+
+def _collect_tree_datas(source_root: Path, target_root: str):
+    items = []
+    if not source_root.exists():
+        return items
+    for path in sorted(source_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative_parent = path.relative_to(source_root).parent.as_posix()
+        target_dir = target_root if relative_parent == "." else f"{target_root}/{relative_parent}"
+        items.append((str(path), target_dir))
+    return items
+
 block_cipher = None
 
 a = Analysis(
@@ -34,7 +47,10 @@ a = Analysis(
         (str(project_root / 'app' / 'resources' / '*.json'), 'app/resources/'),
         # Bundled local pronunciation model for frozen ONNX probe / bootstrap
         (str(project_root / 'installer' / 'resources' / 'local_models' / 'phonikud' / '*.onnx'), 'resources/models/phonikud/'),
-    ],
+    ] + _collect_tree_datas(
+        project_root / 'installer' / 'resources' / 'local_models' / 'stanza_hebrew',
+        'resources/nlp_runtime/stanza_payload',
+    ),
     hiddenimports=[
         # PyQt6 core
         'PyQt6.sip',

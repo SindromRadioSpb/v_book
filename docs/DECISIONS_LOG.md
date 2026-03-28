@@ -173,3 +173,10 @@
   - the DB reprocess smoke path should clone only the minimum base rows required for one document and let `reprocess_document()` rebuild derived NLP state from there.
 - Rationale:
   - full source DB copies and even project-scoped exports remained too expensive for the real Windows source database; the release gate must validate runtime behavior, not disk throughput on a 35GB file.
+
+## D-024 — Packaged Hebrew payload must be release-owned and staged before freezing
+- Status: accepted and implemented
+- Decision:
+  - the packaged Windows release must stage a directory-based Hebrew Stanza payload under `installer/resources/local_models/stanza_hebrew/` and bundle it into the frozen app under `_internal/resources/nlp_runtime/stanza_payload/`.
+- Rationale:
+  - the product already owns a managed runtime/bootstrap contract; the missing piece was a release-owned bundled payload source that does not depend on a legacy local Stanza cache at install time.

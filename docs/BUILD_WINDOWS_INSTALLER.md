@@ -286,6 +286,40 @@ Test-Path "M:\Soft\1. Data folder HDLE Local (model, dataset, logs temporary)\mo
 Get-ChildItem installer\resources\local_models\phonikud
 ```
 
+### Step 2B: Stage Bundled Hebrew Payload for Managed Stanza Runtime
+
+Packaged releases must now carry the bundled Hebrew payload for the product-owned
+managed Stanza runtime. This payload is directory-based and is staged before the
+PyInstaller build.
+
+`rebuild.ps1` stages the payload automatically before the build:
+
+- preferred override: `HDLE_REQUIRED_STANZA_HEBREW_SOURCE`
+- fallback sources:
+  - `%LOCALAPPDATA%\StanfordNLP\stanza\Cache\<version>\resources`
+  - `%USERPROFILE%\stanza_resources`
+  - previously staged `installer\resources\local_models\stanza_hebrew\stanza_resources`
+
+Canonical staging target:
+
+- `installer\resources\local_models\stanza_hebrew\payload_manifest.json`
+- `installer\resources\local_models\stanza_hebrew\stanza_resources\resources.json`
+- `installer\resources\local_models\stanza_hebrew\stanza_resources\he\...`
+
+PyInstaller bundles this staged payload into the frozen app under:
+
+- `dist\HDLE_Premium\_internal\resources\nlp_runtime\stanza_payload\...`
+
+This is the canonical packaged source for the managed Hebrew payload. The app
+must not depend on a legacy local Stanza cache when this bundled payload is present.
+
+Required verification:
+
+```powershell
+Get-ChildItem installer\resources\local_models\stanza_hebrew -Recurse
+Get-ChildItem dist\HDLE_Premium\_internal\resources\nlp_runtime\stanza_payload -Recurse
+```
+
 ### Step 3: Build Installer with Inno Setup
 
 Once the standalone executable is verified, create the installer.
@@ -617,7 +651,8 @@ excludes=[
 ]
 ```
 
-**Stanza models** are downloaded on first run to `%LOCALAPPDATA%\HDLE\models\`.
+**Bundled Hebrew payload** is staged into the release artifact for the managed
+Stanza runtime. The managed runtime then copies it into `%LOCALAPPDATA%\HDLE\nlp_runtime\stanza_resources\`.
 
 ### UPX Compression
 
