@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
+from app.services.nlp_runtime.managed_runtime import (
+    ManagedStanzaRuntime,
+    _ManagedPayloadSource,
+)
 
 
 class _Settings:
@@ -35,16 +39,77 @@ def test_bootstrap_runtime_copies_legacy_model_into_managed_root(monkeypatch, tm
         settings=_Settings({ManagedStanzaRuntime.SETTINGS_KEY_MANAGED_RUNTIME_ROOT: str(managed_root)})
     )
     monkeypatch.setattr(runtime, "_bundled_model_candidates", lambda: [])
-    monkeypatch.setattr(runtime, "_legacy_model_candidates", lambda: [legacy_he])
+    monkeypatch.setattr(
+        runtime,
+        "_legacy_model_candidates",
+        lambda: [
+            _ManagedPayloadSource(
+                source_kind="legacy_cache",
+                resources_root=legacy_root,
+                model_path=legacy_he,
+            )
+        ],
+    )
 
     result = runtime.bootstrap_runtime(force_repair=False)
 
     assert result.ok is True
-    assert result.source_kind == "legacy"
+    assert result.source_kind == "legacy_cache"
+    assert result.bundled_payload_root is None
     assert (managed_root / "stanza_resources" / "he" / "tokenize").exists()
     assert (managed_root / "stanza_resources" / "he" / "backward_charlm").exists()
     assert (managed_root / "stanza_resources" / "resources.json").exists()
-    assert result.manifest_path.exists()
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["model_source_kind"] == "legacy_cache"
+
+
+def test_bootstrap_runtime_prefers_bundled_dev_over_legacy(monkeypatch, tmp_path):
+    managed_root = tmp_path / "managed"
+    bundled_root = tmp_path / "bundled_dev"
+    bundled_he = _populate_runtime_payload(bundled_root / "stanza_resources")
+    payload_manifest = bundled_root / "payload_manifest.json"
+    payload_manifest.write_text("{}", encoding="utf-8")
+
+    legacy_root = tmp_path / "legacy"
+    legacy_he = _populate_runtime_payload(legacy_root)
+
+    runtime = ManagedStanzaRuntime(
+        settings=_Settings({ManagedStanzaRuntime.SETTINGS_KEY_MANAGED_RUNTIME_ROOT: str(managed_root)})
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_bundled_model_candidates",
+        lambda: [
+            _ManagedPayloadSource(
+                source_kind="bundled_dev",
+                resources_root=bundled_root / "stanza_resources",
+                model_path=bundled_he,
+                payload_root=bundled_root,
+                payload_manifest_path=payload_manifest,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_legacy_model_candidates",
+        lambda: [
+            _ManagedPayloadSource(
+                source_kind="legacy_cache",
+                resources_root=legacy_root,
+                model_path=legacy_he,
+            )
+        ],
+    )
+
+    result = runtime.bootstrap_runtime(force_repair=False)
+
+    assert result.ok is True
+    assert result.source_kind == "bundled_dev"
+    assert result.bundled_payload_root == str(bundled_root)
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["model_source_kind"] == "bundled_dev"
+    assert manifest["bundled_payload_root"] == str(bundled_root)
+    assert manifest["payload_manifest_path"] == str(payload_manifest)
 
 
 def test_bootstrap_runtime_repairs_incomplete_managed_copy_from_legacy(monkeypatch, tmp_path):
@@ -63,12 +128,22 @@ def test_bootstrap_runtime_repairs_incomplete_managed_copy_from_legacy(monkeypat
         settings=_Settings({ManagedStanzaRuntime.SETTINGS_KEY_MANAGED_RUNTIME_ROOT: str(managed_root)})
     )
     monkeypatch.setattr(runtime, "_bundled_model_candidates", lambda: [])
-    monkeypatch.setattr(runtime, "_legacy_model_candidates", lambda: [legacy_he])
+    monkeypatch.setattr(
+        runtime,
+        "_legacy_model_candidates",
+        lambda: [
+            _ManagedPayloadSource(
+                source_kind="legacy_cache",
+                resources_root=legacy_root,
+                model_path=legacy_he,
+            )
+        ],
+    )
 
     result = runtime.bootstrap_runtime(force_repair=False)
 
     assert result.ok is True
-    assert result.source_kind == "legacy"
+    assert result.source_kind == "legacy_cache"
     assert (managed_he / "backward_charlm").exists()
     assert (managed_he / "tokenize").exists()
 

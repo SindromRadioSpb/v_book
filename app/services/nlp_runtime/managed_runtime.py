@@ -29,6 +29,8 @@ class ManagedRuntimeBootstrapResult:
     ownership: str
     source_kind: str
     source_path: str | None
+    bundled_payload_root: str | None
+    payload_manifest_path: str | None
     model_present: bool
     runtime_command: list[str]
     probe_command: list[str]
@@ -44,11 +46,22 @@ class ManagedRuntimeBootstrapResult:
             "ownership": self.ownership,
             "source_kind": self.source_kind,
             "source_path": self.source_path,
+            "bundled_payload_root": self.bundled_payload_root,
+            "payload_manifest_path": self.payload_manifest_path,
             "model_present": bool(self.model_present),
             "runtime_command": list(self.runtime_command),
             "probe_command": list(self.probe_command),
             "message": self.message,
         }
+
+
+@dataclass(frozen=True)
+class _ManagedPayloadSource:
+    source_kind: str
+    resources_root: Path
+    model_path: Path
+    payload_root: Path | None = None
+    payload_manifest_path: Path | None = None
 
 
 class ManagedStanzaRuntime:
@@ -131,12 +144,16 @@ class ManagedStanzaRuntime:
         model_path = self.model_path()
         manifest_path = self.manifest_path()
 
-        source_kind = "missing"
-        source_path: str | None = None
+        manifest_payload = self.load_manifest() or {}
+        source_kind = "repaired_managed" if self._managed_runtime_ready(resources_root, model_path) else "missing"
+        source_path: str | None = str(model_path) if model_path.exists() else None
+        bundled_payload_root: str | None = str(manifest_payload.get("bundled_payload_root") or "") or None
+        payload_manifest_path: str | None = str(manifest_payload.get("payload_manifest_path") or "") or None
         runtime_ready = self._managed_runtime_ready(resources_root, model_path)
 
         if runtime_ready and not force_repair:
-            source_kind = "managed_existing"
+            source_kind = str(manifest_payload.get("model_source_kind") or "repaired_managed")
+            source_path = str(manifest_payload.get("model_source_path") or source_path or "") or source_path
         else:
             resources_json = resources_root / "resources.json"
             if model_path.exists() and (force_repair or not runtime_ready):
@@ -146,9 +163,17 @@ class ManagedStanzaRuntime:
 
             source = self._resolve_bootstrap_source(include_managed=False)
             if source is not None:
-                source_kind, source_dir = source
-                source_path = str(source_dir)
-                self._copy_resources_payload(source_dir, resources_root)
+                source_kind = source.source_kind
+                source_path = str(source.model_path)
+                bundled_payload_root = str(source.payload_root) if source.payload_root else None
+                payload_manifest_path = (
+                    str(source.payload_manifest_path) if source.payload_manifest_path else None
+                )
+                self._copy_resources_payload(
+                    source_resources_root=source.resources_root,
+                    source_model_path=source.model_path,
+                    target_resources_root=resources_root,
+                )
 
         resources_json = resources_root / "resources.json"
         model_present = self._managed_runtime_ready(resources_root, model_path)
@@ -159,7 +184,7 @@ class ManagedStanzaRuntime:
         )
 
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "updated_at_utc": _utc_now_iso(),
             "ownership": self.ownership(),
             "runtime_root": str(runtime_root),
@@ -169,6 +194,8 @@ class ManagedStanzaRuntime:
             "resources_json_present": bool(resources_json.exists()),
             "model_source_kind": source_kind,
             "model_source_path": source_path,
+            "bundled_payload_root": bundled_payload_root,
+            "payload_manifest_path": payload_manifest_path,
             "runtime_command": self.build_worker_command(),
             "probe_command": self.build_probe_command(),
             "runtime_executable": str(Path(sys.executable).resolve()),
@@ -184,6 +211,8 @@ class ManagedStanzaRuntime:
             ownership=self.ownership(),
             source_kind=source_kind,
             source_path=source_path,
+            bundled_payload_root=bundled_payload_root,
+            payload_manifest_path=payload_manifest_path,
             model_present=bool(model_present),
             runtime_command=self.build_worker_command(),
             probe_command=self.build_probe_command(),
@@ -206,44 +235,62 @@ class ManagedStanzaRuntime:
 
         source = self._resolve_bootstrap_source(include_managed=False)
         if source is not None:
-            return str(source[1])
+            return str(source.model_path)
         return None
 
-    def _resolve_bootstrap_source(self, *, include_managed: bool = True) -> tuple[str, Path] | None:
-        candidates: list[tuple[str, Path]] = []
+    def _resolve_bootstrap_source(self, *, include_managed: bool = True) -> _ManagedPayloadSource | None:
+        candidates: list[_ManagedPayloadSource] = []
 
         if include_managed:
             managed = self.model_path()
             if self._managed_runtime_ready(self.resources_root(), managed):
-                candidates.append(("managed_existing", managed))
+                candidates.append(
+                    _ManagedPayloadSource(
+                        source_kind="repaired_managed",
+                        resources_root=self.resources_root(),
+                        model_path=managed,
+                    )
+                )
 
         for candidate in self._bundled_model_candidates():
-            if candidate.exists() and self._dir_has_contents(candidate):
-                candidates.append(("bundled", candidate))
+            if self._payload_ready(candidate.resources_root, candidate.model_path):
+                candidates.append(candidate)
 
         for candidate in self._legacy_model_candidates():
-            if candidate.exists() and self._dir_has_contents(candidate):
-                candidates.append(("legacy", candidate))
+            if self._payload_ready(candidate.resources_root, candidate.model_path):
+                candidates.append(candidate)
 
         return candidates[0] if candidates else None
 
-    def _bundled_model_candidates(self) -> list[Path]:
+    def _bundled_model_candidates(self) -> list[_ManagedPayloadSource]:
         bundled_root = ResourcePaths.resolve_bundled_resources_root()
+        packaged_root = bundled_root / "nlp_runtime" / "stanza_payload"
+        repo_root = Path(__file__).resolve().parents[3]
+        dev_root = repo_root / "installer" / "resources" / "local_models" / "stanza_hebrew"
         return [
-            bundled_root / "stanza_resources" / "he",
-            bundled_root / "models" / "stanza" / "he",
-            bundled_root / "nlp_runtime" / "stanza_resources" / "he",
+            _ManagedPayloadSource(
+                source_kind="bundled_packaged",
+                resources_root=packaged_root / "stanza_resources",
+                model_path=packaged_root / "stanza_resources" / "he",
+                payload_root=packaged_root,
+                payload_manifest_path=packaged_root / "payload_manifest.json",
+            ),
+            _ManagedPayloadSource(
+                source_kind="bundled_dev",
+                resources_root=dev_root / "stanza_resources",
+                model_path=dev_root / "stanza_resources" / "he",
+                payload_root=dev_root,
+                payload_manifest_path=dev_root / "payload_manifest.json",
+            ),
         ]
 
-    def _legacy_model_candidates(self) -> list[Path]:
-        candidates: list[Path] = []
+    def _legacy_model_candidates(self) -> list[_ManagedPayloadSource]:
+        candidates: list[_ManagedPayloadSource] = []
         explicit = os.getenv("STANZA_RESOURCES_DIR", "").strip()
         if explicit:
-            explicit_root = Path(explicit)
-            candidates.append(explicit_root / "he")
-            candidates.append(explicit_root)
+            candidates.extend(self._build_legacy_candidates_from_root(Path(explicit)))
 
-        candidates.append(Path.home() / "stanza_resources" / "he")
+        candidates.extend(self._build_legacy_candidates_from_root(Path.home() / "stanza_resources"))
 
         local_appdata = os.getenv("LOCALAPPDATA", "").strip()
         if local_appdata:
@@ -251,19 +298,25 @@ class ManagedStanzaRuntime:
             if cache_root.exists():
                 for version_dir in sorted(cache_root.iterdir(), reverse=True):
                     if version_dir.is_dir():
-                        candidates.append(version_dir / "resources" / "he")
+                        candidates.extend(
+                            self._build_legacy_candidates_from_root(version_dir / "resources")
+                        )
         return candidates
 
     @staticmethod
-    def _copy_resources_payload(source_dir: Path, target_resources_root: Path) -> None:
+    def _copy_resources_payload(
+        *,
+        source_resources_root: Path,
+        source_model_path: Path,
+        target_resources_root: Path,
+    ) -> None:
         target_resources_root.mkdir(parents=True, exist_ok=True)
         target_model_dir = target_resources_root / "he"
         if target_model_dir.exists():
             shutil.rmtree(target_model_dir, ignore_errors=True)
-        shutil.copytree(source_dir, target_model_dir)
+        shutil.copytree(source_model_path, target_model_dir)
 
-        source_root = source_dir if source_dir.name != "he" else source_dir.parent
-        resources_json = source_root / "resources.json"
+        resources_json = source_resources_root / "resources.json"
         if resources_json.exists():
             shutil.copy2(resources_json, target_resources_root / "resources.json")
 
@@ -273,10 +326,31 @@ class ManagedStanzaRuntime:
             return False
         return any(path.iterdir())
 
-    def _managed_runtime_ready(self, resources_root: Path, model_path: Path) -> bool:
+    @classmethod
+    def _payload_ready(cls, resources_root: Path, model_path: Path) -> bool:
         resources_json = resources_root / "resources.json"
         if not resources_json.exists():
             return False
-        if not self._dir_has_contents(model_path):
+        if not cls._dir_has_contents(model_path):
             return False
-        return all((model_path / entry).exists() for entry in self._REQUIRED_MODEL_ENTRIES)
+        return all((model_path / entry).exists() for entry in cls._REQUIRED_MODEL_ENTRIES)
+
+    def _managed_runtime_ready(self, resources_root: Path, model_path: Path) -> bool:
+        return self._payload_ready(resources_root, model_path)
+
+    @staticmethod
+    def _build_legacy_candidates_from_root(root: Path) -> list[_ManagedPayloadSource]:
+        normalized = root.expanduser()
+        if normalized.name == "he":
+            resources_root = normalized.parent
+            model_path = normalized
+        else:
+            resources_root = normalized
+            model_path = normalized / "he"
+        return [
+            _ManagedPayloadSource(
+                source_kind="legacy_cache",
+                resources_root=resources_root,
+                model_path=model_path,
+            )
+        ]

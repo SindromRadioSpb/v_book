@@ -25,6 +25,10 @@ class NlpRuntimeStatus:
     engine_version: str | None = None
     model_id: str | None = None
     model_path: str | None = None
+    managed_runtime_source_kind: str | None = None
+    managed_runtime_source_path: str | None = None
+    managed_runtime_ownership: str | None = None
+    managed_runtime_bundled_payload_root: str | None = None
 
     @property
     def stanza_ready(self) -> bool:

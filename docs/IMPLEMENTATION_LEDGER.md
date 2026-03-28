@@ -409,3 +409,32 @@
 
 ## Next Step
 - Update managed runtime bootstrap so bundled packaged payload becomes the first-class source and ownership metadata is recorded explicitly.
+## Step 20 — Managed Bootstrap Prefers Bundled Hebrew Payload Ownership
+- Status: completed
+- Trigger:
+  - packaged release assembly now had a canonical bundled Hebrew payload root, but runtime bootstrap still treated bundled sources too generically and did not expose ownership truth.
+- Code deliverables:
+  - `app/services/nlp_runtime/managed_runtime.py`
+  - `app/services/nlp_runtime/runtime_probe.py`
+  - `app/services/nlp_runtime/dto.py`
+  - `tests/test_managed_stanza_runtime.py`
+  - `tests/test_nlp_runtime_probe.py`
+- Confirmed behavior changes:
+  - managed bootstrap source precedence is now deterministic:
+    - `bundled_packaged`
+    - `bundled_dev`
+    - `legacy_cache`
+    - existing managed copy remains `repaired_managed`
+  - runtime manifest now records:
+    - `model_source_kind`
+    - `model_source_path`
+    - `bundled_payload_root`
+    - `payload_manifest_path`
+  - runtime probe now surfaces bundled/source ownership as part of machine-readable status
+  - repair/setup steps now mention payload ownership and bundled root when known
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\nlp_runtime\managed_runtime.py app\services\nlp_runtime\runtime_probe.py app\services\nlp_runtime\dto.py tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py -q` -> `11 passed`
+
+## Next Step
+- Align Resources Manager / Health Check / Documents / release smoke to display and validate bundled payload ownership explicitly.

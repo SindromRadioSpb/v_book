@@ -39,6 +39,17 @@ class NlpRuntimeProbe:
             steps.append("Run the isolated NLP probe again to capture the current runtime truth.")
             return steps
 
+        if status.managed_runtime_source_kind:
+            steps.append(
+                "Managed Hebrew payload ownership: "
+                f"{status.managed_runtime_source_kind}."
+            )
+        if status.managed_runtime_bundled_payload_root:
+            steps.append(
+                "Bundled payload root: "
+                f"{status.managed_runtime_bundled_payload_root}"
+            )
+
         if status.model_path:
             steps.append(f"Detected Hebrew model path: {status.model_path}")
         else:
@@ -101,7 +112,7 @@ class NlpRuntimeProbe:
                 "next_action": "No repair is required. Persisted processing can use Stanza directly.",
                 "steps": [
                     "Run Health Check only if you want to verify the current environment again.",
-                    "Open Resources Manager only if you want to inspect the managed runtime manifest or Hebrew model files manually.",
+                    "Open Resources Manager if you want to inspect the bundled payload ownership or managed Hebrew model files manually.",
                 ],
             }
 
@@ -113,7 +124,7 @@ class NlpRuntimeProbe:
                 "steps": [
                     "Open Resources Manager from Documents or Tools.",
                     "Run Install / Repair NLP Runtime to restore the product-owned Hebrew model path.",
-                    "Inspect the Managed Hebrew Resource section for the detected model path.",
+                    "Inspect the Managed Hebrew Resource section for the detected model path and source ownership.",
                     "Open the model folder if you need to verify or replace the local files manually.",
                     "Re-run the isolated NLP probe after the managed model files are repaired.",
                     "Run Health Check if you need a consolidated report before retrying persisted processing.",
@@ -262,6 +273,12 @@ class NlpRuntimeProbe:
         model_path = str(payload.get("model_path") or "") or self.runtime.detect_best_model_path()
         engine_version = str(payload.get("engine_version") or "") or None
         error_detail = str(payload.get("error_detail") or "").strip() or None
+        managed_runtime = payload.get("managed_runtime") if isinstance(payload.get("managed_runtime"), dict) else {}
+        source_kind = str(managed_runtime.get("source_kind") or "") or None
+        source_path = str(managed_runtime.get("source_path") or "") or None
+        ownership = str(managed_runtime.get("ownership") or "") or None
+        bundled_payload_root = str(managed_runtime.get("bundled_payload_root") or "") or None
+
         effective_engine_id = None
         if not error_code and package_installed and pipeline_init_ok and smoke_ok:
             effective_engine_id = "stanza"
@@ -278,10 +295,18 @@ class NlpRuntimeProbe:
             fallback_used=False,
             error_code=error_code,
             error_detail=error_detail,
-            remediation=self._build_remediation(error_code, model_path=model_path),
+            remediation=self._build_remediation(
+                error_code,
+                model_path=model_path,
+                source_kind=source_kind,
+            ),
             engine_version=engine_version,
             model_id=self.STANZA_MODEL_ID,
             model_path=model_path,
+            managed_runtime_source_kind=source_kind,
+            managed_runtime_source_path=source_path,
+            managed_runtime_ownership=ownership,
+            managed_runtime_bundled_payload_root=bundled_payload_root,
         )
 
     @staticmethod
@@ -289,8 +314,15 @@ class NlpRuntimeProbe:
         text = str(error_code or "").strip().lower()
         return text or None
 
-    def _build_remediation(self, error_code: str | None, *, model_path: str | None) -> str:
+    def _build_remediation(
+        self,
+        error_code: str | None,
+        *,
+        model_path: str | None,
+        source_kind: str | None,
+    ) -> str:
         model_hint = f" Model path: {model_path}." if model_path else ""
+        ownership_hint = f" Managed source ownership: {source_kind}." if source_kind else ""
         if self.is_packaged_runtime():
             package_help = (
                 "Packaged mode detected. This build cannot repair Python packages in place. "
@@ -302,17 +334,17 @@ class NlpRuntimeProbe:
             )
 
         remediation_map = {
-            "package_missing": f"{package_help} Expected package: stanza.{model_hint}",
-            "runtime_import_failed": f"The Python package exists but failed during runtime import. Check the managed runtime executable and Torch/CUDA environment.{model_hint}",
-            "hostile_torch_state": f"Torch failed during DLL initialization inside the probe subprocess. Check the managed runtime payload, VC++ runtime, and local driver compatibility.{model_hint}",
-            "model_missing": f"Run Install / Repair NLP Runtime to restore the managed Hebrew model resources. Use Resources Manager for model paths and offline guidance.{model_hint}",
-            "pipeline_init_failed": f"Stanza package is present, but pipeline initialization failed. Verify managed model files, cache paths, and runtime compatibility.{model_hint}",
-            "smoke_failed": f"The pipeline initialized but the smoke sentence failed. Reinstall the managed model resources and inspect runtime logs.{model_hint}",
+            "package_missing": f"{package_help} Expected package: stanza.{ownership_hint}{model_hint}",
+            "runtime_import_failed": f"The Python package exists but failed during runtime import. Check the managed runtime executable and Torch/CUDA environment.{ownership_hint}{model_hint}",
+            "hostile_torch_state": f"Torch failed during DLL initialization inside the probe subprocess. Check the managed runtime payload, VC++ runtime, and local driver compatibility.{ownership_hint}{model_hint}",
+            "model_missing": f"Run Install / Repair NLP Runtime to restore the managed Hebrew model resources. Use Resources Manager for model paths and offline guidance.{ownership_hint}{model_hint}",
+            "pipeline_init_failed": f"Stanza package is present, but pipeline initialization failed. Verify managed model files, cache paths, and runtime compatibility.{ownership_hint}{model_hint}",
+            "smoke_failed": f"The pipeline initialized but the smoke sentence failed. Reinstall the managed model resources and inspect runtime logs.{ownership_hint}{model_hint}",
             "probe_timeout": "The isolated probe timed out. Retry diagnostics in CPU mode and inspect startup cost or blocking dependencies.",
             "probe_subprocess_failed": "The isolated probe process could not complete. Retry diagnostics and inspect local runtime dependencies.",
             "probe_invalid_output": "The isolated probe returned invalid output. Retry diagnostics and inspect stderr/log output.",
         }
         return remediation_map.get(
             error_code or "",
-            f"Runtime status is unavailable. Retry diagnostics and inspect the active environment.{model_hint}",
+            f"Runtime status is unavailable. Retry diagnostics and inspect the active environment.{ownership_hint}{model_hint}",
         )

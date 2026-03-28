@@ -180,3 +180,10 @@
   - the packaged Windows release must stage a directory-based Hebrew Stanza payload under `installer/resources/local_models/stanza_hebrew/` and bundle it into the frozen app under `_internal/resources/nlp_runtime/stanza_payload/`.
 - Rationale:
   - the product already owns a managed runtime/bootstrap contract; the missing piece was a release-owned bundled payload source that does not depend on a legacy local Stanza cache at install time.
+
+## D-025 — Managed bootstrap must record source ownership, not only current managed path
+- Status: accepted and implemented
+- Decision:
+  - the runtime manifest and probe status must distinguish `bundled_packaged`, `bundled_dev`, `legacy_cache`, and `repaired_managed` instead of collapsing everything into a generic bundled/legacy flag.
+- Rationale:
+  - packaged release sign-off depends on proving that Stanza processing succeeded from the bundled release-owned Hebrew payload rather than by accidentally reusing a legacy local cache.

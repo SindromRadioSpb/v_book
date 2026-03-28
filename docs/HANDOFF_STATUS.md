@@ -67,3 +67,18 @@
   - staged source root: `installer/resources/local_models/stanza_hebrew/`
   - packaged target root: `_internal/resources/nlp_runtime/stanza_payload/`
 
+
+## Completed After PATCH-02 Bundled Payload Ownership Bootstrap
+- Managed runtime bootstrap now prefers bundled packaged Hebrew payloads before dev-staged payloads or legacy caches.
+- Runtime manifest and probe output now record source ownership explicitly:
+  - `bundled_packaged`
+  - `bundled_dev`
+  - `legacy_cache`
+  - `repaired_managed`
+- Bundled payload roots and payload manifests are now part of the machine-readable runtime truth.
+
+## In Progress
+- UI / Health / Resources / smoke alignment for bundled payload ownership.
+
+## Next Step
+- Expose bundled payload ownership in Resources Manager, Health Check, Documents runtime detail text, and release smoke output.

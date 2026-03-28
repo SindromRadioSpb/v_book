@@ -135,3 +135,8 @@
 - `rebuild.ps1` now stages this payload before PyInstaller runs.
 - `hdle_premium_installer.spec` now bundles that staged tree into the frozen app under `_internal/resources/nlp_runtime/stanza_payload/`.
 - The remaining gap is no longer packaging assembly; it is runtime/bootstrap preference and ownership truth for the bundled packaged payload.
+
+## Confirmed Current State After Bundled Payload Ownership Bootstrap
+- Managed bootstrap now prefers `bundled_packaged` over `bundled_dev`, then `legacy_cache`, while preserving `repaired_managed` for already healthy managed copies.
+- The runtime manifest now records bundled payload ownership and payload-manifest linkage explicitly.
+- The runtime probe now carries that ownership truth into machine-readable status so UI/health/smoke can report whether processing is using a bundled packaged payload or only a legacy cache source.

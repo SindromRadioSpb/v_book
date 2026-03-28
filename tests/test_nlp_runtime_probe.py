@@ -24,6 +24,10 @@ def _bootstrap():
             "ok": True,
             "model_present": True,
             "model_path": "C:/managed/stanza_resources/he",
+            "source_kind": "bundled_packaged",
+            "source_path": "C:/bundle/stanza_payload/stanza_resources/he",
+            "ownership": "packaged_app",
+            "bundled_payload_root": "C:/bundle/stanza_payload",
         },
     )
 
@@ -40,6 +44,12 @@ def test_probe_stanza_uses_subprocess_payload(monkeypatch):
         "smoke_requested": True,
         "error_code": "hostile_torch_state",
         "error_detail": "WinError 1114",
+        "managed_runtime": {
+            "source_kind": "bundled_packaged",
+            "source_path": "C:/bundle/stanza_payload/stanza_resources/he",
+            "ownership": "packaged_app",
+            "bundled_payload_root": "C:/bundle/stanza_payload",
+        },
     }
 
     monkeypatch.setattr(
@@ -65,7 +75,9 @@ def test_probe_stanza_uses_subprocess_payload(monkeypatch):
     assert status.error_code == "hostile_torch_state"
     assert status.package_installed is True
     assert status.effective_engine_id is None
-    assert "DLL initialization" in status.remediation or "Torch failed" in status.remediation
+    assert status.managed_runtime_source_kind == "bundled_packaged"
+    assert status.managed_runtime_bundled_payload_root == "C:/bundle/stanza_payload"
+    assert "Torch failed" in status.remediation
 
 
 def test_probe_stanza_timeout_becomes_machine_readable_status(monkeypatch):
@@ -155,6 +167,10 @@ def test_guided_repair_plan_routes_runtime_failures():
         engine_version=None,
         model_id="he/tokenize,pos,lemma",
         model_path=None,
+        managed_runtime_source_kind="bundled_packaged",
+        managed_runtime_source_path="C:/bundle/stanza_payload/stanza_resources/he",
+        managed_runtime_ownership="packaged_app",
+        managed_runtime_bundled_payload_root="C:/bundle/stanza_payload",
     )
 
     plan = probe.build_guided_repair_plan(status)
@@ -181,6 +197,10 @@ def test_guided_repair_plan_routes_model_failures_to_resource():
         engine_version="1.11.1",
         model_id="he/tokenize,pos,lemma",
         model_path="C:/models/he",
+        managed_runtime_source_kind="bundled_dev",
+        managed_runtime_source_path="E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew/stanza_resources/he",
+        managed_runtime_ownership="development_app",
+        managed_runtime_bundled_payload_root="E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew",
     )
 
     plan = probe.build_guided_repair_plan(status)
@@ -189,7 +209,7 @@ def test_guided_repair_plan_routes_model_failures_to_resource():
     assert "Managed Hebrew Resource" in plan["next_action"]
 
 
-def test_build_setup_steps_mentions_official_runtime_repair():
+def test_build_setup_steps_mentions_official_runtime_repair_and_payload_ownership():
     probe = NlpRuntimeProbe()
     status = type(probe.build_mock_status())(
         configured_engine_id="stanza",
@@ -207,8 +227,14 @@ def test_build_setup_steps_mentions_official_runtime_repair():
         engine_version="1.11.1",
         model_id="he/tokenize,pos,lemma",
         model_path="C:/managed/stanza_resources/he",
+        managed_runtime_source_kind="bundled_packaged",
+        managed_runtime_source_path="C:/bundle/stanza_payload/stanza_resources/he",
+        managed_runtime_ownership="packaged_app",
+        managed_runtime_bundled_payload_root="C:/bundle/stanza_payload",
     )
 
     steps = probe.build_setup_steps(status)
 
     assert any("Install / Repair NLP Runtime" in step for step in steps)
+    assert any("bundled_packaged" in step for step in steps)
+    assert any("C:/bundle/stanza_payload" in step for step in steps)
