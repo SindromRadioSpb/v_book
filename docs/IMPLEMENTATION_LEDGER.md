@@ -519,3 +519,35 @@
   - `reports/runtime_smoke/packaged_stanza_probe.json` confirms `bundled_packaged` ownership plus `hostile_torch_state`
   - `reports/runtime_smoke/packaged_stanza_worker.jsonl` confirms packaged worker still fails on `c10.dll`
 
+## Step 19 — Frozen Torch Runtime Hook Hardening for Packaged Probe/Worker
+- Status: completed
+- Trigger:
+  - the packaged Hebrew payload was already bundled and ownership was already `bundled_packaged`, but the frozen `--stanza-probe` / `--stanza-worker` path still died on `torch\lib\c10.dll`.
+- Code deliverables:
+  - `app/infra/runtime_torch_bootstrap.py`
+  - `app/runtime_hooks/pyi_rth_torch_dll_bootstrap.py`
+  - `app/infra/nlp_engines/stanza_engine.py`
+  - `hdle_premium_installer.spec`
+  - `tests/test_stanza_engine_subprocess.py`
+- Confirmed behavior changes:
+  - Windows Torch DLL bootstrap is now shared through `app.infra.runtime_torch_bootstrap` instead of living only inside `stanza_engine.py`
+  - the frozen app now runs Torch DLL bootstrap from a PyInstaller runtime hook before user-code imports
+  - the runtime hook preloads the CRT bridge and `c10.dll` chain on frozen Windows builds to avoid the packaged `WinError 1114` import failure
+  - packaged `--stanza-probe` now succeeds with:
+    - `pipeline_init_ok = true`
+    - `smoke_ok = true`
+    - `source_kind = bundled_packaged`
+  - packaged release smoke now succeeds with enforced bundled ownership on both:
+    - direct engine smoke
+    - DB reprocess smoke
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\infra\runtime_torch_bootstrap.py app\runtime_hooks\pyi_rth_torch_dll_bootstrap.py app\infra\nlp_engines\stanza_engine.py app\services\nlp_runtime\stanza_probe_worker.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_stanza_engine_subprocess.py tests\test_managed_stanza_runtime.py tests\test_nlp_runtime_probe.py -q` -> `19 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py tests\test_resources_manager_dialog.py tests\test_health_check_service.py tests\test_documents_engine_readiness.py tests\test_process_service_nlp_runtime.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_workspace_app_window_contract.py tests\test_release_smoke_nlp_runtime.py -q` -> `73 passed`
+  - `$env:PATH='E:\projects\Project_Vibe\V_book\.venv\Scripts;' + $env:PATH; pyinstaller .\hdle_premium_installer.spec --clean --noconfirm` -> packaged rebuild succeeded and included `pyi_rth_torch_dll_bootstrap.py`
+  - `dist\HDLE_Premium\HDLE_Premium.exe --stanza-probe` on a clean `HDLE_DATA_ROOT` -> `pipeline_init_ok=true`, `smoke_ok=true`, `source_kind='bundled_packaged'`
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --force-hostile-inprocess --require-source-kind bundled_packaged --require-bundled-source` with `HDLE_DATA_ROOT=reports\runtime_smoke\managed_data_root_packaged_hook2` -> passed
+  - `.\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --db-path hdle_premium.db --copy-db-to reports\runtime_smoke\runtime_smoke_copy_packaged_hook.db --doc-id 1 --require-source-kind bundled_packaged --require-bundled-source` with the same `HDLE_DATA_ROOT` -> passed
+- Residual note:
+  - packaged `--self-check import` still reports a separate ONNX helper timeout for `HDLE_ONNX_Probe.exe`; that is outside the frozen Torch/Stanza runtime track.
+

@@ -168,3 +168,17 @@
   - packaged `--stanza-worker` still fails on the same `torch\lib\c10.dll` import chain
 - Therefore bundled payload delivery is complete, but packaged Torch/Stanza runtime readiness is not yet release-green.
 
+## Confirmed Current State After Frozen Torch Runtime Hook Hardening
+- The packaged `torch\lib\c10.dll` failure was caused by bootstrap timing, not by missing bundled Hebrew payload files.
+- Torch DLL directories and the critical `c10.dll` chain are now prepared in a PyInstaller runtime hook before the frozen app imports user code.
+- The packaged frozen runtime is now release-green for the Stanza/Torch track:
+  - packaged `--stanza-probe` succeeds on a clean managed root
+  - packaged `--stanza-worker` initializes the managed runtime successfully
+  - release smoke now passes with `--require-source-kind bundled_packaged --require-bundled-source`
+  - DB reprocess smoke keeps `run_engine='stanza'`, `run_status='ok'`, and `runtime_effective='stanza'`
+- Bundled payload delivery remains confirmed and unchanged:
+  - `source_kind = bundled_packaged`
+  - bundled payload root still resolves to `_internal/resources/nlp_runtime/stanza_payload`
+- The remaining frozen validation item is outside this track:
+  - `--self-check import` still reports an ONNX helper timeout for `HDLE_ONNX_Probe.exe`
+

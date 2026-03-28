@@ -210,3 +210,11 @@
 - Rationale:
   - the rebuilt packaged artifact now proves `bundled_packaged` ownership correctly, but the frozen `--stanza-probe` / `--stanza-worker` path can still fail later on `torch\lib\c10.dll`; ownership success alone is not sufficient for release sign-off.
 
+## D-029 — Frozen Torch DLL bootstrap must run before user-code imports
+- Status: accepted and implemented
+- Decision:
+  - packaged Windows Torch bootstrap for the managed Stanza runtime must run from a PyInstaller runtime hook, not only from app-level probe/worker code.
+  - the frozen bootstrap must register `_internal`, `_internal\torch`, `_internal\torch\lib` and preflight the critical `c10.dll` chain before the first user-code import path touches `torch/stanza`.
+- Rationale:
+  - app-level `prepare_torch_runtime_paths()` was already correct in principle, but it executed too late for the frozen packaged process; moving the bootstrap into a runtime hook is what closed the packaged `WinError 1114` failure while preserving the existing managed ownership contract.
+

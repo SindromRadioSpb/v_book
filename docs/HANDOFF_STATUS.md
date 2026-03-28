@@ -126,3 +126,24 @@
   - determine which DLL dependency of `dist/.../torch/lib/c10.dll` is still unresolved in the frozen layout
   - fix the packaged worker/probe import chain without regressing the already confirmed `bundled_packaged` ownership path
 
+## Completed After Frozen Torch Runtime Hook Hardening
+- Current dirty state was preserved first (`backup/pre-rollback-20260329-7e8c9e4-anchor` + named stash), and work resumed from checkpoint `7e8c9e4` on `fix/frozen-runtime-loading`.
+- The packaged `c10.dll` blocker is now closed without changing the bundled payload ownership contract.
+- Frozen Torch bootstrap now runs from `pyi_rth_torch_dll_bootstrap.py` before user-code imports, while app-level bootstrap remains available for dev/in-process safety.
+- The packaged Stanza/Torch release gate is now green:
+  - `dist\HDLE_Premium\HDLE_Premium.exe --stanza-probe` passes on a clean managed root
+  - packaged worker path initializes the managed runtime successfully
+  - release smoke passes with `--require-source-kind bundled_packaged --require-bundled-source`
+  - DB reprocess smoke stays on real `stanza` with `runtime_effective='stanza'`
+
+## Remaining Risks
+- The bundled packaged Stanza/Torch track is closed.
+- A separate frozen validation issue remains in `--self-check import`:
+  - `HDLE_ONNX_Probe.exe` still times out in the packaged ONNX import helper path
+- No new schema, ownership, or payload-delivery risks were introduced by the Torch runtime hook hardening patch.
+
+## Next Step
+- If release sign-off requires a fully green import self-check, open a separate track for frozen ONNX helper startup:
+  - inspect `HDLE_ONNX_Probe.exe` startup latency / timeout semantics
+  - fix the ONNX helper without touching the now-green packaged Stanza/Torch path
+

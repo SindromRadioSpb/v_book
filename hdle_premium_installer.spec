@@ -18,6 +18,7 @@ from pathlib import Path
 
 # Project root
 project_root = Path.cwd()
+torch_runtime_hook = str(project_root / 'app' / 'runtime_hooks' / 'pyi_rth_torch_dll_bootstrap.py')
 
 
 def _collect_tree_datas(source_root: Path, target_root: str):
@@ -163,7 +164,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[torch_runtime_hook],
     excludes=[
         'stanza_resources',  # Stanza models (СЃРєР°С‡РёРІР°СЋС‚СЃСЏ РїСЂРё РїРµСЂРІРѕРј Р·Р°РїСѓСЃРєРµ)
         'tkinter',           # РќРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ
