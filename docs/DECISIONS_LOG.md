@@ -187,3 +187,17 @@
   - the runtime manifest and probe status must distinguish `bundled_packaged`, `bundled_dev`, `legacy_cache`, and `repaired_managed` instead of collapsing everything into a generic bundled/legacy flag.
 - Rationale:
   - packaged release sign-off depends on proving that Stanza processing succeeded from the bundled release-owned Hebrew payload rather than by accidentally reusing a legacy local cache.
+
+## D-026 — Bundled payload ownership must be visible on all runtime surfaces
+- Status: accepted and implemented
+- Decision:
+  - Resources Manager, Health Check, Documents tooltips, and release smoke must all expose the same bundled payload ownership truth from the managed runtime manifest.
+- Rationale:
+  - the release gate is only honest when the UI and smoke path can prove whether Stanza is using a bundled packaged/dev payload or falling back to legacy cache semantics.
+
+## D-027 — Obsolete managed ownership must be upgraded to current bundled truth
+- Status: accepted and implemented
+- Decision:
+  - if an existing healthy managed copy still carries obsolete ownership labels like `managed_existing`, bootstrap must rebind it to the current bundled source when a valid bundled payload is present.
+- Rationale:
+  - otherwise release smoke can report a false non-bundled source even though the release-owned bundled payload is available and should be authoritative.

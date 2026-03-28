@@ -82,3 +82,26 @@
 
 ## Next Step
 - Expose bundled payload ownership in Resources Manager, Health Check, Documents runtime detail text, and release smoke output.
+
+## Completed After PATCH-03 Bundled Ownership UI / Smoke Alignment
+- Resources Manager, Health Check, and Documents now expose managed Hebrew payload ownership and bundled payload roots when known.
+- Release smoke can now assert `source_kind` and bundled payload usage explicitly instead of only checking `runtime_effective='stanza'`.
+
+## In Progress
+- Final regression + smoke validation only.
+
+## Next Step
+- Run full runtime regression and release smoke with `bundled_dev` enforcement, then finish release-grade handoff.
+
+## Completed After Bundled Payload Release Validation
+- Bundled Hebrew payload delivery is now validated on the dev release path with enforced bundled ownership.
+- Engine smoke and DB reprocess smoke both pass with:
+  - `source_kind = bundled_dev`
+  - `runtime_effective = stanza`
+- Remaining release work is only packaged-build confirmation for `bundled_packaged` ownership.
+
+## In Progress
+- No active implementation in this patch series.
+
+## Next Step
+- Run the same smoke contract against the actual packaged build and require `bundled_packaged`.

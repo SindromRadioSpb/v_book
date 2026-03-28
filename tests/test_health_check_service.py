@@ -172,6 +172,10 @@ def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
             error_code="package_missing",
             error_detail="missing",
             remediation="install stanza",
+            managed_runtime_source_kind="bundled_packaged",
+            managed_runtime_source_path="C:/bundle/stanza_payload/stanza_resources/he",
+            managed_runtime_ownership="packaged_app",
+            managed_runtime_bundled_payload_root="C:/bundle/stanza_payload",
         ),
     )
 
@@ -182,6 +186,8 @@ def test_nlp_health_reports_runtime_probe(monkeypatch, tmp_path):
     assert check["title"] == "External Runtime Dependency: Stanza Hebrew"
     assert "package_missing" in check["message"]
     assert "route=runtime" in check["message"]
+    assert "source=bundled_packaged" in check["message"]
+    assert "bundled_root=C:/bundle/stanza_payload" in check["message"]
     assert "install stanza" in check["remediation"]
     assert "Next action:" in check["remediation"]
     assert "Install / Repair NLP Runtime" in check["remediation"]

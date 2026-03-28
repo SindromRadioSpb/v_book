@@ -152,8 +152,32 @@ class ManagedStanzaRuntime:
         runtime_ready = self._managed_runtime_ready(resources_root, model_path)
 
         if runtime_ready and not force_repair:
-            source_kind = str(manifest_payload.get("model_source_kind") or "repaired_managed")
+            valid_source_kinds = {
+                "bundled_packaged",
+                "bundled_dev",
+                "legacy_cache",
+                "repaired_managed",
+            }
+            source_kind = str(manifest_payload.get("model_source_kind") or "").strip() or None
             source_path = str(manifest_payload.get("model_source_path") or source_path or "") or source_path
+            if source_kind not in valid_source_kinds:
+                source = self._resolve_bootstrap_source(include_managed=False)
+                if source is not None:
+                    source_kind = source.source_kind
+                    source_path = str(source.model_path)
+                    bundled_payload_root = str(source.payload_root) if source.payload_root else None
+                    payload_manifest_path = (
+                        str(source.payload_manifest_path) if source.payload_manifest_path else None
+                    )
+                    self._copy_resources_payload(
+                        source_resources_root=source.resources_root,
+                        source_model_path=source.model_path,
+                        target_resources_root=resources_root,
+                    )
+                else:
+                    source_kind = "repaired_managed"
+            else:
+                source_kind = str(source_kind)
         else:
             resources_json = resources_root / "resources.json"
             if model_path.exists() and (force_repair or not runtime_ready):
@@ -314,7 +338,7 @@ class ManagedStanzaRuntime:
         target_model_dir = target_resources_root / "he"
         if target_model_dir.exists():
             shutil.rmtree(target_model_dir, ignore_errors=True)
-        shutil.copytree(source_model_path, target_model_dir)
+        shutil.copytree(source_model_path, target_model_dir, dirs_exist_ok=True)
 
         resources_json = source_resources_root / "resources.json"
         if resources_json.exists():

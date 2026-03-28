@@ -113,6 +113,17 @@ def test_run_db_smoke_builds_project_scoped_db_and_reprocesses(monkeypatch, tmp_
         return True
 
     monkeypatch.setattr(smoke.ProcessService, "reprocess_document", _fake_reprocess)
+    monkeypatch.setattr(
+        smoke.ManagedStanzaRuntime,
+        "load_manifest",
+        lambda self: {
+            "model_source_kind": "bundled_dev",
+            "model_source_path": "E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew/stanza_resources/he",
+            "bundled_payload_root": "E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew",
+            "payload_manifest_path": "E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew/payload_manifest.json",
+            "ownership": "development_app",
+        },
+    )
 
     try:
         report = smoke._run_db_smoke(
@@ -131,6 +142,24 @@ def test_run_db_smoke_builds_project_scoped_db_and_reprocesses(monkeypatch, tmp_
     assert report["run_engine"] == "stanza"
     assert report["run_status"] == "ok"
     assert report["runtime_effective"] == "stanza"
+    assert report["source_kind"] == "bundled_dev"
+    assert report["bundled_payload_root"].endswith("stanza_hebrew")
     assert Path(report["db_copy"]).exists()
     assert report["doc_id"] > 0
     assert report["project_id"] > 0
+
+
+def test_assert_expected_source_rejects_non_bundled_payload():
+    smoke = _load_smoke_module()
+
+    try:
+        smoke._assert_expected_source(
+            {"source_kind": "legacy_cache", "bundled_payload_root": None},
+            label="engine_smoke",
+            require_source_kind=None,
+            require_bundled_source=True,
+        )
+    except RuntimeError as exc:
+        assert "expected bundled source ownership" in str(exc)
+    else:
+        raise AssertionError("Expected bundled-source assertion to fail")

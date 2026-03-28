@@ -61,6 +61,10 @@ def test_nlp_engine_readiness_worker_skips_cuda_when_stanza_missing(monkeypatch)
             error_code="package_missing",
             error_detail="missing",
             remediation="install",
+            managed_runtime_source_kind="bundled_packaged",
+            managed_runtime_source_path="C:/bundle/stanza_payload/stanza_resources/he",
+            managed_runtime_ownership="packaged_app",
+            managed_runtime_bundled_payload_root="C:/bundle/stanza_payload",
         ),
     )
     worker.result_ready.connect(
@@ -137,6 +141,10 @@ def test_documents_view_applies_latest_nlp_engine_readiness_result(monkeypatch, 
             error_code="package_missing",
             error_detail="missing",
             remediation="install",
+            managed_runtime_source_kind="bundled_packaged",
+            managed_runtime_source_path="C:/bundle/stanza_payload/stanza_resources/he",
+            managed_runtime_ownership="packaged_app",
+            managed_runtime_bundled_payload_root="C:/bundle/stanza_payload",
         ),
     )
 
@@ -149,6 +157,8 @@ def test_documents_view_applies_latest_nlp_engine_readiness_result(monkeypatch, 
     assert "explicit Mock fallback confirmation" in view.process_btn.toolTip()
     assert view.gpu_checkbox.isHidden() is True
     assert "External runtime reason: package_missing" in view.nlp_engine_status_label.toolTip()
+    assert "Managed source ownership: bundled_packaged" in view.nlp_engine_status_label.toolTip()
+    assert "Bundled payload root: C:/bundle/stanza_payload" in view.nlp_engine_status_label.toolTip()
     assert "Remediation: install" in view.nlp_engine_status_label.toolTip()
     assert "Recommended route: Repair the external runtime dependency" in view.nlp_engine_status_label.toolTip()
     assert "Next action: Start with Health Check" in view.nlp_engine_status_label.toolTip()
@@ -167,3 +177,5 @@ def test_documents_view_open_nlp_setup_routes_to_resources_manager(monkeypatch, 
     view.on_open_nlp_setup()
 
     assert events == [view]
+
+

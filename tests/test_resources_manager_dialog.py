@@ -128,7 +128,14 @@ class _StatusProbe:
         }
 
 
-def _make_status(*, ready: bool, model_path: str | None, error_code: str | None = None) -> NlpRuntimeStatus:
+def _make_status(
+    *,
+    ready: bool,
+    model_path: str | None,
+    error_code: str | None = None,
+    source_kind: str = "bundled_dev",
+    bundled_root: str | None = "E:/projects/Project_Vibe/V_book/installer/resources/local_models/stanza_hebrew",
+) -> NlpRuntimeStatus:
     return NlpRuntimeStatus(
         configured_engine_id="stanza",
         effective_engine_id="stanza" if ready else None,
@@ -145,6 +152,10 @@ def _make_status(*, ready: bool, model_path: str | None, error_code: str | None 
         engine_version="1.11.1" if ready else None,
         model_id="he/tokenize,pos,lemma",
         model_path=model_path,
+        managed_runtime_source_kind=source_kind,
+        managed_runtime_source_path=(f"{bundled_root}/stanza_resources/he" if bundled_root else None),
+        managed_runtime_ownership="packaged_app" if source_kind == "bundled_packaged" else "development_app",
+        managed_runtime_bundled_payload_root=bundled_root,
     )
 
 
@@ -177,26 +188,27 @@ def test_resources_manager_runtime_probe_failure_does_not_crash():
     assert "does not ship a one-click Python package installer" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is False
     assert "Managed Hebrew resource is not detected" in dialog.hebrew_resource_label.value
-    assert "No single installer file" in dialog.hebrew_resource_label.value
+    assert "Source ownership: unknown" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_ready_runtime_enables_model_folder_button():
-    status = _make_status(ready=True, model_path="C:/models/he")
+    status = _make_status(ready=True, model_path="C:/models/he", source_kind="bundled_packaged", bundled_root="C:/bundle/stanza_payload")
     dialog = _build_dialog(_StatusProbe(status))
 
     ResourcesManagerDialog._refresh_nlp_runtime_status(dialog)
 
     assert "External runtime dependency is ready" in dialog.nlp_runtime_label.value
-    assert "app-owned managed subprocess runtime path" in dialog.nlp_runtime_label.value
-    assert "No bundled installer file is managed in this dialog" in dialog.nlp_runtime_label.value
+    assert "Source ownership: bundled_packaged" in dialog.nlp_runtime_label.value
+    assert "Bundled payload root: C:/bundle/stanza_payload" in dialog.nlp_runtime_label.value
     assert dialog.open_nlp_model_folder_btn.enabled is True
     assert "C:/models/he" in dialog.open_nlp_model_folder_btn.tooltip
     assert "Managed Hebrew resource is present" in dialog.hebrew_resource_label.value
-    assert "directory-based resource" in dialog.hebrew_resource_label.value
+    assert "Source ownership: bundled_packaged" in dialog.hebrew_resource_label.value
+    assert "C:/bundle/stanza_payload" in dialog.hebrew_resource_label.value
 
 
 def test_resources_manager_setup_guide_is_packaging_aware():
-    status = _make_status(ready=False, model_path=None, error_code="hostile_torch_state")
+    status = _make_status(ready=False, model_path=None, error_code="hostile_torch_state", source_kind="bundled_packaged", bundled_root="C:/bundle/stanza_payload")
     dialog = _build_dialog(_StatusProbe(status, packaged=True))
     dialog._apply_nlp_runtime_ui_state(status, dialog._build_nlp_runtime_message(status))
 
@@ -254,11 +266,13 @@ def test_resources_manager_runtime_setup_finish_refreshes_status(monkeypatch):
         dialog,
         {
             "model_present": True,
-            "source_kind": "legacy",
+            "source_kind": "bundled_packaged",
             "model_path": "C:/managed/stanza_resources/he",
+            "bundled_payload_root": "C:/bundle/stanza_payload",
         },
     )
 
     assert refreshed["count"] == 1
     assert any("Managed NLP runtime ready" in text for text in statuses)
+    assert any("C:/bundle/stanza_payload" in text for text in statuses)
     assert messages

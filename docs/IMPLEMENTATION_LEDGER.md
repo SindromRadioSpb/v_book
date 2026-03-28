@@ -438,3 +438,56 @@
 
 ## Next Step
 - Align Resources Manager / Health Check / Documents / release smoke to display and validate bundled payload ownership explicitly.
+## Step 21 — Bundled Payload Ownership Exposed in UI, Health, and Smoke
+- Status: completed
+- Trigger:
+  - bundled payload ownership was now recorded in bootstrap/probe state, but the primary product surfaces and release smoke still did not expose or assert that truth.
+- Code deliverables:
+  - `app/ui/resources_manager_dialog.py`
+  - `app/services/health_check_service.py`
+  - `app/ui/documents_view.py`
+  - `scripts/release_smoke_nlp_runtime.py`
+  - `tests/test_resources_manager_dialog.py`
+  - `tests/test_health_check_service.py`
+  - `tests/test_documents_engine_readiness.py`
+  - `tests/test_release_smoke_nlp_runtime.py`
+- Confirmed behavior changes:
+  - Resources Manager now shows managed Hebrew payload ownership and bundled payload root in both runtime and resource sections
+  - Health Check now reports bundled/source ownership in the runtime line when available
+  - Documents runtime detail tooltip now includes managed source ownership and bundled payload root
+  - release smoke now reports and can assert source ownership via:
+    - `source_kind`
+    - `source_path`
+    - `bundled_payload_root`
+  - release smoke now supports:
+    - `--require-source-kind`
+    - `--require-bundled-source`
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\ui\resources_manager_dialog.py app\services\health_check_service.py app\ui\documents_view.py scripts\release_smoke_nlp_runtime.py tests\test_resources_manager_dialog.py tests\test_health_check_service.py tests\test_documents_engine_readiness.py tests\test_release_smoke_nlp_runtime.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_resources_manager_dialog.py tests\test_health_check_service.py tests\test_documents_engine_readiness.py tests\test_release_smoke_nlp_runtime.py -q` -> `16 passed`
+
+## Next Step
+- Run full runtime regression and release smoke with `bundled_dev` enforcement, then finish handoff.
+## Step 22 — Release Gate Confirmed for Bundled Hebrew Payload Delivery
+- Status: completed
+- Trigger:
+  - release smoke originally surfaced an upgrade-path gap: an old managed manifest with obsolete `managed_existing` ownership prevented the smoke gate from proving bundled payload usage.
+- Code deliverables:
+  - `app/services/nlp_runtime/managed_runtime.py`
+  - `tests/test_managed_stanza_runtime.py`
+- Confirmed behavior changes:
+  - bootstrap now upgrades obsolete managed manifest ownership to the current bundled source when a valid bundled payload is present
+  - overwrite-safe payload copy semantics prevent `WinError 183` during managed payload refresh
+  - release smoke now passes with enforced bundled ownership on the dev release path
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\nlp_runtime\managed_runtime.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py -q` -> `6 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_managed_stanza_runtime.py tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py tests\test_resources_manager_dialog.py tests\test_health_check_service.py tests\test_documents_engine_readiness.py tests\test_process_service_nlp_runtime.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_documents_process_progress_ui.py tests\test_workspace_app_window_contract.py tests\test_release_smoke_nlp_runtime.py -q` -> `71 passed`
+  - `$env:HDLE_DATA_ROOT='E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_data_root'; .\.venv\Scripts\python.exe scripts\stage_stanza_hebrew_payload.py` -> staged payload from local cache into `installer/resources/local_models/stanza_hebrew`
+  - `$env:HDLE_DATA_ROOT='E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_data_root'; .\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --force-hostile-inprocess --require-source-kind bundled_dev --require-bundled-source` -> managed subprocess `stanza`, Hebrew sample processed, `source_kind='bundled_dev'`
+  - `$env:HDLE_DATA_ROOT='E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_data_root'; .\.venv\Scripts\python.exe scripts\release_smoke_nlp_runtime.py --db-path "E:\projects\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --copy-db-to "E:\projects\Project_Vibe\V_book\reports\runtime_smoke\managed_runtime_smoke_copy.db" --doc-id 1 --require-source-kind bundled_dev --require-bundled-source` -> `ok=true`, `run_engine='stanza'`, `run_status='ok'`, `runtime_effective='stanza'`, `source_kind='bundled_dev'`
+
+## Next Step
+- Release engineering only:
+  - verify the same smoke contract on the actual packaged build with `--require-source-kind bundled_packaged`
+  - keep the staged bundled Hebrew payload as part of the release artifact pipeline

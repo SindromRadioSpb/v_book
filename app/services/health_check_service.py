@@ -73,6 +73,12 @@ class HealthCheckService:
                 message=f"runtime_probe_failed: {exc} | route=runtime",
                 remediation="Use Install / Repair NLP Runtime in Resources Manager, then re-run Health Check. Next action: Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
             )
+        source_suffix = f", source={status.managed_runtime_source_kind}" if status.managed_runtime_source_kind else ""
+        bundled_suffix = (
+            f", bundled_root={status.managed_runtime_bundled_payload_root}"
+            if status.managed_runtime_bundled_payload_root
+            else ""
+        )
         if status.stanza_ready:
             mode = "GPU-capable" if status.cuda_available else "CPU-only"
             plan = self.nlp_probe.build_guided_repair_plan(status)
@@ -80,7 +86,10 @@ class HealthCheckService:
                 check_id="nlp_runtime:stanza",
                 title="External Runtime Dependency: Stanza Hebrew",
                 status="ok",
-                message=f"Ready ({mode}). package=stanza, reason_code=none, route={plan['route']}",
+                message=(
+                    f"Ready ({mode}). package=stanza, reason_code=none, route={plan['route']}"
+                    f"{source_suffix}{bundled_suffix}"
+                ),
             )
 
         message = f"{status.error_code or 'unavailable'}"
@@ -91,7 +100,7 @@ class HealthCheckService:
             check_id="nlp_runtime:stanza",
             title="External Runtime Dependency: Stanza Hebrew",
             status="warn",
-            message=f"{message} | route={plan['route']}",
+            message=f"{message}{source_suffix}{bundled_suffix} | route={plan['route']}",
             remediation=(
                 f"{status.remediation or 'Repair the external runtime dependency and retry Health Check.'} "
                 f"Next action: {plan['next_action']} "
@@ -396,3 +405,4 @@ class HealthCheckService:
             message=status.message,
             remediation="Install/import baseline bundle from Resources Manager if needed.",
         )
+

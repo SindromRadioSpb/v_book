@@ -185,3 +185,41 @@ def test_runtime_root_falls_back_to_temp_when_preferred_root_is_not_writable(mon
     root = runtime.runtime_root()
 
     assert root == fallback_root
+
+def test_bootstrap_runtime_upgrades_obsolete_manifest_to_bundled_dev(monkeypatch, tmp_path):
+    managed_root = tmp_path / "managed"
+    managed_resources = managed_root / "stanza_resources"
+    _populate_runtime_payload(managed_resources)
+    (managed_root / "runtime_manifest.json").write_text(
+        json.dumps({"model_source_kind": "managed_existing"}),
+        encoding="utf-8",
+    )
+
+    bundled_root = tmp_path / "bundled_dev"
+    bundled_he = _populate_runtime_payload(bundled_root / "stanza_resources")
+    payload_manifest = bundled_root / "payload_manifest.json"
+    payload_manifest.write_text("{}", encoding="utf-8")
+
+    runtime = ManagedStanzaRuntime(
+        settings=_Settings({ManagedStanzaRuntime.SETTINGS_KEY_MANAGED_RUNTIME_ROOT: str(managed_root)})
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_bundled_model_candidates",
+        lambda: [
+            _ManagedPayloadSource(
+                source_kind="bundled_dev",
+                resources_root=bundled_root / "stanza_resources",
+                model_path=bundled_he,
+                payload_root=bundled_root,
+                payload_manifest_path=payload_manifest,
+            )
+        ],
+    )
+    monkeypatch.setattr(runtime, "_legacy_model_candidates", lambda: [])
+
+    result = runtime.bootstrap_runtime(force_repair=False)
+
+    assert result.source_kind == "bundled_dev"
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["model_source_kind"] == "bundled_dev"

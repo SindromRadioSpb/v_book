@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import sqlite3
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +16,7 @@ from sqlalchemy import func, select
 from app.infra.nlp_engines.stanza_engine import StanzaEngine, create_stanza_engine
 from app.infra.sa_models import ProcessorRun, SourceDocument
 from app.services.db_service import DBService
+from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
 from app.services.process_service import ProcessService
 
 
@@ -118,7 +117,6 @@ def _materialize_project_smoke_db(*, source_db: Path, target_db: Path, doc_id: i
     finally:
         source_conn.close()
 
-    # Keep the clone self-contained: external project links are not part of this smoke DB.
     if project_row.get("general_corpus_id") not in (None, project_row["project_id"]):
         project_row["general_corpus_id"] = None
 
@@ -168,6 +166,17 @@ def _resolve_imported_doc_id(target_db: Path, context: _ProjectDocContext) -> tu
         _reset_db_service()
 
 
+def _load_managed_runtime_summary() -> dict[str, object]:
+    manifest = ManagedStanzaRuntime().load_manifest() or {}
+    return {
+        "source_kind": str(manifest.get("model_source_kind") or "") or None,
+        "source_path": str(manifest.get("model_source_path") or "") or None,
+        "bundled_payload_root": str(manifest.get("bundled_payload_root") or "") or None,
+        "payload_manifest_path": str(manifest.get("payload_manifest_path") or "") or None,
+        "ownership": str(manifest.get("ownership") or "") or None,
+    }
+
+
 def _run_engine_smoke(*, sample_text: str, force_hostile: bool) -> dict[str, object]:
     app = QApplication.instance() or QApplication([])
     _ = app
@@ -203,6 +212,7 @@ def _run_engine_smoke(*, sample_text: str, force_hostile: bool) -> dict[str, obj
         if callable(close):
             close()
 
+    summary.update(_load_managed_runtime_summary())
     return summary
 
 
@@ -245,7 +255,7 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
             ).scalar_one_or_none()
             session.refresh(doc)
 
-            return {
+            report = {
                 "db_copy": str(copy_db_to),
                 "db_copy_strategy": "document_scoped_clone",
                 "source_project_id": int(context.source_project_id),
@@ -259,6 +269,8 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
                 "runtime_effective": _extract_runtime_effective(latest_run.note) if latest_run is not None else None,
                 "created_run_id": int(latest_run.run_id) if latest_run is not None else None,
             }
+            report.update(_load_managed_runtime_summary())
+            return report
     finally:
         _reset_db_service()
 
@@ -276,6 +288,27 @@ def _extract_runtime_effective(note_text: str | None) -> str | None:
         return str(value) if value else None
     value = payload.get("effective_engine_id")
     return str(value) if value else None
+
+
+def _assert_expected_source(
+    summary: dict[str, object],
+    *,
+    label: str,
+    require_source_kind: str | None,
+    require_bundled_source: bool,
+) -> None:
+    source_kind = str(summary.get("source_kind") or "") or None
+    bundled_root = str(summary.get("bundled_payload_root") or "") or None
+    if require_source_kind and source_kind != require_source_kind:
+        raise RuntimeError(
+            f"{label} expected source_kind={require_source_kind}, got {source_kind or 'missing'}"
+        )
+    if require_bundled_source and source_kind not in {"bundled_packaged", "bundled_dev"}:
+        raise RuntimeError(
+            f"{label} expected bundled source ownership, got {source_kind or 'missing'}"
+        )
+    if require_bundled_source and not bundled_root:
+        raise RuntimeError(f"{label} expected bundled payload root, but none was recorded")
 
 
 def main() -> int:
@@ -304,6 +337,17 @@ def main() -> int:
         action="store_true",
         help="Force direct in-process Stanza init failure while validating managed subprocess recovery",
     )
+    parser.add_argument(
+        "--require-source-kind",
+        type=str,
+        default="",
+        help="Require a specific managed source ownership kind such as bundled_packaged or bundled_dev.",
+    )
+    parser.add_argument(
+        "--require-bundled-source",
+        action="store_true",
+        help="Fail if the smoke uses a non-bundled managed payload source.",
+    )
     args = parser.parse_args()
 
     report: dict[str, object] = {
@@ -312,6 +356,12 @@ def main() -> int:
             force_hostile=bool(args.force_hostile_inprocess),
         )
     }
+    _assert_expected_source(
+        report["engine_smoke"],
+        label="engine_smoke",
+        require_source_kind=str(args.require_source_kind or "") or None,
+        require_bundled_source=bool(args.require_bundled_source),
+    )
 
     if args.db_path:
         source_db = Path(args.db_path).expanduser().resolve()
@@ -324,6 +374,12 @@ def main() -> int:
             source_db=source_db,
             copy_db_to=copy_target,
             doc_id=int(args.doc_id),
+        )
+        _assert_expected_source(
+            report["db_reprocess_smoke"],
+            label="db_reprocess_smoke",
+            require_source_kind=str(args.require_source_kind or "") or None,
+            require_bundled_source=bool(args.require_bundled_source),
         )
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -642,6 +642,10 @@ class DocumentsView(QWidget):
             parts.append(f"External runtime reason: {status.error_code}")
         if getattr(status, "error_detail", None):
             parts.append(f"Details: {status.error_detail}")
+        if getattr(status, "managed_runtime_source_kind", None):
+            parts.append(f"Managed source ownership: {status.managed_runtime_source_kind}")
+        if getattr(status, "managed_runtime_bundled_payload_root", None):
+            parts.append(f"Bundled payload root: {status.managed_runtime_bundled_payload_root}")
         if getattr(status, "model_path", None):
             parts.append(f"Managed Hebrew resource path: {status.model_path}")
         remediation = getattr(status, "remediation", "")
@@ -2216,4 +2220,5 @@ class DocumentsView(QWidget):
 
         self._cleanup_process_worker()
         return True
+
 

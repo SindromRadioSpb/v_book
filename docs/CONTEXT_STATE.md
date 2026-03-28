@@ -140,3 +140,16 @@
 - Managed bootstrap now prefers `bundled_packaged` over `bundled_dev`, then `legacy_cache`, while preserving `repaired_managed` for already healthy managed copies.
 - The runtime manifest now records bundled payload ownership and payload-manifest linkage explicitly.
 - The runtime probe now carries that ownership truth into machine-readable status so UI/health/smoke can report whether processing is using a bundled packaged payload or only a legacy cache source.
+
+## Confirmed Current State After Bundled Ownership UI / Health / Smoke Alignment
+- Resources Manager now renders bundled payload ownership and bundled payload root directly in both the external runtime and managed Hebrew resource messages.
+- Health Check now includes source ownership and bundled payload root in the NLP runtime line when available.
+- Documents runtime detail tooltip now exposes the same ownership truth.
+- Release smoke can now fail fast if the managed runtime does not report the expected bundled source kind.
+
+## Confirmed Current State After Bundled Payload Release Gate Validation
+- The dev release path now passes both engine smoke and DB reprocess smoke with enforced bundled ownership:
+  - `source_kind = bundled_dev`
+  - `runtime_effective = stanza`
+- Obsolete managed manifests are now upgraded to current bundled ownership when a valid bundled payload is available.
+- Managed payload refresh is overwrite-safe and no longer trips `WinError 183` during release smoke.

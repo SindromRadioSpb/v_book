@@ -298,6 +298,10 @@ class ResourcesManagerDialog(QDialog):
 
     def _build_nlp_runtime_message(self, status) -> str:
         mode = "Packaged" if self.nlp_probe.is_packaged_runtime() else "Development"
+        source_kind = str(getattr(status, "managed_runtime_source_kind", "") or "unknown")
+        bundled_root = str(getattr(status, "managed_runtime_bundled_payload_root", "") or "")
+        source_text = f"Source ownership: {source_kind}. "
+        bundled_text = f"Bundled payload root: {bundled_root}. " if bundled_root else ""
         if status.stanza_ready:
             runtime = "GPU-capable" if status.cuda_available else "CPU-only"
             return (
@@ -305,6 +309,8 @@ class ResourcesManagerDialog(QDialog):
                 f"Environment: {mode}. "
                 "Package: stanza installed. "
                 f"Runtime: {runtime}. "
+                f"{source_text}"
+                f"{bundled_text}"
                 "This product now uses an app-owned managed subprocess runtime path. "
                 "No bundled installer file is managed in this dialog for Python packages. "
                 f"Reason code: none."
@@ -314,6 +320,8 @@ class ResourcesManagerDialog(QDialog):
             "External runtime dependency is unavailable. "
             f"Environment: {mode}. "
             f"Reason: {status.error_code or 'unavailable'}. "
+            f"{source_text}"
+            f"{bundled_text}"
             "Use Install / Repair NLP Runtime for the official product-owned bootstrap path. "
             "This dialog does not ship a one-click Python package installer. "
             f"Remediation: {status.remediation or 'Repair the runtime outside this dialog.'}"
@@ -323,10 +331,16 @@ class ResourcesManagerDialog(QDialog):
     def _build_hebrew_resource_message(status) -> str:
         model_path = getattr(status, "model_path", None) if status is not None else None
         model_present = bool(getattr(status, "model_present", False)) if status is not None else False
+        source_kind = str(getattr(status, "managed_runtime_source_kind", "") or "unknown") if status is not None else "unknown"
+        bundled_root = str(getattr(status, "managed_runtime_bundled_payload_root", "") or "") if status is not None else ""
+        source_text = f"Source ownership: {source_kind}. "
+        bundled_text = f"Bundled payload root: {bundled_root}. " if bundled_root else ""
         if model_present and model_path:
             return (
                 "Managed Hebrew resource is present. "
                 f"Model path: {model_path}. "
+                f"{source_text}"
+                f"{bundled_text}"
                 "This is a directory-based resource, not a single installer file. "
                 "Use Open NLP Model Folder to inspect or replace the local files."
             )
@@ -334,11 +348,15 @@ class ResourcesManagerDialog(QDialog):
             return (
                 "Managed Hebrew resource path is known but the resource is not ready. "
                 f"Model path: {model_path}. "
+                f"{source_text}"
+                f"{bundled_text}"
                 "This is a directory-based resource, not a single installer file. "
                 "Use offline import or copy the Hebrew model files into this location."
             )
         return (
             "Managed Hebrew resource is not detected. "
+            f"{source_text}"
+            f"{bundled_text}"
             "No Hebrew model path is currently known. "
             "No single installer file is currently bundled here. "
             "Use offline import guidance or configure the resource path first."
@@ -425,10 +443,12 @@ class ResourcesManagerDialog(QDialog):
         model_present = bool(payload.get("model_present"))
         source_kind = str(payload.get("source_kind") or "unknown")
         model_path = str(payload.get("model_path") or "").strip()
+        bundled_root = str(payload.get("bundled_payload_root") or "").strip()
+        bundled_text = f" Bundled payload root: {bundled_root}" if bundled_root else ""
         summary = (
-            f"Managed NLP runtime ready ({source_kind}). Model path: {model_path}"
+            f"Managed NLP runtime ready ({source_kind}). Model path: {model_path}.{bundled_text}"
             if model_present
-            else f"Managed NLP runtime still missing Hebrew resources. Expected model path: {model_path}"
+            else f"Managed NLP runtime still missing Hebrew resources. Expected model path: {model_path}.{bundled_text}"
         )
         self._set_status(summary)
         self._refresh_nlp_runtime_status()
@@ -715,5 +735,7 @@ class ResourcesManagerDialog(QDialog):
 def show_resources_manager(parent=None) -> int:
     dialog = ResourcesManagerDialog(parent=parent)
     return int(dialog.exec())
+
+
 
 
