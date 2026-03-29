@@ -1,7 +1,53 @@
 """Data Transfer Objects for project exchange."""
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+
+
+class ExportStageId(StrEnum):
+    """Stable stage identities for the project export pipeline."""
+
+    PREPARE_CONTEXT = "prepare_context"
+    PREFLIGHT_CHECKS = "preflight_checks"
+    CREATE_STAGING_DB = "create_staging_db"
+    APPLY_SCHEMA = "apply_schema"
+    ATTACH_HOST_DB = "attach_host_db"
+    PREPARE_FTS = "prepare_fts"
+    RESOLVE_PROJECT_SCOPE = "resolve_project_scope"
+    COPY_TABLES = "copy_tables"
+    EXPORT_PRONUNCIATION_METADATA = "export_pronunciation_metadata"
+    BUILD_MANIFEST = "build_manifest"
+    PRUNE_PAYLOAD = "prune_payload"
+    FINALIZE_SQLITE = "finalize_sqlite"
+    BUILD_BUNDLE = "build_bundle"
+    VALIDATE_ARTIFACT = "validate_artifact"
+    CLEANUP_TEMP_STATE = "cleanup_temp_state"
+    COMPLETED = "completed"
+
+
+@dataclass
+class ExportStageRecord:
+    """Observed export stage transition."""
+
+    stage_id: str
+    stage_label: str
+    status: str
+    started_at: float
+    ended_at: float | None = None
+    elapsed_seconds: float = 0.0
+    detail: str | None = None
+
+
+@dataclass
+class ExportArtifactInfo:
+    """Post-build artifact validation details."""
+
+    bundle_size_bytes: int
+    payload_quick_check: str
+    manifest_project_name: str
+    total_rows: int
+    validation_method: str = "bundle_format.read_bundle+payload.quick_check"
 
 
 @dataclass
@@ -86,6 +132,10 @@ class ExportReport:
     manifest: ManifestInfo | None = None
     elapsed_seconds: float = 0.0
     error_message: str | None = None
+    final_stage_id: str | None = None
+    final_stage_label: str | None = None
+    stage_history: list[ExportStageRecord] = field(default_factory=list)
+    artifact_info: ExportArtifactInfo | None = None
 
 
 @dataclass

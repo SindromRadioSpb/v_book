@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from app.services.project_exchange.dto import ImportPreflightReport, ImportReport, ManifestInfo
+from app.services.project_exchange.dto import (
+    ExportArtifactInfo,
+    ExportReport,
+    ExportStageRecord,
+    ImportPreflightReport,
+    ImportReport,
+    ManifestInfo,
+)
 from app.ui.dialogs.project_exchange_dialogs import ImportPreviewDialog, ImportProgressDialog
+from app.ui.dialogs.project_exchange_dialogs import ExportProgressDialog
 
 
 def _make_manifest() -> ManifestInfo:
@@ -69,3 +77,44 @@ def test_import_progress_dialog_shows_success_details_and_open_flag(qtbot):
 
     assert dialog.should_open_project() is True
     assert dialog.get_new_project_id() == 42
+
+
+def test_export_progress_dialog_renders_artifact_validation_and_stage_history(qtbot, tmp_path):
+    dialog = ExportProgressDialog()
+    qtbot.addWidget(dialog)
+
+    bundle_path = tmp_path / "bundle.hdleproj"
+    bundle_path.write_bytes(b"ok")
+    report = ExportReport(
+        success=True,
+        bundle_path=bundle_path,
+        manifest=_make_manifest(),
+        elapsed_seconds=2.0,
+        final_stage_id="completed",
+        final_stage_label="Completed",
+        artifact_info=ExportArtifactInfo(
+            bundle_size_bytes=2,
+            payload_quick_check="ok",
+            manifest_project_name="Bundle Project",
+            total_rows=10,
+        ),
+        stage_history=[
+            ExportStageRecord(
+                stage_id="prune_payload",
+                stage_label="Pruning excluded payload structures...",
+                status="ok",
+                started_at=0.0,
+                ended_at=1.0,
+                elapsed_seconds=1.0,
+                detail="excluded_tables=10",
+            )
+        ],
+    )
+
+    dialog.set_completed(report)
+
+    details = dialog.details_text.toPlainText()
+    assert "Artifact Validation" in details
+    assert "Payload quick_check: ok" in details
+    assert "Stage History" in details
+    assert "prune_payload" in details

@@ -2,6 +2,7 @@
 
 import csv
 import logging
+import os
 import shutil
 import sqlite3
 import sys
@@ -26,8 +27,11 @@ from app.services.project_exchange.constants import (
     TABLE_INSERT_ORDER,
 )
 from app.services.project_exchange.dto import (
+    ExportArtifactInfo,
     ExportOptions,
     ExportReport,
+    ExportStageId,
+    ExportStageRecord,
     ManifestInfo,
 )
 
@@ -36,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 class ExportCancelled(RuntimeError):
     """Raised when export is cancelled by the user."""
+
+
+class ExportStageTimeout(RuntimeError):
+    """Raised when an export stage exceeds its bounded execution budget."""
 
 
 def _get_migrations_dir() -> Path:
@@ -52,14 +60,204 @@ def _get_migrations_dir() -> Path:
         return Path("app/infra/migrations")
 
 
+class _ExportStageTracker:
+    """Structured stage tracker for product-grade export diagnostics."""
+
+    def __init__(self, progress_callback: Callable[[str, int, int], None] | None):
+        self._progress_callback = progress_callback
+        self._records: list[ExportStageRecord] = []
+        self._active_index: int | None = None
+        self._last_stage_id: str | None = None
+        self._last_stage_label: str | None = None
+
+    @property
+    def current_stage_id(self) -> str | None:
+        if self._active_index is None:
+            return self._last_stage_id
+        return self._records[self._active_index].stage_id
+
+    @property
+    def current_stage_label(self) -> str | None:
+        if self._active_index is None:
+            return self._last_stage_label
+        return self._records[self._active_index].stage_label
+
+    def begin(
+        self,
+        stage_id: ExportStageId,
+        stage_label: str,
+        *,
+        progress_current: int | None = None,
+        progress_total: int = 100,
+        detail: str | None = None,
+    ) -> None:
+        self.finish_active(status="ok")
+        record = ExportStageRecord(
+            stage_id=str(stage_id),
+            stage_label=stage_label,
+            status="running",
+            started_at=time.time(),
+            detail=detail,
+        )
+        self._records.append(record)
+        self._active_index = len(self._records) - 1
+        if detail:
+            logger.info(
+                "Export stage started: stage=%s label=%s detail=%s",
+                stage_id,
+                stage_label,
+                detail,
+            )
+        else:
+            logger.info("Export stage started: stage=%s label=%s", stage_id, stage_label)
+        if self._progress_callback and progress_current is not None:
+            self._progress_callback(stage_label, progress_current, progress_total)
+
+    def heartbeat(self, *, detail: str | None = None) -> None:
+        if self._active_index is None:
+            return
+        record = self._records[self._active_index]
+        if detail:
+            record.detail = detail
+            logger.info(
+                "Export stage heartbeat: stage=%s label=%s detail=%s",
+                record.stage_id,
+                record.stage_label,
+                detail,
+            )
+        else:
+            logger.info(
+                "Export stage heartbeat: stage=%s label=%s",
+                record.stage_id,
+                record.stage_label,
+            )
+
+    def finish_active(self, *, status: str = "ok", detail: str | None = None) -> None:
+        if self._active_index is None:
+            return
+        record = self._records[self._active_index]
+        ended_at = time.time()
+        record.ended_at = ended_at
+        record.elapsed_seconds = max(0.0, ended_at - record.started_at)
+        record.status = status
+        if detail:
+            record.detail = detail
+        logger.info(
+            "Export stage finished: stage=%s label=%s status=%s elapsed=%.3fs%s",
+            record.stage_id,
+            record.stage_label,
+            status,
+            record.elapsed_seconds,
+            f" detail={record.detail}" if record.detail else "",
+        )
+        self._last_stage_id = record.stage_id
+        self._last_stage_label = record.stage_label
+        self._active_index = None
+
+    def fail_active(self, error: Exception | str) -> None:
+        detail = str(error)
+        self.finish_active(status="error", detail=detail)
+
+    def snapshot(self) -> list[ExportStageRecord]:
+        records: list[ExportStageRecord] = []
+        for record in self._records:
+            records.append(
+                ExportStageRecord(
+                    stage_id=record.stage_id,
+                    stage_label=record.stage_label,
+                    status=record.status,
+                    started_at=record.started_at,
+                    ended_at=record.ended_at,
+                    elapsed_seconds=record.elapsed_seconds,
+                    detail=record.detail,
+                )
+            )
+        return records
+
+
 class ProjectExportEngine:
     """Handles export of projects to .hdleproj bundles."""
 
     _SQLITE_FALLBACK_MAX_VARIABLES = 999
     _CORRUPTION_PROBE_TIMEOUT_SEC = 5.0
+    _DEFAULT_FINALIZE_STEP_TIMEOUT_SEC = 30.0
+    _MIN_FINALIZE_STEP_TIMEOUT_SEC = 5.0
+    _MAX_FINALIZE_STEP_TIMEOUT_SEC = 600.0
+    _FINALIZE_HEARTBEAT_SEC = 5.0
 
     def __init__(self):
         self.db_service = DBService.get_instance()
+
+    def _resolve_finalize_step_timeout_sec(self) -> float | None:
+        raw = os.environ.get("HDLE_EXPORT_FINALIZE_STEP_TIMEOUT_SEC", "").strip()
+        if not raw:
+            return self._DEFAULT_FINALIZE_STEP_TIMEOUT_SEC
+        try:
+            parsed = float(raw)
+        except ValueError:
+            logger.warning(
+                "Invalid HDLE_EXPORT_FINALIZE_STEP_TIMEOUT_SEC=%r; using default %.1fs",
+                raw,
+                self._DEFAULT_FINALIZE_STEP_TIMEOUT_SEC,
+            )
+            return self._DEFAULT_FINALIZE_STEP_TIMEOUT_SEC
+        if parsed <= 0:
+            logger.info("Disabled export finalize-step timeout via environment override")
+            return None
+        return max(
+            self._MIN_FINALIZE_STEP_TIMEOUT_SEC,
+            min(self._MAX_FINALIZE_STEP_TIMEOUT_SEC, parsed),
+        )
+
+    def _execute_payload_step(
+        self,
+        payload_conn: sqlite3.Connection,
+        statement: str,
+        parameters: tuple | None = None,
+        *,
+        stage_tracker: _ExportStageTracker | None = None,
+        detail: str,
+        cancel_check: Callable[[], bool] | None = None,
+        timeout_sec: float | None = None,
+    ) -> None:
+        """Run a bounded payload-side SQL step with heartbeat diagnostics."""
+
+        original_handler = lambda: 1 if cancel_check and bool(cancel_check()) else 0
+        started = time.perf_counter()
+        state = {"reason": None, "last_heartbeat": started}
+
+        def _progress_handler() -> int:
+            if cancel_check and bool(cancel_check()):
+                state["reason"] = "cancelled"
+                return 1
+            elapsed = time.perf_counter() - started
+            if timeout_sec and elapsed >= timeout_sec:
+                state["reason"] = "timeout"
+                return 1
+            if (
+                stage_tracker is not None
+                and elapsed - state["last_heartbeat"] >= self._FINALIZE_HEARTBEAT_SEC
+            ):
+                stage_tracker.heartbeat(detail=f"{detail}; elapsed={elapsed:.1f}s")
+                state["last_heartbeat"] = time.perf_counter()
+            return 0
+
+        payload_conn.set_progress_handler(_progress_handler, 2_000)
+        cursor = None
+        try:
+            cursor = payload_conn.execute(statement, parameters or ())
+        except sqlite3.OperationalError as exc:
+            if state["reason"] == "cancelled" and "interrupted" in str(exc).lower():
+                raise ExportCancelled("Export cancelled by user.") from exc
+            if state["reason"] == "timeout" and "interrupted" in str(exc).lower():
+                raise ExportStageTimeout(
+                    f"Export stage timed out after {timeout_sec:.1f}s while {detail}"
+                ) from exc
+            raise
+        finally:
+            if cursor is not None:
+                cursor.close()
+            payload_conn.set_progress_handler(original_handler, 2_000)
 
     def export_project(
         self,
@@ -85,30 +283,61 @@ class ProjectExportEngine:
         """
         start_time = time.time()
         temp_dir = None
+        stage_tracker = _ExportStageTracker(progress_callback)
+        artifact_info: ExportArtifactInfo | None = None
+        artifact_created = False
 
         try:
-            # Preflight checks
             logger.info(f"Starting export of project {project_id} to {out_path}")
+
+            stage_tracker.begin(
+                ExportStageId.PREPARE_CONTEXT,
+                "Preparing export context...",
+                progress_current=0,
+                detail=f"project_id={project_id}; out_path={out_path}",
+            )
+            self._check_cancelled(cancel_check)
+            stage_tracker.finish_active(detail=f"project_id={project_id}")
+
+            stage_tracker.begin(
+                ExportStageId.PREFLIGHT_CHECKS,
+                "Running preflight checks...",
+                progress_current=0,
+                detail=f"project_id={project_id}",
+            )
             self._preflight_checks(project_id, out_path)
             self._check_cancelled(cancel_check)
+            stage_tracker.finish_active(detail="source DB, disk space, and path checks passed")
 
-            # Create temp directory
+            stage_tracker.begin(
+                ExportStageId.CREATE_STAGING_DB,
+                "Creating staging workspace...",
+                progress_current=0,
+            )
             temp_dir = Path(tempfile.mkdtemp(prefix="hdle_export_"))
             logger.info(f"Temp directory: {temp_dir}")
-
-            # Create payload
-            if progress_callback:
-                progress_callback("Creating payload...", 0, 100)
+            stage_tracker.finish_active(detail=str(temp_dir))
 
             payload_path = temp_dir / "payload.sqlite"
             table_counts = self._create_payload(
-                project_id, payload_path, options, progress_callback, cancel_check
+                project_id,
+                payload_path,
+                options,
+                progress_callback,
+                cancel_check,
+                stage_tracker=stage_tracker,
             )
             self._check_cancelled(cancel_check)
 
             pronunciation_count = 0
             extra_files: dict[str, Path] = {}
             if options.include_pronunciation_metadata:
+                stage_tracker.begin(
+                    ExportStageId.EXPORT_PRONUNCIATION_METADATA,
+                    "Exporting pronunciation metadata...",
+                    progress_current=90,
+                    detail=f"project_id={project_id}",
+                )
                 pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
                 pronunciation_count = self._export_pronunciation_metadata(
                     project_id,
@@ -117,17 +346,31 @@ class ProjectExportEngine:
                 )
                 if pronunciation_count > 0:
                     extra_files[PRONUNCIATION_METADATA_FILENAME] = pron_path
+                stage_tracker.finish_active(
+                    detail=f"rows={pronunciation_count}; path={pron_path.name}"
+                )
 
-            # Get project metadata for manifest
+            stage_tracker.begin(
+                ExportStageId.BUILD_MANIFEST,
+                "Building export manifest...",
+                progress_current=91,
+                detail=f"project_id={project_id}",
+            )
             manifest = self._build_manifest(
                 project_id,
                 table_counts,
                 pronunciation_metadata_count=pronunciation_count,
             )
+            stage_tracker.finish_active(
+                detail=f"project_name={manifest.project_name}; total_rows={sum(table_counts.values())}"
+            )
 
-            # Create bundle
-            if progress_callback:
-                progress_callback("Computing checksums...", 92, 100)
+            stage_tracker.begin(
+                ExportStageId.BUILD_BUNDLE,
+                "Building bundle artifact...",
+                progress_current=92,
+                detail=str(out_path),
+            )
             self._check_cancelled(cancel_check)
             bundle_format.create_bundle(
                 payload_path,
@@ -144,45 +387,93 @@ class ProjectExportEngine:
                     else None
                 ),
             )
+            artifact_created = True
+            stage_tracker.finish_active(detail=str(out_path))
+
+            stage_tracker.begin(
+                ExportStageId.VALIDATE_ARTIFACT,
+                "Validating bundle artifact...",
+                progress_current=99,
+                detail=str(out_path),
+            )
+            artifact_validation = bundle_format.validate_bundle_artifact(out_path)
+            artifact_info = ExportArtifactInfo(**artifact_validation)
+            stage_tracker.finish_active(
+                detail=(
+                    f"size={artifact_info.bundle_size_bytes}; "
+                    f"quick_check={artifact_info.payload_quick_check}"
+                )
+            )
 
             elapsed = time.time() - start_time
             logger.info(f"Export completed in {elapsed:.1f}s: {out_path}")
 
-            if progress_callback:
-                progress_callback("Completed", 100, 100)
+            stage_tracker.begin(
+                ExportStageId.COMPLETED,
+                "Completed",
+                progress_current=100,
+                detail=f"artifact={out_path.name}",
+            )
+            stage_tracker.finish_active(detail=f"elapsed={elapsed:.3f}s")
 
             return ExportReport(
                 success=True,
                 bundle_path=out_path,
                 manifest=manifest,
                 elapsed_seconds=elapsed,
+                final_stage_id=str(ExportStageId.COMPLETED),
+                final_stage_label="Completed",
+                stage_history=stage_tracker.snapshot(),
+                artifact_info=artifact_info,
             )
 
         except ExportCancelled:
             elapsed = time.time() - start_time
             logger.info("Export cancelled by user after %.1fs", elapsed)
+            stage_tracker.fail_active("Export cancelled by user.")
             return ExportReport(
                 success=False,
                 elapsed_seconds=elapsed,
                 error_message="Export cancelled by user.",
+                final_stage_id=stage_tracker.current_stage_id,
+                final_stage_label=stage_tracker.current_stage_label,
+                stage_history=stage_tracker.snapshot(),
             )
         except Exception as e:
             elapsed = time.time() - start_time
             logger.exception(f"Export failed after {elapsed:.1f}s")
+            stage_tracker.fail_active(e)
+            if artifact_created and out_path.exists():
+                try:
+                    out_path.unlink()
+                    logger.warning("Removed invalid export artifact after failure: %s", out_path)
+                except Exception:
+                    logger.warning("Failed to remove invalid export artifact: %s", out_path)
             return ExportReport(
                 success=False,
                 elapsed_seconds=elapsed,
                 error_message=str(e),
+                final_stage_id=stage_tracker.current_stage_id,
+                final_stage_label=stage_tracker.current_stage_label,
+                stage_history=stage_tracker.snapshot(),
             )
 
         finally:
-            # Cleanup temp directory
+            stage_tracker.begin(
+                ExportStageId.CLEANUP_TEMP_STATE,
+                "Cleaning up export workspace...",
+                detail=str(temp_dir) if temp_dir else "no temp dir",
+            )
             if temp_dir and temp_dir.exists():
                 try:
                     shutil.rmtree(temp_dir)
                     logger.debug(f"Cleaned up temp dir: {temp_dir}")
+                    stage_tracker.finish_active(detail=f"removed {temp_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
+                    stage_tracker.finish_active(status="warning", detail=str(e))
+            else:
+                stage_tracker.finish_active(detail="nothing to cleanup")
 
     @staticmethod
     def _check_cancelled(cancel_check: Callable[[], bool] | None) -> None:
@@ -343,6 +634,8 @@ class ProjectExportEngine:
         options: ExportOptions,
         progress_callback: Callable[[str, int, int], None] | None,
         cancel_check: Callable[[], bool] | None,
+        *,
+        stage_tracker: _ExportStageTracker | None = None,
     ) -> dict[str, int]:
         """Create payload.sqlite with project data.
 
@@ -369,6 +662,13 @@ class ProjectExportEngine:
         try:
             self._check_cancelled(cancel_check)
             # Apply migrations to create schema
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.APPLY_SCHEMA,
+                    "Applying payload schema...",
+                    progress_current=0,
+                    detail=str(payload_path),
+                )
             migrations_dir = _get_migrations_dir()
             migration_files = sorted(migrations_dir.glob("*.sql"))
 
@@ -377,20 +677,49 @@ class ProjectExportEngine:
                 self._check_cancelled(cancel_check)
                 with open(mig_file, encoding="utf-8") as f:
                     payload_conn.executescript(f.read())
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail=f"migrations={len(migration_files)}")
 
             # Attach host DB
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.ATTACH_HOST_DB,
+                    "Attaching source database...",
+                    progress_current=1,
+                    detail=str(host_db_path),
+                )
             payload_conn.execute("ATTACH DATABASE ? AS host", (str(host_db_path),))
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail=str(host_db_path))
 
             # Disable FK checks during export (we insert in topological order but ATTACH doesn't guarantee)
             payload_conn.execute("PRAGMA foreign_keys = OFF")
 
             # CRITICAL: Ensure FTS tables exist in payload DB before copying data
             # INSERT triggers on document_sentence/term_search reference sentence_fts/term_fts
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.PREPARE_FTS,
+                    "Preparing payload FTS structures...",
+                    progress_current=2,
+                    detail="ensure_fts_tables(main)",
+                )
             ensure_fts_tables(payload_conn, schema="main", rebuild=False)
             logger.info("Ensured FTS tables exist in payload DB")
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail="fts tables ensured")
 
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.RESOLVE_PROJECT_SCOPE,
+                    "Resolving project scope...",
+                    progress_current=3,
+                    detail=f"project_id={project_id}",
+                )
             self._materialize_project_sentence_ids(payload_conn, project_id)
             logger.info("Materialized valid sentence ids for project export")
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail=f"project_id={project_id}")
 
             # Copy data table by table
             table_counts = {}
@@ -401,6 +730,13 @@ class ProjectExportEngine:
                 and t != "project_snapshot"
                 or options.include_snapshots
             ]
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.COPY_TABLES,
+                    "Copying project data into payload...",
+                    progress_current=4,
+                    detail=f"tables={len(export_order)}",
+                )
 
             for i, table_name in enumerate(export_order):
                 self._check_cancelled(cancel_check)
@@ -411,6 +747,14 @@ class ProjectExportEngine:
                         100,
                     )
 
+                table_started = time.perf_counter()
+                logger.info(
+                    "Export table started: table=%s ordinal=%s/%s project_id=%s",
+                    table_name,
+                    i + 1,
+                    len(export_order),
+                    project_id,
+                )
                 count = self._export_table(
                     payload_conn,
                     table_name,
@@ -418,24 +762,78 @@ class ProjectExportEngine:
                     cancel_check=cancel_check,
                 )
                 table_counts[table_name] = count
-                logger.debug(f"Exported {count} rows from {table_name}")
-
-            payload_conn.execute("DROP TABLE IF EXISTS temp_project_sentence_ids")
+                logger.info(
+                    "Export table finished: table=%s rows=%s elapsed=%.3fs",
+                    table_name,
+                    count,
+                    time.perf_counter() - table_started,
+                )
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail=f"tables={len(export_order)}")
 
             # Drop FTS5 virtual tables (will be rebuilt on import)
             self._check_cancelled(cancel_check)
-            logger.info("Dropping FTS5 virtual tables from payload")
-            payload_conn.execute("DROP TABLE IF EXISTS sentence_fts")
-            payload_conn.execute("DROP TABLE IF EXISTS term_fts")
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.PRUNE_PAYLOAD,
+                    "Pruning excluded payload structures...",
+                    progress_current=90,
+                    detail="drop temp table, FTS virtual tables, and excluded system tables",
+                )
+            finalize_timeout_sec = self._resolve_finalize_step_timeout_sec()
+            self._execute_payload_step(
+                payload_conn,
+                "DROP TABLE IF EXISTS temp_project_sentence_ids",
+                stage_tracker=stage_tracker,
+                detail="dropping temp_project_sentence_ids",
+                cancel_check=cancel_check,
+                timeout_sec=finalize_timeout_sec,
+            )
+            self._execute_payload_step(
+                payload_conn,
+                "DROP TABLE IF EXISTS sentence_fts",
+                stage_tracker=stage_tracker,
+                detail="dropping sentence_fts",
+                cancel_check=cancel_check,
+                timeout_sec=finalize_timeout_sec,
+            )
+            self._execute_payload_step(
+                payload_conn,
+                "DROP TABLE IF EXISTS term_fts",
+                stage_tracker=stage_tracker,
+                detail="dropping term_fts",
+                cancel_check=cancel_check,
+                timeout_sec=finalize_timeout_sec,
+            )
 
-            # Drop excluded tables
-            logger.info("Dropping excluded tables from payload")
-            for excluded_table in EXCLUDED_TABLES:
-                payload_conn.execute(f"DROP TABLE IF EXISTS {excluded_table}")
+            remaining_excluded_tables = sorted(EXCLUDED_TABLES - {"sentence_fts", "term_fts"})
+            for excluded_table in remaining_excluded_tables:
+                logger.info("Pruning excluded payload table: %s", excluded_table)
+                self._execute_payload_step(
+                    payload_conn,
+                    f"DROP TABLE IF EXISTS {excluded_table}",
+                    stage_tracker=stage_tracker,
+                    detail=f"dropping excluded table {excluded_table}",
+                    cancel_check=cancel_check,
+                    timeout_sec=finalize_timeout_sec,
+                )
+            if stage_tracker is not None:
+                stage_tracker.finish_active(
+                    detail=f"excluded_tables={len(remaining_excluded_tables)}"
+                )
 
             # Re-enable FK checks and commit
+            if stage_tracker is not None:
+                stage_tracker.begin(
+                    ExportStageId.FINALIZE_SQLITE,
+                    "Finalizing staging SQLite state...",
+                    progress_current=91,
+                    detail=str(payload_path),
+                )
             payload_conn.execute("PRAGMA foreign_keys = ON")
             payload_conn.commit()
+            if stage_tracker is not None:
+                stage_tracker.finish_active(detail="payload committed")
 
             logger.info(f"Payload created: {sum(table_counts.values())} total rows")
             return table_counts

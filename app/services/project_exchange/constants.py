@@ -98,6 +98,7 @@ TABLE_SCHEMA = {
         "pk": "sentence_id",
         "fks": {
             "doc_id": "source_document",
+            "corpus_id": "source_corpus",
         },
     },
     "lemma": {

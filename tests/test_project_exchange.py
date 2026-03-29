@@ -21,6 +21,7 @@ from app.services.project_exchange.dto import (
     ManifestInfo,
     ExportOptions,
     ImportOptions,
+    ExportStageId,
 )
 from app.services.project_exchange import import_engine as import_engine_module
 from app.services.project_exchange.export_engine import ProjectExportEngine
@@ -112,8 +113,8 @@ def populated_project(temp_db):
                 sent_id = i * 5 + j + 1
                 conn.execute(
                     """
-                    INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO document_sentence (sentence_id, doc_id, sent_index, text, corpus_id)
+                    VALUES (?, ?, ?, ?, 1)
                 """,
                     (sent_id, i + 1, j, f"Sentence {sent_id}"),
                 )
@@ -746,6 +747,82 @@ def test_create_bundle_reports_final_stage_progress(tmp_path):
     assert events[-1][1:] == (6, 6)
 
 
+def test_export_report_contains_stage_history_and_artifact_validation(populated_project, tmp_path):
+    engine = ProjectExportEngine()
+    bundle_path = tmp_path / "stage_history_bundle.hdleproj"
+
+    report = engine.export_project(
+        project_id=populated_project,
+        out_path=bundle_path,
+        options=ExportOptions(),
+    )
+
+    assert report.success is True
+    assert report.artifact_info is not None
+    assert report.artifact_info.payload_quick_check == "ok"
+    assert report.final_stage_id == str(ExportStageId.COMPLETED)
+    assert report.final_stage_label == "Completed"
+
+    stage_ids = [record.stage_id for record in report.stage_history]
+    assert str(ExportStageId.APPLY_SCHEMA) in stage_ids
+    assert str(ExportStageId.PRUNE_PAYLOAD) in stage_ids
+    assert str(ExportStageId.VALIDATE_ARTIFACT) in stage_ids
+    assert stage_ids[-1] == str(ExportStageId.COMPLETED)
+
+
+def test_export_prune_skips_duplicate_fts_drop(populated_project, tmp_path, monkeypatch):
+    engine = ProjectExportEngine()
+    bundle_path = tmp_path / "no_duplicate_fts_drop.hdleproj"
+    observed_details: list[str] = []
+    original_execute_payload_step = engine._execute_payload_step
+
+    def wrapped_execute_payload_step(*args, **kwargs):
+        detail = str(kwargs.get("detail") or "")
+        if detail:
+            observed_details.append(detail)
+        return original_execute_payload_step(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "_execute_payload_step", wrapped_execute_payload_step)
+
+    report = engine.export_project(
+        project_id=populated_project,
+        out_path=bundle_path,
+        options=ExportOptions(),
+    )
+
+    assert report.success is True
+    assert "dropping sentence_fts" in observed_details
+    assert "dropping term_fts" in observed_details
+    assert "dropping excluded table sentence_fts" not in observed_details
+    assert "dropping excluded table term_fts" not in observed_details
+
+
+def test_export_fails_if_artifact_validation_fails_and_removes_bundle(
+    populated_project, tmp_path, monkeypatch
+):
+    engine = ProjectExportEngine()
+    bundle_path = tmp_path / "invalid_after_build_bundle.hdleproj"
+
+    monkeypatch.setattr(
+        bundle_format,
+        "validate_bundle_artifact",
+        lambda _bundle: (_ for _ in ()).throw(
+            bundle_format.BundleFormatError("artifact validation failed")
+        ),
+    )
+
+    report = engine.export_project(
+        project_id=populated_project,
+        out_path=bundle_path,
+        options=ExportOptions(),
+    )
+
+    assert report.success is False
+    assert report.final_stage_id == str(ExportStageId.VALIDATE_ARTIFACT)
+    assert "artifact validation failed" in (report.error_message or "")
+    assert bundle_path.exists() is False
+
+
 def test_path_traversal_blocked():
     """Test path traversal attacks are blocked."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1244,6 +1321,46 @@ def test_export_filters_cross_project_sample_sentence_refs(populated_project, te
             assert rows == [(1, 1)]
         finally:
             payload_conn.close()
+
+
+def test_export_import_roundtrip_remaps_document_sentence_corpus_id(populated_project, temp_db):
+    """document_sentence.corpus_id must follow source_corpus remapping on import."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "sentence_corpus_roundtrip.hdleproj"
+
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        import_report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Sentence Corpus Remap"),
+        )
+        assert import_report.success
+        assert import_report.new_project_id is not None
+
+        conn = sqlite3.connect(str(temp_db))
+        try:
+            rows = conn.execute(
+                """
+                SELECT ds.doc_id, ds.corpus_id, sd.corpus_id
+                FROM document_sentence ds
+                JOIN source_document sd ON sd.doc_id = ds.doc_id
+                JOIN source_corpus sc ON sc.corpus_id = ds.corpus_id
+                WHERE sc.project_id = ?
+                LIMIT 5
+                """,
+                (import_report.new_project_id,),
+            ).fetchall()
+            assert rows
+            assert all(int(sentence_corpus_id) == int(document_corpus_id) for _, sentence_corpus_id, document_corpus_id in rows)
+        finally:
+            conn.close()
 
 
 # More integration tests would go here (FTS5 population, self-ref handling, etc.)

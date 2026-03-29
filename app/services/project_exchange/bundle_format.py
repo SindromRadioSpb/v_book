@@ -5,6 +5,9 @@ import hashlib
 import json
 import logging
 import os
+import shutil
+import sqlite3
+import tempfile
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -158,6 +161,36 @@ def read_bundle(bundle_path: Path, extract_dir: Path) -> tuple[ManifestInfo, Pat
 
     logger.info("Bundle validation passed")
     return manifest, payload_path
+
+
+def validate_bundle_artifact(bundle_path: Path) -> dict[str, object]:
+    """Validate a finished bundle artifact and return structured evidence."""
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="hdle_bundle_validate_"))
+    try:
+        manifest, payload_path = read_bundle(bundle_path, temp_dir)
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            quick_check_rows = [
+                str(row[0]) for row in payload_conn.execute("PRAGMA quick_check(1)").fetchall()
+            ]
+        finally:
+            payload_conn.close()
+
+        if not quick_check_rows or any(row.lower() != "ok" for row in quick_check_rows):
+            raise BundleFormatError(
+                "Payload quick_check failed during artifact validation: "
+                + ("; ".join(quick_check_rows) if quick_check_rows else "empty result")
+            )
+
+        return {
+            "bundle_size_bytes": int(bundle_path.stat().st_size),
+            "payload_quick_check": quick_check_rows[0],
+            "manifest_project_name": str(manifest.project_name),
+            "total_rows": int(sum((manifest.table_counts or {}).values())),
+        }
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def peek_manifest(bundle_path: Path) -> ManifestInfo:

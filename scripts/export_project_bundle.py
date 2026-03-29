@@ -61,9 +61,19 @@ def main():
         print(f"  Size: {report.bundle_path.stat().st_size / 1024 / 1024:.1f} MB")
         print(f"  Time: {report.elapsed_seconds:.1f}s")
         print(f"  Total rows: {sum(report.manifest.table_counts.values()):,}")
+        if report.artifact_info is not None:
+            print("  Artifact validation:")
+            print(f"    payload quick_check: {report.artifact_info.payload_quick_check}")
+            print(f"    total rows: {report.artifact_info.total_rows:,}")
         return 0
     else:
-        print(f"\n[FAIL] Export failed: {report.error_message}", file=sys.stderr)
+        if report.final_stage_label:
+            print(
+                f"\n[FAIL] Export failed during '{report.final_stage_label}': {report.error_message}",
+                file=sys.stderr,
+            )
+        else:
+            print(f"\n[FAIL] Export failed: {report.error_message}", file=sys.stderr)
         return 1
 
 

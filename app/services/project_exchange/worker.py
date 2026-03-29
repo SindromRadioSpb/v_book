@@ -66,7 +66,7 @@ class ProjectExportWorker(QThread):
             if report.success:
                 self.finished.emit(report)
             else:
-                self.error.emit(report.error_message or "Export failed")
+                self.error.emit(self._format_export_failure(report))
 
         except Exception as e:
             logger.exception("Export worker error")
@@ -96,6 +96,13 @@ class ProjectExportWorker(QThread):
             return "Export failed: Permission denied. Check file permissions and try again."
         else:
             return f"Export failed: {error_str}"
+
+    @staticmethod
+    def _format_export_failure(report) -> str:
+        error_text = report.error_message or "Export failed"
+        if report.final_stage_label:
+            return f"Export failed during '{report.final_stage_label}': {error_text}"
+        return error_text
 
 
 class ProjectImportWorker(QThread):

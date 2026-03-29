@@ -150,6 +150,7 @@ class ExportProgressDialog(QDialog):
                 else "N/A"
             ),
             f"Time: {report.elapsed_seconds:.1f}s",
+            f"Final stage: {report.final_stage_label or 'N/A'}",
             "",
             "=== Project Metadata ===",
             f"Name: {report.manifest.project_name}",
@@ -167,6 +168,26 @@ class ExportProgressDialog(QDialog):
 
         total_rows = sum(report.manifest.table_counts.values())
         lines.append(f"\nTotal rows: {total_rows:,}")
+
+        if report.artifact_info is not None:
+            lines.extend(
+                [
+                    "",
+                    "=== Artifact Validation ===",
+                    f"Payload quick_check: {report.artifact_info.payload_quick_check}",
+                    f"Bundle size: {report.artifact_info.bundle_size_bytes / 1024 / 1024:.1f} MB",
+                    f"Validated rows: {report.artifact_info.total_rows:,}",
+                ]
+            )
+
+        if report.stage_history:
+            lines.extend(["", "=== Stage History ==="])
+            for record in report.stage_history:
+                elapsed = f"{record.elapsed_seconds:.3f}s" if record.elapsed_seconds else "running"
+                detail = f" | {record.detail}" if record.detail else ""
+                lines.append(
+                    f"  [{record.status}] {record.stage_label} ({record.stage_id}) - {elapsed}{detail}"
+                )
         return "\n".join(lines)
 
 
