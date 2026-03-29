@@ -106,6 +106,7 @@ def test_run_db_smoke_builds_project_scoped_db_and_reprocesses(monkeypatch, tmp_
             engine="stanza",
             engine_version="1.11.1",
             status="ok",
+            effective_engine_id="stanza",
             note=json.dumps({"runtime": {"effective_engine_id": "stanza"}}),
         )
         session.add(run)
@@ -147,6 +148,18 @@ def test_run_db_smoke_builds_project_scoped_db_and_reprocesses(monkeypatch, tmp_
     assert Path(report["db_copy"]).exists()
     assert report["doc_id"] > 0
     assert report["project_id"] > 0
+
+
+def test_extract_runtime_effective_falls_back_to_legacy_note():
+    smoke = _load_smoke_module()
+    run = ProcessorRun(
+        project_id=1,
+        engine="stanza",
+        status="ok",
+        note=json.dumps({"runtime": {"effective_engine_id": "mock"}}),
+    )
+
+    assert smoke._extract_runtime_effective(run) == "mock"
 
 
 def test_assert_expected_source_rejects_non_bundled_payload():

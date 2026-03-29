@@ -167,6 +167,12 @@ def test_process_document_records_configured_vs_effective_runtime_note(monkeypat
         assert note["runtime"]["reason_code"] == "model_missing"
         assert note["runtime"]["runtime_mode"] == "cpu"
         assert note["runtime"]["probe_summary"]["model_path"] == "C:/fake/he"
+        assert run.configured_engine_id == "stanza"
+        assert run.effective_engine_id == "mock"
+        assert run.fallback_used is True
+        assert run.runtime_reason_code == "model_missing"
+        assert run.runtime_mode == "cpu"
+        assert json.loads(run.runtime_probe_summary_json)["model_path"] == "C:/fake/he"
         assert project.nlp_engine == "mock"
         assert run.status == "ok"
     finally:

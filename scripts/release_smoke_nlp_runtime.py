@@ -266,7 +266,7 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
                 "document_status": str(doc.status),
                 "run_engine": str(latest_run.engine) if latest_run is not None else None,
                 "run_status": str(latest_run.status) if latest_run is not None else None,
-                "runtime_effective": _extract_runtime_effective(latest_run.note) if latest_run is not None else None,
+                "runtime_effective": _extract_runtime_effective(latest_run),
                 "created_run_id": int(latest_run.run_id) if latest_run is not None else None,
             }
             report.update(_load_managed_runtime_summary())
@@ -275,7 +275,13 @@ def _run_db_smoke(*, source_db: Path, copy_db_to: Path, doc_id: int) -> dict[str
         _reset_db_service()
 
 
-def _extract_runtime_effective(note_text: str | None) -> str | None:
+def _extract_runtime_effective(run: ProcessorRun | None) -> str | None:
+    if run is None:
+        return None
+    value = getattr(run, "effective_engine_id", None)
+    if value:
+        return str(value)
+    note_text = getattr(run, "note", None)
     if not note_text:
         return None
     try:

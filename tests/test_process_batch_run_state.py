@@ -137,6 +137,12 @@ def test_batch_run_resumes_latest_cancelled_run(monkeypatch) -> None:
         assert runs_after_first[0].status == "cancelled"
         assert runs_after_first[0].docs_processed == 1
         assert runs_after_first[0].last_doc_id == doc_ids[0]
+        assert runs_after_first[0].configured_engine_id == "mock"
+        assert runs_after_first[0].effective_engine_id == "mock"
+        assert runs_after_first[0].fallback_used is False
+        assert runs_after_first[0].runtime_reason_code is None
+        assert runs_after_first[0].runtime_mode == "cpu"
+        assert json.loads(runs_after_first[0].runtime_probe_summary_json)["engine_version"] == "1.0.0"
         first_note = json.loads(runs_after_first[0].note)
         assert first_note["runtime"]["configured_engine_id"] == "mock"
         assert first_note["runtime"]["effective_engine_id"] == "mock"

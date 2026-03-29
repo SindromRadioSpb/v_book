@@ -154,6 +154,45 @@ class ProcessService:
         }
 
     @staticmethod
+    def _build_runtime_provenance_fields(
+        *,
+        runtime_status: NlpRuntimeStatus,
+    ) -> dict[str, Any]:
+        probe_summary = {
+            "package_installed": bool(runtime_status.package_installed),
+            "model_present": bool(runtime_status.model_present),
+            "pipeline_init_ok": bool(runtime_status.pipeline_init_ok),
+            "smoke_ok": bool(runtime_status.smoke_ok),
+            "error_detail": runtime_status.error_detail,
+            "engine_version": runtime_status.engine_version,
+            "model_id": runtime_status.model_id,
+            "model_path": runtime_status.model_path,
+        }
+        return {
+            "configured_engine_id": runtime_status.configured_engine_id,
+            "effective_engine_id": runtime_status.effective_engine_id,
+            "fallback_used": bool(runtime_status.fallback_used),
+            "runtime_reason_code": runtime_status.error_code,
+            "runtime_mode": runtime_status.runtime_mode,
+            "runtime_probe_summary_json": json.dumps(
+                probe_summary,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+
+    @staticmethod
+    def _apply_runtime_provenance_fields(
+        run: ProcessorRun,
+        *,
+        runtime_status: NlpRuntimeStatus,
+    ) -> None:
+        for field_name, field_value in ProcessService._build_runtime_provenance_fields(
+            runtime_status=runtime_status
+        ).items():
+            setattr(run, field_name, field_value)
+
+    @staticmethod
     def _build_runtime_note_payload(
         *,
         runtime_status: NlpRuntimeStatus,
@@ -1043,6 +1082,7 @@ class ProcessService:
                 fallback_used=runtime_status.fallback_used,
                 is_reprocess=is_reprocess,
             ),
+            **self._build_runtime_provenance_fields(runtime_status=runtime_status),
             note=self._build_single_run_note(
                 runtime_status=runtime_status,
                 use_gpu=use_gpu,
@@ -1696,6 +1736,8 @@ class ProcessService:
                     str(verification.get("reason") or "Explicit snapshot backfill resume failed")
                 )
             run = session.get(ProcessorRun, int(verification["run_id"]))
+            if run is not None:
+                self._apply_runtime_provenance_fields(run, runtime_status=runtime_status)
         elif resume_latest:
             verification = self.verify_batch_run_contract(
                 session,
@@ -1710,6 +1752,8 @@ class ProcessService:
             )
             if verification.get("ok"):
                 run = session.get(ProcessorRun, int(verification["run_id"]))
+                if run is not None:
+                    self._apply_runtime_provenance_fields(run, runtime_status=runtime_status)
 
         if run is None:
             run = ProcessorRun(
@@ -1724,6 +1768,7 @@ class ProcessService:
                 status="running",
                 stage="snapshot_backfill",
                 params_hash=params_hash,
+                **self._build_runtime_provenance_fields(runtime_status=runtime_status),
                 note=self._build_batch_run_note(
                     doc_ids=ordered_ids,
                     chunk_size=chunk_size,
@@ -2178,6 +2223,8 @@ class ProcessService:
             if not verification.get("ok"):
                 raise ValueError(str(verification.get("reason") or "Explicit batch resume failed"))
             run = session.get(ProcessorRun, int(verification["run_id"]))
+            if run is not None:
+                self._apply_runtime_provenance_fields(run, runtime_status=runtime_status)
         elif resume_latest:
             verification = self.verify_batch_run_contract(
                 session,
@@ -2192,6 +2239,8 @@ class ProcessService:
             )
             if verification.get("ok"):
                 run = session.get(ProcessorRun, int(verification["run_id"]))
+                if run is not None:
+                    self._apply_runtime_provenance_fields(run, runtime_status=runtime_status)
 
         if run is None:
             run = ProcessorRun(
@@ -2206,6 +2255,7 @@ class ProcessService:
                 status="running",
                 stage="queued",
                 params_hash=params_hash,
+                **self._build_runtime_provenance_fields(runtime_status=runtime_status),
                 note=self._build_batch_run_note(
                     doc_ids=ordered_ids,
                     chunk_size=chunk_size,
