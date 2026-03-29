@@ -675,6 +675,77 @@ def test_checksum_validation_fails_on_tamper(populated_project, temp_db):
             bundle_format.read_bundle(bundle_path, extract_dir)
 
 
+def test_create_bundle_cleans_partial_output_on_failure(tmp_path, monkeypatch):
+    payload_path = tmp_path / PAYLOAD_FILENAME
+    conn = sqlite3.connect(str(payload_path))
+    conn.execute("CREATE TABLE dummy (id INTEGER PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO dummy (value) VALUES ('ok')")
+    conn.commit()
+    conn.close()
+
+    bundle_path = tmp_path / "broken_bundle.hdleproj"
+    manifest = ManifestInfo(
+        bundle_format_version=1,
+        app_version="1.0.0",
+        schema_version=52,
+        project_name="Broken Bundle",
+        project_src_lang="he",
+        project_tgt_lang="ru",
+        exported_at="2026-03-29T00:00:00Z",
+        table_counts={"dummy": 1},
+    )
+
+    original_write = zipfile.ZipFile.write
+
+    def _crash_on_payload(self, filename, arcname=None, *args, **kwargs):
+        if Path(str(filename)).name == PAYLOAD_FILENAME:
+            raise RuntimeError("simulated payload write crash")
+        return original_write(self, filename, arcname, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", _crash_on_payload)
+
+    with pytest.raises(bundle_format.BundleFormatError, match="simulated payload write crash"):
+        bundle_format.create_bundle(payload_path, manifest, bundle_path)
+
+    assert bundle_path.exists() is False
+    assert (tmp_path / "broken_bundle.hdleproj.partial").exists() is False
+
+
+def test_create_bundle_reports_final_stage_progress(tmp_path):
+    payload_path = tmp_path / PAYLOAD_FILENAME
+    conn = sqlite3.connect(str(payload_path))
+    conn.execute("CREATE TABLE dummy (id INTEGER PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO dummy (value) VALUES ('ok')")
+    conn.commit()
+    conn.close()
+
+    bundle_path = tmp_path / "progress_bundle.hdleproj"
+    manifest = ManifestInfo(
+        bundle_format_version=1,
+        app_version="1.0.0",
+        schema_version=52,
+        project_name="Progress Bundle",
+        project_src_lang="he",
+        project_tgt_lang="ru",
+        exported_at="2026-03-29T00:00:00Z",
+        table_counts={"dummy": 1},
+    )
+
+    events: list[tuple[str, int, int]] = []
+    bundle_format.create_bundle(
+        payload_path,
+        manifest,
+        bundle_path,
+        progress_callback=lambda stage, current, total: events.append((stage, current, total)),
+    )
+
+    assert bundle_path.exists() is True
+    assert events
+    assert events[0][0] == "Computing checksums..."
+    assert events[-1][0] == "Finalizing bundle..."
+    assert events[-1][1:] == (6, 6)
+
+
 def test_path_traversal_blocked():
     """Test path traversal attacks are blocked."""
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -164,6 +164,11 @@ class ProjectImportWorker(QThread):
             return (
                 f"Import failed: {error_str}\n\nPlease update HDLE Premium to import this bundle."
             )
+        elif "invalid zip file" in error_str.lower():
+            return (
+                "Import failed: Bundle file is incomplete or not a valid .hdleproj archive.\n\n"
+                "If this bundle came from a cancelled or interrupted export, export it again and wait for the final completion screen."
+            )
         elif "Checksum mismatch" in error_str or "corrupted" in error_str.lower():
             return "Import failed: Bundle is corrupted or tampered.\n\nPlease re-download the bundle and try again."
         elif "Project name" in error_str and "already exists" in error_str:

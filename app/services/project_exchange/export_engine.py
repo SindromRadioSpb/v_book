@@ -127,10 +127,23 @@ class ProjectExportEngine:
 
             # Create bundle
             if progress_callback:
-                progress_callback("Creating bundle...", 95, 100)
+                progress_callback("Computing checksums...", 92, 100)
             self._check_cancelled(cancel_check)
-
-            bundle_format.create_bundle(payload_path, manifest, out_path, extra_files=extra_files)
+            bundle_format.create_bundle(
+                payload_path,
+                manifest,
+                out_path,
+                extra_files=extra_files,
+                progress_callback=(
+                    lambda stage, current, total: progress_callback(
+                        stage,
+                        92 + int((max(0, current) * 7) / max(1, total)),
+                        100,
+                    )
+                    if progress_callback
+                    else None
+                ),
+            )
 
             elapsed = time.time() - start_time
             logger.info(f"Export completed in {elapsed:.1f}s: {out_path}")
@@ -407,6 +420,8 @@ class ProjectExportEngine:
                 table_counts[table_name] = count
                 logger.debug(f"Exported {count} rows from {table_name}")
 
+            payload_conn.execute("DROP TABLE IF EXISTS temp_project_sentence_ids")
+
             # Drop FTS5 virtual tables (will be rebuilt on import)
             self._check_cancelled(cancel_check)
             logger.info("Dropping FTS5 virtual tables from payload")
@@ -663,13 +678,16 @@ class ProjectExportEngine:
             return 0
 
         if table_name == "tm_global":
-            table_exists = payload_conn.execute(
+            table_exists_cursor = payload_conn.execute(
                 "SELECT 1 FROM host.sqlite_master WHERE type='table' AND name='tm_global'"
-            ).fetchone()
+            )
+            table_exists = table_exists_cursor.fetchone()
+            table_exists_cursor.close()
             if not table_exists:
                 logger.debug("Host table tm_global not found, skipping export")
                 return 0
 
+        cursor = None
         try:
             self._check_cancelled(cancel_check)
             cursor = payload_conn.execute(query, (project_id,))
@@ -684,6 +702,9 @@ class ProjectExportEngine:
             if cancel_check and bool(cancel_check()) and "interrupted" in str(exc).lower():
                 raise ExportCancelled("Export cancelled by user.") from exc
             raise
+        finally:
+            if cursor is not None:
+                cursor.close()
 
     def _build_manifest(
         self,

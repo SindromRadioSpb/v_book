@@ -68,3 +68,12 @@ def test_dictionary_import_worker_reports_busy_when_heavy_slot_taken(monkeypatch
     assert errors
     assert "Dictionary Import" in errors[0]
     assert "Project Import (bundle.hdle)" in errors[0]
+
+
+def test_project_import_worker_formats_invalid_zip_as_interrupted_export_hint(tmp_path):
+    worker = ProjectImportWorker(tmp_path / "broken_bundle.hdleproj", ImportOptions())
+
+    message = worker._make_user_friendly_error(RuntimeError("Invalid ZIP file: File is not a zip file"))
+
+    assert "incomplete or not a valid .hdleproj archive" in message
+    assert "cancelled or interrupted export" in message

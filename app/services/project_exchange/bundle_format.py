@@ -1,9 +1,12 @@
 """Bundle format handling: ZIP creation, extraction, validation."""
 
+import contextlib
 import hashlib
 import json
 import logging
+import os
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from app.infra.security import validate_file_size, validate_path_security
@@ -31,6 +34,7 @@ def create_bundle(
     out_path: Path,
     *,
     extra_files: dict[str, Path] | None = None,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> None:
     """Create a .hdleproj bundle (ZIP) from payload and manifest.
 
@@ -48,32 +52,50 @@ def create_bundle(
     # Compute checksums
     logger.info("Computing checksums...")
     checksums = _compute_checksums(payload_path, manifest, extra_files=extra_files or {})
+    if progress_callback:
+        progress_callback("Computing checksums...", 1, 6)
 
     # Create ZIP
     logger.info(f"Creating bundle: {out_path}")
+    temp_out_path = out_path.with_suffix(f"{out_path.suffix}.partial")
+    temp_out_path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(FileNotFoundError):
+        temp_out_path.unlink()
     try:
-        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        with zipfile.ZipFile(temp_out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             # Add manifest.json
             manifest_json = json.dumps(manifest.to_dict(), indent=2)
             zf.writestr(MANIFEST_FILENAME, manifest_json)
+            if progress_callback:
+                progress_callback("Writing manifest...", 2, 6)
 
             # Add payload.sqlite
             zf.write(payload_path, PAYLOAD_FILENAME)
+            if progress_callback:
+                progress_callback("Writing payload...", 4, 6)
 
             # Add checksums.json
             checksums_json = json.dumps(checksums, indent=2)
             zf.writestr(CHECKSUMS_FILENAME, checksums_json)
+            if progress_callback:
+                progress_callback("Writing checksums...", 5, 6)
 
             # Add optional sidecar files (metadata-only sections)
             for arcname, local_path in (extra_files or {}).items():
                 validate_path_security(local_path, operation="export_bundle")
                 zf.write(local_path, arcname)
+            if progress_callback:
+                progress_callback("Finalizing bundle...", 6, 6)
+
+        os.replace(temp_out_path, out_path)
 
         logger.info(
             f"Bundle created successfully: {out_path} ({out_path.stat().st_size / 1024 / 1024:.1f} MB)"
         )
     except Exception as e:
         logger.exception("Failed to create bundle")
+        with contextlib.suppress(FileNotFoundError):
+            temp_out_path.unlink()
         raise BundleFormatError(f"Failed to create bundle: {e}") from e
 
 
