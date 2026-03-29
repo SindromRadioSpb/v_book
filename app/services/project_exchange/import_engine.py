@@ -25,9 +25,13 @@ from app.services.project_exchange.constants import (
     TABLE_SCHEMA,
 )
 from app.services.project_exchange.dto import (
+    ImportArtifactInfo,
     ImportOptions,
     ImportPreflightReport,
     ImportReport,
+    ImportStageId,
+    ImportStageRecord,
+    ImportVerificationInfo,
 )
 from app.services.pronunciation_import_export_service import PronunciationImportExportService
 
@@ -49,6 +53,18 @@ class ProjectImportEngine:
     _MAX_LEMMA_GATE_BATCH_CAP = 10000
     _DEFAULT_GENERIC_GATE_BATCH_SIZE = 200
     _MONOLITHIC_IMPORT_TABLES = {"library", "dict_project", "tm_global"}
+    _STAGE_LABELS: dict[ImportStageId, str] = {
+        ImportStageId.PREFLIGHT_BUNDLE: "Validating bundle artifact",
+        ImportStageId.PREFLIGHT_COMPATIBILITY: "Checking compatibility",
+        ImportStageId.PREPARE_CONNECTIONS: "Preparing import connections",
+        ImportStageId.CHECK_IMPORTABILITY: "Checking importability",
+        ImportStageId.COMPUTE_OFFSETS: "Computing ID offsets",
+        ImportStageId.IMPORT_TABLES: "Importing data",
+        ImportStageId.IMPORT_PRONUNCIATION_METADATA: "Importing pronunciation metadata",
+        ImportStageId.VERIFY_IMPORTED_PROJECT: "Verifying imported project",
+        ImportStageId.CLEANUP_PARTIAL_ROWS: "Cleaning partial import rows",
+        ImportStageId.COMPLETED: "Completed",
+    }
 
     def __init__(self):
         self.db_service = DBService.get_instance()
@@ -56,6 +72,8 @@ class ProjectImportEngine:
         self._lemma_gate_batch_cap = self._DEFAULT_LEMMA_GATE_BATCH_CAP
         self._gate_trace_path: Path | None = None
         self._gate_trace_lock = threading.Lock()
+        self._last_cleanup_status: str | None = None
+        self._last_cleanup_error: str | None = None
 
     def import_project(
         self,
@@ -84,25 +102,85 @@ class ProjectImportEngine:
         warnings = []
         host_conn = None
         payload_conn = None
+        artifact_info: ImportArtifactInfo | None = None
+        verification_info: ImportVerificationInfo | None = None
+        cleanup_context: dict[str, object] = {
+            "new_project_id": None,
+            "inserted_library_ids": [],
+            "inserted_tm_global_ids": [],
+        }
+        stage_history: list[ImportStageRecord] = []
+        current_stage: ImportStageRecord | None = None
+        result_report: ImportReport | None = None
         self._lemma_batch_size = self._resolve_lemma_batch_size()
         self._lemma_gate_batch_cap = self._resolve_lemma_gate_batch_cap()
         self._configure_gate_trace(gate_trace_path)
+        self._last_cleanup_status = None
+        self._last_cleanup_error = None
+
+        def _begin_stage(stage_id: ImportStageId, *, detail: str | None = None) -> None:
+            nonlocal current_stage
+            now = time.time()
+            if current_stage is not None and current_stage.ended_at is None:
+                current_stage.ended_at = now
+                current_stage.elapsed_seconds = max(0.0, now - current_stage.started_at)
+                if current_stage.status == "running":
+                    current_stage.status = "ok"
+            current_stage = ImportStageRecord(
+                stage_id=str(stage_id),
+                stage_label=self._STAGE_LABELS[stage_id],
+                status="running",
+                started_at=now,
+                detail=detail,
+            )
+            stage_history.append(current_stage)
+            logger.info("Import stage start: %s", current_stage.stage_id)
+
+        def _finish_stage(status: str = "ok", *, detail: str | None = None) -> None:
+            nonlocal current_stage
+            if current_stage is None or current_stage.ended_at is not None:
+                return
+            now = time.time()
+            current_stage.ended_at = now
+            current_stage.elapsed_seconds = max(0.0, now - current_stage.started_at)
+            current_stage.status = status
+            if detail:
+                current_stage.detail = detail
+            logger.info(
+                "Import stage finish: %s status=%s detail=%s",
+                current_stage.stage_id,
+                status,
+                current_stage.detail or "",
+            )
 
         try:
+            _begin_stage(ImportStageId.PREFLIGHT_BUNDLE)
             self._check_cancelled(cancel_check)
 
             # Extract and validate bundle
             logger.info(f"Starting import from {bundle_path}")
             if progress_callback:
-                progress_callback("Validating bundle...", 0, 100)
+                progress_callback(self._STAGE_LABELS[ImportStageId.PREFLIGHT_BUNDLE] + "...", 0, 100)
 
             temp_dir = Path(tempfile.mkdtemp(prefix="hdle_import_"))
             manifest, payload_path = bundle_format.read_bundle(bundle_path, temp_dir)
+            artifact_info = self._build_import_artifact_info(bundle_path, manifest, payload_path)
             self._check_cancelled(cancel_check)
+            _finish_stage(
+                detail=(
+                    f"project={manifest.project_name}; total_rows={artifact_info.total_rows:,}; "
+                    f"payload_quick_check={artifact_info.payload_quick_check}"
+                )
+            )
 
             # Preflight checks
+            _begin_stage(ImportStageId.PREFLIGHT_COMPATIBILITY)
             if progress_callback:
-                progress_callback("Checking compatibility...", 5, 100)
+                progress_callback(
+                    self._STAGE_LABELS[ImportStageId.PREFLIGHT_COMPATIBILITY] + "...",
+                    5,
+                    100,
+                )
 
             self._preflight_checks(manifest)
             self._check_cancelled(cancel_check)
@@ -111,10 +189,21 @@ class ProjectImportEngine:
             final_project_name = self._resolve_project_name(
                 manifest.project_name, options, warnings
             )
+            _finish_stage(
+                detail=(
+                    f"host_schema={self._get_host_schema_version()}; "
+                    f"target_name={final_project_name}"
+                )
+            )
 
             # Compute ID offsets
+            _begin_stage(ImportStageId.PREPARE_CONNECTIONS)
             if progress_callback:
-                progress_callback("Computing ID offsets...", 10, 100)
+                progress_callback(
+                    self._STAGE_LABELS[ImportStageId.PREPARE_CONNECTIONS] + "...",
+                    10,
+                    100,
+                )
 
             host_conn = sqlite3.connect(self.db_service.db_manager.db_path)
             # FK checks will be done at COMMIT time
@@ -122,16 +211,36 @@ class ProjectImportEngine:
 
             payload_conn = sqlite3.connect(str(payload_path))
             payload_conn.execute("PRAGMA foreign_keys = ON")
+            _finish_stage(detail="host_db_and_payload_opened")
 
+            _begin_stage(ImportStageId.CHECK_IMPORTABILITY)
+            if progress_callback:
+                progress_callback(
+                    self._STAGE_LABELS[ImportStageId.CHECK_IMPORTABILITY] + "...",
+                    12,
+                    100,
+                )
             self._preflight_payload_document_uniqueness(payload_conn)
+            self._check_cancelled(cancel_check)
+            _finish_stage(detail="payload_duplicate_document_check=ok")
+
+            _begin_stage(ImportStageId.COMPUTE_OFFSETS)
+            if progress_callback:
+                progress_callback(
+                    self._STAGE_LABELS[ImportStageId.COMPUTE_OFFSETS] + "...",
+                    15,
+                    100,
+                )
 
             offsets = self._compute_offsets(host_conn, payload_conn, cancel_check=cancel_check)
+            _finish_stage(detail=f"tables_with_offsets={len(offsets)}")
 
             # Transactional import
+            _begin_stage(ImportStageId.IMPORT_TABLES)
             if progress_callback:
-                progress_callback("Importing data...", 15, 100)
+                progress_callback(self._STAGE_LABELS[ImportStageId.IMPORT_TABLES] + "...", 18, 100)
 
-            new_project_id, table_counts = self._import_tables(
+            new_project_id, table_counts, cleanup_context = self._import_tables(
                 host_conn,
                 payload_conn,
                 offsets,
@@ -141,47 +250,115 @@ class ProjectImportEngine:
                 cancel_check=cancel_check,
             )
             self._check_cancelled(cancel_check)
+            _finish_stage(
+                detail=(
+                    f"new_project_id={new_project_id}; imported_rows={sum(table_counts.values()):,}"
+                )
+            )
 
             pron_path = temp_dir / PRONUNCIATION_METADATA_FILENAME
             if pron_path.exists():
+                _begin_stage(ImportStageId.IMPORT_PRONUNCIATION_METADATA)
                 self._import_pronunciation_metadata(
                     pron_path,
                     warnings,
                     cancel_check=cancel_check,
                 )
+                self._check_cancelled(cancel_check)
+                _finish_stage(detail="pronunciation_metadata_sidecar_processed")
+
+            _begin_stage(ImportStageId.VERIFY_IMPORTED_PROJECT)
+            if progress_callback:
+                progress_callback(
+                    self._STAGE_LABELS[ImportStageId.VERIFY_IMPORTED_PROJECT] + "...",
+                    95,
+                    100,
+                )
+            verification_info = self._verify_imported_project(
+                host_conn,
+                new_project_id,
+                final_project_name,
+                table_counts,
+            )
+            _finish_stage(
+                detail=(
+                    f"documents={verification_info.verified_document_count:,}; "
+                    f"sentences={verification_info.verified_sentence_count:,}; "
+                    f"lemmas={verification_info.verified_lemma_count:,}"
+                )
+            )
 
             elapsed = time.time() - start_time
             logger.info(f"Import completed in {elapsed:.1f}s, new project ID: {new_project_id}")
 
+            _begin_stage(ImportStageId.COMPLETED)
             if progress_callback:
-                progress_callback("Completed", 100, 100)
+                progress_callback(self._STAGE_LABELS[ImportStageId.COMPLETED], 100, 100)
+            _finish_stage(detail="import_successfully_verified")
 
-            return ImportReport(
+            result_report = ImportReport(
                 success=True,
                 new_project_id=new_project_id,
                 new_project_name=final_project_name,
                 table_counts=table_counts,
                 warnings=warnings,
                 elapsed_seconds=elapsed,
+                final_stage_id=str(ImportStageId.COMPLETED),
+                final_stage_label=self._STAGE_LABELS[ImportStageId.COMPLETED],
+                artifact_info=artifact_info,
+                verification_info=verification_info,
             )
 
-        except ImportCancelledError:
+        except ImportCancelledError as exc:
             elapsed = time.time() - start_time
             logger.info(f"Import cancelled after {elapsed:.1f}s")
-            return ImportReport(
+            failed_stage_id = current_stage.stage_id if current_stage is not None else None
+            failed_stage_label = current_stage.stage_label if current_stage is not None else None
+            _finish_stage(status="cancelled", detail=str(exc))
+            result_report = ImportReport(
                 success=False,
                 elapsed_seconds=elapsed,
                 error_message="Import cancelled by user",
                 warnings=warnings,
+                failure_code="import_cancelled",
+                artifact_info=artifact_info,
+                final_stage_id=failed_stage_id,
+                final_stage_label=failed_stage_label,
             )
         except Exception as e:
             elapsed = time.time() - start_time
             logger.exception(f"Import failed after {elapsed:.1f}s")
-            return ImportReport(
+            failed_stage_id = current_stage.stage_id if current_stage is not None else None
+            failed_stage_label = current_stage.stage_label if current_stage is not None else None
+            _finish_stage(status="failed", detail=str(e))
+            if host_conn is not None:
+                cleanup_project_id = cleanup_context.get("new_project_id")
+                cleanup_library_ids = cleanup_context.get("inserted_library_ids", [])
+                cleanup_tm_ids = cleanup_context.get("inserted_tm_global_ids", [])
+                if cleanup_project_id is not None or cleanup_library_ids or cleanup_tm_ids:
+                    try:
+                        _begin_stage(ImportStageId.CLEANUP_PARTIAL_ROWS)
+                        cleanup_status, cleanup_error = self._cleanup_partial_import(
+                            host_conn,
+                            new_project_id=cleanup_project_id,
+                            inserted_library_ids=list(cleanup_library_ids),
+                            inserted_tm_global_ids=list(cleanup_tm_ids),
+                        )
+                        _finish_stage(
+                            status="ok" if cleanup_status != "failed" else "failed",
+                            detail=cleanup_error or cleanup_status,
+                        )
+                    except Exception:
+                        logger.exception("Unexpected cleanup-stage failure during import error handling")
+            result_report = ImportReport(
                 success=False,
                 elapsed_seconds=elapsed,
                 error_message=str(e),
                 warnings=warnings,
+                failure_code=self._classify_failure_code(e),
+                artifact_info=artifact_info,
+                final_stage_id=failed_stage_id,
+                final_stage_label=failed_stage_label,
             )
 
         finally:
@@ -203,6 +380,36 @@ class ProjectImportEngine:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp dir {temp_dir}: {e}")
             self._gate_trace_path = None
+
+            if result_report is None:
+                result_report = ImportReport(
+                    success=False,
+                    elapsed_seconds=time.time() - start_time,
+                    error_message="Import failed before report creation",
+                    failure_code="import_internal_error",
+                    warnings=warnings,
+                    artifact_info=artifact_info,
+                )
+
+            if current_stage is not None and current_stage.ended_at is None:
+                _finish_stage(
+                    status="ok" if result_report.success else "failed",
+                    detail=current_stage.detail,
+                )
+
+            if self._last_cleanup_status is not None:
+                result_report.cleanup_status = self._last_cleanup_status
+                result_report.cleanup_error_message = self._last_cleanup_error
+            elif not result_report.success:
+                result_report.cleanup_status = "not_needed"
+
+            if not result_report.final_stage_id and stage_history:
+                final_stage = stage_history[-1]
+                result_report.final_stage_id = final_stage.stage_id
+                result_report.final_stage_label = final_stage.stage_label
+            result_report.stage_history = list(stage_history)
+
+        return result_report
 
     def preflight_import(
         self,
@@ -233,6 +440,59 @@ class ProjectImportEngine:
             total_rows=total_rows,
             warnings=list(warnings),
         )
+
+    @classmethod
+    def get_stage_label(cls, stage_id: str | ImportStageId | None) -> str:
+        """Resolve a stable import stage label from its identifier."""
+        if stage_id is None:
+            return "Unknown stage"
+        try:
+            normalized = ImportStageId(str(stage_id))
+        except ValueError:
+            return str(stage_id)
+        return cls._STAGE_LABELS.get(normalized, str(stage_id))
+
+    def _build_import_artifact_info(
+        self,
+        bundle_path: Path,
+        manifest,
+        payload_path: Path,
+    ) -> ImportArtifactInfo:
+        payload_conn = sqlite3.connect(str(payload_path))
+        try:
+            quick_check_rows = [
+                str(row[0]) for row in payload_conn.execute("PRAGMA quick_check(1)").fetchall()
+            ]
+        finally:
+            payload_conn.close()
+
+        if not quick_check_rows or any(row.lower() != "ok" for row in quick_check_rows):
+            detail = "; ".join(quick_check_rows) if quick_check_rows else "empty result"
+            raise ValueError(
+                "Bundle payload quick_check failed before import mutation: " + detail
+            )
+
+        return ImportArtifactInfo(
+            bundle_size_bytes=int(bundle_path.stat().st_size),
+            payload_quick_check=quick_check_rows[0],
+            manifest_project_name=str(manifest.project_name),
+            total_rows=int(sum((manifest.table_counts or {}).values())),
+        )
+
+    @staticmethod
+    def _classify_failure_code(error: Exception) -> str:
+        error_str = str(error).lower()
+        if "invalid zip file" in error_str:
+            return "invalid_archive"
+        if "checksum mismatch" in error_str or "corrupted" in error_str:
+            return "corrupted_bundle"
+        if "requires schema" in error_str or "unsupported bundle format" in error_str:
+            return "incompatible_bundle"
+        if "duplicate source documents" in error_str:
+            return "payload_duplicate_documents"
+        if "verification failed" in error_str:
+            return "post_import_verification_failed"
+        return "import_failed"
 
     @staticmethod
     def _check_cancelled(cancel_check: Callable[[], bool] | None) -> None:
@@ -663,7 +923,7 @@ class ProjectImportEngine:
         progress_callback: Callable[[str, int, int], None] | None,
         *,
         cancel_check: Callable[[], bool] | None = None,
-    ) -> tuple[int, dict[str, int]]:
+    ) -> tuple[int, dict[str, int], dict[str, object]]:
         """Import all tables with bounded write-lock windows.
 
         Args:
@@ -676,7 +936,7 @@ class ProjectImportEngine:
             cancel_check: Optional cancellation callback
 
         Returns:
-            Tuple of (new_project_id, table_counts)
+            Tuple of (new_project_id, table_counts, cleanup_context)
 
         Raises:
             Exception: On import failure/cancellation
@@ -801,7 +1061,11 @@ class ProjectImportEngine:
 
             logger.info("Import committed successfully")
 
-            return new_project_id, table_counts
+            return new_project_id, table_counts, {
+                "new_project_id": new_project_id,
+                "inserted_library_ids": list(inserted_library_ids),
+                "inserted_tm_global_ids": list(inserted_tm_global_ids),
+            }
 
         except ImportCancelledError:
             self._cleanup_partial_import(
@@ -828,10 +1092,12 @@ class ProjectImportEngine:
         new_project_id: int | None,
         inserted_library_ids: list[int],
         inserted_tm_global_ids: list[int],
-    ) -> None:
+    ) -> tuple[str, str | None]:
         """Best-effort cleanup for partially imported rows after cancel/failure."""
         if new_project_id is None and not inserted_library_ids and not inserted_tm_global_ids:
-            return
+            self._last_cleanup_status = "not_needed"
+            self._last_cleanup_error = None
+            return "not_needed", None
 
         try:
 
@@ -874,8 +1140,113 @@ class ProjectImportEngine:
                 action=_cleanup_action,
             )
             logger.info("Cleaned up partial import rows")
+            self._last_cleanup_status = "completed"
+            self._last_cleanup_error = None
+            return "completed", None
         except Exception as cleanup_exc:
             logger.warning("Failed to cleanup partial import rows: %s", cleanup_exc)
+            self._last_cleanup_status = "failed"
+            self._last_cleanup_error = str(cleanup_exc)
+            return "failed", str(cleanup_exc)
+
+    def _verify_imported_project(
+        self,
+        host_conn: sqlite3.Connection,
+        new_project_id: int | None,
+        final_project_name: str,
+        table_counts: dict[str, int],
+    ) -> ImportVerificationInfo:
+        """Verify that the imported project is readable and internally coherent."""
+        if new_project_id is None:
+            raise ValueError("Post-import verification failed: imported project id is missing")
+
+        project_row = host_conn.execute(
+            "SELECT name FROM dict_project WHERE project_id = ?",
+            (int(new_project_id),),
+        ).fetchone()
+        if project_row is None:
+            raise ValueError("Post-import verification failed: imported project row is missing")
+
+        project_name_matches = str(project_row[0]) == str(final_project_name)
+        if not project_name_matches:
+            raise ValueError(
+                "Post-import verification failed: imported project name does not match the target name"
+            )
+
+        verified_corpus_count = int(
+            host_conn.execute(
+                "SELECT COUNT(*) FROM source_corpus WHERE project_id = ?",
+                (int(new_project_id),),
+            ).fetchone()[0]
+            or 0
+        )
+        verified_document_count = int(
+            host_conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM source_document sd
+                JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id
+                WHERE sc.project_id = ?
+                """,
+                (int(new_project_id),),
+            ).fetchone()[0]
+            or 0
+        )
+        verified_sentence_count = int(
+            host_conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM document_sentence ds
+                JOIN source_document sd ON sd.doc_id = ds.doc_id
+                JOIN source_corpus sc ON sc.corpus_id = sd.corpus_id
+                WHERE sc.project_id = ?
+                """,
+                (int(new_project_id),),
+            ).fetchone()[0]
+            or 0
+        )
+        verified_lemma_count = int(
+            host_conn.execute(
+                "SELECT COUNT(*) FROM lemma WHERE project_id = ?",
+                (int(new_project_id),),
+            ).fetchone()[0]
+            or 0
+        )
+
+        expected_corpus_count = int(table_counts.get("source_corpus", 0) or 0)
+        expected_document_count = int(table_counts.get("source_document", 0) or 0)
+        expected_sentence_count = int(table_counts.get("document_sentence", 0) or 0)
+        expected_lemma_count = int(table_counts.get("lemma", 0) or 0)
+
+        if verified_corpus_count != expected_corpus_count:
+            raise ValueError(
+                "Post-import verification failed: source_corpus count mismatch "
+                f"(expected {expected_corpus_count}, got {verified_corpus_count})"
+            )
+        if verified_document_count != expected_document_count:
+            raise ValueError(
+                "Post-import verification failed: source_document count mismatch "
+                f"(expected {expected_document_count}, got {verified_document_count})"
+            )
+        if verified_sentence_count != expected_sentence_count:
+            raise ValueError(
+                "Post-import verification failed: document_sentence count mismatch "
+                f"(expected {expected_sentence_count}, got {verified_sentence_count})"
+            )
+        if verified_lemma_count != expected_lemma_count:
+            raise ValueError(
+                "Post-import verification failed: lemma count mismatch "
+                f"(expected {expected_lemma_count}, got {verified_lemma_count})"
+            )
+
+        return ImportVerificationInfo(
+            project_row_found=True,
+            project_name_matches=True,
+            verified_corpus_count=verified_corpus_count,
+            verified_document_count=verified_document_count,
+            verified_sentence_count=verified_sentence_count,
+            verified_lemma_count=verified_lemma_count,
+        )
 
     def _resolve_import_batch_size(self, table_name: str) -> int:
         if table_name == "lemma":

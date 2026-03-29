@@ -6,8 +6,11 @@ from app.services.project_exchange.dto import (
     ExportArtifactInfo,
     ExportReport,
     ExportStageRecord,
+    ImportArtifactInfo,
     ImportPreflightReport,
     ImportReport,
+    ImportStageRecord,
+    ImportVerificationInfo,
     ManifestInfo,
 )
 from app.ui.dialogs.project_exchange_dialogs import ImportPreviewDialog, ImportProgressDialog
@@ -65,18 +68,90 @@ def test_import_progress_dialog_shows_success_details_and_open_flag(qtbot):
         table_counts={"source_document": 2, "document_sentence": 5},
         warnings=["Renamed on import"],
         elapsed_seconds=1.5,
+        final_stage_id="completed",
+        final_stage_label="Completed",
+        artifact_info=ImportArtifactInfo(
+            bundle_size_bytes=2,
+            payload_quick_check="ok",
+            manifest_project_name="Imported Project",
+            total_rows=7,
+        ),
+        verification_info=ImportVerificationInfo(
+            project_row_found=True,
+            project_name_matches=True,
+            verified_corpus_count=1,
+            verified_document_count=2,
+            verified_sentence_count=5,
+            verified_lemma_count=0,
+        ),
+        stage_history=[
+            ImportStageRecord(
+                stage_id="verify_imported_project",
+                stage_label="Verifying imported project",
+                status="ok",
+                started_at=0.0,
+                ended_at=1.0,
+                elapsed_seconds=1.0,
+                detail="documents=2; sentences=5",
+            )
+        ],
     )
 
     dialog.set_completed(report)
 
     assert dialog.details_text.isHidden() is False
-    assert "Imported Project" in dialog.details_text.toPlainText()
+    details = dialog.details_text.toPlainText()
+    assert "Imported Project" in details
+    assert "Artifact Validation" in details
+    assert "Post-import Verification" in details
+    assert "Stage History" in details
+    assert "verify_imported_project" in details
     assert dialog.should_open_project() is False
 
     dialog.on_open_project()
 
     assert dialog.should_open_project() is True
     assert dialog.get_new_project_id() == 42
+
+
+def test_import_progress_dialog_renders_failure_stage_and_cleanup_details(qtbot):
+    dialog = ImportProgressDialog()
+    qtbot.addWidget(dialog)
+
+    report = ImportReport(
+        success=False,
+        elapsed_seconds=2.5,
+        error_message="Bundle contains duplicate source documents",
+        failure_code="payload_duplicate_documents",
+        final_stage_id="check_importability",
+        final_stage_label="Checking importability",
+        cleanup_status="not_needed",
+        artifact_info=ImportArtifactInfo(
+            bundle_size_bytes=2,
+            payload_quick_check="ok",
+            manifest_project_name="Bundle Project",
+            total_rows=10,
+        ),
+        stage_history=[
+            ImportStageRecord(
+                stage_id="check_importability",
+                stage_label="Checking importability",
+                status="failed",
+                started_at=0.0,
+                ended_at=2.5,
+                elapsed_seconds=2.5,
+                detail="payload_duplicate_document_check=failed",
+            )
+        ],
+    )
+
+    dialog.set_completed(report)
+
+    assert "Import failed during 'Checking importability'" == dialog.stage_label.text()
+    details = dialog.details_text.toPlainText()
+    assert "Failure code: payload_duplicate_documents" in details
+    assert "Cleanup status: not_needed" in details
+    assert "Stage History" in details
 
 
 def test_export_progress_dialog_renders_artifact_validation_and_stage_history(qtbot, tmp_path):

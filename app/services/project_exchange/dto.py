@@ -50,6 +50,58 @@ class ExportArtifactInfo:
     validation_method: str = "bundle_format.read_bundle+payload.quick_check"
 
 
+class ImportStageId(StrEnum):
+    """Stable stage identities for the project import pipeline."""
+
+    PREFLIGHT_BUNDLE = "preflight_bundle"
+    PREFLIGHT_COMPATIBILITY = "preflight_compatibility"
+    PREPARE_CONNECTIONS = "prepare_connections"
+    CHECK_IMPORTABILITY = "check_importability"
+    COMPUTE_OFFSETS = "compute_offsets"
+    IMPORT_TABLES = "import_tables"
+    IMPORT_PRONUNCIATION_METADATA = "import_pronunciation_metadata"
+    VERIFY_IMPORTED_PROJECT = "verify_imported_project"
+    CLEANUP_PARTIAL_ROWS = "cleanup_partial_rows"
+    COMPLETED = "completed"
+
+
+@dataclass
+class ImportStageRecord:
+    """Observed import stage transition."""
+
+    stage_id: str
+    stage_label: str
+    status: str
+    started_at: float
+    ended_at: float | None = None
+    elapsed_seconds: float = 0.0
+    detail: str | None = None
+
+
+@dataclass
+class ImportArtifactInfo:
+    """Pre-mutation artifact validation details for import."""
+
+    bundle_size_bytes: int
+    payload_quick_check: str
+    manifest_project_name: str
+    total_rows: int
+    validation_method: str = "bundle_format.read_bundle+payload.quick_check"
+
+
+@dataclass
+class ImportVerificationInfo:
+    """Post-import verification evidence."""
+
+    project_row_found: bool
+    project_name_matches: bool
+    verified_corpus_count: int
+    verified_document_count: int
+    verified_sentence_count: int
+    verified_lemma_count: int
+    verification_method: str = "post_import_readback"
+
+
 @dataclass
 class ExportOptions:
     """Options for project export."""
@@ -77,6 +129,7 @@ class ImportPreflightReport:
     name_conflict: bool = False
     total_rows: int = 0
     warnings: list[str] = field(default_factory=list)
+    artifact_info: ImportArtifactInfo | None = None
 
 
 @dataclass
@@ -149,3 +202,11 @@ class ImportReport:
     warnings: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     error_message: str | None = None
+    failure_code: str | None = None
+    final_stage_id: str | None = None
+    final_stage_label: str | None = None
+    stage_history: list[ImportStageRecord] = field(default_factory=list)
+    artifact_info: ImportArtifactInfo | None = None
+    verification_info: ImportVerificationInfo | None = None
+    cleanup_status: str | None = None
+    cleanup_error_message: str | None = None

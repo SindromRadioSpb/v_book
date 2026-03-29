@@ -22,6 +22,7 @@ from app.services.project_exchange.dto import (
     ExportOptions,
     ImportOptions,
     ExportStageId,
+    ImportStageId,
 )
 from app.services.project_exchange import import_engine as import_engine_module
 from app.services.project_exchange.export_engine import ProjectExportEngine
@@ -253,6 +254,9 @@ def test_import_cancel_returns_cancelled_report(populated_project, temp_db):
 
     assert report.success is False
     assert "cancel" in (report.error_message or "").lower()
+    assert report.failure_code == "import_cancelled"
+    assert report.final_stage_id is not None
+    assert report.stage_history
 
 
 def test_import_rejects_duplicate_source_document_natural_keys(populated_project, temp_db):
@@ -311,6 +315,9 @@ def test_import_rejects_duplicate_source_document_natural_keys(populated_project
     assert report.success is False
     assert "duplicate source documents" in (report.error_message or "").lower()
     assert "(corpus_id, sha256)" in (report.error_message or "")
+    assert report.failure_code == "payload_duplicate_documents"
+    assert report.final_stage_id == str(ImportStageId.CHECK_IMPORTABILITY)
+    assert report.cleanup_status == "not_needed"
 
 
 def test_import_cancel_after_partial_commit_cleans_rows(populated_project, temp_db, monkeypatch):
@@ -1045,6 +1052,11 @@ def test_export_import_roundtrip(populated_project, temp_db):
             options=ImportOptions(custom_name="Test Project (Imported)"),
         )
         assert import_report.success
+        assert import_report.final_stage_id == str(ImportStageId.COMPLETED)
+        assert import_report.stage_history
+        assert import_report.artifact_info is not None
+        assert import_report.verification_info is not None
+        assert import_report.verification_info.project_name_matches is True
 
         # Verify counts match
         export_counts = export_report.manifest.table_counts
@@ -1054,6 +1066,36 @@ def test_export_import_roundtrip(populated_project, temp_db):
             assert import_counts.get(table, 0) == export_counts.get(
                 table, 0
             ), f"Count mismatch for {table}"
+
+
+def test_import_verification_detects_missing_project_row(populated_project, temp_db, monkeypatch):
+    """Success must depend on post-import verification, not only on lack of exceptions."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = Path(tmpdir) / "verification_failure_bundle.hdleproj"
+
+        export_engine = ProjectExportEngine()
+        export_report = export_engine.export_project(
+            project_id=populated_project,
+            out_path=bundle_path,
+            options=ExportOptions(),
+        )
+        assert export_report.success
+
+        import_engine = ProjectImportEngine()
+        def broken_verify(*args, **kwargs):
+            raise ValueError("Post-import verification failed: imported project row is missing")
+
+        monkeypatch.setattr(import_engine, "_verify_imported_project", broken_verify)
+
+        report = import_engine.import_project(
+            bundle_path=bundle_path,
+            options=ImportOptions(custom_name="Verification Failure Import"),
+        )
+
+    assert report.success is False
+    assert report.failure_code == "post_import_verification_failed"
+    assert report.final_stage_id == str(ImportStageId.VERIFY_IMPORTED_PROJECT)
+    assert "verification failed" in (report.error_message or "").lower()
 
 
 def test_import_fk_integrity(populated_project, temp_db):

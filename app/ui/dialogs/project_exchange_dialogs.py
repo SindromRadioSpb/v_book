@@ -23,6 +23,7 @@ from app.services.project_exchange.dto import (
     ImportPreflightReport,
     ImportReport,
 )
+from app.services.project_exchange.import_engine import ProjectImportEngine
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,7 @@ class ImportPreviewDialog(QDialog):
                 f"host accepts v{self.manifest.schema_version} bundle"
             ),
             f"Total rows to import: {self.preflight.total_rows:,}",
+            "Before host DB mutation, import will re-validate the bundle, payload quick_check, and importability guards.",
         ]
 
         if self.manifest.pronunciation_metadata_count:
@@ -409,9 +411,18 @@ class ImportProgressDialog(QDialog):
 
         error_text_raw = report.error_message or "Import failed"
         is_cancelled = "cancel" in error_text_raw.lower()
-        self.stage_label.setText("Import cancelled" if is_cancelled else "Import failed")
+        failure_label = (
+            report.final_stage_label
+            or ProjectImportEngine.get_stage_label(report.final_stage_id)
+            if report.final_stage_id
+            else None
+        )
+        if failure_label and not is_cancelled:
+            self.stage_label.setText(f"Import failed during '{failure_label}'")
+        else:
+            self.stage_label.setText("Import cancelled" if is_cancelled else "Import failed")
         self.progress_bar.setValue(0)
-        self.details_text.setPlainText(f"Error: {error_text_raw}")
+        self.details_text.setPlainText(self._format_import_report(report))
         self.details_text.setVisible(True)
         self.cancel_button.setVisible(False)
         self.copy_report_button.setVisible(True)
@@ -445,17 +456,60 @@ class ImportProgressDialog(QDialog):
     def _format_import_report(self, report: ImportReport) -> str:
         lines = [
             "=== Import Report ===",
-            f"New Project ID: {report.new_project_id}",
-            f"Project Name: {report.new_project_name}",
+            f"Success: {'yes' if report.success else 'no'}",
+            f"Final stage: {report.final_stage_label or report.final_stage_id or 'N/A'}",
             f"Time: {report.elapsed_seconds:.1f}s",
             "",
         ]
+
+        if report.failure_code:
+            lines.append(f"Failure code: {report.failure_code}")
+        if report.error_message:
+            lines.append(f"Error: {report.error_message}")
+        if report.cleanup_status:
+            cleanup_line = f"Cleanup status: {report.cleanup_status}"
+            if report.cleanup_error_message:
+                cleanup_line += f" ({report.cleanup_error_message})"
+            lines.append(cleanup_line)
+        if report.error_message or report.cleanup_status:
+            lines.append("")
+
+        if report.success:
+            lines.append(f"New Project ID: {report.new_project_id}")
+            lines.append(f"Project Name: {report.new_project_name}")
+            lines.append("")
 
         if report.warnings:
             lines.append("=== Warnings ===")
             for warning in report.warnings:
                 lines.append(f"  - {warning}")
             lines.append("")
+
+        if report.artifact_info is not None:
+            lines.extend(
+                [
+                    "=== Artifact Validation ===",
+                    f"Bundle size: {report.artifact_info.bundle_size_bytes / 1024 / 1024:.1f} MB",
+                    f"Payload quick_check: {report.artifact_info.payload_quick_check}",
+                    f"Manifest project: {report.artifact_info.manifest_project_name}",
+                    f"Bundle rows: {report.artifact_info.total_rows:,}",
+                    "",
+                ]
+            )
+
+        if report.verification_info is not None:
+            lines.extend(
+                [
+                    "=== Post-import Verification ===",
+                    f"Project row found: {report.verification_info.project_row_found}",
+                    f"Project name matches: {report.verification_info.project_name_matches}",
+                    f"Verified corpora: {report.verification_info.verified_corpus_count:,}",
+                    f"Verified documents: {report.verification_info.verified_document_count:,}",
+                    f"Verified sentences: {report.verification_info.verified_sentence_count:,}",
+                    f"Verified lemmas: {report.verification_info.verified_lemma_count:,}",
+                    "",
+                ]
+            )
 
         lines.append("=== Table Counts ===")
         for table, count in sorted(report.table_counts.items()):
@@ -464,4 +518,13 @@ class ImportProgressDialog(QDialog):
 
         total_rows = sum(report.table_counts.values())
         lines.append(f"\nTotal rows imported: {total_rows:,}")
+
+        if report.stage_history:
+            lines.extend(["", "=== Stage History ==="])
+            for record in report.stage_history:
+                elapsed = f"{record.elapsed_seconds:.3f}s" if record.elapsed_seconds else "running"
+                detail = f" | {record.detail}" if record.detail else ""
+                lines.append(
+                    f"  [{record.status}] {record.stage_label} ({record.stage_id}) - {elapsed}{detail}"
+                )
         return "\n".join(lines)

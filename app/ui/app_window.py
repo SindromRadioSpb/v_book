@@ -1891,11 +1891,11 @@ class AppWindow(QMainWindow):
         self._maybe_open_imported_project(progress_dialog)
 
     def _on_import_finished(self, report, dialog):
-        """Handle successful import."""
+        """Handle import completion."""
         dialog.set_completed(report)
 
         # Refresh dashboard (if visible)
-        if hasattr(self, "dashboard") and isinstance(
+        if report.success and hasattr(self, "dashboard") and isinstance(
             self.stack.currentWidget(), type(self.dashboard)
         ):
             self.dashboard.load_projects()

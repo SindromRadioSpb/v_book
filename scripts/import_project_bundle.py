@@ -9,6 +9,7 @@ from pathlib import Path
 from app.services.db_service import DBService
 from app.services.project_exchange.import_engine import ProjectImportEngine
 from app.services.project_exchange.dto import ImportOptions
+from app.services.project_exchange.worker import ProjectImportWorker
 
 
 def setup_logging():
@@ -72,6 +73,17 @@ def main():
         print(f"  Project Name: {report.new_project_name}")
         print(f"  Time: {report.elapsed_seconds:.1f}s")
         print(f"  Total rows: {sum(report.table_counts.values()):,}")
+        if report.final_stage_label:
+            print(f"  Final stage: {report.final_stage_label}")
+        if report.artifact_info is not None:
+            print(f"  Payload quick_check: {report.artifact_info.payload_quick_check}")
+        if report.verification_info is not None:
+            print(
+                "  Verification: "
+                f"documents={report.verification_info.verified_document_count:,}, "
+                f"sentences={report.verification_info.verified_sentence_count:,}, "
+                f"lemmas={report.verification_info.verified_lemma_count:,}"
+            )
 
         if report.warnings:
             print("\n  Warnings:")
@@ -80,7 +92,17 @@ def main():
 
         return 0
     else:
-        print(f"\n[FAIL] Import failed: {report.error_message}", file=sys.stderr)
+        print(
+            f"\n[FAIL] {ProjectImportWorker.format_import_failure(report)}",
+            file=sys.stderr,
+        )
+        if report.failure_code:
+            print(f"  Failure code: {report.failure_code}", file=sys.stderr)
+        if report.cleanup_status:
+            cleanup_text = f"  Cleanup status: {report.cleanup_status}"
+            if report.cleanup_error_message:
+                cleanup_text += f" ({report.cleanup_error_message})"
+            print(cleanup_text, file=sys.stderr)
         return 1
 
 

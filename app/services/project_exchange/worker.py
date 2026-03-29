@@ -139,10 +139,7 @@ class ProjectImportWorker(QThread):
                 cancel_check=lambda: bool(self._cancelled),
             )
 
-            if report.success:
-                self.finished.emit(report)
-            else:
-                self.error.emit(report.error_message or "Import failed")
+            self.finished.emit(report)
 
         except OperationsCenterBusyError as e:
             self.error.emit(_format_heavy_operation_busy_error("Project Import", e))
@@ -186,3 +183,11 @@ class ProjectImportWorker(QThread):
             return "Import failed: Permission denied. Check file permissions and try again."
         else:
             return f"Import failed: {error_str}"
+
+    @staticmethod
+    def format_import_failure(report) -> str:
+        """Format a structured import failure for UI/CLI surfaces."""
+        error_text = report.error_message or "Import failed"
+        if report.final_stage_label:
+            return f"Import failed during '{report.final_stage_label}': {error_text}"
+        return error_text
