@@ -260,6 +260,7 @@ class SubprocessStanzaEngine(NLPEngine):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            errors="replace",
             cwd=Path(__file__).resolve().parents[3],
             env=env,
         )

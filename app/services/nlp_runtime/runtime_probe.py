@@ -182,6 +182,7 @@ class NlpRuntimeProbe:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                errors="replace",
                 timeout=self._PROBE_TIMEOUT_SECONDS,
                 cwd=Path(__file__).resolve().parents[3],
                 env=env,

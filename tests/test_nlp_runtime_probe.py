@@ -80,6 +80,35 @@ def test_probe_stanza_uses_subprocess_payload(monkeypatch):
     assert "Torch failed" in status.remediation
 
 
+def test_probe_stanza_subprocess_uses_utf8_replace(monkeypatch):
+    run_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap(),
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_probe_command",
+        lambda self: ["python", "-m", "app.main", "--stanza-probe"],
+    )
+    monkeypatch.setattr(
+        "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {},
+    )
+
+    def _fake_run(*args, **kwargs):
+        run_kwargs.update(kwargs)
+        return _Completed(stdout=json.dumps({"package_installed": True, "model_present": True}))
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    NlpRuntimeProbe().probe_stanza(use_gpu=False, run_smoke=False)
+
+    assert run_kwargs["text"] is True
+    assert run_kwargs["encoding"] == "utf-8"
+    assert run_kwargs["errors"] == "replace"
+
+
 def test_probe_stanza_timeout_becomes_machine_readable_status(monkeypatch):
     monkeypatch.setattr(
         "app.services.nlp_runtime.runtime_probe.ManagedStanzaRuntime.bootstrap_runtime",

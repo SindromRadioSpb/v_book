@@ -15,12 +15,21 @@ from app.infra.nlp_engines.stanza_engine import StanzaEngine
 from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
 
 
+def _configure_stdio_for_json_protocol() -> None:
+    """Force UTF-8 JSON lines across worker pipes on Windows and packaged runs."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def main() -> int:
+    _configure_stdio_for_json_protocol()
     use_gpu = os.getenv("HDLE_STANZA_WORKER_MODE", "cpu").strip().lower() == "gpu"
     runtime = ManagedStanzaRuntime()
     bootstrap = runtime.bootstrap_runtime(force_repair=False)

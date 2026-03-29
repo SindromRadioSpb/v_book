@@ -10,12 +10,21 @@ from app.infra.nlp_engines.stanza_engine import prepare_torch_runtime_paths
 from app.services.nlp_runtime.managed_runtime import ManagedStanzaRuntime
 
 
+def _configure_stdio_for_json_protocol() -> None:
+    """Force UTF-8 JSON lines across probe pipes on Windows and packaged runs."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def _emit(payload: dict[str, object]) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def main() -> int:
+    _configure_stdio_for_json_protocol()
     runtime = ManagedStanzaRuntime()
     bootstrap = runtime.bootstrap_runtime(force_repair=False)
     mode = os.getenv("HDLE_STANZA_PROBE_MODE", "cpu").strip().lower() or "cpu"

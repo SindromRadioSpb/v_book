@@ -152,6 +152,40 @@ def test_subprocess_stanza_engine_processes_json_protocol(monkeypatch):
     assert shutdown["command"] == "shutdown"
 
 
+def test_subprocess_stanza_engine_uses_utf8_replace_for_worker_pipes(monkeypatch):
+    handshake = json.dumps({"ok": True, "name": "stanza", "version": "1.11.1"}) + "\n"
+    fake_process = _FakeProcess([handshake])
+    popen_kwargs: dict[str, object] = {}
+
+    def _fake_popen(*args, **kwargs):
+        popen_kwargs.update(kwargs)
+        return fake_process
+
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.subprocess.Popen",
+        _fake_popen,
+    )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.bootstrap_runtime",
+        lambda self, force_repair=False: _bootstrap_result(),
+    )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.build_runtime_env",
+        lambda self, use_gpu=False, run_smoke=False: {"STANZA_RESOURCES_DIR": "C:/managed/stanza_resources"},
+    )
+    monkeypatch.setattr(
+        "app.infra.nlp_engines.stanza_engine.ManagedStanzaRuntime.build_worker_command",
+        lambda self: ["python", "-m", "app.main", "--stanza-worker"],
+    )
+
+    engine = SubprocessStanzaEngine(use_gpu=False)
+    engine.close()
+
+    assert popen_kwargs["text"] is True
+    assert popen_kwargs["encoding"] == "utf-8"
+    assert popen_kwargs["errors"] == "replace"
+
+
 def test_create_stanza_engine_reports_both_failures(monkeypatch):
     monkeypatch.setattr(
         "app.infra.nlp_engines.stanza_engine.SubprocessStanzaEngine",
