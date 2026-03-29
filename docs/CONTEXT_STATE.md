@@ -18,7 +18,7 @@
 
 ## Confirmed Gaps
 - Resources Manager still does not provide a true install wizard; it provides status, repair guidance, and model-path actions only.
-- Run-level provenance is still additive text in `ProcessorRun.note`, not structured relational metadata.
+- Historical runtime provenance rows still depend on the legacy `ProcessorRun.note` envelope until explicitly re-run or resumed under schema version `52`.
 - External runtime dependency repair and managed model import are still surfaced in one dialog, though now with clearer boundaries.
 
 ## Constraints
@@ -54,6 +54,18 @@
 - `ProcessorRun.note` now carries a stable nested `runtime` provenance envelope in addition to the legacy flat fields.
 - The structured envelope records `configured_engine_id`, `effective_engine_id`, `fallback_used`, `reason_code`, `runtime_mode`, and `probe_summary`.
 - Batch and single-document processing now share the same machine-readable runtime provenance shape.
+
+## Confirmed Current State After Optional Provenance Promotion
+- `processor_run` now stores dedicated schema-backed runtime provenance for new runs:
+  - `configured_engine_id`
+  - `effective_engine_id`
+  - `fallback_used`
+  - `runtime_reason_code`
+  - `runtime_mode`
+  - `runtime_probe_summary_json`
+- `ProcessService` still preserves the stable nested `runtime` envelope in `ProcessorRun.note` as a compatibility layer.
+- Single-document, batch, and snapshot-backfill runs now share the same dual-write provenance contract.
+- Compatibility read paths prefer dedicated schema fields and fall back to the legacy note envelope for old rows.
 
 ## Confirmed Current State After Wave 3 PATCH-03
 - `RuntimeProbe` now exposes a shared guided repair plan derived from the machine-readable error taxonomy.

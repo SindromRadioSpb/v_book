@@ -582,3 +582,36 @@
 - Outcome:
   - the packaged ONNX helper startup timeout track is now closed without reopening the already-green packaged Stanza/Torch runtime path.
 
+## Step 21 — Schema-backed Runtime Provenance Promotion
+- Status: completed
+- Trigger:
+  - packaged NLP runtime sign-off was already green, but run-level runtime provenance still required `ProcessorRun.note` parsing for SQL/debug/audit use.
+- Code deliverables:
+  - `app/infra/migrations/052_processor_run_runtime_provenance.sql`
+  - `app/infra/sa_models.py`
+  - `app/services/process_service.py`
+  - `scripts/release_smoke_nlp_runtime.py`
+  - `tests/test_process_service_nlp_runtime.py`
+  - `tests/test_process_run_state_foundation.py`
+  - `tests/test_process_batch_run_state.py`
+  - `tests/test_release_smoke_nlp_runtime.py`
+- Confirmed behavior changes:
+  - `processor_run` now has dedicated runtime provenance fields for new rows:
+    - `configured_engine_id`
+    - `effective_engine_id`
+    - `fallback_used`
+    - `runtime_reason_code`
+    - `runtime_mode`
+    - `runtime_probe_summary_json`
+  - `ProcessService` now dual-writes these fields while preserving the legacy machine-readable runtime envelope in `ProcessorRun.note`
+  - single-document, batch, and snapshot-backfill runs all share the same schema-backed provenance write path
+  - resumed legacy batch runs opportunistically receive the dedicated fields without dropping the old note contract
+  - debug/smoke reads now prefer schema-backed provenance and fall back to `note` for older rows
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\process_service.py app\infra\sa_models.py scripts\release_smoke_nlp_runtime.py tests\test_process_service_nlp_runtime.py tests\test_process_batch_run_state.py tests\test_process_run_state_foundation.py tests\test_release_smoke_nlp_runtime.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_process_service_nlp_runtime.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_release_smoke_nlp_runtime.py -q` -> `20 passed`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_documents_engine_readiness.py tests\test_health_check_service.py tests\test_resources_manager_dialog.py tests\test_documents_process_progress_ui.py tests\test_workspace_app_window_contract.py tests\test_process_service_nlp_runtime.py tests\test_process_run_state_foundation.py tests\test_process_batch_run_state.py tests\test_release_smoke_nlp_runtime.py -q` -> `55 passed`
+- Outcome:
+  - runtime provenance is now schema-backed for new runs without reopening the already-closed packaged runtime tracks
+  - old rows remain readable through the legacy note envelope fallback
+

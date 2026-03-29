@@ -100,6 +100,14 @@
 - Rationale:
   - this preserves historical compatibility while enabling filtering and audit on stable machine-readable fields.
 
+## D-031 — Runtime provenance promotion stays dual-write and migration-safe
+- Status: accepted and implemented
+- Decision:
+  - promote runtime provenance for new `ProcessorRun` rows into dedicated schema fields while preserving the existing nested `runtime` envelope in `ProcessorRun.note` as a compatibility layer.
+  - read/debug paths should prefer schema-backed fields and fall back to `note` for legacy rows created before the promotion.
+- Rationale:
+  - this turns runtime provenance into SQL/audit-friendly data without reopening packaged runtime work or breaking historical rows that only have the additive note contract.
+
 ## D-014 — Guided repair flow must reuse runtime taxonomy
 - Status: accepted and implemented
 - Decision:
