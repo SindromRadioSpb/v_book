@@ -264,3 +264,16 @@
   - CLI prints `[OK] Import successful!` only after the verification stage completes
   - invalid bundle smoke now fails truthfully with `failure_code = invalid_archive` and `cleanup_status = not_needed`
 
+## Confirmed Current State After NLP Processing Transport Hardening
+- The active source-of-truth NLP processing path remains:
+  - `DocumentsView` -> `ProcessWorker` -> `ProcessService.process_documents_batch()` -> `ProcessService.process_document()` / `reprocess_document()` -> `SubprocessStanzaEngine.process()`
+- The release-blocking bug was localized to the managed subprocess transport layer, not to Stanza runtime ownership/bootstrap itself:
+  - real user logs showed `UnicodeDecodeError` from `app/infra/nlp_engines/stanza_engine.py` while reading subprocess JSON output
+  - the failure occurred after sentence splitting and during per-sentence NLP calls on real Hebrew documents
+- The transport contract is now hardened:
+  - `--stanza-worker` and `--stanza-probe` normalize stdio to UTF-8 with replacement semantics
+  - parent-side subprocess readers now decode with `errors="replace"`
+- Live repro evidence on a copy of `hdle_premium.db` is green again:
+  - `reprocess_document(session, 387647, use_mock=False, configured_engine_id='stanza')` -> `ok=True`
+  - the same document had previously failed in logs with `UnicodeDecodeError` during `engine.process(...)`
+

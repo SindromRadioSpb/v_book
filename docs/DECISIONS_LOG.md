@@ -141,6 +141,13 @@
 - Rationale:
   - the previous import path had useful guards, but it still left too much operator ambiguity between “bundle is readable”, “bundle is safely importable”, and “the imported project is actually usable after writes complete”.
 
+## D-035 — Managed Stanza subprocess transport must enforce UTF-8 JSON pipes
+- Status: accepted and implemented
+- Decision:
+  - the managed `--stanza-worker` / `--stanza-probe` subprocess protocol must explicitly normalize stdin/stdout/stderr to UTF-8 with replacement semantics, and parent-side pipe readers must decode with `errors="replace"`.
+- Rationale:
+  - the real release-blocking defect was not in NLP logic itself but in the subprocess transport layer: `Process with NLP` / `Re-process` could fail on real Hebrew documents with `UnicodeDecodeError` while reading JSON-line responses from the managed Stanza subprocess.
+
 ## D-014 — Guided repair flow must reuse runtime taxonomy
 - Status: accepted and implemented
 - Decision:

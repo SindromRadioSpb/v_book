@@ -775,3 +775,37 @@
   - project import is now a deterministic, observable, verification-backed pipeline rather than a best-effort mutation flow
   - the import track is now closed for the currently proven bundle path without reopening export or runtime work
 
+## Step 25 — NLP Processing / Re-process Transport Hardening
+- Status: completed
+- Trigger:
+  - after the `v1.0.1` release cut, real user smoke found that `Process with NLP` and `Re-process` were failing again in both repo and installed app paths.
+- Audit findings:
+  - existing automated processing/runtime/UI suites still passed; the defect was outside current coverage.
+  - user logs localized the live failure to `app/infra/nlp_engines/stanza_engine.py` while reading managed subprocess output:
+    - `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xd7 ...`
+  - the failure happened after sentence splitting and inside per-sentence `engine.process(...)`, so the bug was in the worker transport layer rather than the Stanza ownership/bootstrap contract itself.
+  - a separate `PermissionError` on `runtime_manifest.json` was observed only inside the sandboxed audit environment and was not treated as the product root cause.
+- Code deliverables:
+  - `app/infra/nlp_engines/stanza_engine.py`
+  - `app/infra/nlp_engines/stanza_subprocess_worker.py`
+  - `app/services/nlp_runtime/runtime_probe.py`
+  - `app/services/nlp_runtime/stanza_probe_worker.py`
+  - `tests/test_stanza_engine_subprocess.py`
+  - `tests/test_nlp_runtime_probe.py`
+  - `tests/test_stanza_worker_stdio.py`
+- Confirmed behavior changes:
+  - `SubprocessStanzaEngine` now opens worker pipes with `encoding="utf-8", errors="replace"`
+  - the headless `--stanza-worker` and `--stanza-probe` entrypoints now reconfigure stdin/stdout/stderr to UTF-8 with replacement semantics before emitting JSON lines
+  - the runtime probe subprocess path now also decodes with `errors="replace"` for consistency with the managed worker transport
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\infra\nlp_engines\stanza_engine.py app\infra\nlp_engines\stanza_subprocess_worker.py app\services\nlp_runtime\runtime_probe.py app\services\nlp_runtime\stanza_probe_worker.py tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py tests\test_stanza_worker_stdio.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_stanza_engine_subprocess.py tests\test_nlp_runtime_probe.py tests\test_stanza_worker_stdio.py tests\test_process_service_nlp_runtime.py tests\test_documents_process_progress_ui.py tests\test_documents_engine_readiness.py tests\test_managed_stanza_runtime.py tests\test_release_smoke_nlp_runtime.py -q` -> `44 passed`
+  - live repro on copied real DB:
+    - source symptom from log: `doc_id=387647` failed during `Re-process` with `UnicodeDecodeError`
+    - verification run:
+      - copied DB: `build\repro_processing_fix.db`
+      - `reprocess_document(session, 387647, use_gpu=False, use_mock=False, configured_engine_id='stanza', allow_mock_fallback=False)` -> `{'ok': True}`
+- Outcome:
+  - the live release-blocking bug is closed on the source-of-truth NLP processing path without reopening the packaged runtime/bootstrap design
+  - the fix is transport-local and low-risk for unrelated processing/export/import flows
+

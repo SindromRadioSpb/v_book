@@ -1,7 +1,7 @@
 # Handoff Status
 
 ## Current Task
-- `task33`: product-grade project import closure
+- `task34`: corrective NLP processing / re-process transport hardening
 
 ## Current Phase
 - Packaged runtime sign-off is complete for the currently scoped NLP runtime tracks.
@@ -20,6 +20,10 @@
   - import has an explicit stage contract
   - import runs truth-based pre-mutation bundle validation before host DB mutation
   - import success now requires post-import verification, not only “no exception”
+- A post-release corrective hotfix is now required before the next public rerelease:
+  - persisted `Process with NLP` / `Re-process` failed on real Hebrew documents in both repo and installed app
+  - the failure was localized to managed Stanza subprocess JSON transport, not to the already-closed packaged runtime ownership/bootstrap tracks
+  - the active corrective wave is limited to transport hardening, regression coverage, and rerelease preparation
 
 ## Closed Tracks
 - Bundled Hebrew payload delivery is complete for packaged release assembly.
@@ -78,6 +82,11 @@
   - the `Mishneh Torah` acceptance bundle imports into a clean migrated target DB with `exit code 0`
   - CLI import now reports `[OK] Import successful!` only after post-import verification passes
   - invalid bundles now fail with stage-aware diagnostics and no misleading success signal
+- The NLP processing regression is now localized and fixed for the current source-of-truth path:
+  - real persisted processing failures were traced to `UnicodeDecodeError` while the parent process decoded managed Stanza subprocess JSON output
+  - the worker/probe subprocesses now force UTF-8 stdio with `errors="replace"`
+  - the parent-side probe/worker launches now also decode subprocess pipes with `errors="replace"`
+  - a live reprocess of the previously failing Hebrew document (`doc_id=387647`) now completes successfully on a copied DB
 
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
@@ -85,17 +94,14 @@
 - Historical `ProcessorRun` rows created before schema version `52` still rely on the legacy note envelope unless they are resumed or re-run.
 - Very large project bundle export can still take noticeable time in the preflight and final compression phases; it is now explicit and bounded enough for diagnosis, but not “instant”.
 - Very large bundle import can still spend noticeable time in the `import_tables` stage; it is now stage-visible and ends with verification evidence instead of a generic success/failure surface.
+- Release `v1.0.1` is now a known-bad public artifact for persisted NLP processing and should be superseded by a corrective rebuild/rerelease that includes Step 25.
 
 ## Next Step
-- No packaged NLP runtime blocker is currently open.
-- Runtime provenance promotion is no longer an open blocker.
-- Project export is closed for the currently proven path.
-- Project import is now also closed for the currently proven path.
-- If a future wave is needed, it should not reopen the closed export/import core pipelines without new evidence.
-- Allowed next steps are now narrow:
-  - broaden clean import/export smoke coverage on installer-path artifacts
-  - add optional UX polish around import previews/reports without changing the core import contract
-- If a future release wave requires installer-path reconfirmation, rerun:
-  - packaged `HDLE_Premium.exe --self-check import`
-  - packaged `HDLE_Premium.exe --self-check health`
-  - packaged Stanza release smoke on a clean `HDLE_DATA_ROOT`
+- No packaged runtime ownership/bootstrap blocker is currently open.
+- Runtime provenance promotion is not the active issue.
+- Project export and project import remain closed for the currently proven paths.
+- The immediate next step is a corrective rerelease wave only:
+  - rebuild the app and installer with the managed Stanza transport hardening from Step 25
+  - rerun targeted repo and installed-app persisted processing smoke on real Hebrew documents
+  - supersede `v1.0.1` with a corrected release once the processing smoke is green
+- Do not reopen the already-closed packaged runtime, provenance, export, or import core tracks without new direct evidence.
