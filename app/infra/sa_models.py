@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     Float,
@@ -665,6 +666,12 @@ class ProcessorRun(Base):
     stage = Column(String)
     last_doc_id = Column(Integer)
     params_hash = Column(String)
+    configured_engine_id = Column(String)
+    effective_engine_id = Column(String)
+    fallback_used = Column(Boolean)
+    runtime_reason_code = Column(String)
+    runtime_mode = Column(String)
+    runtime_probe_summary_json = Column(Text)
     error_message = Column(Text)
     note = Column(Text)
 

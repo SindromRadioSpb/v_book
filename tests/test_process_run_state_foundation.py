@@ -80,6 +80,12 @@ def test_processor_run_migration_adds_run_state_columns() -> None:
             "stage",
             "last_doc_id",
             "params_hash",
+            "configured_engine_id",
+            "effective_engine_id",
+            "fallback_used",
+            "runtime_reason_code",
+            "runtime_mode",
+            "runtime_probe_summary_json",
             "error_message",
         ):
             assert required in columns
@@ -215,6 +221,12 @@ def test_process_document_populates_extended_run_state(monkeypatch) -> None:
         assert run.chunks_completed == 1
         assert run.last_doc_id == doc_id
         assert run.params_hash
+        assert run.configured_engine_id == "mock"
+        assert run.effective_engine_id == "mock"
+        assert run.fallback_used is False
+        assert run.runtime_reason_code is None
+        assert run.runtime_mode == "cpu"
+        assert run.runtime_probe_summary_json
         assert run.error_message is None
     finally:
         _reset_db_service()
