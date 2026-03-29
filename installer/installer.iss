@@ -9,7 +9,7 @@
 [Setup]
 ; Application metadata
 AppName=HDLE Premium
-AppVersion=1.0.0
+AppVersion=1.0.1
 AppPublisher=Your Organization
 AppPublisherURL=https://github.com/yourusername/v_book
 AppSupportURL=https://github.com/yourusername/v_book/issues
@@ -41,12 +41,12 @@ WizardStyle=modern
 ; WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
 
 ; Versioning
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.0.1.0
 VersionInfoCompany=Your Organization
 VersionInfoDescription=HDLE Premium Installer
 VersionInfoCopyright=Copyright (C) 2026
 VersionInfoProductName=HDLE Premium
-VersionInfoProductVersion=1.0.0
+VersionInfoProductVersion=1.0.1
 
 ; Privileges
 PrivilegesRequired=admin
