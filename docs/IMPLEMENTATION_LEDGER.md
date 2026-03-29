@@ -652,3 +652,62 @@
   - the confirmed import/export failure chain is now narrowed and safer without reopening packaged runtime work
   - very large export remains long-running, but it is no longer silent and no longer leaves a false final bundle name when interrupted
 
+## Step 23 — Project Export Product Closure
+- Status: completed
+- Trigger:
+  - the previous stability hardening removed the invalid-final-bundle failure chain, but export still hung on the live reference DB after `Dropping excluded tables`.
+  - product acceptance now required a deterministic export lifecycle for project `6` (`Mishneh Torah`) on the large reference DB.
+- Audit findings:
+  - the active source-of-truth export path is:
+    - `app/ui/app_window.py` -> `ProjectExportWorker` -> `ProjectExportEngine.export_project()` -> `bundle_format.create_bundle()`
+  - the live hang was not generic SQLite slowness and not an import-side issue:
+    - export stalled on a second `DROP TABLE IF EXISTS sentence_fts` inside the generic exclusion loop
+    - the first explicit FTS prune had already dropped `sentence_fts` / `term_fts`
+  - the clean import gate exposed a separate compatibility gap:
+    - `document_sentence.corpus_id` exists since schema `31`
+    - the import remap contract still treated `document_sentence` as if only `doc_id` were a foreign key
+- Code deliverables:
+  - `app/services/project_exchange/dto.py`
+  - `app/services/project_exchange/bundle_format.py`
+  - `app/services/project_exchange/export_engine.py`
+  - `app/services/project_exchange/constants.py`
+  - `app/services/project_exchange/worker.py`
+  - `app/ui/dialogs/project_exchange_dialogs.py`
+  - `scripts/export_project_bundle.py`
+  - `tests/test_project_exchange.py`
+  - `tests/test_project_exchange_dialogs.py`
+- Confirmed behavior changes:
+  - export now uses an explicit product stage model with structured stage history:
+    - `prepare_context`
+    - `preflight_checks`
+    - `create_staging_db`
+    - `apply_schema`
+    - `attach_host_db`
+    - `prepare_fts`
+    - `resolve_project_scope`
+    - `copy_tables`
+    - `export_pronunciation_metadata`
+    - `build_manifest`
+    - `prune_payload`
+    - `finalize_sqlite`
+    - `build_bundle`
+    - `validate_artifact`
+    - `completed`
+  - finalization now skips duplicate FTS drops by pruning `sentence_fts` / `term_fts` once, then excluding only the remaining operational tables
+  - payload finalization steps now run with stage-aware heartbeat and bounded timeout semantics instead of silent indefinite execution
+  - bundle success now depends on explicit post-build validation:
+    - ZIP structure and checksums via `read_bundle()`
+    - payload `PRAGMA quick_check(1)` on the extracted `payload.sqlite`
+  - CLI/UI success surfaces now expose final stage and artifact validation evidence
+  - import compatibility for exported bundles is restored for schema `31+` payloads because `document_sentence.corpus_id` is now part of the remap contract
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\project_exchange\constants.py app\services\project_exchange\dto.py app\services\project_exchange\bundle_format.py app\services\project_exchange\export_engine.py app\services\project_exchange\worker.py app\ui\dialogs\project_exchange_dialogs.py scripts\export_project_bundle.py tests\test_project_exchange.py tests\test_project_exchange_dialogs.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_project_exchange.py tests\test_project_exchange_preflight.py tests\test_project_exchange_dialogs.py tests\test_heavy_worker_slot_guard.py tests\test_workspace_app_window_contract.py -q` -> `46 passed`
+  - reference DB export acceptance:
+    - `.\.venv\Scripts\python.exe .\scripts\export_project_bundle.py --db-path "E:\projects\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing test.db" --project-id 6 --out "E:\projects\Project_Vibe\V_book\-info files\Экспорт проекта\Mishneh_Torah_project_6_acceptance.hdleproj"` -> `exit code 0`, `[OK] Export successful!`, validated bundle produced
+  - clean import compatibility gate:
+    - `.\.venv\Scripts\python.exe .\scripts\import_project_bundle.py --db-path "E:\projects\Project_Vibe\V_book\reports\project_exchange_repro\mishneh_torah_import_target.db" --bundle "E:\projects\Project_Vibe\V_book\-info files\Экспорт проекта\Mishneh_Torah_project_6_acceptance.hdleproj"` -> `exit code 0`, `[OK] Import successful!`
+- Outcome:
+  - project export is now a deterministic, observable, artifact-validated pipeline rather than a best-effort long operation
+  - the reference-DB `Mishneh Torah` export path is now closed with a validated bundle and a clean import roundtrip
+

@@ -21,6 +21,7 @@
 - Historical runtime provenance rows still depend on the legacy `ProcessorRun.note` envelope until explicitly re-run or resumed under schema version `52`.
 - External runtime dependency repair and managed model import are still surfaced in one dialog, though now with clearer boundaries.
 - Very large project bundle export remains disk/CPU heavy in the final compression phase even after payload creation is complete.
+- Project export preflight on the large reference DB is still a visible stage of its own; it is now observable, but not instantaneous.
 
 ## Constraints
 - PowerShell-only workflow.
@@ -78,6 +79,36 @@
 - Bundle creation now stages to `*.hdleproj.partial` and only promotes to the final `.hdleproj` on success.
 - This prevents an interrupted heavy export from leaving a misleading final bundle that later fails import as `Invalid ZIP file`.
 - The heavy export payload cleanup path now closes export cursors before the final schema-drop phase, which removed the reproduced `database is locked` failure on the large live project export path.
+
+## Confirmed Current State After Project Export Product Closure
+- The source-of-truth export path is now explicit and singular:
+  - `app/ui/app_window.py`
+  - `app/services/project_exchange/worker.py`
+  - `app/services/project_exchange/export_engine.py`
+  - `app/services/project_exchange/bundle_format.py`
+- Export now reports product stages instead of only opportunistic UI strings:
+  - `prepare_context`
+  - `preflight_checks`
+  - `create_staging_db`
+  - `apply_schema`
+  - `attach_host_db`
+  - `prepare_fts`
+  - `resolve_project_scope`
+  - `copy_tables`
+  - `prune_payload`
+  - `finalize_sqlite`
+  - `build_manifest`
+  - `build_bundle`
+  - `validate_artifact`
+  - `completed`
+- The live reference-DB hang after `Dropping excluded tables` is now localized and fixed:
+  - payload finalization previously re-entered `sentence_fts` / `term_fts` through the generic exclusion loop after already dropping them explicitly
+  - the exclusion loop now skips those duplicate FTS drops
+- Export success is now stricter:
+  - the final `.hdleproj` must exist
+  - bundle structure/checksums must validate
+  - extracted payload must pass `PRAGMA quick_check(1)`
+- Import compatibility for exported bundles is now restored for schema `31+` payloads because `document_sentence.corpus_id` is remapped together with `doc_id`.
 
 ## Confirmed Current State After Wave 3 PATCH-03
 - `RuntimeProbe` now exposes a shared guided repair plan derived from the machine-readable error taxonomy.

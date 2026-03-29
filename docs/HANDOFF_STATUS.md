@@ -1,7 +1,7 @@
 # Handoff Status
 
 ## Current Task
-- `task31`: product-grade NLP runtime management
+- `task32`: product-grade project export closure
 
 ## Current Phase
 - Packaged runtime sign-off is complete for the currently scoped NLP runtime tracks.
@@ -12,6 +12,10 @@
 - The separate project bundle stability track is now narrowed and hardened:
   - interrupted export no longer leaves a misleading final `.hdleproj`
   - import now gives a clearer message when the selected file is an incomplete bundle
+- The active project-exchange work has now moved from “stability hardening” to “product export closure”:
+  - export has an explicit stage contract
+  - export success requires validated artifact completion
+  - the exported bundle now passes a clean import compatibility gate on the reference DB acceptance path
 
 ## Closed Tracks
 - Bundled Hebrew payload delivery is complete for packaged release assembly.
@@ -36,6 +40,11 @@
   - heavy export now exposes final-stage progress after payload creation (`Computing checksums`, `Writing manifest`, `Writing payload`, `Writing checksums`, `Finalizing bundle`)
   - interrupted export writes to `*.hdleproj.partial` first and only renames to the final `.hdleproj` on success
   - import now surfaces an explicit “incomplete or interrupted export” hint when the selected bundle is not a valid ZIP
+- Project export is now product-closed for the current scope:
+  - the export path has stable stage IDs and structured stage history
+  - the live `Mishneh Torah` hang after `Dropping excluded tables` was fixed by removing duplicate FTS prune work in payload finalization
+  - `.hdleproj` success now requires post-build validation (`read_bundle()` + payload `quick_check`)
+  - clean import compatibility is restored for schema `31+` payloads via `document_sentence.corpus_id` remapping
 
 ## Latest Confirmation
 - The ONNX helper timeout root cause was localized to `app/tools/onnx_probe.py`:
@@ -52,17 +61,25 @@
   - import failure reproduced on an invalid partial bundle left after an interrupted heavy export (`Invalid ZIP file: File is not a zip file`)
   - heavy export did not deadlock in table-copy phases; the user-visible “hang” was the long final zip/checksum phase with no heartbeat after payload creation
   - an additional heavy-project export failure on `project_id=1` was reproduced in the payload cleanup tail (`database is locked`) and resolved by explicit cursor cleanup before schema-drop finalization
+- Product export closure is now confirmed on the large reference DB path:
+  - `project_id=6`, `name='Mishneh Torah'`
+  - CLI export now completes with `exit code 0`, `[OK] Export successful!`, and a validated bundle artifact
+  - the produced bundle imports into a clean migrated target DB without errors
 
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - Historical `ProcessorRun` rows created before schema version `52` still rely on the legacy note envelope unless they are resumed or re-run.
-- Very large project bundle export can still take a long time in the final compression phase; it is now observable and safer, but not “instant”.
+- Very large project bundle export can still take noticeable time in the preflight and final compression phases; it is now explicit and bounded enough for diagnosis, but not “instant”.
 
 ## Next Step
 - No packaged NLP runtime blocker is currently open.
 - Runtime provenance promotion is no longer an open blocker.
-- If project exchange is part of the next ship gate, manually verify one large-project export to completion and then round-trip import that finished bundle into a clean target DB.
+- Project export is closed for the currently proven path.
+- If a future wave is needed, it should be import-focused only:
+  - expand import UX/reporting
+  - broaden clean-import smoke coverage
+  - avoid reopening the already-closed export pipeline without new evidence
 - If a future release wave requires installer-path reconfirmation, rerun:
   - packaged `HDLE_Premium.exe --self-check import`
   - packaged `HDLE_Premium.exe --self-check health`

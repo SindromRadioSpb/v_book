@@ -116,6 +116,19 @@
 - Rationale:
   - the confirmed user-facing failure chain was: long final export phase looked hung, the run was interrupted, and a non-ZIP partial file was left behind under the final `.hdleproj` name, causing the later import failure.
 
+## D-033 — Project export success must require stage completion and artifact validation
+- Status: accepted and implemented
+- Decision:
+  - `ProjectExportEngine` should treat export as a stage-based product pipeline, not just a best-effort sequence of SQL and ZIP operations.
+  - export success now requires all of the following:
+    - payload finalization completed without bounded-stage failure
+    - `.hdleproj` bundle was built
+    - bundle structure/checksums validated through `read_bundle()`
+    - extracted payload passed `PRAGMA quick_check(1)`
+  - schema-backed import compatibility remains a release gate for export results, so the export/import contract must remap `document_sentence.corpus_id` for schema `31+` payloads.
+- Rationale:
+  - the live `Mishneh Torah` repro showed that fixing one visible hang was not enough; export must only report success after the artifact is verifiably complete and structurally importable.
+
 ## D-014 — Guided repair flow must reuse runtime taxonomy
 - Status: accepted and implemented
 - Decision:
