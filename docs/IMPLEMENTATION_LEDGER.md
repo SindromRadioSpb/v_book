@@ -615,3 +615,40 @@
   - runtime provenance is now schema-backed for new runs without reopening the already-closed packaged runtime tracks
   - old rows remain readable through the legacy note envelope fallback
 
+## Step 22 — Project Bundle Stability Hardening
+- Status: completed
+- Trigger:
+  - live operator feedback reported two separate project exchange symptoms:
+    - `Import Project Bundle` ended with an error
+    - `Export Project Bundle` looked hung on large projects
+- Audit findings:
+  - baseline project-exchange tests were still green, so the issue was not a generic bundle-format regression
+  - heavy export on `project_id=1` reproduced a long final phase after payload creation with no granular heartbeat
+  - interrupting that heavy export left a file under the final `.hdleproj` name that was not a valid ZIP; importing it reproduced the user-facing failure
+  - the large live export path also reproduced a `database is locked` failure in the payload cleanup tail before bundle finalization
+- Code deliverables:
+  - `app/services/project_exchange/bundle_format.py`
+  - `app/services/project_exchange/export_engine.py`
+  - `app/services/project_exchange/worker.py`
+  - `tests/test_project_exchange.py`
+  - `tests/test_heavy_worker_slot_guard.py`
+- Confirmed behavior changes:
+  - bundle creation now stages to `*.hdleproj.partial` and publishes the final `.hdleproj` only on success
+  - the export UI/CLI progress contract now shows final-stage heartbeat after payload creation:
+    - `Computing checksums`
+    - `Writing manifest`
+    - `Writing payload`
+    - `Writing checksums`
+    - `Finalizing bundle`
+  - import worker messaging now tells the operator when the selected bundle looks like an interrupted/incomplete export rather than a valid archive
+  - export-side SQLite cursors are now explicitly closed before the final payload schema cleanup, which removed the reproduced `database is locked` tail failure on the heavy live export path
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\project_exchange\bundle_format.py app\services\project_exchange\export_engine.py app\services\project_exchange\worker.py tests\test_project_exchange.py tests\test_heavy_worker_slot_guard.py` -> `OK`
+  - `.\.venv\Scripts\python.exe -m pytest tests\test_project_exchange.py tests\test_project_exchange_preflight.py tests\test_project_exchange_dialogs.py tests\test_heavy_worker_slot_guard.py tests\test_workspace_app_window_contract.py -q` -> `41 passed`
+  - `.\.venv\Scripts\python.exe scripts\export_project_bundle.py --db-path .\hdle_premium.db --project-id 7 --out .\reports\project_exchange_repro\project7_smoke.hdleproj` -> success with granular final-stage progress
+  - `.\.venv\Scripts\python.exe scripts\import_project_bundle.py --db-path .\reports\project_exchange_repro\import_target_smoke.db --bundle .\reports\project_exchange_repro\project7_smoke.hdleproj` -> roundtrip import success
+  - interrupted heavy export smoke on `project_id=1` now leaves only `project1_smoke.hdleproj.partial` and does not publish a misleading final `.hdleproj`
+- Outcome:
+  - the confirmed import/export failure chain is now narrowed and safer without reopening packaged runtime work
+  - very large export remains long-running, but it is no longer silent and no longer leaves a false final bundle name when interrupted
+

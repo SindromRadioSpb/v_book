@@ -108,6 +108,14 @@
 - Rationale:
   - this turns runtime provenance into SQL/audit-friendly data without reopening packaged runtime work or breaking historical rows that only have the additive note contract.
 
+## D-032 — Project bundle export must stage to a temporary artifact before publish
+- Status: accepted and implemented
+- Decision:
+  - heavy `.hdleproj` export should write into a temporary `*.partial` bundle first and only rename it to the final output path after the ZIP is complete.
+  - export progress must expose the post-payload finalization phases explicitly instead of leaving one silent “Creating bundle...” step.
+- Rationale:
+  - the confirmed user-facing failure chain was: long final export phase looked hung, the run was interrupted, and a non-ZIP partial file was left behind under the final `.hdleproj` name, causing the later import failure.
+
 ## D-014 — Guided repair flow must reuse runtime taxonomy
 - Status: accepted and implemented
 - Decision:

@@ -9,6 +9,9 @@
 - The next optional provenance wave is now also complete for newly created `ProcessorRun` rows:
   - runtime provenance is dual-written into dedicated schema fields
   - the legacy `ProcessorRun.note` envelope remains the backward-compatible fallback
+- The separate project bundle stability track is now narrowed and hardened:
+  - interrupted export no longer leaves a misleading final `.hdleproj`
+  - import now gives a clearer message when the selected file is an incomplete bundle
 
 ## Closed Tracks
 - Bundled Hebrew payload delivery is complete for packaged release assembly.
@@ -29,6 +32,10 @@
   - `processor_run` now stores `configured_engine_id`, `effective_engine_id`, `fallback_used`, `runtime_reason_code`, `runtime_mode`, and `runtime_probe_summary_json`
   - single-document and batch processing both dual-write the dedicated fields and the legacy note envelope
   - compatibility reads still fall back to `ProcessorRun.note` for legacy rows
+- Project bundle import/export stability is now improved for the confirmed failure chain:
+  - heavy export now exposes final-stage progress after payload creation (`Computing checksums`, `Writing manifest`, `Writing payload`, `Writing checksums`, `Finalizing bundle`)
+  - interrupted export writes to `*.hdleproj.partial` first and only renames to the final `.hdleproj` on success
+  - import now surfaces an explicit “incomplete or interrupted export” hint when the selected bundle is not a valid ZIP
 
 ## Latest Confirmation
 - The ONNX helper timeout root cause was localized to `app/tools/onnx_probe.py`:
@@ -41,15 +48,21 @@
   - `ProcessService` now writes dedicated schema-backed provenance fields on single, batch, and snapshot-backfill runs
   - resumed legacy batch runs opportunistically gain the same dedicated fields without dropping the old note contract
   - debug/smoke paths now prefer schema fields and fall back to `note` for older rows
+- Project exchange root cause was split cleanly:
+  - import failure reproduced on an invalid partial bundle left after an interrupted heavy export (`Invalid ZIP file: File is not a zip file`)
+  - heavy export did not deadlock in table-copy phases; the user-visible “hang” was the long final zip/checksum phase with no heartbeat after payload creation
+  - an additional heavy-project export failure on `project_id=1` was reproduced in the payload cleanup tail (`database is locked`) and resolved by explicit cursor cleanup before schema-drop finalization
 
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - Historical `ProcessorRun` rows created before schema version `52` still rely on the legacy note envelope unless they are resumed or re-run.
+- Very large project bundle export can still take a long time in the final compression phase; it is now observable and safer, but not “instant”.
 
 ## Next Step
 - No packaged NLP runtime blocker is currently open.
 - Runtime provenance promotion is no longer an open blocker.
+- If project exchange is part of the next ship gate, manually verify one large-project export to completion and then round-trip import that finished bundle into a clean target DB.
 - If a future release wave requires installer-path reconfirmation, rerun:
   - packaged `HDLE_Premium.exe --self-check import`
   - packaged `HDLE_Premium.exe --self-check health`

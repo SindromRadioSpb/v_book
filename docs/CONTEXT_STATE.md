@@ -20,6 +20,7 @@
 - Resources Manager still does not provide a true install wizard; it provides status, repair guidance, and model-path actions only.
 - Historical runtime provenance rows still depend on the legacy `ProcessorRun.note` envelope until explicitly re-run or resumed under schema version `52`.
 - External runtime dependency repair and managed model import are still surfaced in one dialog, though now with clearer boundaries.
+- Very large project bundle export remains disk/CPU heavy in the final compression phase even after payload creation is complete.
 
 ## Constraints
 - PowerShell-only workflow.
@@ -66,6 +67,17 @@
 - `ProcessService` still preserves the stable nested `runtime` envelope in `ProcessorRun.note` as a compatibility layer.
 - Single-document, batch, and snapshot-backfill runs now share the same dual-write provenance contract.
 - Compatibility read paths prefer dedicated schema fields and fall back to the legacy note envelope for old rows.
+
+## Confirmed Current State After Project Bundle Stability Hardening
+- `ProjectExportEngine` now reports the final export phases explicitly after payload creation:
+  - `Computing checksums`
+  - `Writing manifest`
+  - `Writing payload`
+  - `Writing checksums`
+  - `Finalizing bundle`
+- Bundle creation now stages to `*.hdleproj.partial` and only promotes to the final `.hdleproj` on success.
+- This prevents an interrupted heavy export from leaving a misleading final bundle that later fails import as `Invalid ZIP file`.
+- The heavy export payload cleanup path now closes export cursors before the final schema-drop phase, which removed the reproduced `database is locked` failure on the large live project export path.
 
 ## Confirmed Current State After Wave 3 PATCH-03
 - `RuntimeProbe` now exposes a shared guided repair plan derived from the machine-readable error taxonomy.
