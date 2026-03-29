@@ -1,7 +1,7 @@
 # Handoff Status
 
 ## Current Task
-- `task32`: product-grade project export closure
+- `task33`: product-grade project import closure
 
 ## Current Phase
 - Packaged runtime sign-off is complete for the currently scoped NLP runtime tracks.
@@ -16,6 +16,10 @@
   - export has an explicit stage contract
   - export success requires validated artifact completion
   - the exported bundle now passes a clean import compatibility gate on the reference DB acceptance path
+- The import-focused follow-up wave is now also closed for the current source-of-truth path:
+  - import has an explicit stage contract
+  - import runs truth-based pre-mutation bundle validation before host DB mutation
+  - import success now requires post-import verification, not only “no exception”
 
 ## Closed Tracks
 - Bundled Hebrew payload delivery is complete for packaged release assembly.
@@ -45,6 +49,11 @@
   - the live `Mishneh Torah` hang after `Dropping excluded tables` was fixed by removing duplicate FTS prune work in payload finalization
   - `.hdleproj` success now requires post-build validation (`read_bundle()` + payload `quick_check`)
   - clean import compatibility is restored for schema `31+` payloads via `document_sentence.corpus_id` remapping
+- Project import is now product-closed for the current scope:
+  - the import path has stable stage IDs and structured stage history
+  - import now distinguishes artifact validation, compatibility/importability checks, DB mutation, verification, and cleanup
+  - invalid archives fail during `preflight_bundle` with stage-aware reporting instead of a generic import failure
+  - success now requires post-import readback verification of the imported project and its key row counts
 
 ## Latest Confirmation
 - The ONNX helper timeout root cause was localized to `app/tools/onnx_probe.py`:
@@ -65,21 +74,27 @@
   - `project_id=6`, `name='Mishneh Torah'`
   - CLI export now completes with `exit code 0`, `[OK] Export successful!`, and a validated bundle artifact
   - the produced bundle imports into a clean migrated target DB without errors
+- Product import closure is now confirmed on the same proven bundle path:
+  - the `Mishneh Torah` acceptance bundle imports into a clean migrated target DB with `exit code 0`
+  - CLI import now reports `[OK] Import successful!` only after post-import verification passes
+  - invalid bundles now fail with stage-aware diagnostics and no misleading success signal
 
 ## Remaining Risks
 - Resources Manager still does not provide a full guided install wizard; it provides truthful diagnostics and repair guidance only.
 - The guided repair journey is coherent, but it is still rendered across multiple surfaces rather than one dedicated wizard.
 - Historical `ProcessorRun` rows created before schema version `52` still rely on the legacy note envelope unless they are resumed or re-run.
 - Very large project bundle export can still take noticeable time in the preflight and final compression phases; it is now explicit and bounded enough for diagnosis, but not “instant”.
+- Very large bundle import can still spend noticeable time in the `import_tables` stage; it is now stage-visible and ends with verification evidence instead of a generic success/failure surface.
 
 ## Next Step
 - No packaged NLP runtime blocker is currently open.
 - Runtime provenance promotion is no longer an open blocker.
 - Project export is closed for the currently proven path.
-- If a future wave is needed, it should be import-focused only:
-  - expand import UX/reporting
-  - broaden clean-import smoke coverage
-  - avoid reopening the already-closed export pipeline without new evidence
+- Project import is now also closed for the currently proven path.
+- If a future wave is needed, it should not reopen the closed export/import core pipelines without new evidence.
+- Allowed next steps are now narrow:
+  - broaden clean import/export smoke coverage on installer-path artifacts
+  - add optional UX polish around import previews/reports without changing the core import contract
 - If a future release wave requires installer-path reconfirmation, rerun:
   - packaged `HDLE_Premium.exe --self-check import`
   - packaged `HDLE_Premium.exe --self-check health`

@@ -247,3 +247,20 @@
   - packaged `--self-check health` now reports a successful `frozen_onnx_probe`
 - The already closed packaged Stanza/Torch track remains conceptually separate and was not redesigned by this fix.
 
+## Confirmed Current State After Project Import Product Closure
+- The active source-of-truth import path remains:
+  - `app/ui/app_window.py` -> `ProjectImportWorker` -> `ProjectImportEngine.import_project()`
+- Import is no longer just a best-effort long operation:
+  - it now has stable stage IDs and structured stage history
+  - bundle validation and payload `quick_check` run before host DB mutation
+  - importability checks still run before offsets and write phases
+  - success now requires post-import readback verification
+- Import failure is now operator-usable:
+  - invalid archives fail during `preflight_bundle`
+  - failure reports preserve the true failure stage
+  - cleanup outcome is surfaced separately instead of being silently implicit
+- The current proven acceptance path is green:
+  - `Mishneh Torah_project_6_acceptance.hdleproj` imports into a clean migrated target DB with `exit code 0`
+  - CLI prints `[OK] Import successful!` only after the verification stage completes
+  - invalid bundle smoke now fails truthfully with `failure_code = invalid_archive` and `cleanup_status = not_needed`
+

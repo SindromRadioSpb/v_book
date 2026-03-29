@@ -129,6 +129,18 @@
 - Rationale:
   - the live `Mishneh Torah` repro showed that fixing one visible hang was not enough; export must only report success after the artifact is verifiably complete and structurally importable.
 
+## D-034 — Project import success must require staged preflight and post-import verification
+- Status: accepted and implemented
+- Decision:
+  - `ProjectImportEngine` should treat import as a stage-based product pipeline with:
+    - explicit stable stage IDs
+    - pre-mutation bundle validation and importability checks
+    - stage-aware failure reporting
+    - post-import verification before reporting success
+  - import failure reports must preserve the true failure stage even when a later cleanup stage also runs.
+- Rationale:
+  - the previous import path had useful guards, but it still left too much operator ambiguity between “bundle is readable”, “bundle is safely importable”, and “the imported project is actually usable after writes complete”.
+
 ## D-014 — Guided repair flow must reuse runtime taxonomy
 - Status: accepted and implemented
 - Decision:

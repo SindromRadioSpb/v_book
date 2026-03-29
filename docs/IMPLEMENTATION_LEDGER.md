@@ -711,3 +711,67 @@
   - project export is now a deterministic, observable, artifact-validated pipeline rather than a best-effort long operation
   - the reference-DB `Mishneh Torah` export path is now closed with a validated bundle and a clean import roundtrip
 
+## Step 24 — Project Import Product Closure
+- Status: completed
+- Trigger:
+  - export was already product-closed, but import still relied on a weaker success/failure contract:
+    - no stable import stage IDs
+    - no stage-aware failure surface
+    - no post-import verification before success
+- Audit findings:
+  - the active source-of-truth import path is:
+    - `app/ui/app_window.py` -> `ProjectImportWorker` -> `ProjectImportEngine.import_project()`
+  - the import path already had useful safeguards:
+    - `bundle_format.read_bundle()` for archive/checksum validation
+    - duplicate `(corpus_id, sha256)` rejection before mutation
+    - write-gated mutation and best-effort cleanup on cancel/failure
+  - the remaining gaps were product-contract gaps rather than missing core functionality:
+    - no stable import stage model
+    - no machine-readable stage history/failure stage
+    - success still meant “did not raise” more than “verified import”
+- Code deliverables:
+  - `app/services/project_exchange/dto.py`
+  - `app/services/project_exchange/import_engine.py`
+  - `app/services/project_exchange/worker.py`
+  - `app/ui/app_window.py`
+  - `app/ui/dialogs/project_exchange_dialogs.py`
+  - `scripts/import_project_bundle.py`
+  - `tests/test_project_exchange.py`
+  - `tests/test_project_exchange_dialogs.py`
+- Confirmed behavior changes:
+  - import now has stable stage IDs and structured stage history:
+    - `preflight_bundle`
+    - `preflight_compatibility`
+    - `prepare_connections`
+    - `check_importability`
+    - `compute_offsets`
+    - `import_tables`
+    - `import_pronunciation_metadata`
+    - `verify_imported_project`
+    - `cleanup_partial_rows`
+    - `completed`
+  - the pipeline now performs payload `PRAGMA quick_check(1)` before host DB mutation
+  - failure reports now preserve the real failure stage and expose `failure_code`
+  - cleanup outcome is now surfaced explicitly as `cleanup_status` / `cleanup_error_message`
+  - import success now requires post-import readback verification of:
+    - project row presence/name
+    - imported corpus count
+    - imported document count
+    - imported sentence count
+    - imported lemma count
+  - worker/UI/CLI surfaces now consume structured `ImportReport` data instead of flattening failed imports into string-only errors
+- Test evidence:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\project_exchange\dto.py app\services\project_exchange\import_engine.py app\services\project_exchange\worker.py app\ui\dialogs\project_exchange_dialogs.py app\ui\app_window.py scripts\import_project_bundle.py tests\test_project_exchange.py tests\test_project_exchange_dialogs.py` -> `OK`
+  - baseline before diff:
+    - `.\.venv\Scripts\python.exe -m pytest tests\test_project_exchange.py tests\test_project_exchange_preflight.py tests\test_project_exchange_dialogs.py tests\test_heavy_worker_slot_guard.py tests\test_workspace_app_window_contract.py -q` -> `46 passed`
+  - targeted regression after diff:
+    - `.\.venv\Scripts\python.exe -m pytest tests\test_project_exchange.py tests\test_project_exchange_preflight.py tests\test_project_exchange_dialogs.py tests\test_heavy_worker_slot_guard.py tests\test_workspace_app_window_contract.py -q` -> `48 passed`
+  - acceptance smoke:
+    - valid import:
+      - `.\.venv\Scripts\python.exe .\scripts\import_project_bundle.py --db-path "E:\projects\Project_Vibe\V_book\reports\project_exchange_repro\import_acceptance_target.db" --bundle "E:\projects\Project_Vibe\V_book\-info files\Экспорт проекта\Mishneh_Torah_project_6_acceptance.hdleproj"` -> `exit code 0`, `[OK] Import successful!`, final stage `Completed`
+    - invalid archive:
+      - `.\.venv\Scripts\python.exe .\scripts\import_project_bundle.py --db-path "E:\projects\Project_Vibe\V_book\reports\project_exchange_repro\import_acceptance_target.db" --bundle "E:\projects\Project_Vibe\V_book\reports\project_exchange_repro\broken_import_bundle.hdleproj"` -> `exit code 1`, stage-aware failure during `Validating bundle artifact`, `failure_code = invalid_archive`, `cleanup_status = not_needed`
+- Outcome:
+  - project import is now a deterministic, observable, verification-backed pipeline rather than a best-effort mutation flow
+  - the import track is now closed for the currently proven bundle path without reopening export or runtime work
+
