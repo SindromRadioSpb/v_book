@@ -39,6 +39,10 @@ from app.infra.audio.audio_provider_config import (
 from app.infra.audio.audio_provider_config_manager import AudioProviderConfigManager
 from app.infra.settings import SettingsService
 from app.services.audio_usage_tracker import AudioUsageTracker
+from app.ui.dialogs.lightblue_license_gate_dialog import (
+    LIGHTBLUE_LICENSE_ACCEPTED_KEY,
+    ensure_lightblue_license_accepted,
+)
 from app.ui.dialogs.mms_license_gate_dialog import (
     MMS_LICENSE_ACCEPTED_KEY,
     ensure_mms_license_accepted,
@@ -60,6 +64,12 @@ class AudioProviderSettingsDialog(QDialog):
         "azure_speech_tts": {
             "name": "Azure Speech TTS",
             "default_rate_limit": 60,
+            "default_enabled": False,
+            "supports_advanced": True,
+        },
+        "lightblue_tts": {
+            "name": "LightBlueTTS Hebrew (Local, Experimental)",
+            "default_rate_limit": 600,
             "default_enabled": False,
             "supports_advanced": True,
         },
@@ -166,6 +176,11 @@ class AudioProviderSettingsDialog(QDialog):
             }
             layout.addWidget(group)
 
+        # lightblue_tts: auto-trigger license gate when user enables the provider
+        self.provider_widgets["lightblue_tts"]["enabled"].toggled.connect(
+            self._on_lightblue_enabled_toggled
+        )
+
         layout.addStretch()
         return widget
 
@@ -226,14 +241,17 @@ class AudioProviderSettingsDialog(QDialog):
         self.google_page = self._create_google_advanced_page()
         self.azure_page = self._create_azure_advanced_page()
         self.mms_page = self._create_mms_advanced_page()
+        self.lightblue_page = self._create_lightblue_advanced_page()
         self.advanced_pages = {
             "google_cloud_tts": self.google_page,
             "azure_speech_tts": self.azure_page,
             "mms_tts_local": self.mms_page,
+            "lightblue_tts": self.lightblue_page,
         }
         self.advanced_stack.addWidget(self.google_page)
         self.advanced_stack.addWidget(self.azure_page)
         self.advanced_stack.addWidget(self.mms_page)
+        self.advanced_stack.addWidget(self.lightblue_page)
         layout.addWidget(self.advanced_stack)
 
         pronunciation_row = QHBoxLayout()
@@ -488,6 +506,58 @@ class AudioProviderSettingsDialog(QDialog):
         layout.addStretch()
         return page
 
+    def _create_lightblue_advanced_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        local_group = QGroupBox("Local LightBlueTTS Provider (Experimental)")
+        form = QFormLayout(local_group)
+
+        self.lightblue_license_state = QLabel("")
+        self.lightblue_license_state.setWordWrap(True)
+        form.addRow("License gate:", self.lightblue_license_state)
+
+        self.lightblue_accept_btn = QPushButton("Review / Accept License")
+        self.lightblue_accept_btn.clicked.connect(self._accept_lightblue_license)
+        form.addRow("", self.lightblue_accept_btn)
+
+        path_row = QHBoxLayout()
+        self.lightblue_model_path_btn = QPushButton("Select model folder...")
+        self.lightblue_model_path_btn.clicked.connect(self._browse_lightblue_model_path)
+        path_row.addWidget(self.lightblue_model_path_btn)
+        path_row.addStretch()
+        form.addRow("Model path:", path_row)
+
+        self.lightblue_model_path_label = QLabel("(not configured)")
+        self.lightblue_model_path_label.setWordWrap(True)
+        form.addRow("", self.lightblue_model_path_label)
+
+        layout.addWidget(local_group)
+
+        info = QLabel(
+            "lightblue_tts is optional and disabled by default. "
+            "Model weights (notmax123/LightBlue) are external. "
+            "License for commercial use has NOT been verified — use at your own risk."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        voice_group = QGroupBox("Voice / Speech")
+        voice_form = QFormLayout(voice_group)
+        self.lightblue_speech_rate = QDoubleSpinBox()
+        self.lightblue_speech_rate.setRange(0.5, 2.0)
+        self.lightblue_speech_rate.setSingleStep(0.05)
+        self.lightblue_speech_rate.setDecimals(2)
+        self.lightblue_speech_rate.setValue(1.0)
+        self.lightblue_speech_rate.setSuffix(" x")
+        voice_form.addRow("Speech rate:", self.lightblue_speech_rate)
+        layout.addWidget(voice_group)
+
+        self.lightblue_usage_label = self._create_usage_group(layout, "lightblue_tts")
+        self._create_diagnostics_group(layout, "lightblue_tts")
+        layout.addStretch()
+        return page
+
     def _create_budget_group(self, root_layout: QVBoxLayout):
         group = QGroupBox("Budget Guards (Fail-Closed)")
         form = QFormLayout(group)
@@ -651,6 +721,7 @@ class AudioProviderSettingsDialog(QDialog):
         self._load_google_advanced_settings()
         self._load_azure_advanced_settings()
         self._load_mms_advanced_settings()
+        self._load_lightblue_advanced_settings()
         self._reset_playback_defaults()
         self._load_playback_settings()
         self._on_advanced_provider_changed(self.advanced_provider_combo.currentIndex())
@@ -726,6 +797,25 @@ class AudioProviderSettingsDialog(QDialog):
         self.mms_license_state.setText("Accepted" if accepted else "Not accepted")
         self.mms_license_state.setStyleSheet("color: #2e7d32;" if accepted else "color: #d32f2f;")
 
+    def _load_lightblue_advanced_settings(self):
+        from app.infra.audio.providers.lightblue_tts_local_provider import LightBlueTTSLocalProvider
+
+        config = self.config_manager.load_config("lightblue_tts")
+        self.lightblue_speech_rate.setValue(float(config.speech_rate or 1.0))
+        model_path = (config.model_path or "").strip()
+        if model_path:
+            self.lightblue_model_path_label.setText(model_path)
+        else:
+            default = LightBlueTTSLocalProvider._default_model_dir()
+            from pathlib import Path
+            if default and Path(default).exists():
+                self.lightblue_model_path_label.setText(f"Auto: {default}")
+            else:
+                self.lightblue_model_path_label.setText("(not found — place model at default location)")
+        accepted = self.settings.get_bool(LIGHTBLUE_LICENSE_ACCEPTED_KEY, False)
+        self.lightblue_license_state.setText("Accepted" if accepted else "Not accepted")
+        self.lightblue_license_state.setStyleSheet("color: #2e7d32;" if accepted else "color: #d32f2f;")
+
     def _load_playback_settings(self):
         self.playback_pre_roll_spin.setValue(
             self.settings.get_int("audio/playback/pre_roll_ms", 200)
@@ -783,6 +873,7 @@ class AudioProviderSettingsDialog(QDialog):
         self._save_google_advanced_settings()
         self._save_azure_advanced_settings()
         self._save_mms_advanced_settings()
+        self._save_lightblue_advanced_settings()
         self._save_playback_settings()
 
         self.settings.sync()
@@ -829,6 +920,19 @@ class AudioProviderSettingsDialog(QDialog):
         config.speech_rate = float(self.mms_speech_rate.value())
         model_path = self.mms_model_path_label.text().strip()
         config.model_path = None if model_path in {"", "(not configured)"} else model_path
+        self.config_manager.save_config(config)
+
+    def _save_lightblue_advanced_settings(self):
+        config = self.config_manager.load_config("lightblue_tts")
+        config.auth_mode = AudioProviderAuthMode.NONE
+        config.speech_rate = float(self.lightblue_speech_rate.value())
+        model_path = self.lightblue_model_path_label.text().strip()
+        # Labels starting with "Auto:" or "(not" are display-only — save None so
+        # _default_model_dir() auto-discovery kicks in at synthesis time.
+        if not model_path or model_path.startswith("Auto:") or model_path.startswith("(not"):
+            config.model_path = None
+        else:
+            config.model_path = model_path
         self.config_manager.save_config(config)
 
     def _load_google_sa_json(self):
@@ -918,10 +1022,34 @@ class AudioProviderSettingsDialog(QDialog):
             self._load_mms_advanced_settings()
             QMessageBox.information(self, "License Gate", "License accepted.")
 
+    def _on_lightblue_enabled_toggled(self, checked: bool) -> None:
+        """Auto-trigger license gate when user enables lightblue_tts."""
+        if not checked:
+            return
+        if not self.settings.get_bool(LIGHTBLUE_LICENSE_ACCEPTED_KEY, False):
+            if not ensure_lightblue_license_accepted(parent=self):
+                # User declined — revert the checkbox silently
+                cb = self.provider_widgets["lightblue_tts"]["enabled"]
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+            else:
+                self._load_lightblue_advanced_settings()
+
+    def _accept_lightblue_license(self):
+        if ensure_lightblue_license_accepted(parent=self):
+            self._load_lightblue_advanced_settings()
+            QMessageBox.information(self, "License Gate", "LightBlueTTS license gate accepted.")
+
     def _browse_mms_model_path(self):
         selected = QFileDialog.getExistingDirectory(self, "Select MMS model directory")
         if selected:
             self.mms_model_path_label.setText(selected)
+
+    def _browse_lightblue_model_path(self):
+        selected = QFileDialog.getExistingDirectory(self, "Select LightBlueTTS model directory")
+        if selected:
+            self.lightblue_model_path_label.setText(selected)
 
     def _voice_cache_key(self, provider_id: str) -> str:
         return f"audio/providers/{provider_id}/voices_cache"
@@ -998,6 +1126,8 @@ class AudioProviderSettingsDialog(QDialog):
                 self._save_azure_advanced_settings()
             elif provider_id == "mms_tts_local":
                 self._save_mms_advanced_settings()
+            elif provider_id == "lightblue_tts":
+                self._save_lightblue_advanced_settings()
             self.settings.sync()
         except Exception as e:
             QMessageBox.warning(
@@ -1129,6 +1259,7 @@ class AudioProviderSettingsDialog(QDialog):
         self._load_google_advanced_settings()
         self._load_azure_advanced_settings()
         self._load_mms_advanced_settings()
+        self._load_lightblue_advanced_settings()
 
     def _open_pronunciation_bootstrap(self):
         from app.ui.dialogs.pronunciation_bootstrap_dialog import (

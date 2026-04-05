@@ -13,7 +13,10 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.infra.settings import SettingsService
 
 from app.build_meta import format_build_meta_line, get_build_meta
 
@@ -823,10 +826,10 @@ def _run_cloud_tests_self_check(
                 attempt["error"] = str(exc)
             finally:
                 if db_initialized:
-                    try:
+                    import contextlib
+
+                    with contextlib.suppress(Exception):
                         DBService.shutdown()
-                    except Exception:
-                        pass
             attempts.append(attempt)
         payload["credential_db_attempts"] = attempts
 
@@ -1030,6 +1033,14 @@ def main():
         from app.services.nlp_runtime.stanza_probe_worker import main as stanza_probe_main
 
         return int(stanza_probe_main())
+
+    # onnxruntime must be imported before PyQt6 on Windows to prevent a DLL
+    # initialisation conflict (Qt loads OpenMP/MSVC DLLs that clash with the
+    # onnxruntime pybind11 extension when loaded in the reverse order).
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        import onnxruntime  # noqa: F401  # pre-load — order matters
 
     # Import heavy Qt/UI modules only for normal app startup.
     # Keep self-check and subprocess bridge paths independent from GUI imports.

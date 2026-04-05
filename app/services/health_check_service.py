@@ -49,6 +49,7 @@ class HealthCheckService:
         items.append(self._check_pronunciation_bootstrap())
         items.append(self._check_sentence_niqqud_bootstrap())
         items.extend(self._check_cloud_providers())
+        items.append(self._check_lightblue_tts())
         items.append(self._check_baseline_reference())
 
         status_rank = {"ok": 0, "optional": 0, "warn": 1, "error": 2}
@@ -73,7 +74,11 @@ class HealthCheckService:
                 message=f"runtime_probe_failed: {exc} | route=runtime",
                 remediation="Use Install / Repair NLP Runtime in Resources Manager, then re-run Health Check. Next action: Start with Health Check, then inspect the external runtime dependency in Resources Manager before retrying processing.",
             )
-        source_suffix = f", source={status.managed_runtime_source_kind}" if status.managed_runtime_source_kind else ""
+        source_suffix = (
+            f", source={status.managed_runtime_source_kind}"
+            if status.managed_runtime_source_kind
+            else ""
+        )
         bundled_suffix = (
             f", bundled_root={status.managed_runtime_bundled_payload_root}"
             if status.managed_runtime_bundled_payload_root
@@ -250,6 +255,112 @@ class HealthCheckService:
         )
         return checks
 
+    def _check_lightblue_tts(self) -> HealthCheckItem:
+        """Check LightBlueTTS experimental provider readiness."""
+        check_id = "bootstrap:lightblue_tts"
+        title = "Local Audio: LightBlueTTS Hebrew (Experimental)"
+
+        license_accepted = self.settings.get_bool(
+            "audio/providers/lightblue_tts/license_accepted", False
+        )
+        enabled = self.settings.get_bool("audio/providers/lightblue_tts/enabled", False)
+        if not enabled:
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="optional",
+                message="Provider is disabled (opt-in).",
+                remediation=(
+                    "Enable in Audio Provider Settings after accepting the license gate. "
+                    "Model weights must be placed at "
+                    "%LOCALAPPDATA%\\HDLE\\models\\lightblue_tts\\ manually."
+                ),
+            )
+
+        if not license_accepted:
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="warn",
+                message="Provider enabled but license gate not accepted.",
+                remediation="Open Audio Provider Settings and accept the LightBlueTTS license gate.",
+            )
+
+        # Check lightblue_onnx import
+        try:
+            import lightblue_onnx  # noqa: F401, PLC0415
+        except ImportError as exc:
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="error",
+                message=f"lightblue_onnx package not installed: {exc}",
+                remediation=(
+                    "Install from GitHub: "
+                    "pip install --ignore-requires-python "
+                    "git+https://github.com/maxmelichov/Light-BlueTTS.git"
+                ),
+            )
+
+        # Check phonikud_onnx import
+        try:
+            import phonikud_onnx  # noqa: F401, PLC0415
+        except ImportError as exc:
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="error",
+                message=f"phonikud_onnx package not installed: {exc}",
+                remediation="Install phonikud-onnx: pip install phonikud-onnx",
+            )
+
+        # Check model directory
+        import os  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        model_path = self.settings.get_string("audio/providers/lightblue_tts/model_path", "")
+        if not model_path:
+            local_app_data = os.getenv("LOCALAPPDATA", "")
+            model_path = (
+                str(Path(local_app_data) / "HDLE" / "models" / "lightblue_tts")
+                if local_app_data
+                else ""
+            )
+        model_dir = Path(model_path) if model_path else None
+        if not model_dir or not model_dir.exists():
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="warn",
+                message=f"Model directory not found: {model_dir or '(not configured)'}",
+                remediation=(
+                    "Download model weights from HuggingFace (notmax123/LightBlue) and place "
+                    "them at %LOCALAPPDATA%\\HDLE\\models\\lightblue_tts\\, or set a custom "
+                    "path in Audio Provider Settings."
+                ),
+            )
+
+        # Check style file
+        style_path = model_dir / "voices" / "female1.json"
+        if not style_path.exists():
+            return HealthCheckItem(
+                check_id=check_id,
+                title=title,
+                status="warn",
+                message=f"Voice style file not found: {style_path}",
+                remediation=(
+                    "Ensure the model directory contains a voices/ subdirectory "
+                    "with at least female1.json."
+                ),
+            )
+
+        return HealthCheckItem(
+            check_id=check_id,
+            title=title,
+            status="ok",
+            message=f"Ready. Model: {model_dir.name}, style: female1.json",
+        )
+
     def _check_mt_provider(self, *, provider_id: str, title: str) -> HealthCheckItem:
         master_enabled = self.settings.get_bool("mt/providers/enabled", default=False)
         raw_chain = self.settings.get_json("mt/providers/chain", default=[])
@@ -317,9 +428,7 @@ class HealthCheckService:
 
     @staticmethod
     def _mt_default_enabled(provider_id: str) -> bool:
-        if provider_id == "google_cloud_translate":
-            return False
-        return True
+        return provider_id != "google_cloud_translate"
 
     def _is_mt_provider_configured(self, provider_id: str, config) -> bool:
         auth_mode = config.auth.mode
@@ -359,7 +468,8 @@ class HealthCheckService:
             try:
                 with DBService.get_instance().get_session() as session:
                     row = session.execute(
-                        text("""
+                        text(
+                            """
                             SELECT
                                 (SELECT COUNT(*) FROM source_document d
                                   JOIN source_corpus c ON d.corpus_id = c.corpus_id
@@ -369,7 +479,8 @@ class HealthCheckService:
                                   JOIN source_corpus c ON d.corpus_id = c.corpus_id
                                   WHERE c.project_id = :pid) AS sentences,
                                 (SELECT COUNT(*) FROM lemma WHERE project_id = :pid) AS lemmas
-                            """),
+                            """
+                        ),
                         {"pid": baseline_project_id},
                     ).fetchone()
             except Exception as exc:
@@ -405,4 +516,3 @@ class HealthCheckService:
             message=status.message,
             remediation="Install/import baseline bundle from Resources Manager if needed.",
         )
-

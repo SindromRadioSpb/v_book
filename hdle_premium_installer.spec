@@ -118,6 +118,12 @@ a = Analysis(
         'onnxruntime.capi.onnxruntime_pybind11_state',
         'app.services.audio_usage_tracker',
 
+        # LightBlueTTS local provider (experimental)
+        'app.infra.audio.providers.lightblue_tts_local_provider',
+        'app.infra.audio.providers._he_ipa',
+        'lightblue_onnx',
+        'soundfile',
+
         # Project Exchange (Task 9) - РќРћР’РћР•
         'app.services.project_exchange',
         'app.services.project_exchange.export_engine',
@@ -132,6 +138,7 @@ a = Analysis(
         'app.ui.dialogs.batch_translate_dialog',
         'app.ui.dialogs.batch_audio_dialog',
         'app.ui.dialogs.mms_license_gate_dialog',
+        'app.ui.dialogs.lightblue_license_gate_dialog',
         'app.ui.dialogs.batch_progress_dialog',
         'app.ui.dialogs.batch_progress_dialog_v2',
         'app.ui.dialogs.project_exchange_dialogs',

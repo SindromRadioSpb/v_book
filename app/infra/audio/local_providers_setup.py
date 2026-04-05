@@ -7,6 +7,7 @@ import logging
 from app.infra.audio.providers import (
     AzureSpeechTTSProvider,
     GoogleCloudTTSProvider,
+    LightBlueTTSLocalProvider,
     MMSTTSLocalProvider,
     MockLocalAudioProvider,
     MockOnlineAudioProvider,
@@ -24,6 +25,7 @@ def register_default_audio_providers() -> int:
     for provider_cls in (
         GoogleCloudTTSProvider,
         AzureSpeechTTSProvider,
+        LightBlueTTSLocalProvider,
         MMSTTSLocalProvider,
         MockLocalAudioProvider,
         MockOnlineAudioProvider,

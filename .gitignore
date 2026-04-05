@@ -68,6 +68,9 @@ test_m4*.db-*
 # P1 verification reports
 runtime/
 
+# TTS spot-check WAV artifacts
+reports/
+
 # temp
 .timeout*
 
@@ -99,6 +102,7 @@ verify_*.py
 # Installer output
 installer/output/
 installer/resources/local_models/phonikud/
+installer/resources/local_models/stanza_hebrew/
 
 # Reference corpora data files (keep scripts, not data)
 ref_corpora/hewiki/
