@@ -131,6 +131,9 @@ def check_text(
         niqqud_text = text
         g2p_branch = f"raw_text ({exc})"
 
+    # Strip phonikud pipe-separators (same fix as in provider).
+    niqqud_text = niqqud_text.replace("|", "")
+
     result["g2p_branch"] = g2p_branch
     result["niqqud_text"] = niqqud_text
 
@@ -162,7 +165,12 @@ def check_text(
         )
 
         import numpy as np
-        audio_arr, sample_rate = tts.create(phonemes)
+
+        # Add terminal period (same as provider fix: signals end-of-utterance).
+        phonemes_for_synth = phonemes.rstrip(" ") + (
+            "" if phonemes.rstrip().endswith((".", "!", "?")) else "."
+        )
+        audio_arr, sample_rate = tts.create(phonemes_for_synth)
         arr = np.asarray(audio_arr, dtype=np.float32)
 
         # Padding (same as provider)

@@ -1008,3 +1008,115 @@ def test_normalize_audio_loudness_peak_bounded():
     result = LightBlueTTSLocalProvider._normalize_audio_loudness(audio, target_peak=0.92)
     peak = float(np.max(np.abs(result)))
     assert peak <= 0.92 + 1e-6, f"Peak exceeded target: {peak}"
+
+
+# ---------------------------------------------------------------------------
+# T22 — Mater lectionis ו and mobile shva fixes in hebrew_to_ipa
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "niqqud, expected_ipa, label",
+    [
+        # Mater lectionis fix: ו after holam → silent (not /v/)
+        ("חֹומֶר", "χomeʁ", "חומר holam-male vav silent"),
+        ("כֹּול", "kol", "כול dagesh+holam+male vav silent"),
+        # Mobile shva fix: shva before guttural → /e/
+        ("לְאַחֵר", "leʔaχeʁ", "לאחר mobile shva before alef"),
+        ("לְאֹורֶךְ", "leʔoʁeχ", "לאורך mobile shva before alef + mater lectionis"),
+        # Regressions — fixes must NOT affect correctly handled forms
+        ("הוֹסִיף", "hosif", "הוסיף vav+holam = /o/ unaffected"),
+        ("מִבְנֶה", "mivneh", "מבנה shva before non-guttural stays silent"),
+        ("שֶׁל", "ʃel", "של unchanged"),
+        ("הוּא", "huʔ", "הוא shuruk unaffected"),
+        ("עַל", "ʔal", "על unchanged"),
+        ("רַב", "ʁav", "רב unchanged"),
+    ],
+)
+def test_he_ipa_mater_lectionis_and_mobile_shva(niqqud, expected_ipa, label):
+    """Mater lectionis ו and mobile shva produce correct IPA."""
+    assert hebrew_to_ipa(niqqud) == expected_ipa, label
+
+
+# ---------------------------------------------------------------------------
+# T23 — Pipe-separator strip in _synthesize_phonemes
+# ---------------------------------------------------------------------------
+
+
+def test_synthesize_phonemes_pipe_stripped_from_niqqud(monkeypatch):
+    """Phonikud pipe-separator '|' in G2P output is stripped before phonemization."""
+    monkeypatch.delitem(__import__("sys").modules, "phonikud", raising=False)
+
+    received_niqqud: list[str] = []
+
+    def _tracking_phonemize(text: str) -> str:
+        received_niqqud.append(text)
+        return hebrew_to_ipa(text)
+
+    def _fake_apply_g2p(text, ph):
+        # Simulate phonikud returning pipe-separated result (e.g. prefix boundary)
+        return "לְֽ|אַחֵר", "phonikud_onnx"
+
+    monkeypatch.setattr(LightBlueTTSLocalProvider, "_apply_g2p", staticmethod(_fake_apply_g2p))
+
+    fake_tts = MagicMock()
+    fake_tts.create = MagicMock(return_value=_make_fake_wav())
+
+    provider = _make_provider()
+    monkeypatch.setattr(
+        "app.infra.audio.providers.lightblue_tts_local_provider._ENABLE_CONTEXT_WRAP",
+        False,
+    )
+    provider._synthesize_phonemes(
+        text="לאחר",
+        tts_model=fake_tts,
+        phonikud_instance=MagicMock(),
+        phonemize_fn=_tracking_phonemize,
+        phonemize_path="hebrew_to_ipa",
+    )
+
+    assert received_niqqud, "phonemize_fn was never called"
+    assert (
+        "|" not in received_niqqud[0]
+    ), f"Pipe was NOT stripped before phonemization: {received_niqqud[0]!r}"
+
+
+# ---------------------------------------------------------------------------
+# T24 — Terminal period appended to IPA before synthesis
+# ---------------------------------------------------------------------------
+
+
+def test_synthesize_phonemes_terminal_period_added(monkeypatch):
+    """IPA string passed to tts_model.create() always ends with '.'."""
+    monkeypatch.delitem(__import__("sys").modules, "phonikud", raising=False)
+
+    received_by_create: list[str] = []
+
+    def _fake_create(phonemes: str):
+        received_by_create.append(phonemes)
+        return _make_fake_wav()
+
+    def _fake_apply_g2p(text, ph):
+        return "שֶׁל", "phonikud_onnx"
+
+    monkeypatch.setattr(LightBlueTTSLocalProvider, "_apply_g2p", staticmethod(_fake_apply_g2p))
+
+    fake_tts = MagicMock()
+    fake_tts.create = MagicMock(side_effect=_fake_create)
+
+    provider = _make_provider()
+    monkeypatch.setattr(
+        "app.infra.audio.providers.lightblue_tts_local_provider._ENABLE_CONTEXT_WRAP",
+        False,
+    )
+    provider._synthesize_phonemes(
+        text="של",
+        tts_model=fake_tts,
+        phonikud_instance=MagicMock(),
+        phonemize_fn=hebrew_to_ipa,
+        phonemize_path="hebrew_to_ipa",
+    )
+
+    assert received_by_create, "tts_model.create was never called"
+    sent = received_by_create[0]
+    assert sent.endswith("."), f"IPA passed to create() does not end with '.': {sent!r}"

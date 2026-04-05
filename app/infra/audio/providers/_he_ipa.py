@@ -173,6 +173,13 @@ def hebrew_to_ipa(text: str) -> str:
                 result.append("o")
                 i = j + 1
                 continue
+            # Holam-male pattern: preceding consonant had holam → this vav is a
+            # pure vowel letter (mater lectionis) and produces no additional sound.
+            # Condition: last emitted vowel was 'o' (from holam on the previous
+            # consonant) AND vav has no own vowel-producing niqqud.
+            if last_vowel == "o" and not (j < n and chars[j] in (_DAGESH, _HOLAM, _HOLAM_MALE)):
+                i += 1  # skip mater lectionis vav — sound already represented by 'o'
+                continue
             # Otherwise treat as consonant /v/ (fall through to generic letter branch)
 
         # --- Hebrew letter ---
@@ -223,12 +230,18 @@ def hebrew_to_ipa(text: str) -> str:
                 result.append(cons)
 
             # Collect vowel niqqud (second pass through the same diacritics)
+            # Gutturals: א ה ח ע — mobile shva (shva na) before these is pronounced /e/.
+            _GUTTURALS = {"\u05D0", "\u05D4", "\u05D7", "\u05E2"}
+            next_base = chars[end_diacritics] if end_diacritics < n else ""
             vowel_here = ""
             k = i + 1
             while k < end_diacritics:
                 c = chars[k]
                 if c in _NIQQUD_VOWEL:
                     v = _NIQQUD_VOWEL[c]
+                    # Mobile shva (shva na) before a guttural letter → /e/.
+                    if c == _SHVA and v == "" and next_base in _GUTTURALS:
+                        v = "e"
                     if v:
                         result.append(v)
                         vowel_here = v

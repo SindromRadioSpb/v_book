@@ -295,6 +295,12 @@ class LightBlueTTSLocalProvider(BaseAudioProvider):
         else:
             niqqud_text = niqqud_raw
 
+        # Strip phonikud pipe-separators ('|') — phonikud uses '|' as a prefix/compound
+        # word boundary marker; it is not a Hebrew character and must be removed before
+        # IPA conversion so that pre-scan of diacritics (e.g. mobile shva detection)
+        # works correctly across the boundary.
+        niqqud_text = niqqud_text.replace("|", "")
+
         if g2p_branch == "raw_text":
             logger.warning(
                 "lightblue_tts: all G2P branches failed — synthesizing raw text (len=%d)",
@@ -334,7 +340,14 @@ class LightBlueTTSLocalProvider(BaseAudioProvider):
                 text,
             )
 
-        audio_arr, sample_rate = tts_model.create(phonemes)
+        # Append a terminal period so the model treats the sequence as a complete
+        # utterance.  Without it, the flow-matching diffusion tends to echo or
+        # repeat the final phoneme on short inputs (e.g. 2–4 phoneme words).
+        phonemes_for_synth = phonemes.rstrip(" ") + (
+            "" if phonemes.rstrip().endswith((".", "!", "?")) else "."
+        )
+
+        audio_arr, sample_rate = tts_model.create(phonemes_for_synth)
         return audio_arr, sample_rate
 
     @staticmethod
