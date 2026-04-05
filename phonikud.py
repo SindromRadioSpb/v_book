@@ -33,6 +33,10 @@ _ONNX_PROBE_EXE_NAME = "HDLE_ONNX_Probe.exe"
 _DLL_DIR_HANDLES: list[object] = []
 _DLL_DIR_KEYS: set[str] = set()
 
+# Directory of this shim file — stripped from subprocess sys.path so the
+# installed phonikud package is found instead of this shim.
+_SHIM_DIR: str = str(Path(__file__).resolve().parent)
+
 
 def _normalize_input(text: str) -> str:
     return (text or "").strip()
@@ -384,6 +388,99 @@ def _load_model_bundle() -> tuple[str, object, object | None] | None:
         _runtime_mode = MODE_ERROR
         _runtime_details = f"Failed to load model from path: {exc}"
         return None
+
+
+def _run_phonemize_subprocess(texts: list[str]) -> list[str]:
+    """Run phonikud.phonemize in an isolated subprocess to bypass shim shadowing.
+
+    The local phonikud.py shim at the project root shadows the installed
+    phonikud package.  This function strips the shim's directory from sys.path
+    inside the subprocess so the real package is imported instead.
+
+    Args:
+        texts: List of Hebrew strings (with niqqud) to phonemize.
+
+    Returns:
+        List of IPA phoneme strings (one per input).  Empty string on per-item
+        failure; raises RuntimeError if the subprocess itself fails.
+    """
+    normalized = [str(text or "") for text in (texts or [])]
+    if not normalized:
+        return []
+
+    payload = {
+        "texts": normalized,
+        "shim_dir": _SHIM_DIR,
+    }
+
+    # The subprocess strips the shim directory from sys.path before importing
+    # phonikud so that the installed package (site-packages/phonikud/) is
+    # found rather than this file.
+    code = (
+        "import json,sys,os\n"
+        "raw=sys.stdin.read() or '{}'\n"
+        "data=json.loads(raw)\n"
+        "shim_dir=data.get('shim_dir') or ''\n"
+        "if shim_dir:\n"
+        " norm=os.path.normcase\n"
+        " shim_n=norm(shim_dir)\n"
+        " sys.path=[p for p in sys.path if norm(os.path.abspath(p or '.'))!=shim_n]\n"
+        "from phonikud import phonemize as _ph\n"
+        "inputs=data.get('texts') or []\n"
+        "outs=[]\n"
+        "for t in inputs:\n"
+        " t=str(t or '')\n"
+        " try:\n"
+        "  rendered=str(_ph(t) or '').strip()\n"
+        " except Exception:\n"
+        "  rendered=''\n"
+        " outs.append(rendered)\n"
+        "sys.stdout.write(json.dumps({'outputs': outs}, ensure_ascii=True))\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        input=json.dumps(payload, ensure_ascii=True),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=_SUBPROCESS_TIMEOUT_SEC,
+        env=env,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(stderr or f"phonemize subprocess exited with code {proc.returncode}")
+    try:
+        parsed = json.loads(proc.stdout or "{}")
+    except Exception as exc:
+        raise RuntimeError(f"phonemize subprocess returned invalid JSON: {exc}") from exc
+    outputs = parsed.get("outputs") or []
+    return [str(item or "") for item in outputs]
+
+
+def phonemize(text: str) -> str:
+    """Convert Hebrew text (with niqqud) to IPA phoneme string.
+
+    Runs the installed phonikud package's phonemize() in a subprocess so that
+    this local shim does not shadow the package's internal imports.
+
+    Args:
+        text: Hebrew text, ideally with niqqud diacritics.
+
+    Returns:
+        IPA phoneme string compatible with LightBlueTTS.  Empty string on
+        failure (caller should fall back to hebrew_to_ipa).
+    """
+    source = _normalize_input(text)
+    if not source:
+        return ""
+    try:
+        results = _run_phonemize_subprocess([source])
+        return results[0] if results else ""
+    except Exception:
+        return ""
 
 
 def add_niqqud(text: str) -> str:

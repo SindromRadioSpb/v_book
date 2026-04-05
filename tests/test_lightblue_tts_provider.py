@@ -1120,3 +1120,138 @@ def test_synthesize_phonemes_terminal_period_added(monkeypatch):
     assert received_by_create, "tts_model.create was never called"
     sent = received_by_create[0]
     assert sent.endswith("."), f"IPA passed to create() does not end with '.': {sent!r}"
+
+
+# ---------------------------------------------------------------------------
+# T25–T27 — phonikud.py shim phonemize() — Variant 1 subprocess delegation
+# ---------------------------------------------------------------------------
+
+_IPA_VOWELS = set("aeiouˈ")
+
+
+class TestShimPhonemize:
+    """T25: shim.phonemize is present and delegates to site-packages phonikud."""
+
+    def test_phonemize_callable_on_shim(self):
+        """phonemize function is exposed by the phonikud shim module."""
+        import phonikud  # noqa: PLC0415
+
+        assert callable(
+            getattr(phonikud, "phonemize", None)
+        ), "phonikud.phonemize must be a callable after Variant 1"
+
+    @pytest.mark.parametrize(
+        "niqqud_text,expected_contains",
+        [
+            # niqqud input → phonemize should return IPA with at least one vowel
+            ("\u05e9\u05b6\u05dc", "e"),  # שֶׁל  → ʃˈel
+            ("\u05d7\u05d5\u05de\u05b6\u05e8", "e"),  # חוֹמֶר → χˈmeʁ
+            ("\u05db\u05b8\u05d0\u05b2\u05e9\u05b6\u05c1\u05e8", "a"),  # כָּאֲשֶׁר
+            ("\u05dc\u05b0\u05d0\u05d5\u05b9\u05e8\u05b6\u05da", "o"),  # לְאוֹרֶךְ
+            ("\u05d4\u05d5\u05bc\u05e1\u05b4\u05d9\u05e3", "u"),  # הוּסִיף
+            ("\u05de\u05b0\u05d4\u05b4\u05d9\u05e8\u05d5\u05bc\u05ea", "i"),  # מְהִירוּת
+            ("\u05e2\u05b7\u05dc", "a"),  # עַל → ʔˈal
+        ],
+        ids=[
+            "shel",
+            "chomer",
+            "kaasher",
+            "leorech",
+            "hosif",
+            "mehirut",
+            "al",
+        ],
+    )
+    def test_phonemize_returns_ipa_with_vowel(self, niqqud_text: str, expected_contains: str):
+        """phonemize(niqqud_text) returns IPA containing the expected vowel."""
+        import phonikud  # noqa: PLC0415
+
+        result = phonikud.phonemize(niqqud_text)
+        assert isinstance(result, str), "phonemize must return str"
+        assert len(result) > 0, f"phonemize returned empty string for {niqqud_text!r}"
+        assert expected_contains in result, (
+            f"Expected IPA to contain {expected_contains!r} for {niqqud_text!r}, " f"got {result!r}"
+        )
+
+    def test_phonemize_empty_input_returns_empty(self):
+        """phonemize('') returns empty string without error."""
+        import phonikud  # noqa: PLC0415
+
+        assert phonikud.phonemize("") == ""
+        assert phonikud.phonemize("   ") == ""
+
+
+class TestLoadPhonemizerPicksShim:
+    """T26: _load_phonemize() selects phonikud.phonemize when shim has it."""
+
+    def test_load_phonemize_returns_shim_phonemize_path(self):
+        """_load_phonemize() label is 'phonikud.phonemize' when shim exposes phonemize."""
+        import phonikud  # ensures shim is in sys.modules  # noqa: PLC0415
+
+        assert callable(
+            getattr(phonikud, "phonemize", None)
+        ), "Precondition: shim must have phonemize"
+
+        _fn, path = LightBlueTTSLocalProvider._load_phonemize()
+        assert path == "phonikud.phonemize", f"Expected 'phonikud.phonemize' path but got {path!r}"
+
+    def test_load_phonemize_fn_returns_ipa_for_niqqud_input(self):
+        """Function returned by _load_phonemize() produces non-empty IPA for שֶׁל."""
+        import phonikud  # noqa: PLC0415 — ensure shim loaded
+
+        fn, _path = LightBlueTTSLocalProvider._load_phonemize()
+        result = fn("\u05e9\u05b6\u05dc")  # שֶׁל
+        assert isinstance(result, str)
+        assert len(result) > 0, f"IPA is empty for שֶׁל, got {result!r}"
+        # shim.phonemize → subprocess → phonikud.phonemize: שֶׁל → ʃˈel
+        assert "e" in result, f"Expected vowel 'e' in IPA for שֶׁל, got {result!r}"
+
+
+class TestPhonemizerSubprocessIsolation:
+    """T27: subprocess strips shim dir so installed phonikud is used."""
+
+    def test_run_phonemize_subprocess_returns_list(self):
+        """_run_phonemize_subprocess returns list of same length as input."""
+        from phonikud import _run_phonemize_subprocess  # noqa: PLC0415
+
+        inputs = [
+            "\u05e9\u05b6\u05dc",  # שֶׁל
+            "\u05d7\u05d5\u05de\u05b6\u05e8",  # חוֹמֶר
+        ]
+        outputs = _run_phonemize_subprocess(inputs)
+        assert len(outputs) == len(inputs), f"Expected {len(inputs)} outputs, got {len(outputs)}"
+        for i, (inp, out) in enumerate(zip(inputs, outputs)):
+            assert isinstance(out, str), f"Output {i} is not str: {out!r}"
+            assert len(out) > 0, f"Output {i} is empty for input {inp!r}"
+
+    def test_run_phonemize_subprocess_empty_input(self):
+        """_run_phonemize_subprocess([]) returns []."""
+        from phonikud import _run_phonemize_subprocess  # noqa: PLC0415
+
+        assert _run_phonemize_subprocess([]) == []
+
+    def test_run_phonemize_subprocess_no_shim_in_path(self):
+        """Subprocess does not import local shim (no ImportError from phonikud internals)."""
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+        from phonikud import _SHIM_DIR  # noqa: PLC0415
+
+        # Run a probe that imports phonikud from a clean path and checks for lexicon.
+        code = (
+            "import json,sys,os\n"
+            "shim_dir=sys.argv[1]\n"
+            "norm=os.path.normcase\n"
+            "sys.path=[p for p in sys.path if norm(os.path.abspath(p or '.'))!=norm(shim_dir)]\n"
+            "from phonikud import lexicon\n"
+            "sys.stdout.write(json.dumps({'ok': True}))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, _SHIM_DIR],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+        assert (
+            result.returncode == 0
+        ), f"Subprocess failed (shim leaked?): {result.stderr or result.stdout}"
