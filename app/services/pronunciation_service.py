@@ -498,13 +498,17 @@ class PronunciationService:
                 qc_flag=source_qc_flag,
             )
 
-        source_norm_clean = (source_norm or "").strip() or self._normalize_surface(
-            src_lang_clean, source_spoken
-        )
+        # source_norm is a TM cache key (may be lemma-stripped, e.g. "ירות" for "מהירות").
+        # pronunciation_entry is keyed on surface forms, so always look up by the
+        # surface-normalised source text.  Fall back to source_norm only when
+        # surface normalisation yields nothing (e.g. single-letter prefix words).
+        pron_lookup_norm = self._normalize_surface(src_lang_clean, source_spoken)
+        if not pron_lookup_norm:
+            pron_lookup_norm = (source_norm or "").strip()
         exact_entry = self.get_entry(
             session,
             lang=src_lang_clean,
-            src_norm=source_norm_clean,
+            src_norm=pron_lookup_norm,
         )
 
         if exact_entry and (exact_entry.ipa or "").strip():

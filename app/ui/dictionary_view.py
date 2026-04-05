@@ -1257,7 +1257,7 @@ class DictionaryView(QWidget):
         for proxy_index in sorted(selected_rows, key=lambda idx: idx.row()):
             source_row = self.proxy_model.map_to_source_row(proxy_index.row())
             lemma = self.lemma_model.lemmas[source_row]
-            src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm or (
+            src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (
                 lemma.norm_text or ""
             )
             if not src_norm:
@@ -1392,7 +1392,7 @@ class DictionaryView(QWidget):
         """Delegate callback: play one row from Audio column."""
         source_row = self.proxy_model.map_to_source_row(index.row())
         lemma = self.lemma_model.lemmas[source_row]
-        src_norm = normalize_for_tm("he", lemma.lemma_text, "surface").norm or (lemma.norm_text or "")
+        src_norm = normalize_for_tm("he", lemma.lemma_text, "lemma").norm or (lemma.norm_text or "")
         if not src_norm:
             return
         self._play_audio_items(
