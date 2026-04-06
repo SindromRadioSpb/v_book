@@ -364,24 +364,43 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
         is_gptq = "gptq" in model_id.lower()
 
         if is_gptq:
-            # Load via auto_gptq directly — avoids transformers' optimum GPTQ
-            # backend which has fragile QuantizeConfig API coupling.
+            # Load GPTQ model bypassing transformers→optimum chain (fragile
+            # QuantizeConfig API coupling).  Try gptqmodel first (broader arch
+            # support, maintained successor to auto_gptq), then auto_gptq.
             sys.stdout.write(f"[Worker] GPTQ model detected: {model_id}\n")
             sys.stdout.flush()
-            try:
-                from auto_gptq import AutoGPTQForCausalLM
-            except ImportError as e:
-                raise WorkerError(
-                    "GPTQ loading requires auto-gptq. " "Install: pip install auto-gptq>=0.6.0"
-                ) from e
 
             gptq_device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            model = AutoGPTQForCausalLM.from_quantized(
-                model_path,
-                device=gptq_device,
-                use_triton=False,
-                inject_fused_attention=False,
-            )
+
+            gptq_loaded = False
+            try:
+                from gptqmodel import GPTQModel
+
+                model = GPTQModel.from_quantized(model_path, device=gptq_device)
+                sys.stdout.write("[Worker] GPTQ loader: gptqmodel\n")
+                sys.stdout.flush()
+                gptq_loaded = True
+            except ImportError:
+                pass  # gptqmodel not installed, try auto_gptq
+
+            if not gptq_loaded:
+                try:
+                    from auto_gptq import AutoGPTQForCausalLM
+
+                    model = AutoGPTQForCausalLM.from_quantized(
+                        model_path,
+                        device=gptq_device,
+                        use_triton=False,
+                        inject_fused_attention=False,
+                    )
+                    sys.stdout.write("[Worker] GPTQ loader: auto_gptq\n")
+                    sys.stdout.flush()
+                except ImportError as e:
+                    raise WorkerError(
+                        "GPTQ loading requires gptqmodel or auto-gptq. "
+                        "Install: pip install gptqmodel"
+                    ) from e
+
             dtype_label = "gptq-int4"
         else:
             from transformers import AutoModelForCausalLM
@@ -564,7 +583,12 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
         f"{prompt}{_HYMT_ASSISTANT}"
     )
 
-    inputs = tokenizer(chat_text, return_tensors="pt").to(model.device)
+    # model.device may not exist on all GPTQ wrappers — fall back to parameters()
+    try:
+        infer_device = model.device
+    except AttributeError:
+        infer_device = next(model.parameters()).device
+    inputs = tokenizer(chat_text, return_tensors="pt").to(infer_device)
     prompt_len = inputs["input_ids"].shape[1]
 
     # HY-MT generate() rejects token_type_ids — filter it out
