@@ -82,6 +82,18 @@ MODEL_REGISTRY = {
         },
         "description": "HY-MT 1.5 (1.8B) - Tencent Hunyuan, decoder-only, he→ru specialist",
     },
+    "HY-MT1.5-7B-GPTQ-Int4": {
+        "hf_model_id": "tencent/HY-MT1.5-7B-GPTQ-Int4",
+        "size_gb": 4.5,
+        "languages": {
+            "source": ["he", "en", "ru", "fr", "de", "ar", "zh", "ja", "ko"],
+            "target": ["he", "en", "ru", "fr", "de", "ar", "zh", "ja", "ko"],
+        },
+        "description": (
+            "HY-MT 1.5 (7B GPTQ Int4) - Tencent Hunyuan, experimental. "
+            "Requires: pip install auto-gptq>=0.6.0"
+        ),
+    },
 }
 
 

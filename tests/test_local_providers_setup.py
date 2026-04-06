@@ -427,3 +427,81 @@ def test_initialize_local_providers_init_failure_force_register(registry, mock_m
         ):
             with pytest.raises(RuntimeError, match="Init failed"):
                 initialize_local_providers(force_register=True)
+
+
+# ============================================================================
+# Test 8: 7B GPTQ provider — disabled by default, visible in availability check
+# ============================================================================
+
+
+def test_7b_gptq_not_registered_by_default(registry, mock_model_manager, mock_worker):
+    """7B provider must NOT be registered by default (enabled_by_default=False)."""
+    with patch(
+        "app.infra.translators.local_providers_setup.ModelResourceManager",
+        return_value=mock_model_manager,
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.start_worker",
+            return_value=mock_worker,
+        ):
+            with patch(
+                "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+                return_value=mock_model_manager,
+            ):
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        count = initialize_local_providers()
+
+                        # Only nllb + hymt-1.8B registered; 7B is disabled by default
+                        assert count == 2
+                        assert registry.get("local_hymt_7b_gptq") is None
+
+
+def test_7b_gptq_present_in_availability_check(mock_model_manager):
+    """7B provider must appear in check_local_providers_available() result."""
+    mock_model_manager.is_installed = Mock(return_value=(True, None))
+
+    with patch(
+        "app.infra.translators.local_providers_setup.ModelResourceManager",
+        return_value=mock_model_manager,
+    ):
+        status = check_local_providers_available()
+
+        assert "local_hymt_7b_gptq" in status
+        assert status["local_hymt_7b_gptq"]["model_id"] == "tencent/HY-MT1.5-7B-GPTQ-Int4"
+        assert status["local_hymt_7b_gptq"]["backend"] == "transformers_causal"
+
+
+def test_7b_gptq_registered_with_force_register(registry, mock_model_manager, mock_worker):
+    """7B provider IS registered when force_register=True."""
+    with patch(
+        "app.infra.translators.local_providers_setup.ModelResourceManager",
+        return_value=mock_model_manager,
+    ):
+        with patch(
+            "app.infra.translators.providers.local_nllb_provider.start_worker",
+            return_value=mock_worker,
+        ):
+            with patch(
+                "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
+                return_value=mock_model_manager,
+            ):
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        count = initialize_local_providers(force_register=True)
+
+                        # All 3 providers registered with force_register
+                        assert count == 3
+                        assert registry.get("local_hymt_7b_gptq") is not None

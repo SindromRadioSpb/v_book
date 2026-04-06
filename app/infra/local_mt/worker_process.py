@@ -335,14 +335,18 @@ def _load_transformers_model(model_path: str, model_id: str):
 
 
 def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
-    """Load decoder-only causal LM (e.g. HY-MT1.5-1.8B) in bfloat16.
+    """Load decoder-only causal LM (e.g. HY-MT1.5-1.8B or HY-MT1.5-7B-GPTQ-Int4).
+
+    For GPTQ models (detected via ``"gptq"`` in ``model_id``), the ``dtype``
+    kwarg is omitted — GPTQ weights carry their own quantized dtype and
+    passing an explicit dtype causes a loading error.
 
     Args:
         model_path: Path to model directory (local files).
-        model_id: Model ID for logging.
+        model_id: Model ID for logging and GPTQ detection.
 
     Returns:
-        dict with keys ``"model"`` and ``"tokenizer"``.
+        dict with keys ``"model"``, ``"tokenizer"``, and ``"stop_token_ids"``.
 
     Raises:
         WorkerError: If torch or transformers are missing or loading fails.
@@ -356,12 +360,24 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            dtype=dtype,
-            device_map="auto",
-        )
+        is_gptq = "gptq" in model_id.lower()
+
+        if is_gptq:
+            # GPTQ models have quantized weights — do NOT pass dtype or it errors.
+            # Requires auto-gptq >= 0.6.0 or optimum[gptq] to be installed.
+            sys.stdout.write(f"[Worker] GPTQ model detected: {model_id}\n")
+            sys.stdout.flush()
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map="auto",
+            )
+        else:
+            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                dtype=dtype,
+                device_map="auto",
+            )
         model.eval()
 
         device = next(model.parameters()).device

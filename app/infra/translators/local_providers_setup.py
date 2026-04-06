@@ -21,6 +21,7 @@ from app.infra.translators.providers.google_cloud_translate_provider import (
     GoogleCloudTranslateProvider,
 )
 from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
+from app.infra.translators.providers.local_hymt_7b_gptq_provider import LocalHYMT7BGPTQProvider
 from app.infra.translators.providers.local_hymt_provider import LocalHYMTProvider
 from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
 from app.infra.translators.providers_registry import ProvidersRegistry
@@ -49,6 +50,12 @@ LOCAL_PROVIDERS_CONFIG = [
         "model_id": "tencent/HY-MT1.5-1.8B",
         "backend": "transformers_causal",
         "enabled_by_default": True,
+    },
+    {
+        "provider_class": LocalHYMT7BGPTQProvider,
+        "model_id": "tencent/HY-MT1.5-7B-GPTQ-Int4",
+        "backend": "transformers_causal",
+        "enabled_by_default": False,  # Requires: pip install auto-gptq>=0.6.0
     },
 ]
 

@@ -116,6 +116,7 @@ class BatchTranslateDialog(QDialog):
                 "google_cloud_translate",
                 "local_nllb",
                 "local_hymt",
+                "local_hymt_7b_gptq",
                 "deepl",
                 "microsoft",
                 "libretranslate",

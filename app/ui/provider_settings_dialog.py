@@ -95,6 +95,12 @@ class ProviderSettingsDialog(QDialog):
             "default_enabled": False,  # Disabled by default until model installed
             "supports_advanced": False,
         },
+        "local_hymt_7b_gptq": {
+            "name": "Local HY-MT 1.5 7B GPTQ (Offline, Experimental)",
+            "default_rate_limit": 9999,  # Unlimited for local
+            "default_enabled": False,  # Requires auto-gptq + manual model install
+            "supports_advanced": False,
+        },
     }
 
     def __init__(self, parent=None, settings=None):
