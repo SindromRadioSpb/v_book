@@ -371,10 +371,24 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
             # hunyuan_v1_dense support and has an incompatible QuantizeConfig
             # API that breaks optimum's quantizer import).
             # With gptqmodel installed, transformers uses it automatically.
-            sys.stdout.write("[Worker] GPTQ model: loading via transformers+gptqmodel\n")
+            #
+            # Windows: triton is unavailable — force torch kernel via GPTQConfig.
+            # torch._dynamo must be disabled before model load to prevent
+            # inductor from trying to compile with triton during inference.
+            import torch as _torch
+
+            _torch._dynamo.config.disable = True  # no triton on Windows
+
+            from transformers import GPTQConfig
+
+            _gptq_config = GPTQConfig(bits=4, backend="torch")
+            sys.stdout.write(
+                "[Worker] GPTQ model: loading via transformers+gptqmodel (torch backend)\n"
+            )
             sys.stdout.flush()
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
+                quantization_config=_gptq_config,
                 device_map="auto",
             )
             dtype_label = "gptq-int4"
