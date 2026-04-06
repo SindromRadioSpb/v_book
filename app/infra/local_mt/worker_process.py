@@ -337,9 +337,10 @@ def _load_transformers_model(model_path: str, model_id: str):
 def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
     """Load decoder-only causal LM (e.g. HY-MT1.5-1.8B or HY-MT1.5-7B-GPTQ-Int4).
 
-    For GPTQ models (detected via ``"gptq"`` in ``model_id``), the ``dtype``
-    kwarg is omitted — GPTQ weights carry their own quantized dtype and
-    passing an explicit dtype causes a loading error.
+    GPTQ models (detected via ``"gptq"`` in ``model_id``) are loaded directly
+    via ``auto_gptq.AutoGPTQForCausalLM`` to bypass the brittle
+    transformers → optimum → auto_gptq version-coupling chain
+    (``QuantizeConfig`` API changed in auto_gptq 0.7.x).
 
     Args:
         model_path: Path to model directory (local files).
@@ -349,11 +350,11 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
         dict with keys ``"model"``, ``"tokenizer"``, and ``"stop_token_ids"``.
 
     Raises:
-        WorkerError: If torch or transformers are missing or loading fails.
+        WorkerError: If required packages are missing or loading fails.
     """
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoTokenizer
     except ImportError as e:
         raise WorkerError("torch/transformers not installed") from e
 
@@ -363,27 +364,40 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
         is_gptq = "gptq" in model_id.lower()
 
         if is_gptq:
-            # GPTQ models have quantized weights — do NOT pass dtype or it errors.
-            # Requires auto-gptq >= 0.6.0 or optimum[gptq] to be installed.
+            # Load via auto_gptq directly — avoids transformers' optimum GPTQ
+            # backend which has fragile QuantizeConfig API coupling.
             sys.stdout.write(f"[Worker] GPTQ model detected: {model_id}\n")
             sys.stdout.flush()
-            model = AutoModelForCausalLM.from_pretrained(
+            try:
+                from auto_gptq import AutoGPTQForCausalLM
+            except ImportError as e:
+                raise WorkerError(
+                    "GPTQ loading requires auto-gptq. " "Install: pip install auto-gptq>=0.6.0"
+                ) from e
+
+            gptq_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            model = AutoGPTQForCausalLM.from_quantized(
                 model_path,
-                device_map="auto",
+                device=gptq_device,
+                use_triton=False,
+                inject_fused_attention=False,
             )
+            dtype_label = "gptq-int4"
         else:
+            from transformers import AutoModelForCausalLM
+
             dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 dtype=dtype,
                 device_map="auto",
             )
+            dtype_label = str(dtype).split(".")[-1]
+
         model.eval()
 
         device = next(model.parameters()).device
-        sys.stdout.write(
-            f"[Worker] {model_id} loaded on {device} ({dtype.__str__().split('.')[-1]})\n"
-        )
+        sys.stdout.write(f"[Worker] {model_id} loaded on {device} ({dtype_label})\n")
         sys.stdout.flush()
 
         # Pre-compute stop token IDs so generate() doesn't recompute them each call
