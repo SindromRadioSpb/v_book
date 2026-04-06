@@ -257,9 +257,9 @@ class ModelResourceManager:
             return False, f"Manifest verification failed: {reason}"
 
         # Check if model files exist (basic check)
-        # For transformers: config.json should exist
+        # For transformers / transformers_causal: config.json should exist
         # For ctranslate2: model.bin should exist
-        if backend == "transformers":
+        if backend in ("transformers", "transformers_causal"):
             config_path = model_path / "config.json"
             if not config_path.exists():
                 return False, f"Model config not found: {config_path}"

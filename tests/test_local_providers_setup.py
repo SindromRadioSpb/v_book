@@ -69,12 +69,21 @@ def test_initialize_local_providers_success(registry, mock_model_manager, mock_w
                 "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
                 return_value=mock_model_manager,
             ):
-                count = initialize_local_providers()
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        count = initialize_local_providers()
 
-                # Should register local_nllb provider
-                assert count == 1
-                assert len(registry) == 1
-                assert registry.get("local_nllb") is not None
+                        # Should register local_nllb + local_hymt providers
+                        assert count == 2
+                        assert len(registry) == 2
+                        assert registry.get("local_nllb") is not None
+                        assert registry.get("local_hymt") is not None
 
 
 def test_initialize_local_providers_with_db_session(registry, mock_model_manager, mock_worker):
@@ -93,14 +102,27 @@ def test_initialize_local_providers_with_db_session(registry, mock_model_manager
                 "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
                 return_value=mock_model_manager,
             ):
-                count = initialize_local_providers(db_session=mock_session, project_id=100)
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        count = initialize_local_providers(db_session=mock_session, project_id=100)
 
-                assert count == 1
+                        assert count == 2
 
-                provider = registry.get("local_nllb")
-                assert provider is not None
-                assert provider.db_session == mock_session
-                assert provider.project_id == 100
+                        provider = registry.get("local_nllb")
+                        assert provider is not None
+                        assert provider.db_session == mock_session
+                        assert provider.project_id == 100
+
+                        hymt_provider = registry.get("local_hymt")
+                        assert hymt_provider is not None
+                        assert hymt_provider.db_session == mock_session
+                        assert hymt_provider.project_id == 100
 
 
 # ============================================================================
@@ -186,7 +208,7 @@ def test_check_local_providers_available_not_installed(mock_model_manager):
 
 def test_unregister_local_providers(registry, mock_model_manager, mock_worker):
     """Unregister local providers."""
-    # First register a provider
+    # First register providers
     with patch(
         "app.infra.translators.local_providers_setup.ModelResourceManager",
         return_value=mock_model_manager,
@@ -199,18 +221,26 @@ def test_unregister_local_providers(registry, mock_model_manager, mock_worker):
                 "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
                 return_value=mock_model_manager,
             ):
-                initialize_local_providers()
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        initialize_local_providers()
 
-                assert len(registry) == 1
+                        assert len(registry) == 2
 
-                # Unregister
-                count = unregister_local_providers()
+                        # Unregister
+                        count = unregister_local_providers()
 
-                assert count == 1
-                assert len(registry) == 0
+                        assert count == 2
+                        assert len(registry) == 0
 
-                # Shutdown should be called
-                mock_worker.shutdown.assert_called_once()
+                        # Shutdown should be called for each provider
+                        assert mock_worker.shutdown.call_count == 2
 
 
 def test_unregister_local_providers_when_none_registered(registry):
@@ -303,14 +333,22 @@ def test_initialize_local_providers_duplicate_registration(
                 "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
                 return_value=mock_model_manager,
             ):
-                # First registration
-                count1 = initialize_local_providers()
-                assert count1 == 1
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        # First registration
+                        count1 = initialize_local_providers()
+                        assert count1 == 2
 
-                # Second registration should log error but not raise (without force_register)
-                count2 = initialize_local_providers()
-                assert count2 == 0  # No new providers registered
-                assert len(registry) == 1  # Still only one provider
+                        # Second registration should log error but not raise (without force_register)
+                        count2 = initialize_local_providers()
+                        assert count2 == 0  # No new providers registered
+                        assert len(registry) == 2  # Still only two providers
 
 
 def test_initialize_local_providers_duplicate_registration_force(
@@ -329,13 +367,21 @@ def test_initialize_local_providers_duplicate_registration_force(
                 "app.infra.translators.providers.local_nllb_provider.ModelResourceManager",
                 return_value=mock_model_manager,
             ):
-                # First registration
-                count1 = initialize_local_providers()
-                assert count1 == 1
+                with patch(
+                    "app.infra.translators.providers.local_hymt_provider.start_worker",
+                    return_value=mock_worker,
+                ):
+                    with patch(
+                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                        return_value=mock_model_manager,
+                    ):
+                        # First registration
+                        count1 = initialize_local_providers()
+                        assert count1 == 2
 
-                # Second registration with force_register should raise
-                with pytest.raises(ValueError, match="already registered"):
-                    initialize_local_providers(force_register=True)
+                        # Second registration with force_register should raise
+                        with pytest.raises(ValueError, match="already registered"):
+                            initialize_local_providers(force_register=True)
 
 
 # ============================================================================
@@ -356,11 +402,15 @@ def test_initialize_local_providers_init_failure(registry, mock_model_manager):
             "app.infra.translators.providers.local_nllb_provider.LocalNLLBProvider.__init__",
             side_effect=RuntimeError("Init failed"),
         ):
-            # Should not raise, just log error
-            count = initialize_local_providers()
+            with patch(
+                "app.infra.translators.providers.local_hymt_provider.LocalHYMTProvider.__init__",
+                side_effect=RuntimeError("Init failed"),
+            ):
+                # Should not raise, just log error
+                count = initialize_local_providers()
 
-            assert count == 0
-            assert len(registry) == 0
+                assert count == 0
+                assert len(registry) == 0
 
 
 def test_initialize_local_providers_init_failure_force_register(registry, mock_model_manager):

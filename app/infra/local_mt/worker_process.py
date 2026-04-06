@@ -12,6 +12,7 @@ Safety:
 - Error handling: Worker never raises uncaught exceptions
 """
 
+import contextlib
 import logging
 import multiprocessing
 import sys
@@ -115,6 +116,10 @@ def _worker_main(
                 worker_logger.debug("Calling _load_transformers_model...")
                 model = _load_transformers_model(model_path, model_id)
                 worker_logger.debug("Returned from _load_transformers_model")
+            elif backend == "transformers_causal":
+                worker_logger.debug("Calling _load_transformers_causal_model...")
+                model = _load_transformers_causal_model(model_path, model_id)
+                worker_logger.debug("Returned from _load_transformers_causal_model")
             else:
                 raise WorkerError(f"Unknown backend: {backend}")
 
@@ -122,10 +127,8 @@ def _worker_main(
         except Exception as e:
             worker_logger.error(f"CRITICAL: Model loading failed: {e}", exc_info=True)
             # Send error to parent before dying
-            try:
+            with contextlib.suppress(Exception):
                 conn.send({"ok": False, "error": f"Model loading failed: {e}"})
-            except:
-                pass
             raise
 
         # Main loop
@@ -160,6 +163,9 @@ def _worker_main(
                             translated_text = _translate_ctranslate2(
                                 model, req.text, req.source_lang, req.target_lang
                             )
+                        elif backend == "transformers_causal":
+                            # For causal LM: req.text IS the full prompt (built by provider)
+                            translated_text = _translate_transformers_causal(model, req.text)
                         else:  # transformers
                             translated_text = _translate_transformers(
                                 model, req.text, req.source_lang, req.target_lang
@@ -206,15 +212,13 @@ def _worker_main(
                 worker_logger.error(f"Error in worker loop: {e}")
                 try:
                     conn.send({"ok": False, "error": str(e)})
-                except:
+                except Exception:
                     break
 
     except Exception as e:
         worker_logger.error(f"Worker initialization failed: {e}")
-        try:
+        with contextlib.suppress(Exception):
             conn.send({"ok": False, "error": f"Worker init failed: {e}"})
-        except:
-            pass
     finally:
         conn.close()
         worker_logger.info("Worker process exiting")
@@ -245,8 +249,8 @@ def _load_ctranslate2_model(model_path: str, logger=None):
 
         sys.stdout.write("[Worker] ctranslate2 imported\n")
         sys.stdout.flush()
-    except ImportError:
-        raise WorkerError("ctranslate2 not installed")
+    except ImportError as e:
+        raise WorkerError("ctranslate2 not installed") from e
 
     try:
         sys.stdout.write("[Worker] Importing NllbTokenizer...\n")
@@ -255,8 +259,8 @@ def _load_ctranslate2_model(model_path: str, logger=None):
 
         sys.stdout.write("[Worker] NllbTokenizer imported\n")
         sys.stdout.flush()
-    except ImportError:
-        raise WorkerError("transformers not installed (needed for tokenization)")
+    except ImportError as e:
+        raise WorkerError("transformers not installed (needed for tokenization)") from e
 
     try:
         # Load CTranslate2 translator
@@ -312,22 +316,70 @@ def _load_ctranslate2_model(model_path: str, logger=None):
         sys.stdout.write(f"[Worker] ERROR in _load_ctranslate2_model: {e}\n")
         sys.stdout.flush()
         traceback.print_exc()
-        raise WorkerError(f"Failed to load CTranslate2 model: {e}")
+        raise WorkerError(f"Failed to load CTranslate2 model: {e}") from e
 
 
 def _load_transformers_model(model_path: str, model_id: str):
     """Load Transformers model."""
     try:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    except ImportError:
-        raise WorkerError("transformers not installed")
+    except ImportError as e:
+        raise WorkerError("transformers not installed") from e
 
     try:
         model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
         tokenizer = AutoTokenizer.from_pretrained(model_path)
         return {"model": model, "tokenizer": tokenizer}
     except Exception as e:
-        raise WorkerError(f"Failed to load Transformers model: {e}")
+        raise WorkerError(f"Failed to load Transformers model: {e}") from e
+
+
+def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
+    """Load decoder-only causal LM (e.g. HY-MT1.5-1.8B) in bfloat16.
+
+    Args:
+        model_path: Path to model directory (local files).
+        model_id: Model ID for logging.
+
+    Returns:
+        dict with keys ``"model"`` and ``"tokenizer"``.
+
+    Raises:
+        WorkerError: If torch or transformers are missing or loading fails.
+    """
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as e:
+        raise WorkerError("torch/transformers not installed") from e
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            dtype=dtype,
+            device_map="auto",
+        )
+        model.eval()
+
+        device = next(model.parameters()).device
+        sys.stdout.write(
+            f"[Worker] {model_id} loaded on {device} ({dtype.__str__().split('.')[-1]})\n"
+        )
+        sys.stdout.flush()
+
+        # Pre-compute stop token IDs so generate() doesn't recompute them each call
+        stop_token_ids = _hymt_stop_token_ids(tokenizer)
+        sys.stdout.write(f"[Worker] HY-MT stop token IDs: {stop_token_ids}\n")
+        sys.stdout.flush()
+
+        return {"model": model, "tokenizer": tokenizer, "stop_token_ids": stop_token_ids}
+    except WorkerError:
+        raise
+    except Exception as e:
+        raise WorkerError(f"Failed to load causal model: {e}") from e
 
 
 # ============================================================================
@@ -381,7 +433,7 @@ def _translate_ctranslate2(
     # Convert tokens back to IDs for detokenization
     try:
         output_ids = [tokenizer.convert_tokens_to_ids(token) for token in output_tokens]
-    except:
+    except Exception:
         # Fallback: if token conversion fails, use tokens directly
         output_ids = output_tokens
 
@@ -389,6 +441,126 @@ def _translate_ctranslate2(
     translated_text = tokenizer.decode(output_ids, skip_special_tokens=True)
 
     return translated_text
+
+
+# ============================================================================
+# HY-MT template constants (verified against PocketPal config)
+# ============================================================================
+
+# Special tokens from HY-MT tokenizer vocabulary
+_HYMT_BOS = "<｜hy_begin▁of▁sentence｜>"
+_HYMT_SEP = "<｜hy_place▁holder▁no▁3｜>"  # separates system from user turn
+_HYMT_USER = "<｜hy_User｜>"
+_HYMT_ASSISTANT = "<｜hy_Assistant｜>"
+_HYMT_EOS = "<｜hy_end▁of▁sentence｜>"
+_HYMT_STOP2 = "<｜hy_place▁holder▁no▁2｜>"
+
+# System prompt: translation engine persona + placeholder rule
+# Intentionally does NOT include "Translate from X to Y" — that goes in user turn
+_HYMT_SYSTEM_PROMPT = (
+    "You are a translation engine specialized in Hebrew-to-Russian translation. "
+    "Translate from Hebrew into Russian accurately and naturally. "
+    "Preserve meaning, names, numbers, and formatting. "
+    "Preserve all placeholder tokens (HDLE_PH_1, HDLE_PH_2, etc.) exactly as-is "
+    "without any modification. "
+    "Output only the Russian translation without explanations, comments, or extra text."
+)
+
+
+def _hymt_stop_token_ids(tokenizer) -> list[int]:
+    """Resolve HY-MT stop token IDs from the tokenizer vocabulary.
+
+    Tries both ``convert_tokens_to_ids`` (fast, works when token is in vocab)
+    and ``encode`` fallback for single-token strings.  Always includes the
+    tokenizer's ``eos_token_id`` if defined.
+
+    Returns:
+        Deduplicated list of token IDs to use as ``eos_token_id`` in generate().
+    """
+    ids: list[int] = []
+    unk = getattr(tokenizer, "unk_token_id", None)
+
+    for stop_str in (_HYMT_EOS, _HYMT_STOP2):
+        tok_id = tokenizer.convert_tokens_to_ids(stop_str)
+        if tok_id is not None and tok_id != unk:
+            ids.append(tok_id)
+            continue
+        # Fallback: encode without special tokens; only use if single token
+        encoded = tokenizer.encode(stop_str, add_special_tokens=False)
+        if len(encoded) == 1:
+            ids.append(encoded[0])
+
+    if tokenizer.eos_token_id is not None:
+        ids.append(tokenizer.eos_token_id)
+
+    return list(dict.fromkeys(ids))  # deduplicate, preserve order
+
+
+def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
+    """Run HY-MT inference using the vendor-verified template format.
+
+    ``prompt`` (= ``WorkerRequest.text``) carries only the *user content*:
+    the placeholder-protected source text, optionally preceded by a
+    terminology line built by the provider.  All meta-instructions (role,
+    placeholder rule, output format) live in the system prompt inside this
+    function so the model never confuses them with text to translate.
+
+    Template (matches PocketPal config):
+        <BOS>{system}<SEP><User>Translate … without additional explanation.
+
+        {user_content}<Assistant>
+
+    Stop tokens: ``<｜hy_end▁of▁sentence｜>``, ``<｜hy_place▁holder▁no▁2｜>``
+
+    Args:
+        model_dict: Dict with ``"model"``, ``"tokenizer"``, and
+            ``"stop_token_ids"`` (pre-computed by ``_load_transformers_causal_model``).
+        prompt: User content — source text (+ optional terminology line).
+
+    Returns:
+        Decoded translation (new tokens only, special tokens stripped).
+    """
+    import torch
+
+    model = model_dict["model"]
+    tokenizer = model_dict["tokenizer"]
+    stop_ids = model_dict.get("stop_token_ids") or _hymt_stop_token_ids(tokenizer)
+
+    # Build raw HY-MT chat string — no apply_chat_template to avoid template drift
+    chat_text = (
+        f"{_HYMT_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT_SEP}"
+        f"{_HYMT_USER}Translate the following segment into Russian, "
+        f"without additional explanation.\n\n"
+        f"{prompt}{_HYMT_ASSISTANT}"
+    )
+
+    inputs = tokenizer(chat_text, return_tensors="pt").to(model.device)
+    prompt_len = inputs["input_ids"].shape[1]
+
+    # HY-MT generate() rejects token_type_ids — filter it out
+    generate_inputs = {k: v for k, v in inputs.items() if k in ("input_ids", "attention_mask")}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **generate_inputs,
+            max_new_tokens=512,
+            do_sample=True,
+            top_k=20,
+            top_p=0.6,
+            temperature=0.7,
+            repetition_penalty=1.05,
+            eos_token_id=stop_ids if stop_ids else None,
+        )
+
+    new_tokens = outputs[0][prompt_len:]
+    result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+    # Strip any trailing stop strings that survived skip_special_tokens
+    for stop_str in (_HYMT_EOS, _HYMT_STOP2):
+        if result.endswith(stop_str):
+            result = result[: -len(stop_str)].strip()
+
+    return result
 
 
 def _translate_transformers(
@@ -504,7 +676,7 @@ class LocalMTWorker:
             elapsed = time.perf_counter() - start_time
             logger.error(f"[WORKER] Worker startup error: {e} (failed after {elapsed:.1f}s)")
             self.shutdown()
-            raise WorkerError(f"Worker startup failed: {e}")
+            raise WorkerError(f"Worker startup failed: {e}") from e
 
         elapsed = time.perf_counter() - start_time
         logger.info(f"[WORKER] Worker started successfully: {self.model_id} ({elapsed:.1f}s)")
@@ -590,7 +762,7 @@ class LocalMTWorker:
         except WorkerError:
             raise
         except Exception as e:
-            raise WorkerError(f"Worker communication error: {e}")
+            raise WorkerError(f"Worker communication error: {e}") from e
 
     def shutdown(self):
         """Shutdown worker process."""
@@ -599,13 +771,11 @@ class LocalMTWorker:
                 self.conn.send({"type": "shutdown"})
                 if self.conn.poll(timeout=5):
                     self.conn.recv()
-            except:
+            except Exception:
                 pass
 
-            try:
+            with contextlib.suppress(Exception):
                 self.conn.close()
-            except:
-                pass
 
             self.conn = None
 
@@ -623,7 +793,7 @@ class LocalMTWorker:
         try:
             if hasattr(self, "process") and hasattr(self, "conn"):
                 self.shutdown()
-        except:
+        except Exception:
             pass
 
 

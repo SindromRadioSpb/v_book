@@ -73,6 +73,15 @@ MODEL_REGISTRY = {
         },
         "description": "Seamless M4T v2 Large - Multimodal MT with speech support",
     },
+    "HY-MT1.5-1.8B": {
+        "hf_model_id": "tencent/HY-MT1.5-1.8B",
+        "size_gb": 3.5,
+        "languages": {
+            "source": ["he", "en", "ru", "fr", "de", "ar", "zh", "ja", "ko"],
+            "target": ["he", "en", "ru", "fr", "de", "ar", "zh", "ja", "ko"],
+        },
+        "description": "HY-MT 1.5 (1.8B) - Tencent Hunyuan, decoder-only, he→ru specialist",
+    },
 }
 
 
@@ -132,12 +141,12 @@ class ModelInstaller:
         if backend == "ctranslate2":
             if not self._check_ctranslate2():
                 return False
-        elif backend == "transformers":
+        elif backend in ("transformers", "transformers_causal"):
             if not self._check_transformers():
                 return False
         else:
             logger.error(f"Unknown backend: {backend}")
-            logger.info("Supported backends: ctranslate2, transformers")
+            logger.info("Supported backends: ctranslate2, transformers, transformers_causal")
             return False
 
         # Show installation info
@@ -457,8 +466,8 @@ def main():
     parser.add_argument(
         "--backend",
         type=str,
-        choices=["ctranslate2", "transformers"],
-        help="Backend to use (ctranslate2 or transformers)",
+        choices=["ctranslate2", "transformers", "transformers_causal"],
+        help="Backend to use (ctranslate2 | transformers | transformers_causal)",
     )
 
     parser.add_argument(

@@ -21,6 +21,7 @@ from app.infra.translators.providers.google_cloud_translate_provider import (
     GoogleCloudTranslateProvider,
 )
 from app.infra.translators.providers.google_translate_provider import GoogleTranslateProvider
+from app.infra.translators.providers.local_hymt_provider import LocalHYMTProvider
 from app.infra.translators.providers.local_nllb_provider import LocalNLLBProvider
 from app.infra.translators.providers_registry import ProvidersRegistry
 from app.services.local_models import ModelResourceManager
@@ -43,13 +44,12 @@ LOCAL_PROVIDERS_CONFIG = [
         "backend": "ctranslate2",
         "enabled_by_default": True,
     },
-    # Add more local providers here in the future:
-    # {
-    #     "provider_class": LocalSeamlessProvider,
-    #     "model_id": "facebook/seamless-m4t-v2-large",
-    #     "backend": "transformers",
-    #     "enabled_by_default": False,
-    # },
+    {
+        "provider_class": LocalHYMTProvider,
+        "model_id": "tencent/HY-MT1.5-1.8B",
+        "backend": "transformers_causal",
+        "enabled_by_default": True,
+    },
 ]
 
 
@@ -167,7 +167,7 @@ def check_local_providers_available() -> dict:
         try:
             # Get provider_id without full initialization
             provider_id = provider_class.provider_id.fget(None)  # Call property getter
-        except:
+        except Exception:
             # Fallback: use class name
             provider_id = provider_class.__name__.lower().replace("provider", "")
 
@@ -202,7 +202,7 @@ def unregister_local_providers() -> int:
         # Get provider_id
         try:
             provider_id = provider_class.provider_id.fget(None)
-        except:
+        except Exception:
             provider_id = provider_class.__name__.lower().replace("provider", "")
 
         # Check if registered
@@ -379,7 +379,7 @@ def initialize_provider_lazy(
             # Get provider_id from class
             try:
                 config_provider_id = provider_class.provider_id.fget(None)
-            except:
+            except Exception:
                 config_provider_id = provider_class.__name__.lower().replace("provider", "")
 
             if config_provider_id == provider_id:

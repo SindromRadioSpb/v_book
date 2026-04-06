@@ -89,6 +89,12 @@ class ProviderSettingsDialog(QDialog):
             "default_enabled": False,  # Disabled by default until model installed
             "supports_advanced": False,
         },
+        "local_hymt": {
+            "name": "Local HY-MT 1.5 (Offline)",
+            "default_rate_limit": 9999,  # Unlimited for local
+            "default_enabled": False,  # Disabled by default until model installed
+            "supports_advanced": False,
+        },
     }
 
     def __init__(self, parent=None, settings=None):

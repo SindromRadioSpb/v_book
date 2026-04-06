@@ -317,6 +317,14 @@ class BatchMTTranslateService:
                 registry = ProvidersRegistry()
                 provider = registry.get(force_provider_id)
 
+                # Lazy initialization for local providers (e.g. local_nllb, local_hymt)
+                if not provider and force_provider_id.startswith("local_"):
+                    from app.infra.translators.local_providers_setup import initialize_provider_lazy
+
+                    logger.info(f"Attempting lazy initialization of {force_provider_id}")
+                    if initialize_provider_lazy(force_provider_id, session):
+                        provider = registry.get(force_provider_id)
+
                 if not provider:
                     logger.error(f"Force provider '{force_provider_id}' not found in registry")
                     return BatchTranslateRowResult(
