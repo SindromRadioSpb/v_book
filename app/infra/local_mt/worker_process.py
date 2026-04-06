@@ -363,48 +363,22 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
 
         is_gptq = "gptq" in model_id.lower()
 
+        from transformers import AutoModelForCausalLM
+
         if is_gptq:
-            # Load GPTQ model bypassing transformers→optimum chain (fragile
-            # QuantizeConfig API coupling).  Try gptqmodel first (broader arch
-            # support, maintained successor to auto_gptq), then auto_gptq.
-            sys.stdout.write(f"[Worker] GPTQ model detected: {model_id}\n")
+            # Pre-quantized GPTQ model — load via standard transformers path.
+            # Requires gptqmodel as the GPTQ backend (auto_gptq 0.7.x lacks
+            # hunyuan_v1_dense support and has an incompatible QuantizeConfig
+            # API that breaks optimum's quantizer import).
+            # With gptqmodel installed, transformers uses it automatically.
+            sys.stdout.write("[Worker] GPTQ model: loading via transformers+gptqmodel\n")
             sys.stdout.flush()
-
-            gptq_device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-            gptq_loaded = False
-            try:
-                from gptqmodel import GPTQModel
-
-                model = GPTQModel.from_quantized(model_path, device=gptq_device)
-                sys.stdout.write("[Worker] GPTQ loader: gptqmodel\n")
-                sys.stdout.flush()
-                gptq_loaded = True
-            except ImportError:
-                pass  # gptqmodel not installed, try auto_gptq
-
-            if not gptq_loaded:
-                try:
-                    from auto_gptq import AutoGPTQForCausalLM
-
-                    model = AutoGPTQForCausalLM.from_quantized(
-                        model_path,
-                        device=gptq_device,
-                        use_triton=False,
-                        inject_fused_attention=False,
-                    )
-                    sys.stdout.write("[Worker] GPTQ loader: auto_gptq\n")
-                    sys.stdout.flush()
-                except ImportError as e:
-                    raise WorkerError(
-                        "GPTQ loading requires gptqmodel or auto-gptq. "
-                        "Install: pip install gptqmodel"
-                    ) from e
-
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map="auto",
+            )
             dtype_label = "gptq-int4"
         else:
-            from transformers import AutoModelForCausalLM
-
             dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
