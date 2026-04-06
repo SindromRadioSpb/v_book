@@ -1,7 +1,9 @@
 # MT Provider Integration Guide — HDLE Premium
 
 > Цель: минимальное time-to-first-translation для нового MT-провайдера.
-> Читать вместе с: `AUDIT_HY-MT-provider.md` (реальный кейс).
+> Читать вместе с: `AUDIT_HY-MT-provider.md` (полный audit + архитектурные решения).
+> Reference implementation: `local_hymt_provider.py` — HY-MT1.5-1.8B, экспериментальный
+> local backend, успешно интегрирован 2026-04-06.
 
 ---
 
@@ -363,6 +365,46 @@ is_installed, reason = mgr.is_installed("vendor/ModelName", "transformers_causal
 | Забыли `shutdown()` → утечка subprocess | Всегда реализовывать `shutdown()`, вызывать из `__del__()` |
 | `get_model_version()` не переопределён | Разные квантования будут использовать тот же кэш (баг качества) |
 | Chain порядок в UI не обновляется | Новый провайдер добавляется в конец chain — документировать для пользователя |
+
+---
+
+## Lessons Learned: decoder-only LLM backend (HY-MT, 2026-04-06)
+
+Зафиксировано по итогам интеграции `LocalHYMTProvider` (first decoder-only MT backend в HDLE).
+
+### 1. Worker owns the template — не provider
+
+**Проблема**: если provider кладёт инструкции в user content и передаёт как `WorkerRequest.text`,
+decoder-only LLM может перевести инструкции вместо исходного текста.
+
+**Правило**: для decoder-only LLM worker строит полный шаблон сам:
+```python
+# worker_process.py — _translate_transformers_causal
+chat_text = f"{BOS}{SYSTEM_PROMPT}{SEP}{USER_TOKEN}Translate…\n\n{user_content}{ASSISTANT_TOKEN}"
+```
+Provider передаёт только `user_content` = protected source text + optional terminology line.
+
+### 2. Placeholder protection — mandatory, не optional
+
+Для RTL-языков (иврит) использовать ASCII-safe токены `HDLE_PH_N`, не XML `<ph id="N"/>`.
+XML-токены с кавычками ломаются из-за Unicode RTL-марок (U+200E/200F), вставляемых
+контекстом иврита вокруг атрибутов тегов.
+
+### 3. Stop tokens обязательны для decoder-only
+
+Без `eos_token_id` модель продолжает генерацию после перевода.
+Регистрировать все специальные стоп-токены при загрузке модели, кэшировать в model dict.
+
+### 4. apply_chat_template() — проверять совместимость
+
+`apply_chat_template()` может генерировать шаблон, несовместимый с production inference моделью.
+При расхождении: строить raw template string по vendor-документации / PocketPal / llama.cpp config.
+
+### 5. Glossary / TM — критичен для технического домена
+
+Для специализированного домена (религиозные тексты, IT-документация) без TM-постпроцессинга
+качество терминологии нестабильно. `terminology_mode="both"` (prompt injection + `apply_glossary()`)
+даёт лучший результат, чем только один из методов.
 
 ---
 

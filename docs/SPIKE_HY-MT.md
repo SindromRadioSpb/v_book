@@ -1,7 +1,29 @@
 # SPIKE-2: HY-MT Validation on HDLE Domain
 
-> Статус: **SPIKE** — код не изменяется, только валидация
-> Цель: подтвердить quality + latency + all 4 capabilities до начала реализации
+> Статус: **ЗАКРЫТ ✅** — валидация завершена 2026-04-06, результат: **GO**
+> Реализация: PATCH-00..03 завершены (2026-04-06). Подробности: `SPIKE_HY-MT_results.md`
+
+---
+
+## Итоги SPIKE-2 (закрыт ✅)
+
+Все GO-критерии выполнены. Модель: `tencent/HY-MT1.5-1.8B` | Device: `cuda` | Dtype: `bfloat16`
+
+| Критерий | Target | Факт | Статус |
+|----------|--------|------|--------|
+| Avg latency | < 5.0s | 1.39s | ✅ |
+| Pass rate | ≥ 75% | 100% (19/19) | ✅ |
+| Placeholder preservation | 100% | 100% | ✅ |
+| Hallucination rate | < 10% | 0% | ✅ |
+
+Полные результаты: `docs/SPIKE_HY-MT_results.md`
+
+### Ключевые находки SPIKE-2
+
+- `apply_chat_template()` с user-only messages давал неверный результат: инструкции попадали в user content и переводились моделью вместо исходного текста.
+- Корректный путь: worker строит raw HY-MT template (`<BOS><system><SEP><User>…<Assistant>`) напрямую.
+- Placeholder format `HDLE_PH_N` (ASCII) надёжнее XML `<ph id="N"/>` в RTL-контексте.
+- Stop tokens (`<｜hy_end▁of▁sentence｜>`) обязательны — без них модель продолжает генерацию.
 
 ---
 

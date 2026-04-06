@@ -1,20 +1,44 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
-> Дата: 2026-04-06
-> Статус: **AUDIT + PLAN** — код не менялся. SPIKE-1 закрыт.
+> Дата создания: 2026-04-06
+> Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
+> SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | PATCH-00..03: завершены ✅
 > Пилотный маршрут: **Hebrew → Russian**
-> Модель: **HY-MT1.5-1.8B only** (7B не рассматривается)
+> Текущий target: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16)
+> Следующий этап (future): **HY-MT1.5-7B** — upgrade path, требует отдельной VRAM/feasibility валидации
 
 ---
 
 ## Корректировки после review (2026-04-06)
 
 1. **Лицензия** — проект некоммерческий, license review не нужен. Убрать из kill criteria.
-2. **Только 1.8B** — 7B не рассматривается в pilot и в дальнейшем.
+2. **Только 1.8B в pilot** — 7B не рассматривался в рамках данного pilot. Зафиксирован как future upgrade path (см. §13).
 3. **HY-MT — не "ещё один провайдер"**: внедрять сразу со всеми 4 capabilities (terminology injection, contextual, placeholder protection, mixed-language). Обнулять выбор HY-MT через raw text → generate — неприемлемо.
 4. **Placeholder protection — MANDATORY**: не опциональная настройка. Каждый `translate()` вызов ОБЯЗАН делать protect/restore. `{name}` или XML-тег сломает продукт хуже, чем плохой перевод.
 5. **`terminology_mode="both"` — hardcoded default**: prompt injection + `apply_glossary()` постпроцессинг. Не пользовательский toggle.
 6. **`MT_PROVIDER_INTEGRATION_GUIDE.md`** — внутренний стандарт для всех будущих провайдеров.
+
+## Статус реализации (2026-04-06)
+
+| Этап | Файлы | Статус |
+|------|-------|--------|
+| PATCH-00: Регистрация модели | `scripts/install_local_mt_model.py`, `model_resource_manager.py` | ✅ Завершён |
+| PATCH-01: Worker backend | `app/infra/local_mt/worker_process.py` | ✅ Завершён |
+| PATCH-02: Provider class + регистрация | `app/infra/translators/providers/local_hymt_provider.py`, `local_providers_setup.py` | ✅ Завершён |
+| PATCH-03: UI integration | `provider_settings_dialog.py`, `batch_translate_dialog.py` | ✅ Завершён |
+| Hotfix: prompt/template architecture | `worker_process.py`, `local_hymt_provider.py` | ✅ Завершён |
+| Hotfix: lazy init в force-provider mode | `batch_mt_translate_service.py` | ✅ Завершён |
+
+**Regression status**: 18/18 тестов pass, 0 регрессий.
+
+### Ключевые архитектурные решения (зафиксированы)
+
+- **Worker owns template**: провайдер передаёт только user content (protected text + optional terminology);
+  worker строит полный HY-MT-specific шаблон (`<BOS><system><SEP><User>…<Assistant>`) + применяет stop tokens.
+  Инструкции НЕ смешиваются с user content — иначе модель переводит инструкции вместо текста.
+- **HDLE_PH_N placeholder format**: ASCII-safe токены (не XML `<ph id="N"/>`), иммунны к Unicode RTL-маркам.
+- **Stop tokens**: `<｜hy_end▁of▁sentence｜>` и `<｜hy_place▁holder▁no▁2｜>` — предотвращают генерацию мусора после перевода.
+- **bfloat16 + device_map="auto"**: практически оптимальный баланс скорость/качество для RTX 3070 8GB.
 
 ---
 
@@ -807,50 +831,54 @@ else:
 ### GO criteria (переходить к реализации)
 
 - ✅ SPIKE-1: **ЗАКРЫТ** — `_load_transformers_causal_model` + `_translate_transformers_causal`, не ломает NLLB
-- SPIKE-2: latency < 5с, placeholder preservation 100%, quality pass rate ≥ 75%
+- ✅ SPIKE-2: **ЗАКРЫТ** — все критерии выполнены (2026-04-06): latency avg 1.39с, placeholder 100%, pass rate 100%, hallucination 0%. Подробности: `docs/SPIKE_HY-MT_results.md`
 
 ---
 
 ## 13. Final Recommendation
 
-### Verdict: **GO WITH CONSTRAINTS**
+### Verdict: **РЕАЛИЗОВАНО** (был: GO WITH CONSTRAINTS → все constraints закрыты)
 
-**Почему GO:**
-- Hebrew→Russian подтверждён в списке языков
-- 1.8B влезает в 4GB VRAM из 8GB доступных (с запасом)
-- Архитектура HDLE готова к локальным провайдерам (паттерн NLLB отработан)
-- Terminology intervention + formatted translation — задекларированы и нужны нам
+**SPIKE-2 результаты** (подробности в `docs/SPIKE_HY-MT_results.md`):
+- Avg latency: **1.39с** (target < 5с) ✅
+- Pass rate: **100%** (19/19, target ≥ 75%) ✅
+- Placeholder preservation: **100%** ✅
+- Hallucination rate: **0%** (target < 10%) ✅
 
-**Constraints (что нужно сделать перед impl):**
-1. **SPIKE-2 обязателен** — запустить 20 he→ru пар вручную, убедиться в приемлемом качестве
-2. **License review** — прочитать License.txt полностью, не полагаться на "commercial permitted"
-3. **Прочитать** `worker_process.py::_load_transformers_model` и `_translate_transformers` — убедиться что адаптация тривиальна
+**Реализовано (PATCH-00..03, 2026-04-06):**
+- `tencent/HY-MT1.5-1.8B`, backend `transformers_causal`, device `cuda`, dtype `bfloat16`
+- Все 4 capabilities активны: terminology injection, contextual, placeholder protection, mixed-language
+- `terminology_mode="both"` hardcoded
+- Worker-owned HY-MT template (система промптов в worker layer, не в provider)
 
-**Начинать с:** `tencent/HY-MT1.5-1.8B`, backend `transformers_causal`, device `cuda`, dtype `bfloat16`
+**Что НЕ было сделано и остаётся за scope:**
+- ~~7B~~ — вынесен как future upgrade path (см. ниже)
+- vLLM server mode — лишняя инфраструктура, не нужна
+- Fine-tuning — вне scope
+- Streaming/incremental output — усложняет IPC без необходимости
 
-**Что НЕ делать на первом этапе:**
-- Не внедрять 7B (не влезет в 8GB в полной точности, сложнее управлять)
-- Не делать vLLM server mode (лишняя инфраструктура)
-- Не делать fine-tuning (выходит за scope)
-- Не делать streaming/incremental output (усложняет IPC)
-- Не рефакторить существующий `worker_process.py` под общий интерфейс (отдельный task)
+**Future upgrade path: HY-MT1.5-7B**
+
+Рассматривать после:
+1. Отдельной VRAM feasibility оценки для RTX 3070 8GB (7B в bfloat16 = ~14GB → требует квантизации или другого GPU)
+2. Сравнительной quality validation 1.8B vs 7B на HDLE he→ru домене
+3. Оценки latency regression (7B будет медленнее)
+
+Не начинать без подтверждения feasibility. 7B не заменяет 1.8B автоматически — это отдельный evaluation, не апгрейд.
 
 ---
 
-## Executive Summary (для принятия решения)
+## Executive Summary (фактический статус на 2026-04-06)
 
-1. Архитектура HDLE полностью готова к добавлению HY-MT — паттерн LocalNLLBProvider даёт готовый шаблон
-2. HY-MT — decoder-only LLM (не encoder-decoder как NLLB) → нужна новая ветка backend `transformers_causal` в `worker_process.py`
-3. Единственная точка регистрации провайдера: `LOCAL_PROVIDERS_CONFIG` в `local_providers_setup.py`
-4. Единственное место для UI: `PROVIDERS` dict в `provider_settings_dialog.py` (захардкожен)
-5. HY-MT1.5-1.8B: ~4GB VRAM (bfloat16) — влезает на RTX 3070 с запасом
-6. Hebrew→Russian подтверждён в списке 33 языков
-7. Terminology intervention работает через prompt-level injection + постпроцессинг (`apply_glossary`)
-8. Placeholder/tag защита через XML-обёртку — нативно поддерживается HY-MT
-9. Cold start 5-15с — критичный UX риск, нужен warmup или прогресс-индикатор
-10. Главный неизвестный: реальное качество he→ru на HDLE-домене — обязателен SPIKE до реализации
-11. Лицензия HY-MT: коммерческое использование задекларировано как разрешённое — нужна детальная проверка License.txt
-12. Deployment без весов: ship без модели, user скачивает сам — стандартный паттерн (как NLLB)
-13. VRAM конфликт с TTS (LightBlueTTS/MMS) при одновременной работе — задокументировать, мониторить
+1. ✅ Экспериментальный local backend HY-MT1.5-1.8B успешно реализован и интегрирован в HDLE
+2. ✅ Архитектура: decoder-only + `transformers_causal` branch в `worker_process.py` + `LocalHYMTProvider`
+3. ✅ Единственная точка регистрации: `LOCAL_PROVIDERS_CONFIG` + `ProviderSettingsDialog.PROVIDERS`
+4. ✅ HY-MT1.5-1.8B: ~3.34GB VRAM (bfloat16) — влезает на RTX 3070 с запасом
+5. ✅ HDLE_PH_N placeholder protection: mandatory, RTL-safe, 100% в SPIKE-2
+6. ✅ Terminology: prompt injection + `apply_glossary()` постпроцессинг (mode="both", hardcoded)
+7. ✅ Worker-owned HY-MT template: provider НЕ смешивает инструкции с user content
+8. ⚠️ Cold start 5-15с — задокументировано, warmup / прогресс-индикатор рекомендован в UX polish
+9. ⚠️ VRAM конфликт с TTS (LightBlueTTS/MMS) при одновременной работе — задокументировать, мониторить
+10. 🔜 **Future**: HY-MT1.5-7B как upgrade candidate — требует отдельной VRAM/feasibility/quality валидации
 14. Patch series: 4 патча (PATCH-00..03) + тесты, независимы, можно откатить по отдельности
 15. Kill decision после SPIKE-2: если latency >10с или качество неприемлемо → рассмотреть GGUF/llama.cpp вариант
