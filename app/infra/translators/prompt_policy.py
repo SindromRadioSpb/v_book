@@ -633,3 +633,187 @@ def _validate_registry() -> None:
 
 
 _validate_registry()
+
+
+# ============================================================================
+# Sentinel constants  (duplicated in worker_process.py — keep in sync)
+# ============================================================================
+
+#: Prefix that marks a WorkerRequest.text as a PPS payload.
+#: Uses null bytes so no natural source text can match accidentally.
+_PPS_SENTINEL_START: str = "\x00PPS_PAYLOAD\x00"
+
+#: Separator between role_instruction and user_content inside the payload.
+_PPS_ROLE_SEP: str = "\x00ROLE\x00"
+
+
+# ============================================================================
+# PolicyRenderer
+# ============================================================================
+
+
+class PolicyRenderer:
+    """Renders a PromptPolicy into ``WorkerRequest.text``.
+
+    Two rendering modes:
+
+    * :meth:`render_user_content` — plain user_content string (no sentinel).
+      Used for providers that do not support PPS sentinel yet (legacy path).
+
+    * :meth:`render_sentinel_payload` — PPS sentinel payload:
+      ``_PPS_SENTINEL_START + role_instruction + _PPS_ROLE_SEP + user_content``.
+      The worker parses this to build the model-specific chat template.
+
+    ``user_content`` structure (Layers 2–5):
+
+    1. task_instruction   (Layer 2 — what to do)
+    2. output_policy      (Layer 3 — format constraint, if any)
+    3. context_block      (Layer 4a — surrounding segments, if any)
+    4. glossary_block     (Layer 4b — terminology, if any)
+    5. source_text        (Layer 5)
+
+    This order matches the current hardcoded template for ``sentence_ru`` so
+    that the 1.8B regression baseline is preserved: no glossary, no context →
+    ``"Translate the following segment into Russian, without additional
+    explanation.\\n\\n{source_text}"`` (identical to pre-PPS code).
+    """
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def render_user_content(
+        self,
+        policy: PromptPolicy,
+        source_text: str,
+        glossary_terms: list[tuple[str, str]] | None = None,
+        context_items: list[str] | None = None,
+    ) -> str:
+        """Return plain user_content (no sentinel wrapper).
+
+        Args:
+            policy: Active PromptPolicy.
+            source_text: Placeholder-protected source segment.
+            glossary_terms: List of (source_term, target_term) pairs, pre-ranked.
+            context_items: Surrounding segments for context-aware policies.
+
+        Returns:
+            User content string ready for the worker's chat template.
+        """
+        return self._render_visible_content(policy, source_text, glossary_terms, context_items)
+
+    def render_sentinel_payload(
+        self,
+        policy: PromptPolicy,
+        source_text: str,
+        glossary_terms: list[tuple[str, str]] | None = None,
+        context_items: list[str] | None = None,
+    ) -> str:
+        """Return PPS sentinel payload for ``WorkerRequest.text``.
+
+        Format::
+
+            \\x00PPS_PAYLOAD\\x00{role_instruction}\\x00ROLE\\x00{user_content}
+
+        The worker detects the sentinel prefix and splits on ``_PPS_ROLE_SEP``
+        to recover ``role_instruction`` and ``user_content`` before building
+        the model-specific chat template.
+
+        Args:
+            policy: Active PromptPolicy.
+            source_text: Placeholder-protected source segment.
+            glossary_terms: List of (source_term, target_term) pairs, pre-ranked.
+            context_items: Surrounding segments for context-aware policies.
+
+        Returns:
+            Sentinel-wrapped string for ``WorkerRequest.text``.
+        """
+        user_content = self._render_visible_content(
+            policy, source_text, glossary_terms, context_items
+        )
+        return f"{_PPS_SENTINEL_START}{policy.role_instruction}{_PPS_ROLE_SEP}{user_content}"
+
+    def render_effective_preview(
+        self,
+        policy: PromptPolicy,
+        source_text: str,
+        glossary_terms: list[tuple[str, str]] | None = None,
+        context_items: list[str] | None = None,
+    ) -> str:
+        """Return human-readable all-layer preview for debug/advanced mode UI.
+
+        Shows every layer as it would appear in the final prompt.
+        Not passed to the model.
+
+        Args:
+            policy: Active PromptPolicy.
+            source_text: Source segment (may be redacted in production logs).
+            glossary_terms: Glossary pairs, pre-ranked.
+            context_items: Surrounding segments.
+
+        Returns:
+            Formatted multi-section string for display.
+        """
+        parts: list[str] = []
+        if policy.role_instruction:
+            parts.append(f"[Role]\n{policy.role_instruction}")
+        user_content = self._render_visible_content(
+            policy, source_text, glossary_terms, context_items
+        )
+        parts.append(f"[User]\n{user_content}")
+        return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _render_visible_content(
+        self,
+        policy: PromptPolicy,
+        source_text: str,
+        glossary_terms: list[tuple[str, str]] | None,
+        context_items: list[str] | None,
+    ) -> str:
+        """Assemble Layers 2–5 into user_content."""
+        parts: list[str] = []
+
+        # Layer 2: task instruction
+        if policy.task_instruction:
+            parts.append(policy.task_instruction)
+
+        # Layer 3: output policy (format constraint)
+        if policy.output_policy:
+            parts.append(policy.output_policy)
+
+        # Layer 4a: context block
+        if context_items and policy.context_mode != ContextMode.OFF:
+            parts.append(self._render_context_block(context_items))
+
+        # Layer 4b: glossary block
+        if glossary_terms and policy.terminology_mode != TerminologyMode.OFF:
+            parts.append(self._render_glossary_block(glossary_terms, policy))
+
+        # Layer 5: source text
+        parts.append(source_text)
+
+        return "\n\n".join(parts)
+
+    def _render_glossary_block(
+        self,
+        glossary_terms: list[tuple[str, str]],
+        policy: PromptPolicy,
+    ) -> str:
+        """Render glossary as a Terminology block."""
+        if policy.terminology_mode == TerminologyMode.STRICT_GLOSSARY:
+            header = "Approved Terminology (use exactly):"
+        else:
+            header = "Terminology:"
+        limit = policy.max_glossary_items
+        terms = glossary_terms[:limit] if limit is not None else glossary_terms
+        lines = [header] + [f"{src}: {tgt}" for src, tgt in terms]
+        return "\n".join(lines)
+
+    def _render_context_block(self, context_items: list[str]) -> str:
+        """Render surrounding context as a Context block."""
+        lines = ["Context:"] + [f"  {item}" for item in context_items]
+        return "\n".join(lines)

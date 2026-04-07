@@ -526,6 +526,18 @@ _HYMT7B_SEP = "<|extra_4|>"  # token 127966, system→user separator
 _HYMT7B_USER_END = "<|extra_0|>"  # token 127962, end of user turn
 _HYMT7B_EOS = "<|eos|>"  # token 127960 (eos_token)
 
+# ---------------------------------------------------------------------------
+# PPS sentinel constants  (must stay in sync with prompt_policy._PPS_*)
+# ---------------------------------------------------------------------------
+# When LocalHYMTProvider uses PolicyRenderer.render_sentinel_payload(), it
+# wraps WorkerRequest.text in this sentinel so the worker can extract:
+#   - role_instruction  (Layer 1 — appended to system prompt)
+#   - user_content      (Layers 2-5 — task + glossary + source text)
+# If the sentinel is absent, the worker falls back to legacy behaviour:
+# hardcoded task instruction prepended inside the chat template.
+_HYMT_PPS_SENTINEL_START: str = "\x00PPS_PAYLOAD\x00"
+_HYMT_PPS_ROLE_SEP: str = "\x00ROLE\x00"
+
 # System prompt: translation engine persona + placeholder rule
 # Intentionally does NOT include "Translate from X to Y" — that goes in user turn
 _HYMT_SYSTEM_PROMPT = (
@@ -598,6 +610,32 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
     stop_ids = model_dict.get("stop_token_ids") or _hymt_stop_token_ids(tokenizer)
     is_gptq = model_dict.get("is_gptq", False)
 
+    # ------------------------------------------------------------------
+    # PPS sentinel parsing (backwards compatible)
+    # ------------------------------------------------------------------
+    # If prompt carries a PPS sentinel, extract role_instruction and
+    # user_content (which already contains task instruction + source text).
+    # If no sentinel, fall back to legacy behaviour: hardcoded task instruction.
+    if prompt.startswith(_HYMT_PPS_SENTINEL_START):
+        payload = prompt[len(_HYMT_PPS_SENTINEL_START) :]
+        sep_idx = payload.find(_HYMT_PPS_ROLE_SEP)
+        if sep_idx == -1:
+            # Malformed sentinel — treat entire payload as user_content (safe fallback)
+            role_instruction = ""
+            user_content = payload
+        else:
+            role_instruction = payload[:sep_idx]
+            user_content = payload[sep_idx + len(_HYMT_PPS_ROLE_SEP) :]
+        role_suffix = ("\n" + role_instruction.strip()) if role_instruction.strip() else ""
+        effective_system = _HYMT_SYSTEM_PROMPT + role_suffix
+    else:
+        # Legacy path: no sentinel — prepend hardcoded task instruction as before
+        effective_system = _HYMT_SYSTEM_PROMPT
+        user_content = (
+            "Translate the following segment into Russian, "
+            f"without additional explanation.\n\n{prompt}"
+        )
+
     if is_gptq:
         # 7B-GPTQ uses a completely different token vocabulary from the 1.8B model.
         # The <｜hy_*｜> tokens used by 1.8B do NOT exist in the 7B-GPTQ vocabulary;
@@ -605,18 +643,13 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
         # Correct format from chat_template.jinja (shipped with the 7B-GPTQ model):
         #   <|startoftext|>{system}<|extra_4|>{user}<|extra_0|> → {translation}<|eos|>
         chat_text = (
-            f"{_HYMT7B_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT7B_SEP}"
-            f"Translate the following segment into Russian, "
-            f"without additional explanation.\n\n"
-            f"{prompt}{_HYMT7B_USER_END}"
+            f"{_HYMT7B_BOS}{effective_system}{_HYMT7B_SEP}" f"{user_content}{_HYMT7B_USER_END}"
         )
     else:
         # 1.8B template: uses <｜hy_*｜> special tokens
         chat_text = (
-            f"{_HYMT_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT_SEP}"
-            f"{_HYMT_USER}Translate the following segment into Russian, "
-            f"without additional explanation.\n\n"
-            f"{prompt}{_HYMT_ASSISTANT}"
+            f"{_HYMT_BOS}{effective_system}{_HYMT_SEP}"
+            f"{_HYMT_USER}{user_content}{_HYMT_ASSISTANT}"
         )
 
     # model.device may not exist on all GPTQ wrappers — fall back to parameters()
