@@ -56,11 +56,22 @@
 | PPS PATCH-02: PolicyRenderer + sentinel in worker | `prompt_policy.py`, `worker_process.py`, `tests/test_prompt_renderer.py` | ✅ Завершён (28 tests) |
 | PPS PATCH-03: TranslationRouter + provider integration | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_local_hymt_provider_policy.py` | ✅ Завершён (52 tests) |
 | PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | ✅ Завершён (42 tests) |
-| PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `app/ui/prompt_audit_dialog.py`, `tests/test_effective_prompt_trace.py` | 🔄 В работе |
+| PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `app/ui/prompt_audit_dialog.py`, `provider_settings_dialog.py`, `tests/test_effective_prompt_trace.py` | ✅ Завершён (75 tests) |
 | PPS PATCH-06: policy_hash (SHA-256) | TBD | ⬜ Pending |
 | PPS PATCH-07: Context wiring | TBD | ⬜ Pending |
 
-**PPS regression status**: 178 tests (56+28+52+42) pass, 0 регрессий.
+**PPS regression status**: 253 tests (56+28+52+42+75) pass, 0 регрессий.
+
+**PATCH-05 архитектурные детали:**
+- `EffectivePromptTrace` dataclass (37 полей, spec §4.9) в `prompt_policy.py`
+- `build_applied_sampling(policy, force_greedy, max_n_predict_cap)` — зеркало `_resolve_gen_kwargs` без `eos_token_id`, только для трейса
+- Trace создаётся только если `request.trace_id != ""` (нет лишнего overhead в production path)
+- Класс-атрибуты `_FORCE_GREEDY`, `_MAX_N_PREDICT_CAP`, `_MODEL_QUANT_ID` в `LocalHYMTProvider`; overridden в `LocalHYMT7BGPTQProvider`
+- `app/ui/prompt_audit_dialog.py`: `PromptAuditPanel` (class-level `deque(maxlen=100)`, classmethods `add_trace/get_history/clear_history`), `PromptAuditDialog` wrapper
+- History cap = 100, FIFO eviction
+- Color-coded layers: role=blue, task=green, output_policy=orange, glossary=purple, context=teal, payload=dark
+- "Prompt Audit" tab добавлен в `ProviderSettingsDialog`
+- Nullable в PATCH-05: `policy_hash`, `source_text_hash`, `glossary_hash`, `context_hash`, `output_tokens_generated`, `model_quant_id` (все `None`, PATCH-06+)
 
 **PATCH-04 архитектурные детали:**
 - `_WORKER_SAMPLING_PROFILES` (3 профиля) в `worker_process.py` — локальная копия, без cross-layer импорта
