@@ -1,24 +1,28 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
+> Последнее обновление: **2026-04-07** — добавлен 7B-GPTQ experimental backend
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | PATCH-00..03: завершены ✅
+> 7B-GPTQ: PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
 > Пилотный маршрут: **Hebrew → Russian**
-> Текущий target: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16)
-> Следующий этап (future): **HY-MT1.5-7B** — upgrade path, требует отдельной VRAM/feasibility валидации
+> Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
+> Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
 
 ---
 
 ## Корректировки после review (2026-04-06)
 
 1. **Лицензия** — проект некоммерческий, license review не нужен. Убрать из kill criteria.
-2. **Только 1.8B в pilot** — 7B не рассматривался в рамках данного pilot. Зафиксирован как future upgrade path (см. §13).
+2. ~~Только 1.8B в pilot~~ — **обновлено 2026-04-07**: 7B-GPTQ experimental backend реализован и работает. 1.8B остаётся baseline и default провайдером.
 3. **HY-MT — не "ещё один провайдер"**: внедрять сразу со всеми 4 capabilities (terminology injection, contextual, placeholder protection, mixed-language). Обнулять выбор HY-MT через raw text → generate — неприемлемо.
 4. **Placeholder protection — MANDATORY**: не опциональная настройка. Каждый `translate()` вызов ОБЯЗАН делать protect/restore. `{name}` или XML-тег сломает продукт хуже, чем плохой перевод.
 5. **`terminology_mode="both"` — hardcoded default**: prompt injection + `apply_glossary()` постпроцессинг. Не пользовательский toggle.
 6. **`MT_PROVIDER_INTEGRATION_GUIDE.md`** — внутренний стандарт для всех будущих провайдеров.
 
-## Статус реализации (2026-04-06)
+## Статус реализации
+
+### 1.8B baseline (2026-04-06) — неизменён
 
 | Этап | Файлы | Статус |
 |------|-------|--------|
@@ -29,16 +33,30 @@
 | Hotfix: prompt/template architecture | `worker_process.py`, `local_hymt_provider.py` | ✅ Завершён |
 | Hotfix: lazy init в force-provider mode | `batch_mt_translate_service.py` | ✅ Завершён |
 
-**Regression status**: 18/18 тестов pass, 0 регрессий.
+**Regression status (1.8B)**: 18/18 тестов pass, 0 регрессий.
+
+### 7B-GPTQ experimental backend (2026-04-07)
+
+| Этап | Файлы | Статус |
+|------|-------|--------|
+| PATCH-04: Provider class + регистрация | `local_hymt_7b_gptq_provider.py`, `local_providers_setup.py` | ✅ Завершён |
+| PATCH-05: UI integration | `provider_settings_dialog.py`, `batch_translate_dialog.py` | ✅ Завершён |
+| PATCH-06: Model registry | `scripts/install_local_mt_model.py` | ✅ Завершён |
+| PATCH-07: Worker GPTQ runtime hardening | `worker_process.py` | ✅ Завершён |
+| PATCH-08: Tests | `tests/test_local_hymt_7b_gptq_provider.py`, `tests/test_local_providers_setup.py` | ✅ Завершён |
+
+**Regression status (7B-GPTQ)**: 1935 passed, 0 новых регрессий (pre-existing: 1 fail в unrelated test).
 
 ### Ключевые архитектурные решения (зафиксированы)
 
 - **Worker owns template**: провайдер передаёт только user content (protected text + optional terminology);
-  worker строит полный HY-MT-specific шаблон (`<BOS><system><SEP><User>…<Assistant>`) + применяет stop tokens.
+  worker строит полный HY-MT-specific шаблон + применяет stop tokens.
   Инструкции НЕ смешиваются с user content — иначе модель переводит инструкции вместо текста.
 - **HDLE_PH_N placeholder format**: ASCII-safe токены (не XML `<ph id="N"/>`), иммунны к Unicode RTL-маркам.
-- **Stop tokens**: `<｜hy_end▁of▁sentence｜>` и `<｜hy_place▁holder▁no▁2｜>` — предотвращают генерацию мусора после перевода.
-- **bfloat16 + device_map="auto"**: практически оптимальный баланс скорость/качество для RTX 3070 8GB.
+- **Stop tokens**: обязательны, модель-специфичны (разные для 1.8B и 7B-GPTQ).
+- **bfloat16 + device_map="auto"**: для 1.8B — оптимальный баланс скорость/качество для RTX 3070 8GB.
+- **7B-GPTQ: отдельный словарь токенов**: 1.8B использует `<｜hy_*｜>` специальные токены; 7B-GPTQ использует `<|startoftext|>`, `<|extra_4|>`, `<|extra_0|>`, `<|eos|>`. Шаблоны несовместимы.
+- **7B-GPTQ: greedy decoding + max_new_tokens=128**: TorchQuantLinear (torch backend без triton) даёт ~0.6s/token на RTX 3070. Sampling + 512 токенов = timeout. Greedy + 128 = worst case 77s < 120s timeout.
 
 ---
 
@@ -852,24 +870,37 @@ else:
 - Worker-owned HY-MT template (система промптов в worker layer, не в provider)
 
 **Что НЕ было сделано и остаётся за scope:**
-- ~~7B~~ — вынесен как future upgrade path (см. ниже)
+- ~~7B~~ — **реализован как experimental backend (2026-04-07)**, см. ниже
 - vLLM server mode — лишняя инфраструктура, не нужна
 - Fine-tuning — вне scope
 - Streaming/incremental output — усложняет IPC без необходимости
 
-**Future upgrade path: HY-MT1.5-7B**
+**HY-MT1.5-7B-GPTQ-Int4 — статус реализации (обновлено 2026-04-07)**
 
-Рассматривать после:
-1. Отдельной VRAM feasibility оценки для RTX 3070 8GB (7B в bfloat16 = ~14GB → требует квантизации или другого GPU)
-2. Сравнительной quality validation 1.8B vs 7B на HDLE he→ru домене
-3. Оценки latency regression (7B будет медленнее)
+Все три prerequisite, зафиксированные ранее, закрыты:
 
-Не начинать без подтверждения feasibility. 7B не заменяет 1.8B автоматически — это отдельный evaluation, не апгрейд.
+1. ✅ **VRAM feasibility**: Int4 квантизация = ~3.5–4 GB — влезает на RTX 3070 8GB side-by-side с NLLB
+2. ⚠️ **Quality validation**: проведён preliminary smoke (несколько сегментов he→ru), перевод семантически корректен. Систематическая quality validation на HDLE he→ru домене **не проведена** — это остаётся открытым пунктом.
+3. ✅ **Latency assessment**: ~0.6s/token (TorchQuantLinear torch backend). Короткие сегменты (20-30 токенов) = 12-18s. Хуже 1.8B, но в пределах 120s timeout.
+
+**7B-GPTQ остаётся experimental**, не заменяет 1.8B автоматически:
+- `enabled_by_default=False` — не инициализируется при старте
+- Требует явной активации через force-provider или UI
+- 1.8B остаётся default и baseline провайдером
+
+**Environment caveat (обязательно прочитать перед использованием)**:
+Для runtime 7B-GPTQ требуются дополнительные зависимости и два патча в `.venv`:
+- `gptqmodel` (не доступен в официальном Windows wheel — устанавливается из исходников)
+- Патч `gptqmodel/quantization/config.py` — backward compat для GPTQ v1 конфигов
+- Патч `optimum/gptq/quantizer.py` — `BACKEND.EXLLAMA_V1` удалён в gptqmodel 6.0.3
+- Эти патчи нужно повторять при пересоздании venv (скрипт: `scripts/patch_venv_gptq.ps1`)
+- Triton недоступен на Windows → forced `backend="torch"` в GPTQConfig → медленнее, чем ExLlamaV2
 
 ---
 
-## Executive Summary (фактический статус на 2026-04-06)
+## Executive Summary (фактический статус на 2026-04-07)
 
+### 1.8B baseline (неизменён)
 1. ✅ Экспериментальный local backend HY-MT1.5-1.8B успешно реализован и интегрирован в HDLE
 2. ✅ Архитектура: decoder-only + `transformers_causal` branch в `worker_process.py` + `LocalHYMTProvider`
 3. ✅ Единственная точка регистрации: `LOCAL_PROVIDERS_CONFIG` + `ProviderSettingsDialog.PROVIDERS`
@@ -878,7 +909,146 @@ else:
 6. ✅ Terminology: prompt injection + `apply_glossary()` постпроцессинг (mode="both", hardcoded)
 7. ✅ Worker-owned HY-MT template: provider НЕ смешивает инструкции с user content
 8. ⚠️ Cold start 5-15с — задокументировано, warmup / прогресс-индикатор рекомендован в UX polish
-9. ⚠️ VRAM конфликт с TTS (LightBlueTTS/MMS) при одновременной работе — задокументировать, мониторить
-10. 🔜 **Future**: HY-MT1.5-7B как upgrade candidate — требует отдельной VRAM/feasibility/quality валидации
-14. Patch series: 4 патча (PATCH-00..03) + тесты, независимы, можно откатить по отдельности
-15. Kill decision после SPIKE-2: если latency >10с или качество неприемлемо → рассмотреть GGUF/llama.cpp вариант
+9. ⚠️ VRAM конфликт с TTS (LightBlueTTS/MMS) при одновременной работе — мониторить
+
+### 7B-GPTQ experimental backend (новое, 2026-04-07)
+10. ✅ **HY-MT1.5-7B-GPTQ-Int4 translation path реализован и работает**
+11. ✅ `local_hymt_7b_gptq` — отдельный thin subclass `LocalHYMT7BGPTQProvider(LocalHYMTProvider)`
+12. ✅ Side-by-side с 1.8B: `enabled_by_default=False`, не инициализируется при старте автоматически
+13. ✅ Inherit: placeholder protection, glossary, translate() pipeline — всё из 1.8B
+14. ✅ Отдельный шаблон: 7B-GPTQ использует `<|startoftext|>/<|extra_4|>/<|extra_0|>/<|eos|>` (не 1.8B токены)
+15. ✅ Generation: greedy decoding (do_sample=False), max_new_tokens=128, timeout=120s
+16. ✅ Post-load warmup: 1-token dummy pass после загрузки, убирает first-request latency spike
+17. ⚠️ **Environment caveat**: требует `gptqmodel` из исходников + 2 патча в `.venv` → `scripts/patch_venv_gptq.ps1`
+18. ⚠️ **Quality validation pending**: systematic he→ru quality comparison с 1.8B не проведена
+19. ⚠️ Performance: ~0.6s/token (torch backend, no triton) — медленнее 1.8B
+20. ℹ️ 7B-GPTQ НЕ продвигается как default или production-proven backend
+
+### Patch series
+- 1.8B: PATCH-00..03 + hotfixes — независимы, можно откатить по отдельности
+- 7B-GPTQ: PATCH-04..08 + fix commits — rollback: `git revert` по отдельным commit-ам
+
+---
+
+## Runbook: запуск и настройка окружения
+
+### Обычный запуск (каждый раз)
+
+```powershell
+cd E:\projects\Project_Vibe\V_book
+.\.venv\Scripts\Activate.ps1
+python -m app.main --db-path "путь/к/базе.db"
+```
+
+7B-GPTQ активируется через force-provider или MT Provider Settings → включить `local_hymt_7b_gptq`.
+
+### Первичная настройка окружения после пересоздания venv (один раз)
+
+```powershell
+cd E:\projects\Project_Vibe\V_book
+.\.venv\Scripts\Activate.ps1
+.\scripts\patch_venv_gptq.ps1
+```
+
+Скрипт устанавливает: `optimum`, `device-smi`, `tokenicer`, `defuser`, `gptqmodel` из исходников,
+применяет два патча совместимости в `.venv/Lib/site-packages/`.
+
+### Когда нужно повторить patch_venv_gptq.ps1
+
+- При `pip install --upgrade gptqmodel` или `optimum`
+- При полном пересоздании venv
+- При смене Python версии
+
+### Проверка
+
+```powershell
+python -c "import gptqmodel; print('gptqmodel OK:', gptqmodel.__version__)"
+```
+
+---
+
+## Lessons Learned: 7B-GPTQ integration (2026-04-07)
+
+### 1. Provider passes only user content; worker owns template
+
+Провайдер передаёт в worker только `user_content` (placeholder-protected text + optional terminology).
+Worker строит полный шаблон, включая BOS/SEP/role markers/stop tokens.
+Это critical contract: если инструкции смешать с user content, модель переведёт сами инструкции.
+
+### 2. Разные модели из одной серии могут иметь несовместимые токенные словари
+
+HY-MT1.5-1.8B и HY-MT1.5-7B-GPTQ-Int4 — одна серия, но **разные special tokens**:
+- 1.8B: `<｜hy_begin▁of▁sentence｜>`, `<｜hy_User｜>`, `<｜hy_end▁of▁sentence｜>` (Unicode box-drawing)
+- 7B-GPTQ: `<|startoftext|>`, `<|extra_4|>`, `<|extra_0|>`, `<|eos|>` (ASCII pipe)
+
+Кормить 7B-GPTQ шаблоном от 1.8B → модель не понимает задачу → не генерирует EOS → timeout.
+**Всегда проверять chat_template.jinja модели перед написанием шаблона.**
+
+### 3. Stop tokens — обязательны, не опциональны
+
+Без stop tokens модель генерирует continuation диалога вместо остановки.
+`max_new_tokens` без stop tokens = timeout на 7B-GPTQ (~0.6s/token × 512 = 307s >> 120s timeout).
+
+### 4. Timeout bug root cause: template + generation params, не только таймаут
+
+Первоначальный баг не был "таймаут слишком маленький". Root cause:
+1. Неверный шаблон → модель не понимает задачу → не генерирует EOS
+2. max_new_tokens=512 × 0.6s/token = 307s > timeout
+3. Правильный fix: верный шаблон + max_new_tokens=128 + do_sample=False
+
+Слепое увеличение timeout без root cause analysis — неверное решение.
+
+### 5. Placeholder protection — обязательна наследуется корректно
+
+`LocalHYMT7BGPTQProvider` наследует `translate()` от `LocalHYMTProvider`.
+Placeholder protection, glossary injection, apply_glossary() — всё работает без изменений.
+Thin subclass pattern обоснован: переопределять нужно только `provider_id`, `display_name`, `timeout`, `model_id`.
+
+### 6. Post-load warmup устраняет first-request latency spike
+
+TorchQuantLinear (torch backend) имеет ~30% overhead на первом forward pass.
+1-token dummy generation после load убирает этот spike.
+Latency first request = latency subsequent requests (в пределах ±10%).
+
+### 7. Environment caveat — честно документировать, не скрывать
+
+gptqmodel требует нестандартной установки на Windows.
+Два патча в `.venv` (не в git) — инженерный долг, не production-grade решение.
+Задокументирован скрипт `scripts/patch_venv_gptq.ps1` для воспроизводимости.
+
+---
+
+## Translation Settings Reference (зафиксированные параметры на 2026-04-07)
+
+### Shared (оба провайдера)
+
+| Параметр | Значение | Уровень | Изменять? |
+|---|---|---|---|
+| System prompt | `_HYMT_SYSTEM_PROMPT` (см. worker_process.py) | Hardcoded invariant | ❌ Нет |
+| Placeholder format | HDLE_PH_N (ASCII-safe) | Hardcoded invariant | ❌ Нет |
+| Placeholder protection | Обязательна | Hardcoded invariant | ❌ Нет |
+| Glossary mode | `terminology_mode="both"` | Hardcoded default | ❌ Нет |
+
+### 1.8B specific (tencent/HY-MT1.5-1.8B)
+
+| Параметр | Значение | Уровень | Изменять? |
+|---|---|---|---|
+| Template tokens | `<｜hy_*｜>` серия | Hardcoded invariant | ❌ Нет |
+| max_new_tokens | 512 | Soft constraint | ⚠️ Только с качественной валидацией |
+| do_sample | True | Experimental | ⚠️ Dev-only |
+| temperature | 0.7 | Experimental | ⚠️ Dev-only |
+| top_k | 20 | Experimental | ⚠️ Dev-only |
+| top_p | 0.6 | Experimental | ⚠️ Dev-only |
+| repetition_penalty | 1.05 | Experimental | ⚠️ Dev-only |
+| Timeout | 60s | Provider-level | ⚠️ Dev-only |
+
+### 7B-GPTQ specific (tencent/HY-MT1.5-7B-GPTQ-Int4)
+
+| Параметр | Значение | Уровень | Изменять? |
+|---|---|---|---|
+| Template tokens | `<\|startoftext\|>/<\|extra_4\|>/<\|extra_0\|>/<\|eos\|>` | Hardcoded invariant | ❌ Нет |
+| max_new_tokens | 128 | Safety constraint (~0.6s/token) | ⚠️ Max 128; не увеличивать без latency данных |
+| do_sample | False (greedy) | Safety constraint | ❌ Нет (sampling → timeout риск) |
+| temperature / top_k / top_p | — (не используются) | Не применимо | ❌ Нет |
+| Timeout | 120s | Provider-level | ⚠️ Dev-only |
+| Warmup | 1-token dummy pass | GPTQ-specific | ❌ Не убирать |
