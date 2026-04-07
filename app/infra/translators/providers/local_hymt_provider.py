@@ -31,10 +31,19 @@ from app.infra.translators.base_provider import (
     TranslationRequest,
     TranslationResult,
 )
+from app.infra.translators.prompt_policy import (
+    PolicyRenderer,
+    TerminologyMode,
+    TranslationRouter,
+)
 from app.services.local_models import ModelResourceManager
 from app.services.local_mt import apply_glossary
 
 logger = logging.getLogger(__name__)
+
+# Module-level singletons — both classes are stateless; one instance is enough.
+_ROUTER = TranslationRouter()
+_RENDERER = PolicyRenderer()
 
 
 # ============================================================================
@@ -392,20 +401,34 @@ class LocalHYMTProvider(BaseProvider):
                 meta={"segment_count": 0},
             )
 
+        # Step 0: Resolve prompt policy via TranslationRouter
+        # allow_experimental: trace_id present → debug/advanced mode → experimental allowed
+        allow_experimental = bool(request.trace_id)
+        router_result = _ROUTER.route(request.options, allow_experimental=allow_experimental)
+        policy = router_result.policy
+        logger.debug(
+            f"HY-MT policy resolved: {policy.policy_id!r} "
+            f"(source={router_result.source}, provider={self.provider_id})"
+        )
+
         # Step 1: Placeholder protection (MANDATORY)
         protected = _protect_placeholders(request.source_text)
 
-        # Step 2: Fetch glossary terms for prompt injection
+        # Step 2: Fetch glossary terms — only when policy allows glossary
         glossary_terms: list[tuple[str, str]] = []
-        if self.db_session:
+        if self.db_session and policy.terminology_mode != TerminologyMode.OFF:
             glossary_terms = _fetch_glossary_terms_for_prompt(
                 self.db_session, src, tgt, self.project_id
             )
 
-        # Step 3: Build user content (worker owns system prompt + template)
-        user_content = _build_user_content(
+        injected_term_count = len(glossary_terms)
+
+        # Step 3: Build PPS sentinel payload (worker parses role + user_content)
+        user_content = _RENDERER.render_sentinel_payload(
+            policy=policy,
             source_text=protected.text,
             glossary_terms=glossary_terms if glossary_terms else None,
+            context_items=None,  # PATCH-03: context not yet wired; PATCH-05 scope
         )
 
         # Step 4: Worker inference
@@ -449,12 +472,12 @@ class LocalHYMTProvider(BaseProvider):
         if missing:
             logger.warning(f"HY-MT: {len(missing)} placeholder(s) lost in translation: {missing}")
 
-        # Step 6: apply_glossary postprocess (terminology_mode="both" — always run)
+        # Step 6: apply_glossary postprocess — only when policy allows glossary
         applied_terms_count = 0
         used_glossary = False
         final_translation = restored
 
-        if self.db_session:
+        if self.db_session and policy.terminology_mode != TerminologyMode.OFF:
             src_nllb = _ISO_TO_NLLB.get(src)
             tgt_nllb = _ISO_TO_NLLB.get(tgt)
             if src_nllb and tgt_nllb:
@@ -484,12 +507,30 @@ class LocalHYMTProvider(BaseProvider):
             cache_hit=False,
             latency_ms=latency_ms,
             meta={
+                # Existing top-level fields preserved for backwards compatibility
                 "inference_time_ms": worker_result.inference_time_ms,
                 "applied_terms_count": applied_terms_count,
                 "placeholder_count": len(protected.mapping),
                 "missing_placeholders": missing,
                 "model_id": self.model_id,
                 "backend": self.backend,
+                # PPS structured meta (spec §11.1)
+                "prompt_policy": {
+                    "policy_id": policy.policy_id,
+                    "policy_hash": None,  # PATCH-06: SHA-256 of canonical policy JSON
+                    "sampling_profile_id": policy.sampling_profile_id,
+                    "template_profile_id": policy.template_profile_id,
+                    "content_kind": str(policy.content_kind),
+                    "terminology_mode": str(policy.terminology_mode),
+                    "injected_term_count": injected_term_count,
+                    "applied_term_count": applied_terms_count,
+                    "placeholder_count": len(protected.mapping),
+                    "missing_placeholders": missing,
+                    "fallback_triggered": router_result.fallback_triggered,
+                    "fallback_reason": router_result.fallback_reason,
+                    "warnings": router_result.warnings,
+                    "trace": None,  # PATCH-05: EffectivePromptTrace
+                },
             },
         )
 

@@ -11,9 +11,12 @@ Refs: docs/HY_MT_PROMPT_POLICY_SPEC_V3.md
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+
+_logger = logging.getLogger(__name__)
 
 _SPEC_DATE = datetime(2026, 4, 7)
 
@@ -817,3 +820,161 @@ class PolicyRenderer:
         """Render surrounding context as a Context block."""
         lines = ["Context:"] + [f"  {item}" for item in context_items]
         return "\n".join(lines)
+
+
+# ============================================================================
+# TranslationRouter
+# ============================================================================
+
+
+@dataclass
+class RouterResult:
+    """Structured outcome of a ``TranslationRouter.route()`` call.
+
+    Carries everything the provider needs for policy application and
+    ``meta["prompt_policy"]`` construction — without requiring the provider to
+    re-derive any resolution logic.
+    """
+
+    policy: PromptPolicy
+    #: Resolution source: "explicit" | "content_kind" | "fallback"
+    source: str
+    #: True when the router replaced the initially resolved policy due to an error
+    #: or experimental guard.  False for the normal global-default path.
+    fallback_triggered: bool
+    fallback_reason: str | None
+    warnings: list[str] = field(default_factory=list)
+
+
+class TranslationRouter:
+    """Routes a ``TranslationRequest.options`` dict to a ``PromptPolicy``.
+
+    Resolution order (spec §10.1):
+    1. ``options["prompt_policy_id"]`` — explicit override
+    2. ``options["content_kind"]`` → built-in ContentKind→policy mapping
+    3. Global default (``DEFAULT_POLICY_ID = "sentence_ru"``)
+
+    Experimental guard (spec §10.3):
+    If the resolved policy has ``experimental=True`` and ``allow_experimental``
+    is False, the router falls back to ``sentence_ru`` and records a warning.
+
+    The router is stateless; a single module-level instance is sufficient.
+    """
+
+    # Spec §10.1: ContentKind → default policy_id
+    _KIND_TO_POLICY: dict[ContentKind, str] = {
+        ContentKind.LEMMA: "lemma_ru",
+        ContentKind.TERM: "term_ru",
+        ContentKind.SENTENCE: "sentence_ru",
+        ContentKind.SENTENCE_WITH_CONTEXT: "sentence_ru_context",
+        ContentKind.SENTENCE_FORMATTED: "sentence_ru_formatted",
+        ContentKind.UI_STRING: "lemma_ru",
+        ContentKind.BATCH_MIXED: "sentence_ru",
+    }
+
+    def route(
+        self,
+        options: dict,
+        allow_experimental: bool = False,
+    ) -> RouterResult:
+        """Resolve the active ``PromptPolicy`` from request options.
+
+        Args:
+            options: ``TranslationRequest.options`` dict.  Recognised keys:
+                ``"prompt_policy_id"`` (str) — explicit policy ID override.
+                ``"content_kind"`` (str) — ``ContentKind`` value for routing.
+            allow_experimental: If False (default), experimental policies are
+                blocked and the router falls back to ``sentence_ru`` with a
+                warning.  Pass True when the caller has an active trace
+                (debug / advanced mode).
+
+        Returns:
+            ``RouterResult`` with resolved policy, source, and any warnings.
+        """
+        warnings: list[str] = []
+        fallback_triggered = False
+        fallback_reason: str | None = None
+        source: str
+
+        explicit_id: str | None = options.get("prompt_policy_id")
+        content_kind_raw: str | None = options.get("content_kind")
+
+        # ---- Step 1: explicit prompt_policy_id override --------------------
+        if explicit_id is not None:
+            try:
+                policy = get_policy(explicit_id)
+                source = "explicit"
+            except KeyError:
+                msg = (
+                    f"Unknown prompt_policy_id '{explicit_id}'; "
+                    f"falling back to '{DEFAULT_POLICY_ID}'"
+                )
+                warnings.append(msg)
+                _logger.warning(msg)
+                policy = get_policy(DEFAULT_POLICY_ID)
+                source = "fallback"
+                fallback_triggered = True
+                fallback_reason = f"unknown_policy_id:{explicit_id}"
+
+        # ---- Step 2: content_kind → default profile mapping ----------------
+        elif content_kind_raw is not None:
+            resolved_default_id = DEFAULT_POLICY_ID
+            try:
+                ck = ContentKind(content_kind_raw)
+                resolved_default_id = self._KIND_TO_POLICY.get(ck, DEFAULT_POLICY_ID)
+            except ValueError:
+                msg = f"Unknown content_kind '{content_kind_raw}'; using global fallback"
+                warnings.append(msg)
+                _logger.warning(msg)
+
+            try:
+                policy = get_policy(resolved_default_id)
+                source = "content_kind"
+            except KeyError:
+                msg = (
+                    f"Policy '{resolved_default_id}' for content_kind "
+                    f"'{content_kind_raw}' not registered; falling back"
+                )
+                warnings.append(msg)
+                _logger.warning(msg)
+                policy = get_policy(DEFAULT_POLICY_ID)
+                source = "fallback"
+                fallback_triggered = True
+                fallback_reason = f"content_kind_policy_not_found:{resolved_default_id}"
+
+        # ---- Step 3: global default ----------------------------------------
+        else:
+            policy = get_policy(DEFAULT_POLICY_ID)
+            source = "fallback"
+            # fallback_triggered stays False: this is the normal default path,
+            # not an error recovery.
+
+        # ---- Experimental guard --------------------------------------------
+        if policy.experimental and not allow_experimental:
+            original_id = policy.policy_id
+            msg = (
+                f"Policy '{original_id}' is experimental; " f"falling back to '{DEFAULT_POLICY_ID}'"
+            )
+            warnings.append(msg)
+            _logger.warning(
+                "experimental_policy_blocked policy_id=%s",
+                original_id,
+            )
+            fallback_triggered = True
+            fallback_reason = f"experimental_blocked:{original_id}"
+            source = "fallback"
+            policy = get_policy(DEFAULT_POLICY_ID)
+
+        _logger.debug(
+            "policy_resolved policy_id=%s source=%s",
+            policy.policy_id,
+            source,
+        )
+
+        return RouterResult(
+            policy=policy,
+            source=source,
+            fallback_triggered=fallback_triggered,
+            fallback_reason=fallback_reason,
+            warnings=warnings,
+        )
