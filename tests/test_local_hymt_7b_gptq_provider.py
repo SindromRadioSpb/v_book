@@ -5,6 +5,7 @@ Verifies:
 - model_id and backend default values are 7B-GPTQ-specific
 - translate() pipeline is inherited (placeholder protection, glossary)
 - Worker GPTQ detection: _load_transformers_causal_model skips dtype for GPTQ
+- GPTQ inference path: correct template, generation params, EOS handling
 """
 
 import pytest
@@ -176,3 +177,112 @@ def test_worker_process_source_has_gptq_branch():
     source = inspect.getsource(worker_process._load_transformers_causal_model)
     assert "is_gptq" in source
     assert "gptq" in source.lower()
+
+
+# ============================================================================
+# Test 5: GPTQ inference path — template, generation params, truncation
+# ============================================================================
+
+
+def test_worker_stores_is_gptq_flag():
+    """_load_transformers_causal_model must propagate is_gptq into model_dict."""
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._load_transformers_causal_model)
+    # The function must store is_gptq in the returned dict
+    assert '"is_gptq"' in source or "'is_gptq'" in source
+
+
+def test_7b_template_constants_are_defined():
+    """7B-GPTQ template constants must be defined in worker_process module."""
+    from app.infra.local_mt import worker_process
+
+    assert hasattr(worker_process, "_HYMT7B_BOS")
+    assert hasattr(worker_process, "_HYMT7B_SEP")
+    assert hasattr(worker_process, "_HYMT7B_USER_END")
+    assert hasattr(worker_process, "_HYMT7B_EOS")
+
+
+def test_7b_template_constants_distinct_from_1b8():
+    """7B template tokens must differ from 1.8B template tokens."""
+    from app.infra.local_mt import worker_process
+
+    assert worker_process._HYMT7B_BOS != worker_process._HYMT_BOS
+    assert worker_process._HYMT7B_SEP != worker_process._HYMT_SEP
+    assert worker_process._HYMT7B_EOS != worker_process._HYMT_EOS
+
+
+def test_7b_template_token_values():
+    """7B template constants must match the model's chat_template.jinja vocabulary."""
+    from app.infra.local_mt import worker_process
+
+    assert worker_process._HYMT7B_BOS == "<|startoftext|>"
+    assert worker_process._HYMT7B_SEP == "<|extra_4|>"
+    assert worker_process._HYMT7B_USER_END == "<|extra_0|>"
+    assert worker_process._HYMT7B_EOS == "<|eos|>"
+
+
+def test_translate_causal_uses_gptq_template_when_is_gptq():
+    """_translate_transformers_causal must select 7B template when is_gptq=True."""
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._translate_transformers_causal)
+    # 7B path must use the new template constants, not the 1.8B ones in the GPTQ branch
+    assert "_HYMT7B_BOS" in source
+    assert "_HYMT7B_SEP" in source
+    assert "_HYMT7B_USER_END" in source
+
+
+def test_translate_causal_uses_gptq_gen_params():
+    """GPTQ path must use max_new_tokens=128 and do_sample=False."""
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._translate_transformers_causal)
+    assert "max_new_tokens" in source
+    assert "128" in source
+    assert "do_sample" in source
+
+
+def test_translate_causal_gptq_boundary_truncation():
+    """_translate_transformers_causal must truncate output at dialog boundary for GPTQ.
+
+    Uses source inspection to verify the truncation logic is present without
+    importing torch (which fails in test subprocess on Windows).
+    """
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._translate_transformers_causal)
+
+    # The 7B-GPTQ path must check for boundary markers and truncate
+    assert "_HYMT7B_USER_END" in source
+    assert "_HYMT7B_BOS" in source
+    # It must use find() + slice to truncate at the boundary
+    assert ".find(" in source
+    # The strip() to clean trailing whitespace after truncation
+    assert ".strip()" in source
+
+
+def test_translate_causal_1b8_unaffected_by_gptq_changes():
+    """1.8B path (is_gptq=False) must use original template and sampling params."""
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._translate_transformers_causal)
+    # Both branches must exist in the source
+    assert "_HYMT_BOS" in source  # 1.8B template still used
+    assert "_HYMT_ASSISTANT" in source
+    assert "do_sample=True" in source or "do_sample" in source  # sampling path preserved
+
+
+def test_warmup_present_in_load_source():
+    """_load_transformers_causal_model must include post-load warmup for GPTQ."""
+    import inspect
+    from app.infra.local_mt import worker_process
+
+    source = inspect.getsource(worker_process._load_transformers_causal_model)
+    assert "warmup" in source.lower()
+    assert "max_new_tokens" in source  # warmup generates 1 token

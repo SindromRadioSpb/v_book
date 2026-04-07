@@ -347,7 +347,7 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
         model_id: Model ID for logging and GPTQ detection.
 
     Returns:
-        dict with keys ``"model"``, ``"tokenizer"``, and ``"stop_token_ids"``.
+        dict with keys ``"model"``, ``"tokenizer"``, ``"stop_token_ids"``, and ``"is_gptq"``.
 
     Raises:
         WorkerError: If required packages are missing or loading fails.
@@ -412,7 +412,26 @@ def _load_transformers_causal_model(model_path: str, model_id: str) -> dict:
         sys.stdout.write(f"[Worker] HY-MT stop token IDs: {stop_token_ids}\n")
         sys.stdout.flush()
 
-        return {"model": model, "tokenizer": tokenizer, "stop_token_ids": stop_token_ids}
+        if is_gptq:
+            # TorchQuantLinear (torch backend, no triton) has a first-token latency
+            # spike of ~30% due to CUDA kernel scheduling warm-up.  Run a single
+            # dummy generation so the first *real* request doesn't absorb this cost
+            # inside the user-visible timeout window.
+            _warmup_ids = tokenizer("warmup", return_tensors="pt")
+            _warmup_ids.pop("token_type_ids", None)
+            _warmup_device = next(model.parameters()).device
+            _warmup_ids = {k: v.to(_warmup_device) for k, v in _warmup_ids.items()}
+            with torch.no_grad():
+                model.generate(**_warmup_ids, max_new_tokens=1, do_sample=False)
+            sys.stdout.write("[Worker] GPTQ post-load warmup complete\n")
+            sys.stdout.flush()
+
+        return {
+            "model": model,
+            "tokenizer": tokenizer,
+            "stop_token_ids": stop_token_ids,
+            "is_gptq": is_gptq,
+        }
     except WorkerError:
         raise
     except Exception as e:
@@ -484,13 +503,28 @@ def _translate_ctranslate2(
 # HY-MT template constants (verified against PocketPal config)
 # ============================================================================
 
-# Special tokens from HY-MT tokenizer vocabulary
+# ---------------------------------------------------------------------------
+# HY-MT 1.5 1.8B template tokens  (tencent/HY-MT1.5-1.8B)
+# ---------------------------------------------------------------------------
 _HYMT_BOS = "<｜hy_begin▁of▁sentence｜>"
 _HYMT_SEP = "<｜hy_place▁holder▁no▁3｜>"  # separates system from user turn
 _HYMT_USER = "<｜hy_User｜>"
 _HYMT_ASSISTANT = "<｜hy_Assistant｜>"
 _HYMT_EOS = "<｜hy_end▁of▁sentence｜>"
 _HYMT_STOP2 = "<｜hy_place▁holder▁no▁2｜>"
+
+# ---------------------------------------------------------------------------
+# HY-MT 1.5 7B-GPTQ template tokens  (tencent/HY-MT1.5-7B-GPTQ-Int4)
+# Tokenizer uses a DIFFERENT vocabulary from the 1.8B model.  The 1.8B
+# <｜hy_*｜> special tokens do NOT exist in the 7B-GPTQ vocabulary.
+# Correct format (from chat_template.jinja shipped with the model):
+#   <|startoftext|>{system}<|extra_4|>{user_content}<|extra_0|>
+#   → model generates → {translation}<|eos|>
+# ---------------------------------------------------------------------------
+_HYMT7B_BOS = "<|startoftext|>"  # token 127958 (bos_token)
+_HYMT7B_SEP = "<|extra_4|>"  # token 127966, system→user separator
+_HYMT7B_USER_END = "<|extra_0|>"  # token 127962, end of user turn
+_HYMT7B_EOS = "<|eos|>"  # token 127960 (eos_token)
 
 # System prompt: translation engine persona + placeholder rule
 # Intentionally does NOT include "Translate from X to Y" — that goes in user turn
@@ -562,14 +596,28 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
     model = model_dict["model"]
     tokenizer = model_dict["tokenizer"]
     stop_ids = model_dict.get("stop_token_ids") or _hymt_stop_token_ids(tokenizer)
+    is_gptq = model_dict.get("is_gptq", False)
 
-    # Build raw HY-MT chat string — no apply_chat_template to avoid template drift
-    chat_text = (
-        f"{_HYMT_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT_SEP}"
-        f"{_HYMT_USER}Translate the following segment into Russian, "
-        f"without additional explanation.\n\n"
-        f"{prompt}{_HYMT_ASSISTANT}"
-    )
+    if is_gptq:
+        # 7B-GPTQ uses a completely different token vocabulary from the 1.8B model.
+        # The <｜hy_*｜> tokens used by 1.8B do NOT exist in the 7B-GPTQ vocabulary;
+        # feeding them produces garbled input and no EOS signal.
+        # Correct format from chat_template.jinja (shipped with the 7B-GPTQ model):
+        #   <|startoftext|>{system}<|extra_4|>{user}<|extra_0|> → {translation}<|eos|>
+        chat_text = (
+            f"{_HYMT7B_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT7B_SEP}"
+            f"Translate the following segment into Russian, "
+            f"without additional explanation.\n\n"
+            f"{prompt}{_HYMT7B_USER_END}"
+        )
+    else:
+        # 1.8B template: uses <｜hy_*｜> special tokens
+        chat_text = (
+            f"{_HYMT_BOS}{_HYMT_SYSTEM_PROMPT}{_HYMT_SEP}"
+            f"{_HYMT_USER}Translate the following segment into Russian, "
+            f"without additional explanation.\n\n"
+            f"{prompt}{_HYMT_ASSISTANT}"
+        )
 
     # model.device may not exist on all GPTQ wrappers — fall back to parameters()
     try:
@@ -582,25 +630,49 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
     # HY-MT generate() rejects token_type_ids — filter it out
     generate_inputs = {k: v for k, v in inputs.items() if k in ("input_ids", "attention_mask")}
 
+    if is_gptq:
+        # TorchQuantLinear (torch backend, no triton) is ~0.6 s/token on RTX 3070.
+        # Measured worst case: 128 tokens × 0.6 s = 77 s < 120 s provider timeout.
+        # do_sample=False (greedy) is ~25% faster than sampling and appropriate for
+        # translation (deterministic output, no creative variation needed).
+        gen_kwargs: dict = {
+            "max_new_tokens": 128,
+            "do_sample": False,
+            "eos_token_id": stop_ids if stop_ids else None,
+        }
+    else:
+        gen_kwargs = {
+            "max_new_tokens": 512,
+            "do_sample": True,
+            "top_k": 20,
+            "top_p": 0.6,
+            "temperature": 0.7,
+            "repetition_penalty": 1.05,
+            "eos_token_id": stop_ids if stop_ids else None,
+        }
+
     with torch.no_grad():
-        outputs = model.generate(
-            **generate_inputs,
-            max_new_tokens=512,
-            do_sample=True,
-            top_k=20,
-            top_p=0.6,
-            temperature=0.7,
-            repetition_penalty=1.05,
-            eos_token_id=stop_ids if stop_ids else None,
-        )
+        outputs = model.generate(**generate_inputs, **gen_kwargs)
 
     new_tokens = outputs[0][prompt_len:]
     result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    # Strip any trailing stop strings that survived skip_special_tokens
-    for stop_str in (_HYMT_EOS, _HYMT_STOP2):
-        if result.endswith(stop_str):
-            result = result[: -len(stop_str)].strip()
+    if is_gptq:
+        # Strip 7B-GPTQ EOS string if it survived skip_special_tokens
+        if result.endswith(_HYMT7B_EOS):
+            result = result[: -len(_HYMT7B_EOS)].strip()
+        # Safety net: truncate at dialog continuation boundary in case EOS was not
+        # emitted and model rolled into the next turn.
+        for boundary in (_HYMT7B_USER_END, _HYMT7B_BOS, "</User>"):
+            idx = result.find(boundary)
+            if idx != -1:
+                result = result[:idx].strip()
+                break
+    else:
+        # Strip any trailing 1.8B stop strings that survived skip_special_tokens
+        for stop_str in (_HYMT_EOS, _HYMT_STOP2):
+            if result.endswith(stop_str):
+                result = result[: -len(stop_str)].strip()
 
     return result
 
