@@ -334,10 +334,11 @@ def test_translate_trace_field_is_none(provider) -> None:
     assert result.meta["prompt_policy"]["trace"] is None
 
 
-def test_translate_policy_hash_is_none(provider) -> None:
-    """policy_hash must be None (PATCH-06 scope)."""
+def test_translate_policy_hash_populated_patch06(provider) -> None:
+    """PATCH-06: policy_hash in meta is now populated from compute_policy_hash()."""
     result = provider.translate(_make_request())
-    assert result.meta["prompt_policy"]["policy_hash"] is None
+    assert result.meta["prompt_policy"]["policy_hash"] is not None
+    assert len(result.meta["prompt_policy"]["policy_hash"]) == 64
 
 
 def test_translate_sampling_profile_id_matches_policy(provider) -> None:

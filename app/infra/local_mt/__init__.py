@@ -1,6 +1,7 @@
 """Local MT infrastructure (worker processes, IPC)."""
 
 from .worker_process import (
+    _HYMT_SYSTEM_PROMPT_HASH,
     LocalMTWorker,
     WorkerError,
     WorkerRequest,
@@ -14,4 +15,5 @@ __all__ = [
     "WorkerError",
     "WorkerRequest",
     "WorkerResult",
+    "_HYMT_SYSTEM_PROMPT_HASH",
 ]

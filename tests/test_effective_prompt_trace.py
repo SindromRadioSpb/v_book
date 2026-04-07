@@ -460,14 +460,20 @@ def test_trace_fallback_triggered_true_for_unknown_policy(provider) -> None:
     assert trace.fallback_reason is not None
 
 
-def test_trace_policy_hash_none_patch05(provider) -> None:
+def test_trace_policy_hash_populated_patch06(provider) -> None:
+    """PATCH-06: policy_hash is now populated from compute_policy_hash()."""
     result = provider.translate(_req(trace_id="t1"))
-    assert result.meta["prompt_policy"]["trace"].policy_hash is None
+    trace = result.meta["prompt_policy"]["trace"]
+    assert trace.policy_hash is not None
+    assert len(trace.policy_hash) == 64
 
 
-def test_trace_source_text_hash_none_patch05(provider) -> None:
+def test_trace_source_text_hash_populated_patch06(provider) -> None:
+    """PATCH-06: source_text_hash is now populated from compute_source_text_hash()."""
     result = provider.translate(_req(trace_id="t1"))
-    assert result.meta["prompt_policy"]["trace"].source_text_hash is None
+    trace = result.meta["prompt_policy"]["trace"]
+    assert trace.source_text_hash is not None
+    assert len(trace.source_text_hash) == 64
 
 
 def test_trace_glossary_hash_none_patch05(provider) -> None:

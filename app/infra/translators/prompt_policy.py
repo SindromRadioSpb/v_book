@@ -11,6 +11,8 @@ Refs: docs/HY_MT_PROMPT_POLICY_SPEC_V3.md
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -600,15 +602,110 @@ def get_template_profile(profile_id: str) -> TemplateProfile:
 
 
 # ============================================================================
+# PPS PATCH-06: Hash computation utilities
+# ============================================================================
+
+# Fields included in policy_hash canonical representation.
+# Rules: include all fields that affect translation output semantics.
+# Excluded: name, description, enabled, is_builtin, is_custom, experimental,
+#   allow_user_edit_*, created_at, updated_at, policy_hash (circular).
+# These exclusions are intentional and documented — they are operational/display
+# attributes that do not change the model instruction sent to the worker.
+_POLICY_HASH_FIELDS: tuple[str, ...] = (
+    "policy_id",
+    "version",
+    "content_kind",
+    "source_lang",
+    "target_lang",
+    "role_instruction",
+    "task_instruction",
+    "output_policy",
+    "terminology_mode",
+    "context_mode",
+    "formatting_mode",
+    "placeholder_mode",
+    "sampling_profile_id",
+    "template_profile_id",
+    "glossary_strategy",
+    "context_strategy",
+    "max_glossary_items",
+    "max_context_items",
+    "max_input_chars",
+)
+
+
+def compute_policy_hash(policy: PromptPolicy) -> str:
+    """Compute deterministic SHA-256 of a PromptPolicy's semantic fields.
+
+    Canonical representation: JSON object with keys from ``_POLICY_HASH_FIELDS``,
+    serialised with ``sort_keys=True, ensure_ascii=False``, UTF-8 encoded.
+
+    Enum values are converted to their string representation via ``str()``.
+    Non-semantic fields (display metadata, timestamps, access flags) are excluded.
+
+    Args:
+        policy: The PromptPolicy to hash.
+
+    Returns:
+        64-character lowercase hex digest (SHA-256).
+    """
+    canonical: dict = {}
+    for field_name in _POLICY_HASH_FIELDS:
+        value = getattr(policy, field_name)
+        # Enum → str for deterministic serialisation; None → None (kept as-is)
+        if isinstance(value, StrEnum):
+            canonical[field_name] = str(value)
+        else:
+            canonical[field_name] = value
+    serialized = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def compute_source_text_hash(source_text: str) -> str:
+    """Compute deterministic SHA-256 of source text for deduplication.
+
+    Hashes the original (unprotected) source text — not the placeholder-protected
+    payload — because the canonical input for deduplication is the human-readable
+    source, and placeholder substitution is non-deterministic in slot numbering.
+
+    Args:
+        source_text: Original source text as provided in TranslationRequest.
+
+    Returns:
+        64-character lowercase hex digest (SHA-256).
+    """
+    return hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+
+
+def compute_glossary_hash(rendered_block: str) -> str:
+    """Compute deterministic SHA-256 of the rendered glossary block.
+
+    Hashes the actual glossary text injected into the prompt (already rendered by
+    PolicyRenderer._render_glossary_block).  The rendered form captures term
+    ordering, count limit, and header text — so it accurately represents what
+    the model received.
+
+    Args:
+        rendered_block: The rendered glossary string (output of _render_glossary_block).
+
+    Returns:
+        64-character lowercase hex digest (SHA-256).
+    """
+    return hashlib.sha256(rendered_block.encode("utf-8")).hexdigest()
+
+
+# ============================================================================
 # Startup validation  (runs at import time, no I/O)
 # ============================================================================
 
 
 def _validate_registry() -> None:
-    """Validate all built-in registry entries.
+    """Validate all built-in registry entries and compute policy hashes.
 
     Called once at module import. Raises on any misconfiguration so that
     errors are surfaced immediately rather than at the first translation request.
+    Also populates ``policy_hash`` on every built-in PromptPolicy after
+    validation succeeds — this is the canonical PATCH-06 hook.
 
     Raises:
         ValueError: If a SamplingProfile fails parameter validation.
@@ -633,6 +730,15 @@ def _validate_registry() -> None:
 
     if DEFAULT_POLICY_ID not in PROMPT_POLICIES:
         raise KeyError(f"DEFAULT_POLICY_ID '{DEFAULT_POLICY_ID}' not in PROMPT_POLICIES")
+
+    # PPS PATCH-06: compute and stamp policy_hash on all built-in policies.
+    # Done after structural validation so we never hash a misconfigured policy.
+    for policy in PROMPT_POLICIES.values():
+        policy.policy_hash = compute_policy_hash(policy)
+    _logger.debug(
+        "policy_hashes_computed count=%d",
+        len(PROMPT_POLICIES),
+    )
 
 
 _validate_registry()

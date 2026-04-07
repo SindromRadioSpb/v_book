@@ -13,6 +13,7 @@ Safety:
 """
 
 import contextlib
+import hashlib
 import logging
 import multiprocessing
 import sys
@@ -650,6 +651,10 @@ _HYMT_SYSTEM_PROMPT = (
     "without any modification. "
     "Output only the Russian translation without explanations, comments, or extra text."
 )
+
+# PPS PATCH-06: 12-char prefix of SHA-256 over system prompt bytes.
+# Used in get_model_version() for MT cache key isolation when the prompt changes.
+_HYMT_SYSTEM_PROMPT_HASH: str = hashlib.sha256(_HYMT_SYSTEM_PROMPT.encode()).hexdigest()[:12]
 
 
 def _hymt_stop_token_ids(tokenizer) -> list[int]:

@@ -25,7 +25,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.infra.local_mt import LocalMTWorker, WorkerError, WorkerRequest, start_worker
+from app.infra.local_mt import (
+    _HYMT_SYSTEM_PROMPT_HASH,
+    LocalMTWorker,
+    WorkerError,
+    WorkerRequest,
+    start_worker,
+)
 from app.infra.translators.base_provider import (
     BaseProvider,
     TranslationErrorKind,
@@ -40,6 +46,8 @@ from app.infra.translators.prompt_policy import (
     TerminologyMode,
     TranslationRouter,
     build_applied_sampling,
+    compute_glossary_hash,
+    compute_source_text_hash,
 )
 from app.services.local_models import ModelResourceManager
 from app.services.local_mt import apply_glossary
@@ -353,9 +361,13 @@ class LocalHYMTProvider(BaseProvider):
         return False
 
     def get_model_version(self) -> str:
-        """Return version string for MT cache key isolation."""
+        """Return version string for MT cache key isolation.
+
+        Includes a 12-char SHA-256 prefix of the system prompt so that any
+        change to the prompt automatically invalidates cached translations.
+        """
         safe_id = self.model_id.replace("/", "_")
-        return f"{safe_id}_{self.backend}"
+        return f"{safe_id}_{self.backend}_{_HYMT_SYSTEM_PROMPT_HASH}"
 
     def healthcheck(self) -> bool:
         """Ping worker subprocess."""
@@ -552,7 +564,7 @@ class LocalHYMTProvider(BaseProvider):
                 # PPS structured meta (spec §11.1)
                 "prompt_policy": {
                     "policy_id": policy.policy_id,
-                    "policy_hash": None,  # PATCH-06: SHA-256 of canonical policy JSON
+                    "policy_hash": policy.policy_hash,
                     "sampling_profile_id": policy.sampling_profile_id,
                     "template_profile_id": policy.template_profile_id,
                     "content_kind": str(policy.content_kind),
@@ -624,7 +636,7 @@ class LocalHYMTProvider(BaseProvider):
             # Policy snapshot
             policy_id=policy.policy_id,
             policy_version=policy.version,
-            policy_hash=None,  # PATCH-06
+            policy_hash=policy.policy_hash,
             template_profile_id=policy.template_profile_id,
             sampling_profile_id=policy.sampling_profile_id,
             content_kind=policy.content_kind,
@@ -636,7 +648,7 @@ class LocalHYMTProvider(BaseProvider):
             provider_id=self.provider_id,
             # Source
             source_text=request.source_text,
-            source_text_hash=None,  # PATCH-06
+            source_text_hash=compute_source_text_hash(request.source_text),
             source_length_chars=len(request.source_text),
             # Rendered layers (1–5)
             rendered_role_instruction=policy.role_instruction,
@@ -648,7 +660,7 @@ class LocalHYMTProvider(BaseProvider):
             rendered_user_payload=protected.text,
             effective_prompt_preview=preview,
             # Input hashes
-            glossary_hash=None,  # PATCH-06
+            glossary_hash=compute_glossary_hash(rendered_glossary) if rendered_glossary else None,
             context_hash=None,  # PATCH-07
             # Applied constraints
             applied_sampling=build_applied_sampling(

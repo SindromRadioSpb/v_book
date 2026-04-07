@@ -1,11 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-07** — PPS patch series (PATCH-01..03) завершена; PATCH-04 в работе
+> Последнее обновление: **2026-04-08** — PPS PATCH-06 (hashes) завершён; PATCH-01..06 завершены
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
 > 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
-> PPS (Prompt Policy System): PATCH-01 (registry) ✅ | PATCH-02 (PolicyRenderer+sentinel) ✅ | PATCH-03 (TranslationRouter+provider) ✅ | PATCH-04 (sampling profiles in worker) 🔄
+> PPS: PATCH-01 ✅ (registry) | PATCH-02 ✅ (PolicyRenderer+sentinel) | PATCH-03 ✅ (TranslationRouter+provider) | PATCH-04 ✅ (sampling profiles) | PATCH-05 ✅ (EffectivePromptTrace+UI) | PATCH-06 ✅ (hashes) | PATCH-07 ⬜ (context wiring)
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -57,10 +57,20 @@
 | PPS PATCH-03: TranslationRouter + provider integration | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_local_hymt_provider_policy.py` | ✅ Завершён (52 tests) |
 | PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | ✅ Завершён (42 tests) |
 | PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `app/ui/prompt_audit_dialog.py`, `provider_settings_dialog.py`, `tests/test_effective_prompt_trace.py` | ✅ Завершён (75 tests) |
-| PPS PATCH-06: policy_hash (SHA-256) | TBD | ⬜ Pending |
+| PPS PATCH-06: policy_hash (SHA-256) | `prompt_policy.py`, `worker_process.py`, `local_hymt_provider.py`, `local_mt/__init__.py`, `tests/test_pps_hashes.py` | ✅ Завершён (34 tests) |
 | PPS PATCH-07: Context wiring | TBD | ⬜ Pending |
 
-**PPS regression status**: 253 tests (56+28+52+42+75) pass, 0 регрессий.
+**PPS regression status**: 287 tests (56+28+52+42+75+34) pass, 0 регрессий.
+
+**PATCH-06 архитектурные детали:**
+- `_POLICY_HASH_FIELDS` (19 семантических полей) + `compute_policy_hash(policy)` — SHA-256 канонического JSON с `sort_keys=True`
+- `compute_source_text_hash(text)` — SHA-256 UTF-8 источника
+- `compute_glossary_hash(rendered_block)` — SHA-256 rendered glossary block
+- `_validate_registry()` stamps `policy.policy_hash` на всех built-in политиках при импорте
+- Excluded from hash: `name`, `description`, `enabled`, `is_builtin`, `is_custom`, `experimental`, `allow_user_edit_*`, `created_at`, `updated_at`, `policy_hash` (circular)
+- `_HYMT_SYSTEM_PROMPT_HASH`: 12-char SHA-256 prefix в `worker_process.py`, re-exported через `local_mt/__init__.py`
+- `get_model_version()` → `f"{safe_id}_{backend}_{_HYMT_SYSTEM_PROMPT_HASH}"` — MT cache invalidation при смене системного промпта
+- `context_hash` остаётся `None` до PATCH-07
 
 **PATCH-05 архитектурные детали:**
 - `EffectivePromptTrace` dataclass (37 полей, spec §4.9) в `prompt_policy.py`
@@ -71,7 +81,6 @@
 - History cap = 100, FIFO eviction
 - Color-coded layers: role=blue, task=green, output_policy=orange, glossary=purple, context=teal, payload=dark
 - "Prompt Audit" tab добавлен в `ProviderSettingsDialog`
-- Nullable в PATCH-05: `policy_hash`, `source_text_hash`, `glossary_hash`, `context_hash`, `output_tokens_generated`, `model_quant_id` (все `None`, PATCH-06+)
 
 **PATCH-04 архитектурные детали:**
 - `_WORKER_SAMPLING_PROFILES` (3 профиля) в `worker_process.py` — локальная копия, без cross-layer импорта
