@@ -438,6 +438,7 @@ class LocalHYMTProvider(BaseProvider):
                 source_lang=src,
                 target_lang=tgt,
                 request_id=request.trace_id,
+                sampling_profile_id=policy.sampling_profile_id,
             )
             worker_result = self.worker.translate(worker_request)
         except WorkerError as e:

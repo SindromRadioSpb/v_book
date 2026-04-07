@@ -48,6 +48,7 @@ class WorkerRequest:
     source_lang: str
     target_lang: str
     request_id: str = ""
+    sampling_profile_id: str = ""  # PPS PATCH-04: empty = use model-default gen_kwargs
 
 
 @dataclass
@@ -165,7 +166,9 @@ def _worker_main(
                             )
                         elif backend == "transformers_causal":
                             # For causal LM: req.text IS the full prompt (built by provider)
-                            translated_text = _translate_transformers_causal(model, req.text)
+                            translated_text = _translate_transformers_causal(
+                                model, req.text, req.sampling_profile_id
+                            )
                         else:  # transformers
                             translated_text = _translate_transformers(
                                 model, req.text, req.source_lang, req.target_lang
@@ -500,6 +503,105 @@ def _translate_ctranslate2(
 
 
 # ============================================================================
+# PPS PATCH-04: Sampling profiles (local copy — no import from app layer)
+# Values MUST match SAMPLING_PROFILES in prompt_policy.py.
+# ============================================================================
+
+# Each entry: {temperature, top_k, top_p, repetition_penalty, n_predict}
+# temperature=0.0 means greedy by policy intent (not a hardware constraint).
+_WORKER_SAMPLING_PROFILES: dict[str, dict] = {
+    "hy_mt_precise_sentence": {
+        "temperature": 0.7,
+        "top_k": 20,
+        "top_p": 0.6,
+        "repetition_penalty": 1.05,
+        "n_predict": 512,
+    },
+    "hy_mt_precise_short": {
+        "temperature": 0.0,  # greedy by policy intent
+        "top_k": 0,
+        "top_p": 1.0,
+        "repetition_penalty": 1.0,
+        "n_predict": 32,
+    },
+    "hy_mt_precise_formatted": {
+        "temperature": 0.5,
+        "top_k": 10,
+        "top_p": 0.5,
+        "repetition_penalty": 1.1,
+        "n_predict": 512,
+    },
+}
+
+_WORKER_DEFAULT_SAMPLING_PROFILE_ID = "hy_mt_precise_sentence"
+
+
+def _resolve_gen_kwargs(
+    sampling_profile_id: str,
+    force_greedy: bool,
+    max_n_predict_cap: int | None,
+    stop_ids: list[int],
+) -> dict:
+    """Build model.generate() kwargs from a sampling profile + model constraints.
+
+    Args:
+        sampling_profile_id: Key into _WORKER_SAMPLING_PROFILES.
+            Empty string or unknown key → falls back to hy_mt_precise_sentence
+            with a WARNING log.
+        force_greedy: Hardware constraint (True for 7B-GPTQ on Windows).
+            When True, do_sample=False regardless of profile temperature.
+            A WARNING is emitted if the profile had temperature > 0.
+        max_n_predict_cap: Hard cap on max_new_tokens (None = no cap).
+        stop_ids: List of EOS token IDs.
+
+    Returns:
+        Dict suitable for model.generate(**kwargs).
+    """
+    profile = _WORKER_SAMPLING_PROFILES.get(sampling_profile_id)
+    if profile is None:
+        if sampling_profile_id:
+            logger.warning(
+                "Unknown sampling_profile_id %r — falling back to %s",
+                sampling_profile_id,
+                _WORKER_DEFAULT_SAMPLING_PROFILE_ID,
+            )
+        profile = _WORKER_SAMPLING_PROFILES[_WORKER_DEFAULT_SAMPLING_PROFILE_ID]
+
+    temperature: float = profile["temperature"]
+    n_predict: int = profile["n_predict"]
+
+    # Apply model-level token budget cap
+    if max_n_predict_cap is not None:
+        n_predict = min(n_predict, max_n_predict_cap)
+
+    eos = stop_ids if stop_ids else None
+
+    if force_greedy:
+        if temperature > 0.0:
+            logger.warning(
+                "force_greedy=True overrides sampling intent (temperature=%.2f) "
+                "for profile %r — using greedy decoding",
+                temperature,
+                sampling_profile_id or _WORKER_DEFAULT_SAMPLING_PROFILE_ID,
+            )
+        return {"max_new_tokens": n_predict, "do_sample": False, "eos_token_id": eos}
+
+    if temperature == 0.0:
+        # Profile requests greedy by intent — no hardware constraint involved
+        return {"max_new_tokens": n_predict, "do_sample": False, "eos_token_id": eos}
+
+    return {
+        "max_new_tokens": n_predict,
+        "do_sample": True,
+        "top_k": profile["top_k"],
+        "top_p": profile["top_p"],
+        "temperature": temperature,
+        "repetition_penalty": profile["repetition_penalty"],
+        "eos_token_id": eos,
+    }
+
+
+# ============================================================================
 # HY-MT template constants (verified against PocketPal config)
 # ============================================================================
 
@@ -579,7 +681,9 @@ def _hymt_stop_token_ids(tokenizer) -> list[int]:
     return list(dict.fromkeys(ids))  # deduplicate, preserve order
 
 
-def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
+def _translate_transformers_causal(
+    model_dict: dict, prompt: str, sampling_profile_id: str = ""
+) -> str:
     """Run HY-MT inference using the vendor-verified template format.
 
     ``prompt`` (= ``WorkerRequest.text``) carries only the *user content*:
@@ -599,6 +703,8 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
         model_dict: Dict with ``"model"``, ``"tokenizer"``, and
             ``"stop_token_ids"`` (pre-computed by ``_load_transformers_causal_model``).
         prompt: User content — source text (+ optional terminology line).
+        sampling_profile_id: Key into ``_WORKER_SAMPLING_PROFILES``.
+            Empty string uses model-appropriate default via ``_resolve_gen_kwargs``.
 
     Returns:
         Decoded translation (new tokens only, special tokens stripped).
@@ -663,26 +769,16 @@ def _translate_transformers_causal(model_dict: dict, prompt: str) -> str:
     # HY-MT generate() rejects token_type_ids — filter it out
     generate_inputs = {k: v for k, v in inputs.items() if k in ("input_ids", "attention_mask")}
 
-    if is_gptq:
-        # TorchQuantLinear (torch backend, no triton) is ~0.6 s/token on RTX 3070.
-        # Measured worst case: 128 tokens × 0.6 s = 77 s < 120 s provider timeout.
-        # do_sample=False (greedy) is ~25% faster than sampling and appropriate for
-        # translation (deterministic output, no creative variation needed).
-        gen_kwargs: dict = {
-            "max_new_tokens": 128,
-            "do_sample": False,
-            "eos_token_id": stop_ids if stop_ids else None,
-        }
-    else:
-        gen_kwargs = {
-            "max_new_tokens": 512,
-            "do_sample": True,
-            "top_k": 20,
-            "top_p": 0.6,
-            "temperature": 0.7,
-            "repetition_penalty": 1.05,
-            "eos_token_id": stop_ids if stop_ids else None,
-        }
+    # PPS PATCH-04: resolve gen_kwargs from sampling profile + model constraints.
+    # 7B-GPTQ: force_greedy=True (hardware: ~0.6 s/token, no triton on Windows),
+    #           max_n_predict_cap=128 (77 s worst case < 120 s timeout).
+    # 1.8B:    force_greedy=False, max_n_predict_cap=512.
+    gen_kwargs: dict = _resolve_gen_kwargs(
+        sampling_profile_id=sampling_profile_id,
+        force_greedy=is_gptq,
+        max_n_predict_cap=128 if is_gptq else 512,
+        stop_ids=stop_ids,
+    )
 
     with torch.no_grad():
         outputs = model.generate(**generate_inputs, **gen_kwargs)

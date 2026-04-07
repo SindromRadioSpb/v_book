@@ -1,10 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-07** — добавлен 7B-GPTQ experimental backend
+> Последнее обновление: **2026-04-07** — PPS patch series (PATCH-01..03) завершена; PATCH-04 в работе
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
-> SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | PATCH-00..03: завершены ✅
-> 7B-GPTQ: PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
+> SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
+> 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
+> PPS (Prompt Policy System): PATCH-01 (registry) ✅ | PATCH-02 (PolicyRenderer+sentinel) ✅ | PATCH-03 (TranslationRouter+provider) ✅ | PATCH-04 (sampling profiles in worker) 🔄
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -17,7 +18,7 @@
 2. ~~Только 1.8B в pilot~~ — **обновлено 2026-04-07**: 7B-GPTQ experimental backend реализован и работает. 1.8B остаётся baseline и default провайдером.
 3. **HY-MT — не "ещё один провайдер"**: внедрять сразу со всеми 4 capabilities (terminology injection, contextual, placeholder protection, mixed-language). Обнулять выбор HY-MT через raw text → generate — неприемлемо.
 4. **Placeholder protection — MANDATORY**: не опциональная настройка. Каждый `translate()` вызов ОБЯЗАН делать protect/restore. `{name}` или XML-тег сломает продукт хуже, чем плохой перевод.
-5. **`terminology_mode="both"` — hardcoded default**: prompt injection + `apply_glossary()` постпроцессинг. Не пользовательский toggle.
+5. **`terminology_mode` — policy-driven (PPS PATCH-03)**: определяется `PromptPolicy.terminology_mode` через `TranslationRouter`. Значение по умолчанию — `SOFT_GLOSSARY` (эквивалент прежнего "both"). Gated на уровне provider и worker. Не пользовательский toggle.
 6. **`MT_PROVIDER_INTEGRATION_GUIDE.md`** — внутренний стандарт для всех будущих провайдеров.
 
 ## Статус реализации
@@ -46,6 +47,20 @@
 | PATCH-08: Tests | `tests/test_local_hymt_7b_gptq_provider.py`, `tests/test_local_providers_setup.py` | ✅ Завершён |
 
 **Regression status (7B-GPTQ)**: 1935 passed, 0 новых регрессий (pre-existing: 1 fail в unrelated test).
+
+### PPS (Prompt Policy System) patch series (2026-04-07)
+
+| Этап | Файлы | Статус |
+|------|-------|--------|
+| PPS PATCH-01: Domain model + registry | `app/infra/translators/prompt_policy.py`, `tests/test_prompt_policy_registry.py` | ✅ Завершён (56 tests) |
+| PPS PATCH-02: PolicyRenderer + sentinel in worker | `prompt_policy.py`, `worker_process.py`, `tests/test_prompt_renderer.py` | ✅ Завершён (28 tests) |
+| PPS PATCH-03: TranslationRouter + provider integration | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_local_hymt_provider_policy.py` | ✅ Завершён (52 tests) |
+| PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | 🔄 В работе |
+| PPS PATCH-05: Trace field wiring | TBD | ⬜ Pending |
+| PPS PATCH-06: policy_hash (SHA-256) | TBD | ⬜ Pending |
+| PPS PATCH-07: Context wiring | TBD | ⬜ Pending |
+
+**PPS regression status**: 136 tests (56+28+52) pass, 0 регрессий.
 
 ### Ключевые архитектурные решения (зафиксированы)
 
@@ -866,8 +881,10 @@ else:
 **Реализовано (PATCH-00..03, 2026-04-06):**
 - `tencent/HY-MT1.5-1.8B`, backend `transformers_causal`, device `cuda`, dtype `bfloat16`
 - Все 4 capabilities активны: terminology injection, contextual, placeholder protection, mixed-language
-- `terminology_mode="both"` hardcoded
-- Worker-owned HY-MT template (система промптов в worker layer, не в provider)
+- `terminology_mode` — policy-driven через PPS (PPS PATCH-03). Default = `SOFT_GLOSSARY` (бывший "both"). Gating: provider и worker.
+- **PPS sentinel architecture** (PPS PATCH-02..03): provider строит `\x00PPS_PAYLOAD\x00{role_instruction}\x00ROLE\x00{user_content}` и передаёт воркеру. Воркер разбирает sentinel: `role_instruction` добавляется к system prompt, `user_content` (task + glossary + source) — в user turn. Legacy path (без sentinel) сохранён для обратной совместимости.
+- **TranslationRouter** (PPS PATCH-03): маршрутизация policy по `options["prompt_policy_id"]` → `options["content_kind"]` → global default `sentence_ru`. Experimental guard через `request.trace_id`.
+- **`meta["prompt_policy"]`** (PPS PATCH-03): все успешные `translate()` возвращают 14-поле dict (`policy_id`, `sampling_profile_id`, `fallback_triggered`, и др.) в `result.meta["prompt_policy"]`.
 
 **Что НЕ было сделано и остаётся за scope:**
 - ~~7B~~ — **реализован как experimental backend (2026-04-07)**, см. ниже
@@ -906,8 +923,8 @@ else:
 3. ✅ Единственная точка регистрации: `LOCAL_PROVIDERS_CONFIG` + `ProviderSettingsDialog.PROVIDERS`
 4. ✅ HY-MT1.5-1.8B: ~3.34GB VRAM (bfloat16) — влезает на RTX 3070 с запасом
 5. ✅ HDLE_PH_N placeholder protection: mandatory, RTL-safe, 100% в SPIKE-2
-6. ✅ Terminology: prompt injection + `apply_glossary()` постпроцессинг (mode="both", hardcoded)
-7. ✅ Worker-owned HY-MT template: provider НЕ смешивает инструкции с user content
+6. ✅ Terminology: prompt injection + `apply_glossary()` постпроцессинг — policy-driven через PPS (PPS PATCH-03). Default policy `sentence_ru` → `TerminologyMode.SOFT_GLOSSARY` (≡ прежнему "both").
+7. ✅ **PPS sentinel architecture** (PPS PATCH-02..03): provider строит sentinel с отдельными `role_instruction` + `user_content` секциями; worker парсит и собирает chat template. Обратная совместимость: legacy path без sentinel сохранён.
 8. ⚠️ Cold start 5-15с — задокументировано, warmup / прогресс-индикатор рекомендован в UX polish
 9. ⚠️ VRAM конфликт с TTS (LightBlueTTS/MMS) при одновременной работе — мониторить
 

@@ -236,14 +236,27 @@ def test_translate_causal_uses_gptq_template_when_is_gptq():
 
 
 def test_translate_causal_uses_gptq_gen_params():
-    """GPTQ path must use max_new_tokens=128 and do_sample=False."""
+    """GPTQ path must delegate to _resolve_gen_kwargs with is_gptq-derived constraints.
+
+    Since PATCH-04, gen_kwargs are computed by _resolve_gen_kwargs — the literal
+    values no longer appear in _translate_transformers_causal source.  Instead we
+    verify that the delegation call is present and that _resolve_gen_kwargs itself
+    produces the correct values for the GPTQ scenario.
+    """
     import inspect
     from app.infra.local_mt import worker_process
 
     source = inspect.getsource(worker_process._translate_transformers_causal)
-    assert "max_new_tokens" in source
-    assert "128" in source
-    assert "do_sample" in source
+    # The function must call _resolve_gen_kwargs (PATCH-04 delegation)
+    assert "_resolve_gen_kwargs" in source
+    # Hardware constraints for GPTQ must be forwarded
+    assert "128" in source  # max_n_predict_cap=128
+    assert "is_gptq" in source
+
+    # Functional check via _resolve_gen_kwargs directly
+    kwargs = worker_process._resolve_gen_kwargs("hy_mt_precise_sentence", True, 128, [])
+    assert kwargs["max_new_tokens"] == 128
+    assert kwargs["do_sample"] is False
 
 
 def test_translate_causal_gptq_boundary_truncation():
@@ -267,15 +280,23 @@ def test_translate_causal_gptq_boundary_truncation():
 
 
 def test_translate_causal_1b8_unaffected_by_gptq_changes():
-    """1.8B path (is_gptq=False) must use original template and sampling params."""
+    """1.8B path (is_gptq=False) must use original template and sampling params.
+
+    Since PATCH-04, sampling params live in _resolve_gen_kwargs.  We verify the
+    1.8B template tokens are still in the source AND that _resolve_gen_kwargs
+    produces do_sample=True for the 1.8B path (force_greedy=False, temp>0).
+    """
     import inspect
     from app.infra.local_mt import worker_process
 
     source = inspect.getsource(worker_process._translate_transformers_causal)
-    # Both branches must exist in the source
-    assert "_HYMT_BOS" in source  # 1.8B template still used
+    # 1.8B template tokens must still be present
+    assert "_HYMT_BOS" in source
     assert "_HYMT_ASSISTANT" in source
-    assert "do_sample=True" in source or "do_sample" in source  # sampling path preserved
+
+    # Functional: 1.8B path (force_greedy=False) uses sampling
+    kwargs = worker_process._resolve_gen_kwargs("hy_mt_precise_sentence", False, 512, [])
+    assert kwargs["do_sample"] is True
 
 
 def test_warmup_present_in_load_source():
