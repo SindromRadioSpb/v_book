@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 _logger = logging.getLogger(__name__)
@@ -978,3 +978,129 @@ class TranslationRouter:
             fallback_reason=fallback_reason,
             warnings=warnings,
         )
+
+
+# ============================================================================
+# PPS PATCH-05: build_applied_sampling + EffectivePromptTrace
+# ============================================================================
+
+
+def build_applied_sampling(
+    policy: PromptPolicy,
+    force_greedy: bool,
+    max_n_predict_cap: int | None,
+) -> dict:
+    """Compute effective model.generate() kwargs for trace/debug metadata.
+
+    Mirrors the logic in ``worker_process._resolve_gen_kwargs()`` but:
+    - operates on ``PromptPolicy`` (provider-layer object, already imported)
+    - excludes ``eos_token_id`` (model-specific token, worker-owned)
+    - intended for ``EffectivePromptTrace.applied_sampling`` only
+
+    The result accurately reflects the actual kwargs minus the stop-token IDs.
+
+    Args:
+        policy: Active ``PromptPolicy`` with ``sampling_profile_id``.
+        force_greedy: Hardware constraint — True for 7B-GPTQ.
+        max_n_predict_cap: Token budget cap — 128 for 7B, 512 for 1.8B.
+
+    Returns:
+        Dict with keys matching model.generate() kwargs (no eos_token_id).
+    """
+    sp = SAMPLING_PROFILES.get(policy.sampling_profile_id)
+    if sp is None:
+        # Defensive: fall back to default profile values
+        sp = SAMPLING_PROFILES["hy_mt_precise_sentence"]
+
+    temperature: float = sp.temperature
+    n_predict: int = sp.n_predict
+
+    if max_n_predict_cap is not None:
+        n_predict = min(n_predict, max_n_predict_cap)
+
+    if force_greedy or temperature == 0.0:
+        return {"max_new_tokens": n_predict, "do_sample": False}
+
+    return {
+        "max_new_tokens": n_predict,
+        "do_sample": True,
+        "top_k": sp.top_k,
+        "top_p": sp.top_p,
+        "temperature": sp.temperature,
+        "repetition_penalty": sp.repetition_penalty,
+    }
+
+
+@dataclass
+class EffectivePromptTrace:
+    """Full audit record for one translation request.
+
+    Created only when ``trace_id != ""`` (debug / advanced mode).
+    Stored in ``meta["prompt_policy"]["trace"]`` of ``TranslationResult``.
+
+    Fields marked None in PATCH-05 first implementation:
+        policy_hash, source_text_hash, glossary_hash, context_hash,
+        output_tokens_generated, model_quant_id  (completed in PATCH-06+)
+
+    Spec ref: docs/HY_MT_PROMPT_POLICY_SPEC_V3.md §4.9
+    """
+
+    # Tracing identity
+    trace_id: str  # caller-supplied; UUID recommended
+
+    # Policy snapshot
+    policy_id: str
+    policy_version: str
+    policy_hash: str | None  # PATCH-06: SHA-256 of canonical policy JSON
+    template_profile_id: str
+    sampling_profile_id: str
+    content_kind: ContentKind
+    source_lang: str
+    target_lang: str
+
+    # Model identity
+    model_id: str  # e.g. "tencent/HY-MT1.5-1.8B"
+    model_quant_id: str | None  # PATCH-06: "gptq-int4" | "bfloat16" | None
+    provider_id: str  # e.g. "local_hymt" | "local_hymt_7b_gptq"
+
+    # Source
+    source_text: str
+    source_text_hash: str | None  # PATCH-06: SHA-256 of source
+    source_length_chars: int
+
+    # Rendered semantic layers (Layers 1–5)
+    rendered_role_instruction: str  # Layer 1 (may be empty str)
+    rendered_task_instruction: str  # Layer 2
+    rendered_output_policy: str  # Layer 3 (may be empty str)
+    rendered_glossary_block: str | None  # Layer 4a (None if terminology_mode=off)
+    rendered_context_block: str | None  # Layer 4b (None if context_mode=off; PATCH-07)
+    rendered_formatting_note: str | None  # Layer 4c (None if not required)
+    rendered_user_payload: str  # Layer 5 — placeholder-protected source text
+    effective_prompt_preview: str  # Layers 1–5 assembled for UI display
+
+    # Input hashes
+    glossary_hash: str | None  # PATCH-06
+    context_hash: str | None  # PATCH-07
+
+    # Applied constraints — what actually went to model.generate()
+    applied_sampling: dict  # effective gen_kwargs (without eos_token_id)
+    placeholder_tokens_protected: list[str]  # HDLE_PH_N tokens inserted
+    placeholder_tokens_restored: int  # count successfully restored
+
+    # Output
+    raw_model_output: str  # decoded model output before postprocessing
+    translated_text: str  # final translation (after restore + glossary)
+    output_length_chars: int
+    output_tokens_generated: int | None  # PATCH-06: available if worker reports
+
+    # Performance
+    latency_ms: int  # total provider latency
+    worker_latency_ms: int | None  # worker inference only
+
+    # Flags
+    glossary_applied: bool
+    context_applied: bool
+    fallback_triggered: bool
+    fallback_reason: str | None
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

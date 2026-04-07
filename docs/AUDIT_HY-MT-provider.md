@@ -55,12 +55,20 @@
 | PPS PATCH-01: Domain model + registry | `app/infra/translators/prompt_policy.py`, `tests/test_prompt_policy_registry.py` | ✅ Завершён (56 tests) |
 | PPS PATCH-02: PolicyRenderer + sentinel in worker | `prompt_policy.py`, `worker_process.py`, `tests/test_prompt_renderer.py` | ✅ Завершён (28 tests) |
 | PPS PATCH-03: TranslationRouter + provider integration | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_local_hymt_provider_policy.py` | ✅ Завершён (52 tests) |
-| PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | 🔄 В работе |
-| PPS PATCH-05: Trace field wiring | TBD | ⬜ Pending |
+| PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | ✅ Завершён (42 tests) |
+| PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `app/ui/prompt_audit_dialog.py`, `tests/test_effective_prompt_trace.py` | 🔄 В работе |
 | PPS PATCH-06: policy_hash (SHA-256) | TBD | ⬜ Pending |
 | PPS PATCH-07: Context wiring | TBD | ⬜ Pending |
 
-**PPS regression status**: 136 tests (56+28+52) pass, 0 регрессий.
+**PPS regression status**: 178 tests (56+28+52+42) pass, 0 регрессий.
+
+**PATCH-04 архитектурные детали:**
+- `_WORKER_SAMPLING_PROFILES` (3 профиля) в `worker_process.py` — локальная копия, без cross-layer импорта
+- `_resolve_gen_kwargs(sampling_profile_id, force_greedy, max_n_predict_cap, stop_ids)` — единственная точка вычисления gen_kwargs
+- `WorkerRequest.sampling_profile_id: str = ""` — backwards-compatible новое поле
+- Поток: `PromptPolicy.sampling_profile_id` → `WorkerRequest.sampling_profile_id` → `_translate_transformers_causal(…, sampling_profile_id)` → `_resolve_gen_kwargs()`
+- Hardware constraints: `force_greedy=is_gptq`, `max_n_predict_cap=128` (7B) / `512` (1.8B)
+- WARNING при `force_greedy=True` с `temperature > 0`; WARNING при unknown `sampling_profile_id`
 
 ### Ключевые архитектурные решения (зафиксированы)
 

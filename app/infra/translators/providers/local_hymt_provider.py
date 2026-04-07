@@ -21,6 +21,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -32,9 +33,13 @@ from app.infra.translators.base_provider import (
     TranslationResult,
 )
 from app.infra.translators.prompt_policy import (
+    EffectivePromptTrace,
     PolicyRenderer,
+    PromptPolicy,
+    RouterResult,
     TerminologyMode,
     TranslationRouter,
+    build_applied_sampling,
 )
 from app.services.local_models import ModelResourceManager
 from app.services.local_mt import apply_glossary
@@ -263,7 +268,18 @@ class LocalHYMTProvider(BaseProvider):
     - Terminology injection in prompt + apply_glossary postprocess (mode="both")
     - Mixed-language text handling (built-in model capability)
     - Contextual translation via full prompt construction
+
+    PPS PATCH-05 hardware constraint attributes (override in subclasses):
+        _FORCE_GREEDY: True when the model family forces greedy decoding (7B-GPTQ).
+        _MAX_N_PREDICT_CAP: Hard token budget cap used by worker _resolve_gen_kwargs.
+        _MODEL_QUANT_ID: Quantisation descriptor for EffectivePromptTrace metadata.
     """
+
+    # PPS PATCH-05: hardware constraint class attributes
+    # Overridden in LocalHYMT7BGPTQProvider for GPTQ-specific constraints.
+    _FORCE_GREEDY: bool = False
+    _MAX_N_PREDICT_CAP: int = 512
+    _MODEL_QUANT_ID: str | None = None  # "gptq-int4" for 7B subclass
 
     def __init__(
         self,
@@ -501,6 +517,24 @@ class LocalHYMTProvider(BaseProvider):
 
         latency_ms = int((time.time() - start_time) * 1000)
 
+        # Step 7: Build EffectivePromptTrace — only when trace is active (PATCH-05)
+        trace: EffectivePromptTrace | None = None
+        if request.trace_id:
+            trace = self._build_trace(
+                request=request,
+                policy=policy,
+                router_result=router_result,
+                protected=protected,
+                glossary_terms=glossary_terms,
+                raw_model_output=raw_translation,
+                final_translation=final_translation,
+                missing=missing,
+                used_glossary=used_glossary,
+                applied_terms_count=applied_terms_count,
+                latency_ms=latency_ms,
+                worker_latency_ms=int(worker_result.inference_time_ms),
+            )
+
         return TranslationResult(
             translated_text=final_translation,
             provider_id=self.provider_id,
@@ -530,9 +564,112 @@ class LocalHYMTProvider(BaseProvider):
                     "fallback_triggered": router_result.fallback_triggered,
                     "fallback_reason": router_result.fallback_reason,
                     "warnings": router_result.warnings,
-                    "trace": None,  # PATCH-05: EffectivePromptTrace
+                    "trace": trace,  # EffectivePromptTrace | None (PATCH-05)
                 },
             },
+        )
+
+    def _build_trace(
+        self,
+        request: TranslationRequest,
+        policy: PromptPolicy,
+        router_result: RouterResult,
+        protected: _ProtectedText,
+        glossary_terms: list[tuple[str, str]],
+        raw_model_output: str,
+        final_translation: str,
+        missing: list[str],
+        used_glossary: bool,
+        applied_terms_count: int,
+        latency_ms: int,
+        worker_latency_ms: int,
+    ) -> EffectivePromptTrace:
+        """Build EffectivePromptTrace for the current translation request.
+
+        Called only when ``request.trace_id != ""``.  All inputs are already
+        computed — no extra I/O or worker round-trip is performed.
+
+        Args:
+            request: Original translation request (source_text, trace_id, etc.).
+            policy: Resolved PromptPolicy from TranslationRouter.
+            router_result: RouterResult with fallback flags.
+            protected: Placeholder-protected source (_ProtectedText).
+            glossary_terms: Injected glossary (src, tgt) pairs.
+            raw_model_output: Worker output before postprocessing.
+            final_translation: Final output after restore + glossary.
+            missing: Placeholder tokens not found in model output.
+            used_glossary: Whether apply_glossary changed the output.
+            applied_terms_count: Count of glossary terms applied in postprocess.
+            latency_ms: Total provider latency.
+            worker_latency_ms: Worker inference latency.
+
+        Returns:
+            Populated EffectivePromptTrace.
+        """
+        # Rendered glossary block (Layer 4a) — re-render using same inputs as prompt
+        rendered_glossary: str | None = None
+        if glossary_terms and policy.terminology_mode != TerminologyMode.OFF:
+            rendered_glossary = _RENDERER._render_glossary_block(glossary_terms, policy)
+
+        # Effective prompt preview (Layers 1–5 assembled for UI)
+        preview = _RENDERER.render_effective_preview(
+            policy=policy,
+            source_text=protected.text,
+            glossary_terms=glossary_terms if glossary_terms else None,
+            context_items=None,
+        )
+
+        return EffectivePromptTrace(
+            trace_id=request.trace_id,
+            # Policy snapshot
+            policy_id=policy.policy_id,
+            policy_version=policy.version,
+            policy_hash=None,  # PATCH-06
+            template_profile_id=policy.template_profile_id,
+            sampling_profile_id=policy.sampling_profile_id,
+            content_kind=policy.content_kind,
+            source_lang=request.source_lang.lower(),
+            target_lang=request.target_lang.lower(),
+            # Model identity
+            model_id=self.model_id,
+            model_quant_id=self._MODEL_QUANT_ID,
+            provider_id=self.provider_id,
+            # Source
+            source_text=request.source_text,
+            source_text_hash=None,  # PATCH-06
+            source_length_chars=len(request.source_text),
+            # Rendered layers (1–5)
+            rendered_role_instruction=policy.role_instruction,
+            rendered_task_instruction=policy.task_instruction,
+            rendered_output_policy=policy.output_policy,
+            rendered_glossary_block=rendered_glossary,
+            rendered_context_block=None,  # PATCH-07
+            rendered_formatting_note=None,
+            rendered_user_payload=protected.text,
+            effective_prompt_preview=preview,
+            # Input hashes
+            glossary_hash=None,  # PATCH-06
+            context_hash=None,  # PATCH-07
+            # Applied constraints
+            applied_sampling=build_applied_sampling(
+                policy, self._FORCE_GREEDY, self._MAX_N_PREDICT_CAP
+            ),
+            placeholder_tokens_protected=list(protected.mapping.keys()),
+            placeholder_tokens_restored=len(protected.mapping) - len(missing),
+            # Output
+            raw_model_output=raw_model_output,
+            translated_text=final_translation,
+            output_length_chars=len(final_translation),
+            output_tokens_generated=None,  # PATCH-06
+            # Performance
+            latency_ms=latency_ms,
+            worker_latency_ms=worker_latency_ms,
+            # Flags
+            glossary_applied=used_glossary,
+            context_applied=False,
+            fallback_triggered=router_result.fallback_triggered,
+            fallback_reason=router_result.fallback_reason,
+            created_at=datetime.now(UTC),
         )
 
     def shutdown(self) -> None:

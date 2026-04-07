@@ -28,8 +28,18 @@ class LocalHYMT7BGPTQProvider(LocalHYMTProvider):
     """Local HY-MT 1.5 (7B GPTQ Int4) translation provider.
 
     Inherits all translation, placeholder, and glossary logic from
-    LocalHYMTProvider.  Only model identity is overridden.
+    LocalHYMTProvider.  Model identity and hardware constraints are overridden.
+
+    PPS PATCH-05: hardware constraint overrides for EffectivePromptTrace.applied_sampling:
+        - force_greedy=True  (TorchQuantLinear, ~0.6 s/token on Windows)
+        - max_n_predict_cap=128  (76.8 s worst case < 120 s timeout)
+        - model_quant_id="gptq-int4"
     """
+
+    # PPS PATCH-05: override hardware constraints from base class
+    _FORCE_GREEDY: bool = True
+    _MAX_N_PREDICT_CAP: int = 128
+    _MODEL_QUANT_ID: str | None = "gptq-int4"
 
     def __init__(
         self,

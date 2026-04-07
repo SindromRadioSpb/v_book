@@ -175,6 +175,10 @@ class ProviderSettingsDialog(QDialog):
         advanced_tab = self._create_advanced_settings_tab()
         self.tabs.addTab(advanced_tab, "Advanced Settings")
 
+        # Tab 4: Prompt Audit — PPS PATCH-05 debug panel
+        audit_tab = self._create_prompt_audit_tab()
+        self.tabs.addTab(audit_tab, "Prompt Audit")
+
         # Buttons
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -333,6 +337,54 @@ class ProviderSettingsDialog(QDialog):
         self.advanced_stack_layout.addWidget(self.gcp_settings)
 
         layout.addWidget(self.advanced_stack)
+
+        layout.addStretch()
+        return widget
+
+    def _create_prompt_audit_tab(self) -> QWidget:
+        """Create the Prompt Audit tab (PPS PATCH-05 Debug UI).
+
+        Provides a button to open the PromptAuditDialog and a brief explanation
+        of how trace recording is activated.
+        """
+        from app.ui.prompt_audit_dialog import PromptAuditDialog, PromptAuditPanel
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        title = QLabel("<b>Prompt Audit — PPS Debug Mode</b>")
+        title.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(title)
+
+        info = QLabel(
+            "The Prompt Audit panel records the full EffectivePromptTrace for each translation "
+            "request that carries a non-empty <code>trace_id</code>. "
+            "Traces show colour-coded semantic layers, applied sampling parameters, "
+            "placeholder accounting, and raw vs final output.<br><br>"
+            "<b>How to activate trace recording:</b><br>"
+            "Set <code>TranslationRequest.trace_id</code> to any non-empty string "
+            "(e.g. a segment ID or UUID). The provider will build a trace and store it in "
+            "<code>result.meta[\"prompt_policy\"][\"trace\"]</code>. "
+            "Call <code>PromptAuditPanel.add_trace(trace)</code> to push it into the history.<br><br>"
+            f"<b>History cap:</b> {100} entries (oldest evicted on overflow)."
+        )
+        info.setWordWrap(True)
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setStyleSheet("color: #334155; font-size: 12px; margin-bottom: 8px;")
+        layout.addWidget(info)
+
+        btn_layout = QHBoxLayout()
+        open_btn = QPushButton("Open Prompt Audit Window")
+        open_btn.setToolTip("Open the full Prompt Audit dialog with history and layer view")
+        open_btn.clicked.connect(lambda: PromptAuditDialog(self).exec())
+        btn_layout.addWidget(open_btn)
+
+        clear_btn = QPushButton("Clear Trace History")
+        clear_btn.setToolTip("Remove all stored traces from the audit history")
+        clear_btn.clicked.connect(PromptAuditPanel.clear_history)
+        btn_layout.addWidget(clear_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
         layout.addStretch()
         return widget
