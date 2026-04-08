@@ -440,8 +440,11 @@ class LocalHYMTProvider(BaseProvider):
             )
 
         # Step 0: Resolve prompt policy via TranslationRouter
-        # allow_experimental: trace_id present → debug/advanced mode → experimental allowed
-        allow_experimental = bool(request.trace_id)
+        # allow_experimental: trace_id present (debug mode) OR Advanced Mode explicitly
+        # selected a policy (PATCH-10c: options["allow_experimental"]=True).
+        allow_experimental = bool(request.trace_id) or bool(
+            request.options.get("allow_experimental")
+        )
         router_result = _ROUTER.route(request.options, allow_experimental=allow_experimental)
         policy = router_result.policy
         logger.debug(

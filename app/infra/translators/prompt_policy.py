@@ -539,6 +539,69 @@ DEFAULT_POLICY_ID: str = "sentence_ru"
 
 
 # ============================================================================
+# PPS PATCH-10c: Secondary runtime registry for user-defined custom policies
+# ============================================================================
+
+#: Runtime-only registry for custom policies created via Policy Editor.
+#: Separate from ``PROMPT_POLICIES`` to guarantee built-in immutability.
+#: Populated by :func:`register_custom_policy`; cleared by
+#: :func:`clear_custom_policies`.  Lifetime: process — re-populated from
+#: QSettings by ``load_custom_policies_into_registry()`` on every call to
+#: ``load_pps_request_options()`` before a translation starts.
+_CUSTOM_POLICIES: dict[str, PromptPolicy] = {}
+
+
+def register_custom_policy(policy: PromptPolicy) -> None:
+    """Register a custom policy in the runtime-visible secondary registry.
+
+    Built-in policies (present in ``PROMPT_POLICIES``) cannot be overridden
+    via this function.  ``PROMPT_POLICIES`` always takes precedence.
+
+    Args:
+        policy: Custom :class:`PromptPolicy` to register.
+
+    Raises:
+        ValueError: If ``policy.policy_id`` collides with a built-in ID.
+    """
+    if policy.policy_id in PROMPT_POLICIES:
+        raise ValueError(
+            f"Cannot override built-in policy '{policy.policy_id}' via "
+            "register_custom_policy. Built-in policies are immutable."
+        )
+    _CUSTOM_POLICIES[policy.policy_id] = policy
+
+
+def unregister_custom_policy(policy_id: str) -> None:
+    """Remove a single custom policy from the runtime registry.
+
+    No-op if the ID is not currently registered.
+
+    Args:
+        policy_id: ID of the custom policy to remove.
+    """
+    _CUSTOM_POLICIES.pop(policy_id, None)
+
+
+def clear_custom_policies() -> None:
+    """Remove all custom policies from the runtime registry.
+
+    Call in test teardown to prevent registry pollution across tests.
+    Also called by ``load_custom_policies_into_registry()`` before
+    re-populating from QSettings.
+    """
+    _CUSTOM_POLICIES.clear()
+
+
+def list_custom_policy_ids() -> list[str]:
+    """Return sorted list of currently registered custom policy IDs.
+
+    Returns:
+        Sorted list of IDs in ``_CUSTOM_POLICIES``.
+    """
+    return sorted(_CUSTOM_POLICIES.keys())
+
+
+# ============================================================================
 # Registry lookup helpers
 # ============================================================================
 
@@ -546,16 +609,23 @@ DEFAULT_POLICY_ID: str = "sentence_ru"
 def get_policy(policy_id: str) -> PromptPolicy:
     """Return policy by ID.
 
+    Checks ``PROMPT_POLICIES`` (built-ins) first, then ``_CUSTOM_POLICIES``
+    (user-defined).  Built-ins always take precedence.
+
     Args:
         policy_id: Policy identifier (e.g. "sentence_ru").
 
     Returns:
-        PromptPolicy instance from the module-level registry.
+        :class:`PromptPolicy` from the matching registry.
 
     Raises:
-        KeyError: If policy_id is not registered.
+        KeyError: If ``policy_id`` is not found in either registry.
     """
-    return PROMPT_POLICIES[policy_id]
+    if policy_id in PROMPT_POLICIES:
+        return PROMPT_POLICIES[policy_id]
+    if policy_id in _CUSTOM_POLICIES:
+        return _CUSTOM_POLICIES[policy_id]
+    raise KeyError(policy_id)
 
 
 def list_profiles(*, include_experimental: bool = False) -> list[PromptPolicy]:

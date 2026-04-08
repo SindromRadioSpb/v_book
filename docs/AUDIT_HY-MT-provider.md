@@ -1,11 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-08** — PPS PATCH-10 (Advanced Mode UI) завершён; PATCH-01..10 завершены; PATCH-11 в работе
+> Последнее обновление: **2026-04-08** — PPS PATCH-10c (custom policy runtime) завершён; PATCH-01..10c завершены; PATCH-11 pending
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
 > 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
-> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ✅ (template routing) | PATCH-08 ✅ (context wiring) | PATCH-09 ✅ (Basic UI) | PATCH-09b ✅ (wiring) | PATCH-10 ✅ (Advanced UI) | PATCH-11 ⬜ (debug actions)
+> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ✅ | PATCH-08 ✅ | PATCH-09 ✅ | PATCH-09b ✅ | PATCH-10 ✅ (Advanced UI) | PATCH-10c ✅ (custom runtime) | PATCH-11 ⬜ (debug actions)
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -63,9 +63,10 @@
 | PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py`, `tests/test_pps_basic_mode_ui.py` | ✅ Завершён (28 tests) |
 | PPS PATCH-09b: Service Layer Wiring | `local_hymt_provider.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_09b_wiring.py` | ✅ Завершён (16 tests) |
 | PPS PATCH-10: Advanced Mode UI (policy editor) | `app/ui/advanced_policy_editor.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_advanced_mode_ui.py` | ✅ Завершён (39 tests) |
+| PPS PATCH-10c: Custom policy runtime registration | `prompt_policy.py`, `advanced_policy_editor.py`, `provider_settings_dialog.py`, `local_hymt_provider.py`, `tests/test_pps_10c_runtime.py` | ✅ Завершён (29 tests) |
 | PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py` | ⬜ Pending |
 
-**PPS regression status**: 398 tests (56+28+52+42+75+34+28+25+28+16+39) pass, 0 регрессий.
+**PPS regression status**: 427 tests (56+28+52+42+75+34+28+25+28+16+39+29) pass, 0 регрессий.
 
 **PATCH-06 архитектурные детали:**
 - `_POLICY_HASH_FIELDS` (19 семантических полей) + `compute_policy_hash(policy)` — SHA-256 канонического JSON с `sort_keys=True`
@@ -140,6 +141,7 @@ Scope: UI-панель выбора профиля и режимов в `Provide
 - `load_pps_request_options(settings)`: единая точка dispatch — если `pps/advanced/active=True` → advanced options, иначе → `load_pps_basic_options()`; используется во всех 3 wiring-точках (workers.py, batch_mt_translate_service.py, translation_service.py)
 - Runtime integration: `terminology_mode` → `use_glossary` (off → False, остальное → True); `sampling_profile_id` → напрямую в `WorkerRequest`
 - 39 тестов: dropdown coverage, allow_user_edit_* guards, Reset, Save as Custom (независимость копии, id-формат, persistence), serialise/deserialise round-trip, export, load_pps_request_options routing
+- ~~Known gap~~ → **PATCH-10c закрыл**: custom policy runtime registration реализована (см. ниже)
 
 **PATCH-10 план (Advanced Mode UI — spec §6.2):**
 
@@ -153,6 +155,23 @@ Scope: Полный редактор политики для power users. Зав
 - [Export] — сохранить политику как YAML
 - Custom policy persistence: через QSettings или отдельный JSON-файл
 - Тесты: редактирование ограничено `allow_user_edit_*`; Save as Custom создаёт независимую копию; Reset возвращает к built-in значению
+
+**PATCH-10c архитектурные детали (Custom policy runtime registration):**
+
+Реализован: `app/infra/translators/prompt_policy.py` (secondary registry) + `provider_settings_dialog.py` (loader) + `local_hymt_provider.py` (allow_experimental gate).
+
+- **`_CUSTOM_POLICIES: dict[str, PromptPolicy]`** — module-level secondary registry в `prompt_policy.py`; отдельен от `PROMPT_POLICIES` → built-in immutability гарантирована структурой
+- **`get_policy(policy_id)`** обновлён: сначала `PROMPT_POLICIES`, затем `_CUSTOM_POLICIES`; `KeyError` если не найдено в обоих — `TranslationRouter` ловит и делает deterministic fallback на `DEFAULT_POLICY_ID` с warning в лог
+- **`register_custom_policy(policy)`** — добавляет в `_CUSTOM_POLICIES`; поднимает `ValueError` при попытке переопределить built-in ID
+- **`clear_custom_policies()` / `unregister_custom_policy(policy_id)` / `list_custom_policy_ids()`** — управление реестром; `clear_custom_policies()` используется в teardown тестов для изоляции
+- **`load_custom_policies_into_registry(settings)`** в `provider_settings_dialog.py` — читает `pps/custom_policies` JSON из QSettings, десериализует через `dict_to_policy()`, регистрирует через `register_custom_policy()`; всегда вызывает `clear_custom_policies()` первым (no stale entries)
+- **`load_pps_request_options()`** обновлён: вызывает `load_custom_policies_into_registry(s)` перед построением options dict → custom policies доступны runtime на каждой translation сессии
+- **`allow_experimental` gate** в `LocalHYMTProvider.translate()`: `= bool(request.trace_id) or bool(request.options.get("allow_experimental"))` — Advanced Mode добавляет `"allow_experimental": True` в options, поэтому пользователь-выбранные experimental политики (и custom-копии экспериментальных built-ins) проходят guard
+- **`clone_policy_as_custom()`** обновлён: всегда устанавливает `experimental=False` в клоне — custom политика явно выбрана пользователем, не является experimental в смысле "непроверенная"
+- **Reset семантика**: `_base_policy` = загруженная custom policy (или built-in) при выборе в dropdown. Reset восстанавливает `_base_policy.role_instruction` etc. — т.е. "сохранённый baseline текущей политики", а не оригинальный built-in
+- **Corrupt / missing entries**: `dict_to_policy()` → `None` → silently skipped; ID-коллизия с built-in → `ValueError` → logged, skipped
+- **LocalHYMT7BGPTQProvider** наследует `translate()` → fix покрывает оба провайдера
+- 29 тестов: registry operations, QSettings→registry round-trip, router resolution, renderer field flow, built-in immutability, experimental guard, Basic Mode regression
 
 **PATCH-11 план (Debug panel actions — spec §6.3):**
 

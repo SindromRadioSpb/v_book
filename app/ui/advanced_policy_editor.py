@@ -195,6 +195,10 @@ def clone_policy_as_custom(source: PromptPolicy, **overrides) -> PromptPolicy:
             "name": f"{source.name} (Custom)",
             "is_custom": True,
             "is_builtin": False,
+            # PATCH-10c: custom policies are explicitly user-selected — not experimental.
+            # This ensures they pass the TranslationRouter experimental guard
+            # without requiring trace_id (debug mode).
+            "experimental": False,
         }
     )
     base.update({k: (str(v) if hasattr(v, "value") else v) for k, v in overrides.items()})

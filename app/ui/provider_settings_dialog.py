@@ -8,6 +8,8 @@ Allows users to configure:
 - Usage tracking display - PATCH-06
 """
 
+import logging
+
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -31,6 +33,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_logger = logging.getLogger(__name__)
 
 from app.infra.security import CredentialStore
 from app.infra.settings import SettingsService
@@ -1149,12 +1153,63 @@ class ProviderSettingsDialog(QDialog):
         super().accept()
 
 
+def load_custom_policies_into_registry(settings: QSettings | None = None) -> None:
+    """Load custom policies from QSettings into the runtime policy registry.
+
+    Reads ``pps/custom_policies`` JSON array, deserialises each entry via
+    :func:`~app.ui.advanced_policy_editor.dict_to_policy`, and registers valid
+    policies via :func:`~app.infra.translators.prompt_policy.register_custom_policy`.
+
+    Always calls :func:`~app.infra.translators.prompt_policy.clear_custom_policies`
+    first so the registry reflects the current QSettings state — no stale entries
+    from a previous call survive.
+
+    Corrupt or missing-field entries are silently skipped (``dict_to_policy``
+    already logs a warning for each).  Entries whose ID collides with a built-in
+    policy are also skipped with a warning (should not happen in normal use).
+
+    Args:
+        settings: Optional QSettings instance.  Defaults to ``QSettings()``.
+    """
+    import json
+
+    from app.infra.translators.prompt_policy import (
+        clear_custom_policies,
+        register_custom_policy,
+    )
+    from app.ui.advanced_policy_editor import dict_to_policy
+
+    s: QSettings = settings if settings is not None else QSettings()
+    raw: str = s.value("pps/custom_policies", "[]", type=str)
+    try:
+        data: list[dict] = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("load_custom_policies_into_registry: JSON parse error: %s", exc)
+        data = []
+
+    clear_custom_policies()
+    for d in data:
+        policy = dict_to_policy(d)
+        if policy is None:
+            continue  # corrupt entry — dict_to_policy already logged a warning
+        try:
+            register_custom_policy(policy)
+        except ValueError as exc:
+            _logger.warning(
+                "load_custom_policies_into_registry: skipping policy %r: %s",
+                d.get("policy_id"),
+                exc,
+            )
+
+
 def load_pps_request_options(settings: QSettings | None = None) -> dict:
     """Return effective TranslationRequest options, respecting Advanced Mode override.
 
     When ``pps/advanced/active`` is True, returns Advanced Mode options (selected
-    policy + terminology + sampling).  Otherwise delegates to
-    :func:`load_pps_basic_options`.
+    policy + terminology + sampling) and also registers any custom policies from
+    QSettings into the runtime registry so that ``get_policy()`` can resolve them.
+
+    Otherwise delegates to :func:`load_pps_basic_options`.
 
     This is the single authoritative entry point called by workers,
     batch translate service, and translation service (PATCH-09b wiring).
@@ -1163,9 +1218,15 @@ def load_pps_request_options(settings: QSettings | None = None) -> dict:
         settings: Optional QSettings instance.  Defaults to ``QSettings()``.
 
     Returns:
-        Dict with keys: ``prompt_policy_id``, ``use_glossary``, ``sampling_profile_id``.
+        Dict with keys: ``prompt_policy_id``, ``use_glossary``,
+        ``sampling_profile_id``.  Advanced Mode also includes
+        ``allow_experimental: True`` so that user-selected experimental
+        policies are not blocked by the router's experimental guard.
     """
     s: QSettings = settings if settings is not None else QSettings()
+    # PATCH-10c: register custom policies before building the options dict so
+    # that TranslationRouter.route() can resolve them via get_policy().
+    load_custom_policies_into_registry(s)
     if s.value("pps/advanced/active", False, type=bool):
         terminology_str: str = s.value("pps/advanced/terminology_mode", "soft_glossary", type=str)
         return {
@@ -1174,6 +1235,10 @@ def load_pps_request_options(settings: QSettings | None = None) -> dict:
             "sampling_profile_id": s.value(
                 "pps/advanced/sampling_profile_id", "hy_mt_precise_sentence", type=str
             ),
+            # PATCH-10c: advanced mode = user explicitly selected policy.
+            # Allow experimental policies (and custom copies thereof) through
+            # the router's experimental guard without requiring trace_id.
+            "allow_experimental": True,
         }
     return load_pps_basic_options(settings=s)
 

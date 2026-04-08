@@ -24,7 +24,11 @@ import tempfile
 import pytest
 from PyQt6.QtCore import QSettings
 
-from app.infra.translators.prompt_policy import PROMPT_POLICIES, TerminologyMode
+from app.infra.translators.prompt_policy import (
+    PROMPT_POLICIES,
+    TerminologyMode,
+    clear_custom_policies,
+)
 from app.ui.advanced_policy_editor import (
     AdvancedPolicyEditorWidget,
     _serialise_for_export,
@@ -38,6 +42,14 @@ from app.ui.provider_settings_dialog import ProviderSettingsDialog, load_pps_req
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_custom_policies():
+    """PATCH-10c: clear runtime custom policy registry before/after each test."""
+    clear_custom_policies()
+    yield
+    clear_custom_policies()
 
 
 def _make_test_settings(name: str = "AdvancedPolicyEditor") -> QSettings:
