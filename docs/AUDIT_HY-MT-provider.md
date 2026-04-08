@@ -59,12 +59,12 @@
 | PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `app/ui/prompt_audit_dialog.py`, `provider_settings_dialog.py`, `tests/test_effective_prompt_trace.py` | ✅ Завершён (75 tests) |
 | PPS PATCH-06: policy_hash (SHA-256) | `prompt_policy.py`, `worker_process.py`, `local_hymt_provider.py`, `local_mt/__init__.py`, `tests/test_pps_hashes.py` | ✅ Завершён (34 tests) |
 | PPS PATCH-07: TemplateProfile full routing | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `tests/test_template_routing.py` | ✅ Завершён (28 tests) |
-| PPS PATCH-08: Context block wiring (Layer 4b) | `prompt_policy.py` (PolicyRenderer.render_context_block), `local_hymt_provider.py`, `tests/test_context_wiring.py` | 🔄 В работе |
-| PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py` или новый `prompt_policy_panel.py` | ⬜ Pending |
+| PPS PATCH-08: Context block wiring (Layer 4b) | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_context_wiring.py` | ✅ Завершён (25 tests) |
+| PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py`, `tests/test_pps_basic_mode_ui.py` | ✅ Завершён (28 tests) |
 | PPS PATCH-10: Advanced Mode UI (policy editor) | новый `advanced_policy_editor.py` | ⬜ Pending |
 | PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py` | ⬜ Pending |
 
-**PPS regression status**: 315 tests (56+28+52+42+75+34+28) pass, 0 регрессий.
+**PPS regression status**: 343 tests (56+28+52+42+75+34+28+25+28) pass, 0 регрессий.
 
 **PATCH-06 архитектурные детали:**
 - `_POLICY_HASH_FIELDS` (19 семантических полей) + `compute_policy_hash(policy)` — SHA-256 канонического JSON с `sort_keys=True`
