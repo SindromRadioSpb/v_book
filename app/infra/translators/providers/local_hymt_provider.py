@@ -460,9 +460,13 @@ class LocalHYMTProvider(BaseProvider):
         # Step 1: Placeholder protection (MANDATORY)
         protected = _protect_placeholders(request.source_text)
 
-        # Step 2: Fetch glossary terms — only when policy allows glossary
+        # PATCH-09b: respect use_glossary override from request.options.
+        # False → skip both prompt injection and apply_glossary postprocess.
+        _use_glossary: bool = request.options.get("use_glossary", True)
+
+        # Step 2: Fetch glossary terms — only when policy allows glossary AND enabled
         glossary_terms: list[tuple[str, str]] = []
-        if self.db_session and policy.terminology_mode != TerminologyMode.OFF:
+        if _use_glossary and self.db_session and policy.terminology_mode != TerminologyMode.OFF:
             glossary_terms = _fetch_glossary_terms_for_prompt(
                 self.db_session, src, tgt, self.project_id
             )
@@ -481,6 +485,10 @@ class LocalHYMTProvider(BaseProvider):
             context_items=context_items,
         )
 
+        # PATCH-09b: sampling_profile_id override from request.options.
+        # Allows Basic Mode UI to select a different preset without changing the policy.
+        _sampling_id: str = request.options.get("sampling_profile_id") or policy.sampling_profile_id
+
         # Step 4: Worker inference
         try:
             worker_request = WorkerRequest(
@@ -488,7 +496,7 @@ class LocalHYMTProvider(BaseProvider):
                 source_lang=src,
                 target_lang=tgt,
                 request_id=request.trace_id,
-                sampling_profile_id=policy.sampling_profile_id,
+                sampling_profile_id=_sampling_id,
             )
             worker_result = self.worker.translate(worker_request)
         except WorkerError as e:
@@ -528,7 +536,7 @@ class LocalHYMTProvider(BaseProvider):
         used_glossary = False
         final_translation = restored
 
-        if self.db_session and policy.terminology_mode != TerminologyMode.OFF:
+        if _use_glossary and self.db_session and policy.terminology_mode != TerminologyMode.OFF:
             src_nllb = _ISO_TO_NLLB.get(src)
             tgt_nllb = _ISO_TO_NLLB.get(tgt)
             if src_nllb and tgt_nllb:

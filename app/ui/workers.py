@@ -3188,11 +3188,19 @@ class UserDictTranslateWorker(QThread):
             if not provider:
                 raise ValueError(f"Provider '{force_provider_id}' not available")
 
+            # PATCH-09b: inject PPS Basic Mode options for local HY-MT providers.
+            _pps_opts: dict = {}
+            if force_provider_id.startswith("local_hymt"):
+                from app.ui.provider_settings_dialog import load_pps_basic_options
+
+                _pps_opts = load_pps_basic_options()
+
             mt_request = TranslationRequest(
                 source_text=item.src_text,
                 source_lang=item.src_lang,
                 target_lang=item.tgt_lang,
                 glossary=None,
+                options=_pps_opts,
             )
             mt_result = provider.translate(mt_request)
             if mt_result.error_kind:

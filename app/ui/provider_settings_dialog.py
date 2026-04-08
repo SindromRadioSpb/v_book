@@ -1133,3 +1133,32 @@ def show_provider_settings(parent=None):
     """
     dialog = ProviderSettingsDialog(parent)
     return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def load_pps_basic_options(settings: QSettings | None = None) -> dict:
+    """Read PPS Basic Mode settings from QSettings and return as request options dict.
+
+    Returns a dict suitable for passing as ``TranslationRequest.options``.
+    Only the keys relevant to local HY-MT providers are included; all other
+    providers silently ignore unknown options keys.
+
+    Keys returned:
+        ``prompt_policy_id``  — active policy (consumed by TranslationRouter).
+        ``use_glossary``      — bool; False disables prompt injection + postprocess.
+        ``sampling_profile_id`` — str; overrides policy's default sampling preset.
+
+    Args:
+        settings: Optional QSettings instance (uses default QSettings() if None).
+            Pass an explicit instance in tests to avoid global QSettings state.
+
+    Returns:
+        Dict with PPS basic options from QSettings (with sane defaults if not set).
+    """
+    s: QSettings = settings if settings is not None else QSettings()
+    return {
+        "prompt_policy_id": s.value("pps/basic/policy_id", "sentence_ru", type=str),
+        "use_glossary": s.value("pps/basic/use_glossary", True, type=bool),
+        "sampling_profile_id": s.value(
+            "pps/basic/sampling_profile_id", "hy_mt_precise_sentence", type=str
+        ),
+    }
