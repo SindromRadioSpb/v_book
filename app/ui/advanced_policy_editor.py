@@ -353,7 +353,7 @@ class AdvancedPolicyEditorWidget(QWidget):
         self._content_layout.addWidget(group)
 
     def _build_action_buttons(self) -> None:
-        """Build [Save as Custom] and [Export] action buttons."""
+        """Build [Save as Custom], [Export] and [Delete] action buttons."""
         btn_row = QHBoxLayout()
 
         self._save_custom_btn = QPushButton("Save as Custom")
@@ -368,6 +368,15 @@ class AdvancedPolicyEditorWidget(QWidget):
         self._export_btn.setToolTip("Export the current policy to a YAML file")
         self._export_btn.clicked.connect(self._on_export)
         btn_row.addWidget(self._export_btn)
+
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setToolTip(
+            "Permanently delete this custom policy.\n"
+            "Built-in policies cannot be deleted."
+        )
+        self._delete_btn.setEnabled(False)  # enabled only when a custom policy is selected
+        self._delete_btn.clicked.connect(self._on_delete_custom)
+        btn_row.addWidget(self._delete_btn)
 
         btn_row.addStretch()
         self._content_layout.addLayout(btn_row)
@@ -433,6 +442,7 @@ class AdvancedPolicyEditorWidget(QWidget):
             return
         self._base_policy = policy
         self._load_policy_into_editors(policy)
+        self._update_delete_button()
 
     def _load_policy_into_editors(self, policy: PromptPolicy) -> None:
         """Populate all editor widgets from a PromptPolicy instance.
@@ -476,6 +486,64 @@ class AdvancedPolicyEditorWidget(QWidget):
         """Restore output_policy to base policy value."""
         if self._base_policy:
             self._output_edit.setPlainText(self._base_policy.output_policy)
+
+    # ------------------------------------------------------------------
+    # Delete custom policy
+    # ------------------------------------------------------------------
+
+    def _is_current_policy_custom(self) -> bool:
+        """Return True when the currently selected dropdown item is a custom policy."""
+        policy_id = self._policy_combo.currentData()
+        policy = self._resolve_policy(policy_id)
+        return policy is not None and policy.is_custom
+
+    def _update_delete_button(self) -> None:
+        """Enable the Delete button only when the selected policy is custom."""
+        self._delete_btn.setEnabled(self._is_current_policy_custom())
+
+    def _on_delete_custom(self) -> None:
+        """Delete the currently selected custom policy after user confirmation.
+
+        Removes the policy from:
+        - ``self._custom_policies`` (in-memory list)
+        - QSettings ``pps/custom_policies``
+        - The runtime ``_CUSTOM_POLICIES`` registry (via :func:`unregister_custom_policy`)
+        - The policy dropdown
+
+        After deletion the dropdown selects the first available built-in policy.
+        Built-in policies cannot be deleted; the method returns immediately if the
+        current selection is not a custom policy.
+        """
+        policy_id: str | None = self._policy_combo.currentData()
+        policy = self._resolve_policy(policy_id)
+        if policy is None or not policy.is_custom:
+            return  # guard: never delete a built-in
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Custom Policy",
+            f"Delete custom policy '{policy.name}'?\n\nID: {policy.policy_id}\n\n"
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Remove from in-memory list and persist
+        self._custom_policies = [p for p in self._custom_policies if p.policy_id != policy_id]
+        self._save_custom_policies_to_settings()
+
+        # Remove from runtime registry
+        from app.infra.translators.prompt_policy import unregister_custom_policy
+
+        unregister_custom_policy(policy_id)  # type: ignore[arg-type]
+
+        # Rebuild dropdown; select first built-in as visual fallback
+        self._populate_policy_combo()
+        if self._policy_combo.count() > 0:
+            self._policy_combo.setCurrentIndex(0)
+            self._on_policy_selected(0)
 
     def _on_save_as_custom(self) -> None:
         """Create an independent custom policy from the current editor state."""
