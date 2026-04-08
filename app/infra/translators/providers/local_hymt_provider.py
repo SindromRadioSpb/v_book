@@ -40,6 +40,7 @@ from app.infra.translators.base_provider import (
 )
 from app.infra.translators.prompt_policy import (
     _TEMPLATE_FAMILY_OBSERVED,
+    ContextMode,
     EffectivePromptTrace,
     PolicyRenderer,
     PromptPolicy,
@@ -47,6 +48,7 @@ from app.infra.translators.prompt_policy import (
     TerminologyMode,
     TranslationRouter,
     build_applied_sampling,
+    compute_context_hash,
     compute_glossary_hash,
     compute_source_text_hash,
     resolve_template_profile,
@@ -467,12 +469,16 @@ class LocalHYMTProvider(BaseProvider):
 
         injected_term_count = len(glossary_terms)
 
+        # PPS PATCH-08: extract context_items from request options (Layer 4b wiring).
+        # context_items are only used when policy.context_mode != ContextMode.OFF.
+        context_items: list[str] | None = request.options.get("context_items") or None
+
         # Step 3: Build PPS sentinel payload (worker parses role + user_content)
         user_content = _RENDERER.render_sentinel_payload(
             policy=policy,
             source_text=protected.text,
             glossary_terms=glossary_terms if glossary_terms else None,
-            context_items=None,  # PATCH-03: context not yet wired; PATCH-05 scope
+            context_items=context_items,
         )
 
         # Step 4: Worker inference
@@ -553,6 +559,7 @@ class LocalHYMTProvider(BaseProvider):
                 policy=policy,
                 router_result=router_result,
                 resolved_template_profile_id=resolved_template_id,
+                context_items=context_items,
                 protected=protected,
                 glossary_terms=glossary_terms,
                 raw_model_output=raw_translation,
@@ -604,6 +611,7 @@ class LocalHYMTProvider(BaseProvider):
         policy: PromptPolicy,
         router_result: RouterResult,
         resolved_template_profile_id: str,
+        context_items: list[str] | None,
         protected: _ProtectedText,
         glossary_terms: list[tuple[str, str]],
         raw_model_output: str,
@@ -626,6 +634,8 @@ class LocalHYMTProvider(BaseProvider):
             resolved_template_profile_id: Template profile ID after PATCH-07
                 family resolution (may differ from policy.template_profile_id
                 when there is a provider-family mismatch).
+            context_items: Surrounding segments passed via request.options
+                (PATCH-08). None when context_mode=off or not supplied.
             protected: Placeholder-protected source (_ProtectedText).
             glossary_terms: Injected glossary (src, tgt) pairs.
             raw_model_output: Worker output before postprocessing.
@@ -644,12 +654,19 @@ class LocalHYMTProvider(BaseProvider):
         if glossary_terms and policy.terminology_mode != TerminologyMode.OFF:
             rendered_glossary = _RENDERER._render_glossary_block(glossary_terms, policy)
 
+        # PPS PATCH-08: rendered context block (Layer 4b)
+        rendered_context: str | None = None
+        context_applied = False
+        if context_items and policy.context_mode != ContextMode.OFF:
+            rendered_context = _RENDERER._render_context_block(context_items)
+            context_applied = True
+
         # Effective prompt preview (Layers 1–5 assembled for UI)
         preview = _RENDERER.render_effective_preview(
             policy=policy,
             source_text=protected.text,
             glossary_terms=glossary_terms if glossary_terms else None,
-            context_items=None,
+            context_items=context_items,
         )
 
         return EffectivePromptTrace(
@@ -676,13 +693,13 @@ class LocalHYMTProvider(BaseProvider):
             rendered_task_instruction=policy.task_instruction,
             rendered_output_policy=policy.output_policy,
             rendered_glossary_block=rendered_glossary,
-            rendered_context_block=None,  # PATCH-07
+            rendered_context_block=rendered_context,
             rendered_formatting_note=None,
             rendered_user_payload=protected.text,
             effective_prompt_preview=preview,
             # Input hashes
             glossary_hash=compute_glossary_hash(rendered_glossary) if rendered_glossary else None,
-            context_hash=None,  # PATCH-07
+            context_hash=compute_context_hash(rendered_context) if rendered_context else None,
             # Applied constraints
             applied_sampling=build_applied_sampling(
                 policy, self._FORCE_GREEDY, self._MAX_N_PREDICT_CAP
@@ -699,7 +716,7 @@ class LocalHYMTProvider(BaseProvider):
             worker_latency_ms=worker_latency_ms,
             # Flags
             glossary_applied=used_glossary,
-            context_applied=False,
+            context_applied=context_applied,
             fallback_triggered=router_result.fallback_triggered,
             fallback_reason=router_result.fallback_reason,
             created_at=datetime.now(UTC),

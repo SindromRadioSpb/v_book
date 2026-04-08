@@ -694,6 +694,22 @@ def compute_glossary_hash(rendered_block: str) -> str:
     return hashlib.sha256(rendered_block.encode("utf-8")).hexdigest()
 
 
+def compute_context_hash(rendered_block: str) -> str:
+    """Compute deterministic SHA-256 of the rendered context block.
+
+    Hashes the context text injected into the prompt (already rendered by
+    PolicyRenderer._render_context_block).  The rendered form captures item
+    count and ordering — so it accurately represents what the model received.
+
+    Args:
+        rendered_block: The rendered context string (output of _render_context_block).
+
+    Returns:
+        64-character lowercase hex digest (SHA-256).
+    """
+    return hashlib.sha256(rendered_block.encode("utf-8")).hexdigest()
+
+
 # ============================================================================
 # Startup validation  (runs at import time, no I/O)
 # ============================================================================
@@ -1282,7 +1298,7 @@ class EffectivePromptTrace:
 
     # Input hashes
     glossary_hash: str | None  # PATCH-06
-    context_hash: str | None  # PATCH-07
+    context_hash: str | None  # SHA-256 of rendered context block (None if context_mode=off)
 
     # Applied constraints — what actually went to model.generate()
     applied_sampling: dict  # effective gen_kwargs (without eos_token_id)
