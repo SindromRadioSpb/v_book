@@ -58,7 +58,7 @@
 | PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | ✅ Завершён (42 tests) |
 | PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `app/ui/prompt_audit_dialog.py`, `provider_settings_dialog.py`, `tests/test_effective_prompt_trace.py` | ✅ Завершён (75 tests) |
 | PPS PATCH-06: policy_hash (SHA-256) | `prompt_policy.py`, `worker_process.py`, `local_hymt_provider.py`, `local_mt/__init__.py`, `tests/test_pps_hashes.py` | ✅ Завершён (34 tests) |
-| PPS PATCH-07: TemplateProfile full routing | `prompt_policy.py` (TranslationRouter), `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `tests/test_template_routing.py` | ⬜ Pending |
+| PPS PATCH-07: TemplateProfile full routing | `prompt_policy.py` (TranslationRouter), `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `tests/test_template_routing.py` | 🔄 В работе |
 | PPS PATCH-08: Context block wiring (Layer 4b) | `prompt_policy.py` (PolicyRenderer.render_context_block), `local_hymt_provider.py`, `tests/test_context_wiring.py` | ⬜ Pending |
 | PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py` или новый `prompt_policy_panel.py` | ⬜ Pending |
 | PPS PATCH-10: Advanced Mode UI (policy editor) | новый `advanced_policy_editor.py` | ⬜ Pending |

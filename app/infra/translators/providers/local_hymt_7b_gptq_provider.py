@@ -18,6 +18,7 @@ Enabled: ``enabled_by_default=False`` — must be explicitly activated.
 
 from sqlalchemy.orm import Session
 
+from app.infra.translators.prompt_policy import _TEMPLATE_FAMILY_7B
 from app.infra.translators.providers.local_hymt_provider import LocalHYMTProvider
 
 MODEL_ID = "tencent/HY-MT1.5-7B-GPTQ-Int4"
@@ -40,6 +41,9 @@ class LocalHYMT7BGPTQProvider(LocalHYMTProvider):
     _FORCE_GREEDY: bool = True
     _MAX_N_PREDICT_CAP: int = 128
     _MODEL_QUANT_ID: str | None = "gptq-int4"
+
+    # PPS PATCH-07: override provider family — selects hy_mt_7b_* templates
+    _PROVIDER_FAMILY: str = _TEMPLATE_FAMILY_7B
 
     def __init__(
         self,

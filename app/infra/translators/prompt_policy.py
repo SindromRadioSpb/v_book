@@ -929,6 +929,102 @@ class PolicyRenderer:
 
 
 # ============================================================================
+# PPS PATCH-07: Template profile family resolution
+# ============================================================================
+
+# Provider family tokens — matched against LocalHYMTProvider._PROVIDER_FAMILY
+_TEMPLATE_FAMILY_OBSERVED: str = "observed"  # 1.8B: hy_mt_*_observed templates
+_TEMPLATE_FAMILY_7B: str = "7b_gptq"  # 7B-GPTQ: hy_mt_7b_* templates
+
+# Nearest-equivalent mapping: (specified_template_id, target_family) -> resolved_id
+# Used when the policy's template_profile_id is incompatible with the active provider family.
+_TEMPLATE_NEAREST: dict[tuple[str, str], str] = {
+    # 7B template requested but 1.8B provider active
+    ("hy_mt_7b_standard", _TEMPLATE_FAMILY_OBSERVED): "hy_mt_standard_observed",
+    ("hy_mt_7b_glossary", _TEMPLATE_FAMILY_OBSERVED): "hy_mt_glossary_observed",
+    # 1.8B template requested but 7B provider active
+    ("hy_mt_standard_observed", _TEMPLATE_FAMILY_7B): "hy_mt_7b_standard",
+    ("hy_mt_glossary_observed", _TEMPLATE_FAMILY_7B): "hy_mt_7b_glossary",
+    (
+        "hy_mt_context_observed",
+        _TEMPLATE_FAMILY_7B,
+    ): "hy_mt_7b_standard",  # no 7B context profile yet
+    (
+        "hy_mt_formatted_observed",
+        _TEMPLATE_FAMILY_7B,
+    ): "hy_mt_7b_standard",  # no 7B formatted profile yet
+}
+
+# Safe fallback per family when no nearest equivalent is found in _TEMPLATE_NEAREST
+_TEMPLATE_FAMILY_DEFAULT: dict[str, str] = {
+    _TEMPLATE_FAMILY_OBSERVED: "hy_mt_standard_observed",
+    _TEMPLATE_FAMILY_7B: "hy_mt_7b_standard",
+}
+
+
+def resolve_template_profile(
+    policy: PromptPolicy,
+    provider_family: str,
+) -> tuple[str, str | None]:
+    """Resolve the effective template_profile_id for the given provider family.
+
+    If ``policy.template_profile_id`` is compatible with ``provider_family``,
+    it is returned unchanged and warning is ``None``.  Otherwise the nearest
+    compatible equivalent is selected, a ``WARNING`` is logged, and a
+    structured warning string is returned for inclusion in
+    ``meta["prompt_policy"]["warnings"]``.
+
+    Compatibility rules (spec §10.4):
+    - ``"observed"`` family: template ID must end with ``"_observed"``
+    - ``"7b_gptq"`` family:  template ID must start with ``"hy_mt_7b_"``
+
+    Args:
+        policy:          Active ``PromptPolicy`` after router resolution.
+        provider_family: ``_TEMPLATE_FAMILY_OBSERVED`` or ``_TEMPLATE_FAMILY_7B``.
+
+    Returns:
+        ``(resolved_template_profile_id, warning_msg | None)``.
+    """
+    specified = policy.template_profile_id
+
+    if provider_family == _TEMPLATE_FAMILY_OBSERVED:
+        is_compatible = specified.endswith("_observed")
+    elif provider_family == _TEMPLATE_FAMILY_7B:
+        is_compatible = specified.startswith("hy_mt_7b_")
+    else:
+        # Unknown family — pass through unchanged, record warning
+        return specified, (
+            f"template_profile_unknown_family"
+            f" policy_id={policy.policy_id!r}"
+            f" provider_family={provider_family!r}"
+            f" using_as_is={specified!r}"
+        )
+
+    if is_compatible:
+        return specified, None
+
+    resolved = _TEMPLATE_NEAREST.get(
+        (specified, provider_family),
+        _TEMPLATE_FAMILY_DEFAULT.get(provider_family, "hy_mt_standard_observed"),
+    )
+    warning = (
+        f"template_profile_mismatch"
+        f" policy_id={policy.policy_id!r}"
+        f" specified={specified!r}"
+        f" selected={resolved!r}"
+        f" family={provider_family!r}"
+    )
+    _logger.warning(
+        "template_profile_mismatch policy_id=%s specified=%s selected=%s family=%s",
+        policy.policy_id,
+        specified,
+        resolved,
+        provider_family,
+    )
+    return resolved, warning
+
+
+# ============================================================================
 # TranslationRouter
 # ============================================================================
 

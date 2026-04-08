@@ -39,6 +39,7 @@ from app.infra.translators.base_provider import (
     TranslationResult,
 )
 from app.infra.translators.prompt_policy import (
+    _TEMPLATE_FAMILY_OBSERVED,
     EffectivePromptTrace,
     PolicyRenderer,
     PromptPolicy,
@@ -48,6 +49,7 @@ from app.infra.translators.prompt_policy import (
     build_applied_sampling,
     compute_glossary_hash,
     compute_source_text_hash,
+    resolve_template_profile,
 )
 from app.services.local_models import ModelResourceManager
 from app.services.local_mt import apply_glossary
@@ -281,6 +283,8 @@ class LocalHYMTProvider(BaseProvider):
         _FORCE_GREEDY: True when the model family forces greedy decoding (7B-GPTQ).
         _MAX_N_PREDICT_CAP: Hard token budget cap used by worker _resolve_gen_kwargs.
         _MODEL_QUANT_ID: Quantisation descriptor for EffectivePromptTrace metadata.
+    PPS PATCH-07 template family attribute (override in subclasses):
+        _PROVIDER_FAMILY: Token identifying the template family for this provider.
     """
 
     # PPS PATCH-05: hardware constraint class attributes
@@ -288,6 +292,10 @@ class LocalHYMTProvider(BaseProvider):
     _FORCE_GREEDY: bool = False
     _MAX_N_PREDICT_CAP: int = 512
     _MODEL_QUANT_ID: str | None = None  # "gptq-int4" for 7B subclass
+
+    # PPS PATCH-07: provider family — determines which TemplateProfile family is valid.
+    # "observed" → hy_mt_*_observed (1.8B); "7b_gptq" → hy_mt_7b_* (7B-GPTQ).
+    _PROVIDER_FAMILY: str = _TEMPLATE_FAMILY_OBSERVED
 
     def __init__(
         self,
@@ -439,6 +447,14 @@ class LocalHYMTProvider(BaseProvider):
             f"(source={router_result.source}, provider={self.provider_id})"
         )
 
+        # PPS PATCH-07: resolve template_profile_id for this provider family.
+        # Ensures the 1.8B provider uses hy_mt_*_observed and 7B uses hy_mt_7b_*.
+        resolved_template_id, template_warning = resolve_template_profile(
+            policy, self._PROVIDER_FAMILY
+        )
+        if template_warning:
+            router_result.warnings.append(template_warning)
+
         # Step 1: Placeholder protection (MANDATORY)
         protected = _protect_placeholders(request.source_text)
 
@@ -536,6 +552,7 @@ class LocalHYMTProvider(BaseProvider):
                 request=request,
                 policy=policy,
                 router_result=router_result,
+                resolved_template_profile_id=resolved_template_id,
                 protected=protected,
                 glossary_terms=glossary_terms,
                 raw_model_output=raw_translation,
@@ -566,7 +583,7 @@ class LocalHYMTProvider(BaseProvider):
                     "policy_id": policy.policy_id,
                     "policy_hash": policy.policy_hash,
                     "sampling_profile_id": policy.sampling_profile_id,
-                    "template_profile_id": policy.template_profile_id,
+                    "template_profile_id": resolved_template_id,
                     "content_kind": str(policy.content_kind),
                     "terminology_mode": str(policy.terminology_mode),
                     "injected_term_count": injected_term_count,
@@ -586,6 +603,7 @@ class LocalHYMTProvider(BaseProvider):
         request: TranslationRequest,
         policy: PromptPolicy,
         router_result: RouterResult,
+        resolved_template_profile_id: str,
         protected: _ProtectedText,
         glossary_terms: list[tuple[str, str]],
         raw_model_output: str,
@@ -605,6 +623,9 @@ class LocalHYMTProvider(BaseProvider):
             request: Original translation request (source_text, trace_id, etc.).
             policy: Resolved PromptPolicy from TranslationRouter.
             router_result: RouterResult with fallback flags.
+            resolved_template_profile_id: Template profile ID after PATCH-07
+                family resolution (may differ from policy.template_profile_id
+                when there is a provider-family mismatch).
             protected: Placeholder-protected source (_ProtectedText).
             glossary_terms: Injected glossary (src, tgt) pairs.
             raw_model_output: Worker output before postprocessing.
@@ -637,7 +658,7 @@ class LocalHYMTProvider(BaseProvider):
             policy_id=policy.policy_id,
             policy_version=policy.version,
             policy_hash=policy.policy_hash,
-            template_profile_id=policy.template_profile_id,
+            template_profile_id=resolved_template_profile_id,
             sampling_profile_id=policy.sampling_profile_id,
             content_kind=policy.content_kind,
             source_lang=request.source_lang.lower(),
