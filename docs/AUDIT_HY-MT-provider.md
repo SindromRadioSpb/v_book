@@ -1,11 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-08** — PPS PATCH-06 (hashes) завершён; PATCH-01..06 завершены
+> Последнее обновление: **2026-04-08** — PPS PATCH-06 (hashes) завершён; PATCH-01..06 завершены; PATCH-07..11 спланированы
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
 > 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
-> PPS: PATCH-01 ✅ (registry) | PATCH-02 ✅ (PolicyRenderer+sentinel) | PATCH-03 ✅ (TranslationRouter+provider) | PATCH-04 ✅ (sampling profiles) | PATCH-05 ✅ (EffectivePromptTrace+UI) | PATCH-06 ✅ (hashes) | PATCH-07 ⬜ (context wiring)
+> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ⬜ (template routing) | PATCH-08 ⬜ (context wiring) | PATCH-09 ⬜ (Basic UI) | PATCH-10 ⬜ (Advanced UI) | PATCH-11 ⬜ (debug actions)
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -58,7 +58,11 @@
 | PPS PATCH-04: Sampling profiles in worker | `worker_process.py`, `local_hymt_provider.py`, `tests/test_worker_sampling_profiles.py` | ✅ Завершён (42 tests) |
 | PPS PATCH-05: EffectivePromptTrace + Debug UI | `prompt_policy.py`, `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `app/ui/prompt_audit_dialog.py`, `provider_settings_dialog.py`, `tests/test_effective_prompt_trace.py` | ✅ Завершён (75 tests) |
 | PPS PATCH-06: policy_hash (SHA-256) | `prompt_policy.py`, `worker_process.py`, `local_hymt_provider.py`, `local_mt/__init__.py`, `tests/test_pps_hashes.py` | ✅ Завершён (34 tests) |
-| PPS PATCH-07: Context wiring | TBD | ⬜ Pending |
+| PPS PATCH-07: TemplateProfile full routing | `prompt_policy.py` (TranslationRouter), `local_hymt_provider.py`, `local_hymt_7b_gptq_provider.py`, `tests/test_template_routing.py` | ⬜ Pending |
+| PPS PATCH-08: Context block wiring (Layer 4b) | `prompt_policy.py` (PolicyRenderer.render_context_block), `local_hymt_provider.py`, `tests/test_context_wiring.py` | ⬜ Pending |
+| PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py` или новый `prompt_policy_panel.py` | ⬜ Pending |
+| PPS PATCH-10: Advanced Mode UI (policy editor) | новый `advanced_policy_editor.py` | ⬜ Pending |
+| PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py` | ⬜ Pending |
 
 **PPS regression status**: 287 tests (56+28+52+42+75+34) pass, 0 регрессий.
 
@@ -70,7 +74,7 @@
 - Excluded from hash: `name`, `description`, `enabled`, `is_builtin`, `is_custom`, `experimental`, `allow_user_edit_*`, `created_at`, `updated_at`, `policy_hash` (circular)
 - `_HYMT_SYSTEM_PROMPT_HASH`: 12-char SHA-256 prefix в `worker_process.py`, re-exported через `local_mt/__init__.py`
 - `get_model_version()` → `f"{safe_id}_{backend}_{_HYMT_SYSTEM_PROMPT_HASH}"` — MT cache invalidation при смене системного промпта
-- `context_hash` остаётся `None` до PATCH-07
+- `context_hash` остаётся `None` до PATCH-08 (context wiring)
 
 **PATCH-05 архитектурные детали:**
 - `EffectivePromptTrace` dataclass (37 полей, spec §4.9) в `prompt_policy.py`
@@ -81,6 +85,68 @@
 - History cap = 100, FIFO eviction
 - Color-coded layers: role=blue, task=green, output_policy=orange, glossary=purple, context=teal, payload=dark
 - "Prompt Audit" tab добавлен в `ProviderSettingsDialog`
+
+**PATCH-07 план (TemplateProfile full routing — spec §15.6, §10.4):**
+
+Scope: `TranslationRouter` должен автоматически выбирать `template_profile_id` на основе активного провайдера — вместо жёсткой фиксации в `PromptPolicy`. Политика определяет *семантику* шаблона (`hy_mt_standard_observed`), а роутер подменяет его на family-specific вариант при несовместимости.
+
+- Добавить в `TranslationRouter` метод `resolve_template_profile(policy, provider_family) -> str`
+- Mapping: `local_hymt` (1.8B) → `hy_mt_*_observed`; `local_hymt_7b_gptq` → `hy_mt_7b_*`
+- При несовместимости: выбрать ближайший эквивалент, логировать `WARNING` (поля: `policy_id`, `specified`, `selected`)
+- Таблица nearest-equivalents: `hy_mt_standard_observed` ↔ `hy_mt_7b_standard`, `hy_mt_glossary_observed` ↔ `hy_mt_7b_glossary`, `hy_mt_context_observed` ↔ `hy_mt_7b_standard` (нет context-aware 7B), `hy_mt_formatted_observed` ↔ `hy_mt_7b_standard`
+- RouterResult расширить полем `template_profile_id: str` (resolved)
+- Тесты: `tests/test_template_routing.py` — 20+ тестов: корректный выбор для всех 6 политик × 2 провайдера; mismatch warning; backwards-compatibility (policy с already-valid template не переопределяется)
+- DoD: 1.8B провайдер получает `hy_mt_*_observed`, 7B — `hy_mt_7b_*` независимо от политики; WARNING при mismatch; все 287 existing tests проходят
+
+**PATCH-08 план (Context block wiring — Layer 4b):**
+
+Scope: Замкнуть контекстный путь: от `TranslationRequest.options["context_items"]` через `PolicyRenderer.render_context_block()` до `EffectivePromptTrace.context_hash` и `context_applied=True`. Делает профиль `sentence_ru_context` функциональным.
+
+- `TranslationRequest.options["context_items"]: list[str] | None` — входные данные контекста
+- `PolicyRenderer.render_context_block(context_items, policy) -> str | None` — рендер Layer 4b (формат из spec §5: `Context:\n[Previous] {prev}\n[Next] {next}`)
+- `TemplateProfile.use_context_block` управляет включением в `render_user_content()`; при `context_mode=OFF` → `None` независимо от `use_context_block`
+- `LocalHYMTProvider.translate()`: извлечь `context_items` из `request.options`, передать в `render_user_content()` и `_build_trace()`
+- `_build_trace()`: заполнить `rendered_context_block`, `context_hash=compute_glossary_hash(rendered_context_block)` (переиспользуем функцию), `context_applied=True` если контекст добавлен
+- Убрать комментарий `# PATCH-07` у `context_hash=None` — заменить реальным значением
+- `EffectivePromptTrace.context_hash` — полностью populated (не None) когда `context_items` переданы
+- Тесты: `tests/test_context_wiring.py` — 25+ тестов: context_hash populated / None по сценарию; context block в preview; `sentence_ru_context` profile со context_items; context_applied flag; OFF mode → никакого context независимо от входных данных
+- DoD: профиль `sentence_ru_context` (experimental) производит корректный LayEr 4b в prompt preview; context_hash не None когда context_items переданы; all 287+ existing tests pass
+
+**PATCH-09 план (Basic Mode UI — spec §6.1):**
+
+Scope: UI-панель выбора профиля и режимов в `ProviderSettingsDialog` или отдельном `PromptPolicyPanel`. Basic mode — только читатели/переводчики, без редактирования политик.
+
+- Profile chip selector: `QButtonGroup` с кнопками-чипами для каждого не-experimental профиля, сгруппированных по `content_kind`
+- Toggles: "Use glossary" (`terminology_mode`: off ↔ soft_glossary), "Use context" (`context_mode`: off ↔ surrounding_sentences), "Preserve formatting" (`formatting_mode` escalation)
+- Sampling preset selector: `QComboBox` из `SAMPLING_PROFILES`
+- "Effective Prompt Preview" button → read-only modal с Layers 1–5 (без colour-coded layers — это Debug mode)
+- Experimental profiles скрыты в Basic mode (guard на уровне UI)
+- QSettings persistence для выбранного profile_id
+- Тесты: unit-тесты на chip visibility, toggle state → options mapping, experimental guard
+
+**PATCH-10 план (Advanced Mode UI — spec §6.2):**
+
+Scope: Полный редактор политики для power users. Зависит от PATCH-09 (Basic UI как основа).
+
+- Policy dropdown: `QComboBox` из всего реестра (включая experimental), строка формата `{name} [{policy_id}]`
+- Role/Task/Output text editors: `QPlainTextEdit` с кнопкой [↺ Reset] — active only когда `allow_user_edit_*=True`
+- Mode selectors: `QComboBox` для каждого из 4 mode-полей (terminology, context, formatting, placeholder)
+- Sampling profile selector: `QComboBox`
+- [Save as Custom] — создать копию политики с `is_custom=True`, `policy_id` = `{parent_id}_custom_{uuid4()[:8]}`
+- [Export] — сохранить политику как YAML
+- Custom policy persistence: через QSettings или отдельный JSON-файл
+- Тесты: редактирование ограничено `allow_user_edit_*`; Save as Custom создаёт независимую копию; Reset возвращает к built-in значению
+
+**PATCH-11 план (Debug panel actions — spec §6.3):**
+
+Scope: Доработка существующего `PromptAuditDialog` (PATCH-05): добавить [Copy Trace JSON], [Export to File], [Compare with Previous].
+
+- `EffectivePromptTrace.to_dict() -> dict` — сериализуемое repr (datetime → ISO string, enums → str)
+- [Copy Trace JSON] → `QClipboard.setText(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False))`
+- [Export to File] → `QFileDialog.getSaveFileName` → запись JSON-файла
+- [Compare with Previous] — side-by-side diff двух последних трейсов из `PromptAuditPanel.get_history()` (QDialog с `QTextEdit` × 2)
+- Warning при `batch_size > 200` в Debug mode (spec §14/R4)
+- Тесты: `to_dict()` сериализуется без ошибок; все nullable поля обработаны; datetime → ISO
 
 **PATCH-04 архитектурные детали:**
 - `_WORKER_SAMPLING_PROFILES` (3 профиля) в `worker_process.py` — локальная копия, без cross-layer импорта
