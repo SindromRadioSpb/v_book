@@ -10,6 +10,7 @@ Allows users to configure:
 
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -23,8 +24,10 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -175,7 +178,11 @@ class ProviderSettingsDialog(QDialog):
         advanced_tab = self._create_advanced_settings_tab()
         self.tabs.addTab(advanced_tab, "Advanced Settings")
 
-        # Tab 4: Prompt Audit — PPS PATCH-05 debug panel
+        # Tab 4: Prompt Policy — Basic Mode (PPS PATCH-09)
+        pps_tab = self._create_prompt_policy_tab()
+        self.tabs.addTab(pps_tab, "Prompt Policy")
+
+        # Tab 5: Prompt Audit — PPS PATCH-05 debug panel
         audit_tab = self._create_prompt_audit_tab()
         self.tabs.addTab(audit_tab, "Prompt Audit")
 
@@ -340,6 +347,207 @@ class ProviderSettingsDialog(QDialog):
 
         layout.addStretch()
         return widget
+
+    def _create_prompt_policy_tab(self) -> QWidget:
+        """Create Prompt Policy Basic Mode tab (PPS PATCH-09).
+
+        Lets the user pick a non-experimental policy profile (chip selector),
+        toggle glossary / context / formatting, select a sampling preset, and
+        preview the rendered effective prompt.  State is persisted to QSettings
+        under the ``pps/basic/`` namespace.
+        """
+        from app.infra.translators.prompt_policy import SAMPLING_PROFILES, list_profiles
+
+        widget = QWidget()
+        outer = QVBoxLayout(widget)
+
+        title = QLabel("<b>Prompt Policy — Basic Mode</b>")
+        title.setTextFormat(Qt.TextFormat.RichText)
+        outer.addWidget(title)
+
+        info = QLabel(
+            "Select a translation profile and adjust options. "
+            "Experimental profiles are not shown here."
+        )
+        info.setWordWrap(True)
+        outer.addWidget(info)
+
+        # ── Profile chip selector ─────────────────────────────────────────
+        profile_group = QGroupBox("Translation Profile")
+        profile_layout = QVBoxLayout(profile_group)
+
+        self._pps_btn_group = QButtonGroup(widget)
+        self._pps_btn_group.setExclusive(True)
+
+        for policy in list_profiles(include_experimental=False):
+            btn = QPushButton(policy.name)
+            btn.setCheckable(True)
+            btn.setToolTip(policy.description)
+            btn.setProperty("policy_id", policy.policy_id)
+            self._pps_btn_group.addButton(btn)
+            profile_layout.addWidget(btn)
+
+        outer.addWidget(profile_group)
+
+        # ── Option toggles ────────────────────────────────────────────────
+        options_group = QGroupBox("Options")
+        options_layout = QVBoxLayout(options_group)
+
+        self._pps_use_glossary_cb = QCheckBox("Use glossary (inject project terminology)")
+        self._pps_use_glossary_cb.setToolTip(
+            "When checked: terminology_mode = soft_glossary. "
+            "When unchecked: terminology_mode = off."
+        )
+        self._pps_use_context_cb = QCheckBox("Use context (surrounding sentences)")
+        self._pps_use_context_cb.setToolTip(
+            "When checked: context_mode = surrounding_sentences (requires context policy). "
+            "When unchecked: context_mode = off."
+        )
+        self._pps_preserve_fmt_cb = QCheckBox("Preserve formatting (placeholder protection)")
+        self._pps_preserve_fmt_cb.setToolTip(
+            "When checked: formatting_mode = preserve_placeholders. "
+            "When unchecked: formatting_mode = plain_text."
+        )
+
+        options_layout.addWidget(self._pps_use_glossary_cb)
+        options_layout.addWidget(self._pps_use_context_cb)
+        options_layout.addWidget(self._pps_preserve_fmt_cb)
+        outer.addWidget(options_group)
+
+        # ── Sampling preset ───────────────────────────────────────────────
+        sampling_group = QGroupBox("Sampling Preset")
+        sampling_layout = QHBoxLayout(sampling_group)
+
+        self._pps_sampling_combo = QComboBox()
+        for sp in SAMPLING_PROFILES.values():
+            self._pps_sampling_combo.addItem(sp.name, userData=sp.sampling_profile_id)
+
+        sampling_layout.addWidget(QLabel("Preset:"))
+        sampling_layout.addWidget(self._pps_sampling_combo)
+        sampling_layout.addStretch()
+        outer.addWidget(sampling_group)
+
+        # ── Effective Prompt Preview ──────────────────────────────────────
+        preview_layout = QHBoxLayout()
+        preview_btn = QPushButton("Effective Prompt Preview…")
+        preview_btn.setToolTip(
+            "Preview the rendered prompt for the selected profile (Layers 1–5)"
+        )
+        preview_btn.clicked.connect(self._show_effective_prompt_preview)
+        preview_layout.addWidget(preview_btn)
+        preview_layout.addStretch()
+        outer.addLayout(preview_layout)
+
+        outer.addStretch()
+        return widget
+
+    def get_pps_options(self) -> dict:
+        """Return current Prompt Policy Basic Mode UI state as a dict.
+
+        Keys match ``request.options`` conventions consumed by the provider.
+
+        Returns:
+            Dict with keys: policy_id, use_glossary, use_context,
+            preserve_formatting, sampling_profile_id.
+        """
+        checked = self._pps_btn_group.checkedButton()
+        policy_id = checked.property("policy_id") if checked else "sentence_ru"
+        return {
+            "policy_id": policy_id,
+            "use_glossary": self._pps_use_glossary_cb.isChecked(),
+            "use_context": self._pps_use_context_cb.isChecked(),
+            "preserve_formatting": self._pps_preserve_fmt_cb.isChecked(),
+            "sampling_profile_id": self._pps_sampling_combo.currentData(),
+        }
+
+    def _load_pps_settings(self) -> None:
+        """Load PPS Basic Mode settings from QSettings."""
+        policy_id = self.settings.value("pps/basic/policy_id", "sentence_ru", type=str)
+        for btn in self._pps_btn_group.buttons():
+            if btn.property("policy_id") == policy_id:
+                btn.setChecked(True)
+                break
+        else:
+            # Fallback: check first button if saved id not found
+            buttons = self._pps_btn_group.buttons()
+            if buttons:
+                buttons[0].setChecked(True)
+
+        self._pps_use_glossary_cb.setChecked(
+            self.settings.value("pps/basic/use_glossary", True, type=bool)
+        )
+        self._pps_use_context_cb.setChecked(
+            self.settings.value("pps/basic/use_context", False, type=bool)
+        )
+        self._pps_preserve_fmt_cb.setChecked(
+            self.settings.value("pps/basic/preserve_formatting", True, type=bool)
+        )
+
+        sp_id = self.settings.value(
+            "pps/basic/sampling_profile_id", "hy_mt_precise_sentence", type=str
+        )
+        idx = self._pps_sampling_combo.findData(sp_id)
+        if idx >= 0:
+            self._pps_sampling_combo.setCurrentIndex(idx)
+
+    def _save_pps_settings(self) -> None:
+        """Save PPS Basic Mode settings to QSettings."""
+        opts = self.get_pps_options()
+        self.settings.setValue("pps/basic/policy_id", opts["policy_id"])
+        self.settings.setValue("pps/basic/use_glossary", opts["use_glossary"])
+        self.settings.setValue("pps/basic/use_context", opts["use_context"])
+        self.settings.setValue("pps/basic/preserve_formatting", opts["preserve_formatting"])
+        self.settings.setValue("pps/basic/sampling_profile_id", opts["sampling_profile_id"])
+
+    def _show_effective_prompt_preview(self) -> None:
+        """Show read-only Effective Prompt Preview dialog for selected policy."""
+        from app.infra.translators.prompt_policy import PROMPT_POLICIES, PolicyRenderer
+
+        checked = self._pps_btn_group.checkedButton()
+        if not checked:
+            QMessageBox.information(self, "No Profile", "Please select a translation profile.")
+            return
+
+        policy_id = checked.property("policy_id")
+        policy = PROMPT_POLICIES.get(policy_id)
+        if not policy:
+            return
+
+        renderer = PolicyRenderer()
+        sample_text = "שלום עולם"  # sample Hebrew source
+
+        glossary_terms = None
+        if self._pps_use_glossary_cb.isChecked():
+            glossary_terms = [("שלום", "привет"), ("עולם", "мир")]
+
+        context_items = None
+        if self._pps_use_context_cb.isChecked():
+            context_items = ["Предыдущее предложение.", "Следующее предложение."]
+
+        preview = renderer.render_effective_preview(
+            policy=policy,
+            source_text=sample_text,
+            glossary_terms=glossary_terms,
+            context_items=context_items,
+        )
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Effective Prompt Preview — {policy.name}")
+        dlg.setMinimumWidth(540)
+        dlg.setMinimumHeight(420)
+        vlay = QVBoxLayout(dlg)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(preview)
+        text_edit.setFontFamily("Courier New")
+        vlay.addWidget(text_edit)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        vlay.addWidget(close_btn)
+
+        dlg.exec()
 
     def _create_prompt_audit_tab(self) -> QWidget:
         """Create the Prompt Audit tab (PPS PATCH-05 Debug UI).
@@ -763,6 +971,9 @@ class ProviderSettingsDialog(QDialog):
         # Load advanced settings for google_cloud_translate
         self._load_gcp_advanced_settings()
 
+        # Load PPS Basic Mode settings
+        self._load_pps_settings()
+
     def _load_gcp_advanced_settings(self):
         """Load Google Cloud Translate advanced settings."""
         config = self.config_manager.load_config("google_cloud_translate")
@@ -836,6 +1047,9 @@ class ProviderSettingsDialog(QDialog):
 
         # Save advanced settings for google_cloud_translate
         self._save_gcp_advanced_settings()
+
+        # Save PPS Basic Mode settings
+        self._save_pps_settings()
 
         self.settings.sync()
 
