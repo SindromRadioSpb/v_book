@@ -196,9 +196,13 @@ def clone_policy_as_custom(source: PromptPolicy, **overrides) -> PromptPolicy:
             "is_custom": True,
             "is_builtin": False,
             # PATCH-10c: custom policies are explicitly user-selected — not experimental.
-            # This ensures they pass the TranslationRouter experimental guard
-            # without requiring trace_id (debug mode).
             "experimental": False,
+            # Custom copies are always fully editable regardless of source's allow_user_edit_*
+            # flags. Built-ins lock those flags to False to protect immutability; custom copies
+            # have no such restriction — the user created them to edit.
+            "allow_user_edit_role": True,
+            "allow_user_edit_task": True,
+            "allow_user_edit_output_policy": True,
         }
     )
     base.update({k: (str(v) if hasattr(v, "value") else v) for k, v in overrides.items()})
@@ -479,21 +483,19 @@ class AdvancedPolicyEditorWidget(QWidget):
         if base is None:
             return
 
-        # Gather overrides from editors (only for editable fields)
-        overrides: dict = {}
-        if base.allow_user_edit_role:
-            overrides["role_instruction"] = self._role_edit.toPlainText().strip()
-        if base.allow_user_edit_task:
-            overrides["task_instruction"] = self._task_edit.toPlainText().strip()
-        if base.allow_user_edit_output_policy:
-            overrides["output_policy"] = self._output_edit.toPlainText().strip()
-
-        # Mode overrides (always applied from selectors)
-        overrides["terminology_mode"] = self._terminology_combo.currentData()
-        overrides["context_mode"] = self._context_combo.currentData()
-        overrides["formatting_mode"] = self._formatting_combo.currentData()
-        overrides["placeholder_mode"] = self._placeholder_combo.currentData()
-        overrides["sampling_profile_id"] = self._sampling_combo.currentData()
+        # Always capture all text editor content as overrides for the new custom copy.
+        # For read-only editors (built-in source), the text matches the base policy — no
+        # semantic change.  For editable editors (custom source), this captures user edits.
+        overrides: dict = {
+            "role_instruction": self._role_edit.toPlainText().strip(),
+            "task_instruction": self._task_edit.toPlainText().strip(),
+            "output_policy": self._output_edit.toPlainText().strip(),
+            "terminology_mode": self._terminology_combo.currentData(),
+            "context_mode": self._context_combo.currentData(),
+            "formatting_mode": self._formatting_combo.currentData(),
+            "placeholder_mode": self._placeholder_combo.currentData(),
+            "sampling_profile_id": self._sampling_combo.currentData(),
+        }
 
         custom = clone_policy_as_custom(base, **overrides)
         if custom is None:
