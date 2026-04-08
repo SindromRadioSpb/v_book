@@ -1,11 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-08** — PPS PATCH-06 (hashes) завершён; PATCH-01..06 завершены; PATCH-07..11 спланированы
+> Последнее обновление: **2026-04-08** — PPS PATCH-10 (Advanced Mode UI) завершён; PATCH-01..10 завершены; PATCH-11 в работе
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
 > 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
-> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ⬜ (template routing) | PATCH-08 ⬜ (context wiring) | PATCH-09 ⬜ (Basic UI) | PATCH-10 ⬜ (Advanced UI) | PATCH-11 ⬜ (debug actions)
+> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ✅ (template routing) | PATCH-08 ✅ (context wiring) | PATCH-09 ✅ (Basic UI) | PATCH-09b ✅ (wiring) | PATCH-10 ✅ (Advanced UI) | PATCH-11 ⬜ (debug actions)
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -62,10 +62,10 @@
 | PPS PATCH-08: Context block wiring (Layer 4b) | `prompt_policy.py`, `local_hymt_provider.py`, `tests/test_context_wiring.py` | ✅ Завершён (25 tests) |
 | PPS PATCH-09: Basic Mode UI | `app/ui/provider_settings_dialog.py`, `tests/test_pps_basic_mode_ui.py` | ✅ Завершён (28 tests) |
 | PPS PATCH-09b: Service Layer Wiring | `local_hymt_provider.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_09b_wiring.py` | ✅ Завершён (16 tests) |
-| PPS PATCH-10: Advanced Mode UI (policy editor) | новый `advanced_policy_editor.py` | ⬜ Pending |
+| PPS PATCH-10: Advanced Mode UI (policy editor) | `app/ui/advanced_policy_editor.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_advanced_mode_ui.py` | ✅ Завершён (39 tests) |
 | PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py` | ⬜ Pending |
 
-**PPS regression status**: 359 tests (56+28+52+42+75+34+28+25+28+16) pass, 0 регрессий.
+**PPS regression status**: 398 tests (56+28+52+42+75+34+28+25+28+16+39) pass, 0 регрессий.
 
 **PATCH-06 архитектурные детали:**
 - `_POLICY_HASH_FIELDS` (19 семантических полей) + `compute_policy_hash(policy)` — SHA-256 канонического JSON с `sort_keys=True`
@@ -125,9 +125,25 @@ Scope: UI-панель выбора профиля и режимов в `Provide
 - QSettings persistence для выбранного profile_id
 - Тесты: unit-тесты на chip visibility, toggle state → options mapping, experimental guard
 
+**PATCH-10 архитектурные детали (Advanced Mode UI — spec §6.2):**
+
+Реализован: `app/ui/advanced_policy_editor.py` (новый файл) + интеграция в `provider_settings_dialog.py`.
+
+- `AdvancedPolicyEditorWidget(QWidget)` — встраиваемый виджет, добавлен в `ProviderSettingsDialog` как Tab 5 "Policy Editor"
+- Policy dropdown: полный `PROMPT_POLICIES` реестр + custom policies из QSettings, метка `"{name} [exp] [{policy_id}]"` для experimental
+- Role/Task/Output редакторы: `QPlainTextEdit`, `setReadOnly(not policy.allow_user_edit_*)` — только `sentence_ru_context` имеет `allow_user_edit_task=True` в built-ins
+- [↺ Reset] кнопки: enabled только когда редактор активен; восстанавливает `_base_policy` значение
+- Mode selectors: `_make_enum_combo()` для `TerminologyMode`, `ContextMode`, `FormattingMode`, `PlaceholderMode`
+- [Save as Custom]: `clone_policy_as_custom(source, **overrides)` — `policy_id = f"{source.policy_id}_custom_{uuid4().hex[:8]}"`, `is_custom=True`, `is_builtin=False`; сохраняется в QSettings `pps/custom_policies` (JSON array)
+- [Export YAML]: `QFileDialog` + `_serialise_for_export(d, path)` — `yaml.dump()` для `.yaml`, `json.dumps(indent=2)` fallback
+- Custom policy persistence: `pps/custom_policies` QSettings key; `dict_to_policy()` → `None` на ошибку (corrupt entries silently skipped)
+- `load_pps_request_options(settings)`: единая точка dispatch — если `pps/advanced/active=True` → advanced options, иначе → `load_pps_basic_options()`; используется во всех 3 wiring-точках (workers.py, batch_mt_translate_service.py, translation_service.py)
+- Runtime integration: `terminology_mode` → `use_glossary` (off → False, остальное → True); `sampling_profile_id` → напрямую в `WorkerRequest`
+- 39 тестов: dropdown coverage, allow_user_edit_* guards, Reset, Save as Custom (независимость копии, id-формат, persistence), serialise/deserialise round-trip, export, load_pps_request_options routing
+
 **PATCH-10 план (Advanced Mode UI — spec §6.2):**
 
-Scope: Полный редактор политики для power users. Зависит от PATCH-09 (Basic UI как основа).
+Scope: Полный редактор политики для power users. Зависит от PATCH-09 (Basic UI как основа). ✅ Реализован.
 
 - Policy dropdown: `QComboBox` из всего реестра (включая experimental), строка формата `{name} [{policy_id}]`
 - Role/Task/Output text editors: `QPlainTextEdit` с кнопкой [↺ Reset] — active only когда `allow_user_edit_*=True`

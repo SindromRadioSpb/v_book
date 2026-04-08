@@ -340,13 +340,14 @@ class BatchMTTranslateService:
                     )
 
                 # Call provider directly
-                # PATCH-09b: inject PPS Basic Mode options for local HY-MT providers.
+                # PATCH-09b/10: inject PPS options for local HY-MT providers.
+                # load_pps_request_options() respects Advanced Mode override (PATCH-10).
                 _pps_opts: dict = {}
                 if force_provider_id.startswith("local_hymt"):
                     try:
-                        from app.ui.provider_settings_dialog import load_pps_basic_options
+                        from app.ui.provider_settings_dialog import load_pps_request_options
 
-                        _pps_opts = load_pps_basic_options()
+                        _pps_opts = load_pps_request_options()
                     except Exception:
                         pass  # QSettings not available (e.g., headless test env)
 

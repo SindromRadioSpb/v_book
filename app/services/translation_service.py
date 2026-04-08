@@ -774,14 +774,14 @@ class TranslationService:
             f"hash={glossary_hash[:8]}..., truncated={canonical_glossary.truncated}"
         )
 
-        # PATCH-09b: inject PPS Basic Mode options when local HY-MT is in chain.
-        # Non-HY-MT providers silently ignore unknown keys in options.
+        # PATCH-09b/10: inject PPS options when local HY-MT is in chain.
+        # load_pps_request_options() respects Advanced Mode override (PATCH-10).
         _pps_opts: dict = {}
         if any(pid.startswith("local_hymt") for pid in chain):
             try:
-                from app.ui.provider_settings_dialog import load_pps_basic_options
+                from app.ui.provider_settings_dialog import load_pps_request_options
 
-                _pps_opts = load_pps_basic_options()
+                _pps_opts = load_pps_request_options()
             except Exception:
                 pass  # QSettings not available in headless / test environments
 

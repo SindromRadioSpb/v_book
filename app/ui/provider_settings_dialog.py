@@ -182,7 +182,11 @@ class ProviderSettingsDialog(QDialog):
         pps_tab = self._create_prompt_policy_tab()
         self.tabs.addTab(pps_tab, "Prompt Policy")
 
-        # Tab 5: Prompt Audit — PPS PATCH-05 debug panel
+        # Tab 5: Policy Editor — Advanced Mode (PPS PATCH-10)
+        editor_tab = self._create_policy_editor_tab()
+        self.tabs.addTab(editor_tab, "Policy Editor")
+
+        # Tab 6: Prompt Audit — PPS PATCH-05 debug panel
         audit_tab = self._create_prompt_audit_tab()
         self.tabs.addTab(audit_tab, "Prompt Audit")
 
@@ -548,6 +552,23 @@ class ProviderSettingsDialog(QDialog):
         vlay.addWidget(close_btn)
 
         dlg.exec()
+
+    def _create_policy_editor_tab(self) -> QWidget:
+        """Create Policy Editor tab — Advanced Mode (PPS PATCH-10).
+
+        Hosts ``AdvancedPolicyEditorWidget`` which provides full policy editing:
+        role/task/output editors, mode selectors, Save as Custom, Export.
+        """
+        from app.ui.advanced_policy_editor import AdvancedPolicyEditorWidget
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._advanced_editor = AdvancedPolicyEditorWidget(parent=widget, settings=self.settings)
+        layout.addWidget(self._advanced_editor)
+
+        return widget
 
     def _create_prompt_audit_tab(self) -> QWidget:
         """Create the Prompt Audit tab (PPS PATCH-05 Debug UI).
@@ -974,6 +995,9 @@ class ProviderSettingsDialog(QDialog):
         # Load PPS Basic Mode settings
         self._load_pps_settings()
 
+        # Load Advanced Mode settings (PPS PATCH-10)
+        self._advanced_editor.load_settings()
+
     def _load_gcp_advanced_settings(self):
         """Load Google Cloud Translate advanced settings."""
         config = self.config_manager.load_config("google_cloud_translate")
@@ -1051,6 +1075,9 @@ class ProviderSettingsDialog(QDialog):
         # Save PPS Basic Mode settings
         self._save_pps_settings()
 
+        # Save Advanced Mode settings (PPS PATCH-10)
+        self._advanced_editor.save_settings()
+
         self.settings.sync()
 
     def _save_gcp_advanced_settings(self):
@@ -1120,6 +1147,35 @@ class ProviderSettingsDialog(QDialog):
         """Save settings and close dialog."""
         self._save_settings()
         super().accept()
+
+
+def load_pps_request_options(settings: QSettings | None = None) -> dict:
+    """Return effective TranslationRequest options, respecting Advanced Mode override.
+
+    When ``pps/advanced/active`` is True, returns Advanced Mode options (selected
+    policy + terminology + sampling).  Otherwise delegates to
+    :func:`load_pps_basic_options`.
+
+    This is the single authoritative entry point called by workers,
+    batch translate service, and translation service (PATCH-09b wiring).
+
+    Args:
+        settings: Optional QSettings instance.  Defaults to ``QSettings()``.
+
+    Returns:
+        Dict with keys: ``prompt_policy_id``, ``use_glossary``, ``sampling_profile_id``.
+    """
+    s: QSettings = settings if settings is not None else QSettings()
+    if s.value("pps/advanced/active", False, type=bool):
+        terminology_str: str = s.value("pps/advanced/terminology_mode", "soft_glossary", type=str)
+        return {
+            "prompt_policy_id": s.value("pps/advanced/policy_id", "sentence_ru", type=str),
+            "use_glossary": terminology_str != "off",
+            "sampling_profile_id": s.value(
+                "pps/advanced/sampling_profile_id", "hy_mt_precise_sentence", type=str
+            ),
+        }
+    return load_pps_basic_options(settings=s)
 
 
 def show_provider_settings(parent=None):
