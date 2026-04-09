@@ -300,3 +300,149 @@ def test_cancel_delete_leaves_everything_intact(editor, qtbot, settings):
     raw = settings.value("pps/custom_policies", "[]", type=str)
     saved_ids = [d.get("policy_id") for d in json.loads(raw)]
     assert custom_id in saved_ids
+
+
+# ---------------------------------------------------------------------------
+# Save button — in-place update of existing custom policy
+# ---------------------------------------------------------------------------
+
+
+def test_save_button_disabled_for_builtin(editor):
+    """Save button is disabled when a built-in policy is selected."""
+    assert not editor._save_btn.isEnabled()
+
+
+def test_save_button_enabled_for_custom(editor, qtbot):
+    """Save button is enabled when a custom policy is selected."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+    assert editor._save_btn.isEnabled()
+
+
+def test_save_button_disabled_after_switching_to_builtin(editor, qtbot):
+    """Save button becomes disabled when user switches from custom to built-in."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+    assert editor._save_btn.isEnabled()
+
+    editor._policy_combo.setCurrentIndex(0)
+    editor._on_policy_selected(0)
+    assert not editor._save_btn.isEnabled()
+
+
+def test_save_updates_role_instruction(editor, settings, qtbot):
+    """Saving a custom policy persists the edited role_instruction to QSettings."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+
+    new_role = "Updated role instruction for testing"
+    editor._role_edit.setPlainText(new_role)
+
+    with patch(
+        "app.ui.advanced_policy_editor.QMessageBox.information",
+    ):
+        editor._on_save_custom()
+
+    raw = settings.value("pps/custom_policies", "[]", type=str)
+    saved = json.loads(raw)
+    match = next((d for d in saved if d["policy_id"] == custom_id), None)
+    assert match is not None
+    assert match["role_instruction"] == new_role
+
+
+def test_save_updates_task_instruction(editor, settings, qtbot):
+    """Saving a custom policy persists the edited task_instruction to QSettings."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+
+    new_task = "Updated task instruction for testing"
+    editor._task_edit.setPlainText(new_task)
+
+    with patch("app.ui.advanced_policy_editor.QMessageBox.information"):
+        editor._on_save_custom()
+
+    raw = settings.value("pps/custom_policies", "[]", type=str)
+    saved = json.loads(raw)
+    match = next((d for d in saved if d["policy_id"] == custom_id), None)
+    assert match is not None
+    assert match["task_instruction"] == new_task
+
+
+def test_save_updates_output_policy(editor, settings, qtbot):
+    """Saving a custom policy persists the edited output_policy to QSettings."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+
+    new_output = "Updated output policy for testing"
+    editor._output_edit.setPlainText(new_output)
+
+    with patch("app.ui.advanced_policy_editor.QMessageBox.information"):
+        editor._on_save_custom()
+
+    raw = settings.value("pps/custom_policies", "[]", type=str)
+    saved = json.loads(raw)
+    match = next((d for d in saved if d["policy_id"] == custom_id), None)
+    assert match is not None
+    assert match["output_policy"] == new_output
+
+
+def test_save_preserves_policy_id(editor, settings, qtbot):
+    """Saving edits does NOT create a new policy — the policy_id remains unchanged."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+    count_before = len(editor._custom_policies)
+
+    editor._role_edit.setPlainText("Changed role")
+    with patch("app.ui.advanced_policy_editor.QMessageBox.information"):
+        editor._on_save_custom()
+
+    assert len(editor._custom_policies) == count_before
+    ids = [p.policy_id for p in editor._custom_policies]
+    assert custom_id in ids
+
+
+def test_save_updates_runtime_registry(editor, settings, qtbot):
+    """After save, the runtime registry reflects the updated policy."""
+    from app.infra.translators.prompt_policy import get_policy, register_custom_policy
+
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+    # Pre-register so get_policy() can resolve it
+    register_custom_policy(editor._custom_policies[-1])
+
+    editor._role_edit.setPlainText("Runtime updated role")
+    with patch("app.ui.advanced_policy_editor.QMessageBox.information"):
+        editor._on_save_custom()
+
+    updated = get_policy(custom_id)
+    assert updated is not None
+    assert updated.role_instruction == "Runtime updated role"
+
+
+def test_save_guard_builtin_noop(editor):
+    """_on_save_custom() with a built-in selected is a no-op (no QMessageBox)."""
+    editor._policy_combo.setCurrentIndex(0)
+    editor._on_policy_selected(0)
+    count_before = editor._policy_combo.count()
+
+    with patch("app.ui.advanced_policy_editor.QMessageBox") as mock_msgbox:
+        editor._on_save_custom()
+        mock_msgbox.critical.assert_not_called()
+        mock_msgbox.information.assert_not_called()
+
+    assert editor._policy_combo.count() == count_before
+
+
+def test_save_updates_base_policy(editor, settings, qtbot):
+    """After save, _base_policy reflects the updated values (Reset restores saved text)."""
+    custom_id = _add_custom_to_widget(editor)
+    _select_policy(editor, custom_id)
+
+    new_role = "Saved base role"
+    editor._role_edit.setPlainText(new_role)
+    with patch("app.ui.advanced_policy_editor.QMessageBox.information"):
+        editor._on_save_custom()
+
+    # _base_policy should now carry the updated role_instruction
+    assert editor._base_policy is not None
+    assert editor._base_policy.role_instruction == new_role

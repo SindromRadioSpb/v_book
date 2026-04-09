@@ -282,11 +282,14 @@ class AdvancedPolicyEditorWidget(QWidget):
         self._build_policy_selector()
         self._build_text_editors()
         self._build_mode_selectors()
-        self._build_action_buttons()
         self._content_layout.addStretch()
 
         scroll.setWidget(content)
         outer.addWidget(scroll)
+
+        # ── Action buttons — outside scroll area, always visible ──────
+        self._build_action_buttons()
+        outer.addLayout(self._action_btn_row)
 
         # Populate dropdown now (requires all widgets to exist)
         self._populate_policy_combo()
@@ -366,8 +369,22 @@ class AdvancedPolicyEditorWidget(QWidget):
         self._content_layout.addWidget(group)
 
     def _build_action_buttons(self) -> None:
-        """Build [Save as Custom], [Export] and [Delete] action buttons."""
+        """Build [Save], [Save as Custom], [Export] and [Delete] action buttons.
+
+        Stores the resulting layout in ``self._action_btn_row`` so that
+        ``_init_ui`` can attach it **outside** the scroll area, keeping the
+        buttons permanently visible regardless of scroll position.
+        """
         btn_row = QHBoxLayout()
+
+        self._save_btn = QPushButton("Save")
+        self._save_btn.setToolTip(
+            "Save changes to the currently selected custom policy.\n"
+            "Only available for custom policies (not built-ins)."
+        )
+        self._save_btn.setEnabled(False)  # enabled only when a custom policy is selected
+        self._save_btn.clicked.connect(self._on_save_custom)
+        btn_row.addWidget(self._save_btn)
 
         self._save_custom_btn = QPushButton("Save as Custom")
         self._save_custom_btn.setToolTip(
@@ -392,7 +409,8 @@ class AdvancedPolicyEditorWidget(QWidget):
         btn_row.addWidget(self._delete_btn)
 
         btn_row.addStretch()
-        self._content_layout.addLayout(btn_row)
+        # Store layout reference — _init_ui adds it to the outer layout (outside scroll).
+        self._action_btn_row = btn_row
 
     @staticmethod
     def _make_enum_combo(enum_cls) -> QComboBox:
@@ -456,6 +474,7 @@ class AdvancedPolicyEditorWidget(QWidget):
         self._base_policy = policy
         self._load_policy_into_editors(policy)
         self._update_delete_button()
+        self._update_save_button()
 
     def _load_policy_into_editors(self, policy: PromptPolicy) -> None:
         """Populate all editor widgets from a PromptPolicy instance.
@@ -557,6 +576,70 @@ class AdvancedPolicyEditorWidget(QWidget):
         if self._policy_combo.count() > 0:
             self._policy_combo.setCurrentIndex(0)
             self._on_policy_selected(0)
+
+    # ------------------------------------------------------------------
+    # Save changes to existing custom policy
+    # ------------------------------------------------------------------
+
+    def _update_save_button(self) -> None:
+        """Enable the Save button only when the selected policy is custom."""
+        self._save_btn.setEnabled(self._is_current_policy_custom())
+
+    def _on_save_custom(self) -> None:
+        """Save editor changes back to the currently selected custom policy in-place.
+
+        Updates:
+        - ``self._custom_policies`` (in-memory list)
+        - QSettings ``pps/custom_policies``
+        - The runtime ``_CUSTOM_POLICIES`` registry (re-registers updated policy)
+
+        Built-in policies cannot be saved this way; the method returns immediately
+        if the current selection is not a custom policy.
+        """
+        policy_id: str | None = self._policy_combo.currentData()
+        existing = self._resolve_policy(policy_id)
+        if existing is None or not existing.is_custom:
+            return  # guard: only custom policies may be updated in-place
+
+        # Build updated dict from current editor state
+        d = policy_to_dict(existing)
+        d["role_instruction"] = self._role_edit.toPlainText().strip()
+        d["task_instruction"] = self._task_edit.toPlainText().strip()
+        d["output_policy"] = self._output_edit.toPlainText().strip()
+        d["terminology_mode"] = self._terminology_combo.currentData()
+        d["context_mode"] = self._context_combo.currentData()
+        d["formatting_mode"] = self._formatting_combo.currentData()
+        d["placeholder_mode"] = self._placeholder_combo.currentData()
+        d["sampling_profile_id"] = self._sampling_combo.currentData()
+
+        updated = dict_to_policy(d)
+        if updated is None:
+            QMessageBox.critical(self, "Error", "Failed to update custom policy.")
+            return
+
+        # Replace in in-memory list
+        self._custom_policies = [
+            updated if p.policy_id == policy_id else p for p in self._custom_policies
+        ]
+        self._save_custom_policies_to_settings()
+
+        # Re-register in runtime registry
+        from app.infra.translators.prompt_policy import (
+            register_custom_policy,
+            unregister_custom_policy,
+        )
+
+        unregister_custom_policy(policy_id)  # type: ignore[arg-type]
+        register_custom_policy(updated)
+
+        # Sync base policy so Reset buttons reflect the new saved state
+        self._base_policy = updated
+
+        QMessageBox.information(
+            self,
+            "Saved",
+            f"Custom policy updated:\n{updated.name}\nID: {updated.policy_id}",
+        )
 
     def _on_save_as_custom(self) -> None:
         """Create an independent custom policy from the current editor state."""
