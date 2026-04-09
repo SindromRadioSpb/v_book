@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.domain.normalization.normalizer import normalize_for_tm
 from app.infra.sa_models import Lemma, TermCluster, TMEntry
 from app.services.tm_global_service import TMGlobalService
-from app.services.translation_service import TranslationService
+from app.services.translation_service import TranslationService, _push_trace_if_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -357,9 +357,11 @@ class BatchMTTranslateService:
                     target_lang=item.tgt_lang,
                     glossary=None,  # TODO: Add glossary support
                     options=_pps_opts,
+                    trace_id=trace_id,  # PATCH-12: required for trace recording
                 )
 
                 mt_result = provider.translate(mt_request)
+                _push_trace_if_enabled(mt_result, _pps_opts)  # PATCH-12
 
                 if mt_result.error_kind:
                     logger.error(

@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -3177,7 +3178,7 @@ class UserDictTranslateWorker(QThread):
         return session.execute(stmt).scalar_one_or_none()
 
     def _translate_item(self, session, item):
-        from app.services.translation_service import TranslationService
+        from app.services.translation_service import TranslationService, _push_trace_if_enabled
 
         if self.provider_mode.startswith("force:"):
             force_provider_id = self.provider_mode.split(":", 1)[1]
@@ -3202,8 +3203,10 @@ class UserDictTranslateWorker(QThread):
                 target_lang=item.tgt_lang,
                 glossary=None,
                 options=_pps_opts,
+                trace_id=str(uuid.uuid4()),  # PATCH-12: required for trace recording
             )
             mt_result = provider.translate(mt_request)
+            _push_trace_if_enabled(mt_result, _pps_opts)  # PATCH-12
             if mt_result.error_kind:
                 raise ValueError(mt_result.error_message or "Provider translation failed")
 

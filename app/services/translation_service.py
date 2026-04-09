@@ -37,6 +37,32 @@ from app.infra.translators.providers_registry import ProvidersRegistry
 logger = logging.getLogger(__name__)
 
 
+def _push_trace_if_enabled(result: "ProviderTranslationResult", pps_opts: dict) -> None:
+    """Push EffectivePromptTrace to PromptAuditPanel when trace recording is on.
+
+    Called after any successful provider.translate() call. No-ops when:
+    - ``pps_opts["trace_enabled"]`` is falsy
+    - result carries no trace in meta
+    - UI is not available (headless / test environments)
+
+    Args:
+        result: Provider TranslationResult with optional ``meta["prompt_policy"]["trace"]``.
+        pps_opts: Options dict from load_pps_request_options(); must contain
+            ``"trace_enabled"`` key if tracing is desired.
+    """
+    if not pps_opts.get("trace_enabled"):
+        return
+    trace = (result.meta or {}).get("prompt_policy", {}).get("trace")
+    if trace is None:
+        return
+    try:
+        from app.ui.prompt_audit_dialog import PromptAuditPanel
+
+        PromptAuditPanel.add_trace(trace)
+    except Exception:
+        pass  # UI not available in headless / test environments
+
+
 @dataclass
 class TranslationResult:
     """Result of translation lookup with explainability."""
@@ -992,15 +1018,7 @@ class TranslationService:
                 self._log_translation_completed(trace_id, index, total_latency_ms, provider_id)
                 # PATCH-12: push EffectivePromptTrace to Prompt Audit panel when
                 # trace recording is enabled in Advanced Mode (pps/advanced/trace_enabled).
-                if _pps_opts.get("trace_enabled"):
-                    _trace = (result.meta or {}).get("prompt_policy", {}).get("trace")
-                    if _trace is not None:
-                        try:
-                            from app.ui.prompt_audit_dialog import PromptAuditPanel
-
-                            PromptAuditPanel.add_trace(_trace)
-                        except Exception:
-                            pass  # UI not available in headless / test environments
+                _push_trace_if_enabled(result, _pps_opts)
                 return self._map_provider_result_to_service(result)
 
             # Store last result for error reporting
