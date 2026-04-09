@@ -1239,6 +1239,9 @@ def load_pps_request_options(settings: QSettings | None = None) -> dict:
             # Allow experimental policies (and custom copies thereof) through
             # the router's experimental guard without requiring trace_id.
             "allow_experimental": True,
+            # PATCH-12: trace recording controlled by user checkbox in Policy Editor.
+            # When True, translation_service pushes EffectivePromptTrace to PromptAuditPanel.
+            "trace_enabled": s.value("pps/advanced/trace_enabled", False, type=bool),
         }
     return load_pps_basic_options(settings=s)
 

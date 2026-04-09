@@ -66,6 +66,7 @@ _ADV_ACTIVE_KEY = "pps/advanced/active"
 _ADV_POLICY_KEY = "pps/advanced/policy_id"
 _ADV_TERMINOLOGY_KEY = "pps/advanced/terminology_mode"
 _ADV_SAMPLING_KEY = "pps/advanced/sampling_profile_id"
+_ADV_TRACE_KEY = "pps/advanced/trace_enabled"
 
 # Fields serialised for custom policy persistence (excludes runtime metadata)
 _SERIALISABLE_FIELDS: tuple[str, ...] = (
@@ -256,6 +257,18 @@ class AdvancedPolicyEditorWidget(QWidget):
             "Uncheck to fall back to Basic Mode settings."
         )
         outer.addWidget(self._active_cb)
+
+        self._trace_cb = QCheckBox("Record prompt traces for Audit panel")
+        self._trace_cb.setToolTip(
+            "When checked, each HY-MT translation in Advanced Mode builds an "
+            "EffectivePromptTrace and pushes it to the Prompt Audit panel.\n"
+            "Requires Advanced Mode to be active. Has minor per-segment overhead."
+        )
+        self._trace_cb.setEnabled(False)  # enabled only when Advanced Mode is active
+        outer.addWidget(self._trace_cb)
+
+        # Enable/disable trace checkbox together with advanced mode toggle
+        self._active_cb.toggled.connect(self._trace_cb.setEnabled)
 
         # ── Scrollable content area ───────────────────────────────────
         scroll = QScrollArea()
@@ -670,12 +683,18 @@ class AdvancedPolicyEditorWidget(QWidget):
         if sampling:
             self._set_combo_by_data(self._sampling_combo, sampling)
 
+        trace_enabled = self._settings.value(_ADV_TRACE_KEY, False, type=bool)
+        self._trace_cb.setChecked(trace_enabled)
+        # Sync enabled state: trace_cb only active when advanced mode is on
+        self._trace_cb.setEnabled(active)
+
     def save_settings(self) -> None:
         """Persist Advanced Mode state to QSettings."""
         self._settings.setValue(_ADV_ACTIVE_KEY, self._active_cb.isChecked())
         self._settings.setValue(_ADV_POLICY_KEY, self._policy_combo.currentData() or "")
         self._settings.setValue(_ADV_TERMINOLOGY_KEY, self._terminology_combo.currentData() or "")
         self._settings.setValue(_ADV_SAMPLING_KEY, self._sampling_combo.currentData() or "")
+        self._settings.setValue(_ADV_TRACE_KEY, self._trace_cb.isChecked())
 
     # ------------------------------------------------------------------
     # Runtime options interface

@@ -990,6 +990,17 @@ class TranslationService:
             # Success → return immediately
             if result.is_success:
                 self._log_translation_completed(trace_id, index, total_latency_ms, provider_id)
+                # PATCH-12: push EffectivePromptTrace to Prompt Audit panel when
+                # trace recording is enabled in Advanced Mode (pps/advanced/trace_enabled).
+                if _pps_opts.get("trace_enabled"):
+                    _trace = (result.meta or {}).get("prompt_policy", {}).get("trace")
+                    if _trace is not None:
+                        try:
+                            from app.ui.prompt_audit_dialog import PromptAuditPanel
+
+                            PromptAuditPanel.add_trace(_trace)
+                        except Exception:
+                            pass  # UI not available in headless / test environments
                 return self._map_provider_result_to_service(result)
 
             # Store last result for error reporting
