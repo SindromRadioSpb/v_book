@@ -56,6 +56,18 @@ class HelpCenterDialog(QDialog):
             "docs/TERMS_EXTRACTION_GUIDE.md",
             "# Настройки Terms\n\nДокументация недоступна.",
         )
+        prompt_policy_md = _read_doc(
+            "docs/HELP_PROMPT_POLICY.md",
+            "# Prompt Policy\n\nДокументация недоступна.",
+        )
+        policy_editor_md = _read_doc(
+            "docs/HELP_POLICY_EDITOR.md",
+            "# Policy Editor\n\nДокументация недоступна.",
+        )
+        prompt_audit_md = _read_doc(
+            "docs/HELP_PROMPT_AUDIT.md",
+            "# Prompt Audit\n\nДокументация недоступна.",
+        )
 
         self._tab_names: list[str] = []
 
@@ -88,6 +100,9 @@ class HelpCenterDialog(QDialog):
             ),
             "Audio",
         )
+        _add(self._markdown_view(prompt_policy_md), "Prompt Policy")
+        _add(self._markdown_view(policy_editor_md), "Policy Editor")
+        _add(self._markdown_view(prompt_audit_md), "Prompt Audit")
         _add(self._markdown_view(semantics_md), "Справочник сущностей")
         _add(self._markdown_view(terms_guide_md), "Настройки Terms")
 
@@ -114,7 +129,8 @@ def show_help_center_dialog(
         parent: Parent widget.
         initial_tab: Optional tab label to show on open.
             Supported values: "Overview", "Shortcuts", "Keyboard Flows",
-            "Translation", "Audio", "Справочник сущностей", "Настройки Terms".
+            "Translation", "Audio", "Prompt Policy", "Policy Editor",
+            "Prompt Audit", "Справочник сущностей", "Настройки Terms".
     """
     dialog = HelpCenterDialog(parent=parent, initial_tab=initial_tab)
     dialog.exec()
