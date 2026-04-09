@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import select
@@ -59,6 +59,7 @@ class BatchTranslateRowResult:
     latency_ms: int | None
     error_message: str | None
     skipped: bool
+    meta: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -330,7 +331,9 @@ class BatchMTTranslateService:
             nonlocal results, pending_items, pending_requests
             if not pending_items:
                 return
+            translate_started = time.perf_counter()
             mt_results = provider.translate_batch(pending_requests)
+            translate_elapsed_ms = int((time.perf_counter() - translate_started) * 1000)
             for item, mt_result in zip(pending_items, mt_results, strict=False):
                 if mt_result.error_kind:
                     results.append(
@@ -344,16 +347,24 @@ class BatchMTTranslateService:
                             latency_ms=mt_result.latency_ms,
                             error_message=mt_result.error_message,
                             skipped=False,
+                            meta={
+                                "runtime": {
+                                    "translate_batch_ms": translate_elapsed_ms,
+                                    "provider_runtime": (mt_result.meta or {}).get("runtime", {}),
+                                }
+                            },
                         )
                     )
                     continue
 
+                persist_started = time.perf_counter()
                 self._write_to_db(
                     session,
                     item,
                     mt_result.translated_text,
                     write_mode=options.write_mode,
                 )
+                persist_elapsed_ms = int((time.perf_counter() - persist_started) * 1000)
                 results.append(
                     BatchTranslateRowResult(
                         entity_id=item.entity_id,
@@ -365,6 +376,13 @@ class BatchMTTranslateService:
                         latency_ms=mt_result.latency_ms,
                         error_message=None,
                         skipped=False,
+                        meta={
+                            "runtime": {
+                                "translate_batch_ms": translate_elapsed_ms,
+                                "persist_ms": persist_elapsed_ms,
+                                "provider_runtime": (mt_result.meta or {}).get("runtime", {}),
+                            }
+                        },
                     )
                 )
             pending_items = []

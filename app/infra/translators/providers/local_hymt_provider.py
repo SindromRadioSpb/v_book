@@ -30,6 +30,7 @@ from app.infra.local_mt import (
     ProviderLifecycleState,
     WorkerError,
     WorkerRequest,
+    WorkerResult,
     get_local_mt_provider_manager,
 )
 from app.infra.translators.base_provider import (
@@ -407,6 +408,34 @@ class LocalHYMTProvider(BaseProvider):
             max_pending_requests=self._MAX_PENDING_REQUESTS,
         )
 
+    def _build_runtime_meta(
+        self,
+        *,
+        preprocess_ms: int,
+        worker_result: WorkerResult,
+        postprocess_ms: int,
+        total_ms: int,
+    ) -> dict[str, object]:
+        runtime_metrics = getattr(worker_result, "runtime_metrics", {}) or {}
+        return {
+            "stage_timings_ms": {
+                "preprocess": preprocess_ms,
+                "queue_wait": int(runtime_metrics.get("queue_wait_ms", 0)),
+                "gpu_wait": int(runtime_metrics.get("gpu_wait_ms", 0)),
+                "model_load": int(runtime_metrics.get("load_ms", 0)),
+                "worker_inference": int(worker_result.inference_time_ms),
+                "postprocess": postprocess_ms,
+                "total": total_ms,
+            },
+            "batch": {
+                "size": int(runtime_metrics.get("batch_size", 1)),
+                "manager_wall_ms": int(runtime_metrics.get("manager_wall_ms", 0)),
+                "batch_inference_total_ms": int(
+                    runtime_metrics.get("batch_inference_total_ms", worker_result.inference_time_ms)
+                ),
+            },
+        }
+
     def translate(self, request: TranslationRequest) -> TranslationResult:
         """Translate text using local HY-MT model.
 
@@ -427,7 +456,7 @@ class LocalHYMTProvider(BaseProvider):
         Returns:
             TranslationResult — success or error, never raises.
         """
-        start_time = time.time()
+        request_started = time.perf_counter()
 
         # Validate language pair
         src = request.source_lang.lower()
@@ -438,14 +467,14 @@ class LocalHYMTProvider(BaseProvider):
                 provider_id=self.provider_id,
                 error_kind=TranslationErrorKind.UNSUPPORTED,
                 error_message=f"Unsupported language: {unsupported}",
-                latency_ms=int((time.time() - start_time) * 1000),
+                latency_ms=int((time.perf_counter() - request_started) * 1000),
             )
 
         if not request.source_text or not request.source_text.strip():
             return TranslationResult(
                 translated_text="",
                 provider_id=self.provider_id,
-                latency_ms=int((time.time() - start_time) * 1000),
+                latency_ms=int((time.perf_counter() - request_started) * 1000),
                 meta={"segment_count": 0},
             )
 
@@ -498,6 +527,7 @@ class LocalHYMTProvider(BaseProvider):
             glossary_terms=glossary_terms if glossary_terms else None,
             context_items=context_items,
         )
+        preprocess_ms = int((time.perf_counter() - request_started) * 1000)
 
         # PATCH-09b: sampling_profile_id override from request.options.
         # Allows Basic Mode UI to select a different preset without changing the policy.
@@ -519,7 +549,7 @@ class LocalHYMTProvider(BaseProvider):
                 provider_id=self.provider_id,
                 error_kind=TranslationErrorKind.SERVER,
                 error_message=f"Worker error: {e}",
-                latency_ms=int((time.time() - start_time) * 1000),
+                latency_ms=int((time.perf_counter() - request_started) * 1000),
             )
         except Exception as e:
             logger.error(f"HY-MT unexpected error: {e}")
@@ -527,7 +557,7 @@ class LocalHYMTProvider(BaseProvider):
                 provider_id=self.provider_id,
                 error_kind=TranslationErrorKind.UNKNOWN,
                 error_message=f"Unexpected error: {e}",
-                latency_ms=int((time.time() - start_time) * 1000),
+                latency_ms=int((time.perf_counter() - request_started) * 1000),
             )
 
         if worker_result.error:
@@ -535,12 +565,13 @@ class LocalHYMTProvider(BaseProvider):
                 provider_id=self.provider_id,
                 error_kind=TranslationErrorKind.SERVER,
                 error_message=f"Inference failed: {worker_result.error}",
-                latency_ms=int((time.time() - start_time) * 1000),
+                latency_ms=int((time.perf_counter() - request_started) * 1000),
             )
 
         raw_translation = worker_result.text
 
         # Step 5: Restore placeholders
+        postprocess_started = time.perf_counter()
         restored, missing = _restore_placeholders(raw_translation, protected.mapping)
         if missing:
             logger.warning(f"HY-MT: {len(missing)} placeholder(s) lost in translation: {missing}")
@@ -571,7 +602,14 @@ class LocalHYMTProvider(BaseProvider):
                 except Exception as e:
                     logger.warning(f"HY-MT glossary postprocess failed: {e} (using MT output)")
 
-        latency_ms = int((time.time() - start_time) * 1000)
+        postprocess_ms = int((time.perf_counter() - postprocess_started) * 1000)
+        latency_ms = int((time.perf_counter() - request_started) * 1000)
+        runtime_meta = self._build_runtime_meta(
+            preprocess_ms=preprocess_ms,
+            worker_result=worker_result,
+            postprocess_ms=postprocess_ms,
+            total_ms=latency_ms,
+        )
 
         # Step 7: Build EffectivePromptTrace — only when trace is active (PATCH-05)
         trace: EffectivePromptTrace | None = None
@@ -608,6 +646,7 @@ class LocalHYMTProvider(BaseProvider):
                 "model_id": self.model_id,
                 "backend": self.backend,
                 "lifecycle": self._provider_manager.get_state_snapshot(self.backend, self.model_id),
+                "runtime": runtime_meta,
                 # PPS structured meta (spec §11.1)
                 "prompt_policy": {
                     "policy_id": policy.policy_id,
@@ -651,11 +690,13 @@ class LocalHYMTProvider(BaseProvider):
                 RouterResult,
                 str,
                 list[str] | None,
+                float,
+                int,
             ]
         ] = []
 
         for idx, request in enumerate(requests):
-            start_time = time.time()
+            item_started = time.perf_counter()
             src = request.source_lang.lower()
             tgt = request.target_lang.lower()
             if src not in SUPPORTED_LANGS or tgt not in SUPPORTED_LANGS:
@@ -664,14 +705,14 @@ class LocalHYMTProvider(BaseProvider):
                     provider_id=self.provider_id,
                     error_kind=TranslationErrorKind.UNSUPPORTED,
                     error_message=f"Unsupported language: {unsupported}",
-                    latency_ms=int((time.time() - start_time) * 1000),
+                    latency_ms=int((time.perf_counter() - item_started) * 1000),
                 )
                 continue
             if not request.source_text or not request.source_text.strip():
                 results[idx] = TranslationResult(
                     translated_text="",
                     provider_id=self.provider_id,
-                    latency_ms=int((time.time() - start_time) * 1000),
+                    latency_ms=int((time.perf_counter() - item_started) * 1000),
                     meta={"segment_count": 0},
                 )
                 continue
@@ -706,6 +747,7 @@ class LocalHYMTProvider(BaseProvider):
                 glossary_terms=glossary_terms if glossary_terms else None,
                 context_items=context_items,
             )
+            preprocess_ms = int((time.perf_counter() - item_started) * 1000)
             sampling_id = request.options.get("sampling_profile_id") or policy.sampling_profile_id
             prepared_requests.append(
                 (
@@ -726,6 +768,8 @@ class LocalHYMTProvider(BaseProvider):
                     router_result,
                     resolved_template_id,
                     context_items,
+                    item_started,
+                    preprocess_ms,
                 )
             )
 
@@ -759,14 +803,16 @@ class LocalHYMTProvider(BaseProvider):
                     router_result,
                     resolved_template_id,
                     context_items,
+                    item_started,
+                    preprocess_ms,
                 ) = packed
-                start_time = time.time()
+                postprocess_started = time.perf_counter()
                 if getattr(worker_result, "error", None):
                     results[idx] = TranslationResult(
                         provider_id=self.provider_id,
                         error_kind=TranslationErrorKind.SERVER,
                         error_message=f"Inference failed: {worker_result.error}",
-                        latency_ms=int((time.time() - start_time) * 1000),
+                        latency_ms=int((time.perf_counter() - item_started) * 1000),
                     )
                     continue
 
@@ -808,7 +854,14 @@ class LocalHYMTProvider(BaseProvider):
                                 f"HY-MT batch glossary postprocess failed: {e} (using MT output)"
                             )
 
-                latency_ms = int((time.time() - start_time) * 1000)
+                postprocess_ms = int((time.perf_counter() - postprocess_started) * 1000)
+                latency_ms = int((time.perf_counter() - item_started) * 1000)
+                runtime_meta = self._build_runtime_meta(
+                    preprocess_ms=preprocess_ms,
+                    worker_result=worker_result,
+                    postprocess_ms=postprocess_ms,
+                    total_ms=latency_ms,
+                )
                 trace = None
                 if request.trace_id:
                     trace = self._build_trace(
@@ -844,6 +897,7 @@ class LocalHYMTProvider(BaseProvider):
                         "lifecycle": self._provider_manager.get_state_snapshot(
                             self.backend, self.model_id
                         ),
+                        "runtime": runtime_meta,
                         "prompt_policy": {
                             "policy_id": policy.policy_id,
                             "policy_hash": policy.policy_hash,

@@ -29,7 +29,7 @@ def test_manager_reuses_worker_for_repeated_requests(tmp_path):
         return_value=fake_worker,
     ) as mock_start:
         request = WorkerRequest(text="a", source_lang="he", target_lang="ru")
-        manager.run_request(
+        first_result = manager.run_request(
             model_path=tmp_path / "model",
             backend="transformers_causal",
             model_id="test/model",
@@ -37,7 +37,7 @@ def test_manager_reuses_worker_for_repeated_requests(tmp_path):
             worker_request=request,
             idle_timeout_s=999.0,
         )
-        manager.run_request(
+        second_result = manager.run_request(
             model_path=tmp_path / "model",
             backend="transformers_causal",
             model_id="test/model",
@@ -49,7 +49,11 @@ def test_manager_reuses_worker_for_repeated_requests(tmp_path):
     assert mock_start.call_count == 1
     snapshot = manager.get_state_snapshot("transformers_causal", "test/model")
     assert snapshot["load_count"] == 1
+    assert snapshot["total_requests"] == 2
+    assert snapshot["total_segments"] == 2
     assert snapshot["state"] == ProviderLifecycleState.IDLE.value
+    assert first_result.runtime_metrics["batch_size"] == 1
+    assert second_result.runtime_metrics["batch_size"] == 1
 
 
 def test_manager_unloads_model_explicitly(tmp_path):
@@ -112,3 +116,7 @@ def test_manager_batch_requests_use_single_worker_roundtrip(tmp_path):
 
     assert [item.text for item in results] == ["one", "two"]
     fake_worker.translate_batch.assert_called_once()
+    assert results[0].runtime_metrics["batch_size"] == 2
+    snapshot = manager.get_state_snapshot("transformers_causal", "test/model")
+    assert snapshot["total_batches"] == 1
+    assert snapshot["total_segments"] == 2

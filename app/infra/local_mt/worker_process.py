@@ -19,7 +19,7 @@ import logging
 import multiprocessing
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from multiprocessing.connection import Connection
 from pathlib import Path
 
@@ -63,6 +63,7 @@ class WorkerResult:
     inference_time_ms: float
     request_id: str = ""
     error: str | None = None
+    runtime_metrics: dict[str, float | int] = field(default_factory=dict)
 
 
 def _cleanup_loaded_model(model_obj: object, backend: str) -> None:

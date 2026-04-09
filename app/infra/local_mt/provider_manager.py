@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
+import shutil
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -51,10 +54,25 @@ class WorkerSlot:
     last_used_monotonic: float = 0.0
     load_count: int = 0
     unload_count: int = 0
+    total_requests: int = 0
+    total_batches: int = 0
+    total_segments: int = 0
     last_load_ms: float = 0.0
     last_unload_ms: float = 0.0
     last_request_ms: float = 0.0
+    last_queue_wait_ms: float = 0.0
+    last_gpu_wait_ms: float = 0.0
+    last_batch_size: int = 0
+    total_queue_wait_ms: float = 0.0
+    total_gpu_wait_ms: float = 0.0
+    total_inference_ms: float = 0.0
+    total_wall_ms: float = 0.0
     max_observed_queue_depth: int = 0
+    last_unload_reason: str | None = None
+    unload_reasons: dict[str, int] = field(default_factory=dict)
+    last_resource_snapshot: dict[str, object] | None = None
+    last_load_resource_snapshot: dict[str, object] | None = None
+    last_unload_resource_snapshot: dict[str, object] | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
     condition: threading.Condition = field(init=False)
     idle_timer: threading.Timer | None = None
@@ -129,18 +147,44 @@ class LocalMTProviderManager:
                     "pending_requests": 0,
                     "load_count": 0,
                     "unload_count": 0,
+                    "total_requests": 0,
+                    "total_batches": 0,
+                    "total_segments": 0,
                 }
         with slot.lock:
+            avg_queue_wait_ms = (
+                slot.total_queue_wait_ms / slot.total_requests if slot.total_requests else 0.0
+            )
+            avg_gpu_wait_ms = (
+                slot.total_gpu_wait_ms / slot.total_requests if slot.total_requests else 0.0
+            )
+            avg_inference_ms_per_segment = (
+                slot.total_inference_ms / slot.total_segments if slot.total_segments else 0.0
+            )
             return {
                 "state": slot.state.value,
                 "active_requests": slot.active_requests,
                 "pending_requests": slot.pending_requests,
                 "load_count": slot.load_count,
                 "unload_count": slot.unload_count,
+                "total_requests": slot.total_requests,
+                "total_batches": slot.total_batches,
+                "total_segments": slot.total_segments,
                 "last_load_ms": slot.last_load_ms,
                 "last_unload_ms": slot.last_unload_ms,
                 "last_request_ms": slot.last_request_ms,
+                "last_queue_wait_ms": slot.last_queue_wait_ms,
+                "last_gpu_wait_ms": slot.last_gpu_wait_ms,
+                "last_batch_size": slot.last_batch_size,
+                "avg_queue_wait_ms": avg_queue_wait_ms,
+                "avg_gpu_wait_ms": avg_gpu_wait_ms,
+                "avg_inference_ms_per_segment": avg_inference_ms_per_segment,
                 "max_observed_queue_depth": slot.max_observed_queue_depth,
+                "last_unload_reason": slot.last_unload_reason,
+                "unload_reasons": dict(slot.unload_reasons),
+                "last_resource_snapshot": dict(slot.last_resource_snapshot or {}),
+                "last_load_resource_snapshot": dict(slot.last_load_resource_snapshot or {}),
+                "last_unload_resource_snapshot": dict(slot.last_unload_resource_snapshot or {}),
                 "last_error": slot.last_error,
             }
 
@@ -163,14 +207,33 @@ class LocalMTProviderManager:
             idle_timeout_s=idle_timeout_s,
             max_pending_requests=max_pending_requests,
         )
-        self._acquire_queue_slot(slot)
+        request_started = time.perf_counter()
+        queue_wait_ms = self._acquire_queue_slot(slot)
         exec_lock = self._gpu_execution_lock if slot.is_gpu_heavy else threading.Lock()
         try:
+            exec_wait_started = time.perf_counter()
             with exec_lock:
-                worker = self._ensure_worker_loaded(slot)
+                gpu_wait_ms = (time.perf_counter() - exec_wait_started) * 1000
+                worker, load_ms = self._ensure_worker_loaded(slot)
                 started = time.perf_counter()
                 result = worker.translate(worker_request)
                 slot.last_request_ms = (time.perf_counter() - started) * 1000
+                wall_ms = (time.perf_counter() - request_started) * 1000
+                self._record_request_metrics(
+                    slot=slot,
+                    queue_wait_ms=queue_wait_ms,
+                    gpu_wait_ms=gpu_wait_ms,
+                    batch_size=1,
+                    wall_ms=wall_ms,
+                    inference_ms=result.inference_time_ms,
+                )
+                result.runtime_metrics = {
+                    "queue_wait_ms": queue_wait_ms,
+                    "gpu_wait_ms": gpu_wait_ms,
+                    "load_ms": load_ms,
+                    "manager_wall_ms": wall_ms,
+                    "batch_size": 1,
+                }
                 return result
         finally:
             self._release_queue_slot(slot)
@@ -196,14 +259,38 @@ class LocalMTProviderManager:
             idle_timeout_s=idle_timeout_s,
             max_pending_requests=max_pending_requests,
         )
-        self._acquire_queue_slot(slot)
+        request_started = time.perf_counter()
+        queue_wait_ms = self._acquire_queue_slot(slot)
         exec_lock = self._gpu_execution_lock if slot.is_gpu_heavy else threading.Lock()
         try:
+            exec_wait_started = time.perf_counter()
             with exec_lock:
-                worker = self._ensure_worker_loaded(slot)
+                gpu_wait_ms = (time.perf_counter() - exec_wait_started) * 1000
+                worker, load_ms = self._ensure_worker_loaded(slot)
                 started = time.perf_counter()
                 results = worker.translate_batch(worker_requests)
                 slot.last_request_ms = (time.perf_counter() - started) * 1000
+                wall_ms = (time.perf_counter() - request_started) * 1000
+                inference_total_ms = sum(item.inference_time_ms for item in results)
+                batch_size = len(worker_requests)
+                self._record_request_metrics(
+                    slot=slot,
+                    queue_wait_ms=queue_wait_ms,
+                    gpu_wait_ms=gpu_wait_ms,
+                    batch_size=batch_size,
+                    wall_ms=wall_ms,
+                    inference_ms=inference_total_ms,
+                )
+                shared_metrics = {
+                    "queue_wait_ms": queue_wait_ms,
+                    "gpu_wait_ms": gpu_wait_ms,
+                    "load_ms": load_ms,
+                    "manager_wall_ms": wall_ms,
+                    "batch_size": batch_size,
+                    "batch_inference_total_ms": inference_total_ms,
+                }
+                for item in results:
+                    item.runtime_metrics = dict(shared_metrics)
                 return results
         finally:
             self._release_queue_slot(slot)
@@ -232,7 +319,8 @@ class LocalMTProviderManager:
             except Exception as exc:
                 logger.debug("LocalMTProviderManager shutdown skipped for %s: %s", slot.key, exc)
 
-    def _acquire_queue_slot(self, slot: WorkerSlot) -> None:
+    def _acquire_queue_slot(self, slot: WorkerSlot) -> float:
+        wait_started = time.perf_counter()
         with slot.lock:
             while slot.pending_requests >= slot.max_pending_requests:
                 logger.info("Local MT queue saturated for %s; waiting for free slot", slot.model_id)
@@ -242,6 +330,7 @@ class LocalMTProviderManager:
                 slot.max_observed_queue_depth, slot.pending_requests
             )
             self._cancel_idle_timer(slot)
+            return (time.perf_counter() - wait_started) * 1000
 
     def _release_queue_slot(self, slot: WorkerSlot) -> None:
         with slot.lock:
@@ -255,7 +344,7 @@ class LocalMTProviderManager:
                 slot.state = ProviderLifecycleState.UNLOADED
             slot.condition.notify_all()
 
-    def _ensure_worker_loaded(self, slot: WorkerSlot) -> LocalMTWorker:
+    def _ensure_worker_loaded(self, slot: WorkerSlot) -> tuple[LocalMTWorker, float]:
         with slot.lock:
             while slot.state == ProviderLifecycleState.LOADING:
                 slot.condition.wait(timeout=0.5)
@@ -266,13 +355,14 @@ class LocalMTProviderManager:
             ):
                 slot.active_requests += 1
                 slot.state = ProviderLifecycleState.BUSY
-                return slot.worker
+                return slot.worker, 0.0
             slot.state = ProviderLifecycleState.LOADING
             slot.last_error = None
 
         if slot.is_gpu_heavy:
             self._evict_other_idle_gpu_slots(slot.key)
 
+        before_load_snapshot = self._capture_resource_snapshot(slot)
         started = time.perf_counter()
         try:
             worker = start_worker(
@@ -289,11 +379,17 @@ class LocalMTProviderManager:
             raise
 
         load_ms = (time.perf_counter() - started) * 1000
+        after_load_snapshot = self._capture_resource_snapshot(slot)
         with slot.lock:
             slot.worker = worker
             slot.active_requests += 1
             slot.load_count += 1
             slot.last_load_ms = load_ms
+            slot.last_load_resource_snapshot = {
+                "before": before_load_snapshot,
+                "after": after_load_snapshot,
+            }
+            slot.last_resource_snapshot = dict(after_load_snapshot)
             slot.last_used_monotonic = time.monotonic()
             slot.state = ProviderLifecycleState.BUSY
             slot.condition.notify_all()
@@ -303,7 +399,7 @@ class LocalMTProviderManager:
                 slot.state.value,
                 slot.last_load_ms,
             )
-            return worker
+            return worker, load_ms
 
     def _schedule_idle_unload(self, slot: WorkerSlot) -> None:
         if slot.idle_timeout_s <= 0:
@@ -359,16 +455,25 @@ class LocalMTProviderManager:
             slot.state = ProviderLifecycleState.UNLOADING
             self._cancel_idle_timer(slot)
 
+        before_unload_snapshot = self._capture_resource_snapshot(slot)
         started = time.perf_counter()
         try:
             worker.shutdown()
         except Exception as exc:
             logger.warning("Error unloading local MT worker %s: %s", slot.model_id, exc)
         unload_ms = (time.perf_counter() - started) * 1000
+        after_unload_snapshot = self._capture_resource_snapshot(slot)
 
         with slot.lock:
             slot.unload_count += 1
             slot.last_unload_ms = unload_ms
+            slot.last_unload_reason = reason
+            slot.unload_reasons[reason] = slot.unload_reasons.get(reason, 0) + 1
+            slot.last_unload_resource_snapshot = {
+                "before": before_unload_snapshot,
+                "after": after_unload_snapshot,
+            }
+            slot.last_resource_snapshot = dict(after_unload_snapshot)
             slot.last_used_monotonic = time.monotonic()
             slot.state = ProviderLifecycleState.UNLOADED
             slot.condition.notify_all()
@@ -379,6 +484,81 @@ class LocalMTProviderManager:
                 slot.last_unload_ms,
             )
         return True
+
+    def _record_request_metrics(
+        self,
+        *,
+        slot: WorkerSlot,
+        queue_wait_ms: float,
+        gpu_wait_ms: float,
+        batch_size: int,
+        wall_ms: float,
+        inference_ms: float,
+    ) -> None:
+        with slot.lock:
+            slot.total_requests += 1
+            if batch_size > 1:
+                slot.total_batches += 1
+            slot.total_segments += batch_size
+            slot.last_queue_wait_ms = queue_wait_ms
+            slot.last_gpu_wait_ms = gpu_wait_ms
+            slot.last_batch_size = batch_size
+            slot.total_queue_wait_ms += queue_wait_ms
+            slot.total_gpu_wait_ms += gpu_wait_ms
+            slot.total_wall_ms += wall_ms
+            slot.total_inference_ms += inference_ms
+
+    @staticmethod
+    def _capture_resource_snapshot(slot: WorkerSlot) -> dict[str, object]:
+        snapshot: dict[str, object] = {
+            "timestamp_monotonic": round(time.monotonic(), 3),
+            "backend": slot.backend,
+            "model_id": slot.model_id,
+        }
+        process_rss_mb = LocalMTProviderManager._sample_process_rss_mb()
+        if process_rss_mb is not None:
+            snapshot["manager_process_rss_mb"] = process_rss_mb
+        gpu_memory = LocalMTProviderManager._sample_gpu_memory_mb()
+        if gpu_memory:
+            snapshot["gpu_memory"] = gpu_memory
+        return snapshot
+
+    @staticmethod
+    def _sample_process_rss_mb() -> float | None:
+        try:
+            import psutil
+
+            return round(psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024, 1)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _sample_gpu_memory_mb() -> dict[str, int] | None:
+        nvidia_smi = shutil.which("nvidia-smi")
+        if not nvidia_smi:
+            return None
+        try:
+            out = subprocess.check_output(
+                [
+                    nvidia_smi,
+                    "--query-gpu=memory.used,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            ).strip()
+        except Exception:
+            return None
+
+        first_line = out.splitlines()[0].strip() if out else ""
+        if not first_line:
+            return None
+        try:
+            used_mb, total_mb = [int(part.strip()) for part in first_line.split(",")[:2]]
+        except Exception:
+            return None
+        return {"used_mb": used_mb, "total_mb": total_mb}
 
 
 def get_local_mt_provider_manager() -> LocalMTProviderManager:
