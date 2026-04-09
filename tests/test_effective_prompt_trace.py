@@ -815,3 +815,100 @@ def test_patch04_sampling_profile_in_meta(provider) -> None:
     """PATCH-04: sampling_profile_id present in meta."""
     result = provider.translate(_req())
     assert "sampling_profile_id" in result.meta["prompt_policy"]
+
+
+# ---------------------------------------------------------------------------
+# PATCH-11: EffectivePromptTrace.to_dict()
+# ---------------------------------------------------------------------------
+
+
+_EXPECTED_DICT_KEYS = {
+    "trace_id",
+    "policy_id",
+    "policy_version",
+    "policy_hash",
+    "template_profile_id",
+    "sampling_profile_id",
+    "content_kind",
+    "source_lang",
+    "target_lang",
+    "model_id",
+    "model_quant_id",
+    "provider_id",
+    "source_text",
+    "source_text_hash",
+    "source_length_chars",
+    "rendered_role_instruction",
+    "rendered_task_instruction",
+    "rendered_output_policy",
+    "rendered_glossary_block",
+    "rendered_context_block",
+    "rendered_formatting_note",
+    "rendered_user_payload",
+    "effective_prompt_preview",
+    "glossary_hash",
+    "context_hash",
+    "applied_sampling",
+    "placeholder_tokens_protected",
+    "placeholder_tokens_restored",
+    "raw_model_output",
+    "translated_text",
+    "output_length_chars",
+    "output_tokens_generated",
+    "latency_ms",
+    "worker_latency_ms",
+    "glossary_applied",
+    "context_applied",
+    "fallback_triggered",
+    "fallback_reason",
+    "created_at",
+}
+
+
+def test_patch11_to_dict_all_keys_present(provider) -> None:
+    """to_dict() must include all expected keys."""
+    result = provider.translate(_req(trace_id="patch11-test"))
+    trace = result.meta["prompt_policy"]["trace"]
+    assert trace is not None, "trace must be populated when trace_id is set"
+    d = trace.to_dict()
+    assert set(d.keys()) == _EXPECTED_DICT_KEYS
+
+
+def test_patch11_to_dict_created_at_is_iso_string(provider) -> None:
+    """created_at must be serialised to an ISO 8601 string."""
+    result = provider.translate(_req(trace_id="patch11-test"))
+    trace = result.meta["prompt_policy"]["trace"]
+    d = trace.to_dict()
+    assert isinstance(d["created_at"], str)
+    # Must parse back to datetime without error
+    from datetime import datetime
+
+    datetime.fromisoformat(d["created_at"])
+
+
+def test_patch11_to_dict_content_kind_is_str(provider) -> None:
+    """content_kind must be a plain str (not an enum instance)."""
+    result = provider.translate(_req(trace_id="patch11-test"))
+    trace = result.meta["prompt_policy"]["trace"]
+    d = trace.to_dict()
+    assert isinstance(d["content_kind"], str)
+
+
+def test_patch11_to_dict_is_json_serialisable(provider) -> None:
+    """json.dumps(trace.to_dict()) must not raise."""
+    import json
+
+    result = provider.translate(_req(trace_id="patch11-test"))
+    trace = result.meta["prompt_policy"]["trace"]
+    serialised = json.dumps(trace.to_dict(), ensure_ascii=False)
+    assert isinstance(serialised, str) and len(serialised) > 0
+
+
+def test_patch11_to_dict_nullable_none_preserved(provider) -> None:
+    """Nullable fields that are None must appear as None (not absent) in to_dict()."""
+    result = provider.translate(_req(trace_id="patch11-test"))
+    trace = result.meta["prompt_policy"]["trace"]
+    d = trace.to_dict()
+    # context_hash and rendered_context_block are None when no context_items provided
+    assert "rendered_context_block" in d
+    assert "context_hash" in d

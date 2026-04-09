@@ -1,11 +1,11 @@
 # Аудит и план внедрения HY-MT как MT-провайдера в HDLE
 
 > Дата создания: 2026-04-06
-> Последнее обновление: **2026-04-08** — PPS PATCH-10c (custom policy runtime) завершён; PATCH-01..10c завершены; PATCH-11 pending
+> Последнее обновление: **2026-04-08** — PPS PATCH-11 (debug panel actions) завершён; PATCH-01..11 завершены
 > Статус: **РЕАЛИЗОВАН** — экспериментальный local backend успешно интегрирован в HDLE (2026-04-06)
 > SPIKE-1: закрыт ✅ | SPIKE-2: закрыт ✅ (19/19 GO) | HY-MT integration PATCH-00..03: завершены ✅
 > 7B-GPTQ: HY-MT integration PATCH-04..07 завершены ✅ (2026-04-07) — experimental, side-by-side с 1.8B
-> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ✅ | PATCH-08 ✅ | PATCH-09 ✅ | PATCH-09b ✅ | PATCH-10 ✅ (Advanced UI) | PATCH-10c ✅ (custom runtime) | PATCH-11 ⬜ (debug actions)
+> PPS: PATCH-01 ✅ | PATCH-02 ✅ | PATCH-03 ✅ | PATCH-04 ✅ | PATCH-05 ✅ | PATCH-06 ✅ | PATCH-07 ✅ | PATCH-08 ✅ | PATCH-09 ✅ | PATCH-09b ✅ | PATCH-10 ✅ (Advanced UI) | PATCH-10c ✅ (custom runtime) | PATCH-11 ✅ (debug actions)
 > Пилотный маршрут: **Hebrew → Russian**
 > Базовый провайдер: **HY-MT1.5-1.8B** (Windows pilot: 3.34GB VRAM, RTX 3070, bfloat16) — baseline, не изменён
 > Experimental backend: **HY-MT1.5-7B-GPTQ-Int4** — реализован и работает, не default, требует venv setup
@@ -64,9 +64,9 @@
 | PPS PATCH-09b: Service Layer Wiring | `local_hymt_provider.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_09b_wiring.py` | ✅ Завершён (16 tests) |
 | PPS PATCH-10: Advanced Mode UI (policy editor) | `app/ui/advanced_policy_editor.py`, `provider_settings_dialog.py`, `workers.py`, `batch_mt_translate_service.py`, `translation_service.py`, `tests/test_pps_advanced_mode_ui.py` | ✅ Завершён (39 tests) |
 | PPS PATCH-10c: Custom policy runtime registration | `prompt_policy.py`, `advanced_policy_editor.py`, `provider_settings_dialog.py`, `local_hymt_provider.py`, `tests/test_pps_10c_runtime.py` | ✅ Завершён (29 tests) |
-| PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py` | ⬜ Pending |
+| PPS PATCH-11: Debug panel actions (Copy/Export/Compare) | `app/ui/prompt_audit_dialog.py`, `prompt_policy.py`, `tests/test_effective_prompt_trace.py`, `tests/test_prompt_audit_actions.py` | ✅ Завершён (18 new tests) |
 
-**PPS regression status**: 427 tests (56+28+52+42+75+34+28+25+28+16+39+29) pass, 0 регрессий.
+**PPS regression status**: 445 tests (56+28+52+42+75+34+28+25+28+16+39+29+5+13) pass, 0 регрессий.
 
 **PATCH-06 архитектурные детали:**
 - `_POLICY_HASH_FIELDS` (19 семантических полей) + `compute_policy_hash(policy)` — SHA-256 канонического JSON с `sort_keys=True`
@@ -173,16 +173,17 @@ Scope: Полный редактор политики для power users. Зав
 - **LocalHYMT7BGPTQProvider** наследует `translate()` → fix покрывает оба провайдера
 - 29 тестов: registry operations, QSettings→registry round-trip, router resolution, renderer field flow, built-in immutability, experimental guard, Basic Mode regression
 
-**PATCH-11 план (Debug panel actions — spec §6.3):**
+**PATCH-11 архитектурные детали (Debug panel actions — spec §6.3):**
 
-Scope: Доработка существующего `PromptAuditDialog` (PATCH-05): добавить [Copy Trace JSON], [Export to File], [Compare with Previous].
+Реализован: `app/infra/translators/prompt_policy.py` (to_dict) + `app/ui/prompt_audit_dialog.py` (3 кнопки + CompareDialog).
 
-- `EffectivePromptTrace.to_dict() -> dict` — сериализуемое repr (datetime → ISO string, enums → str)
-- [Copy Trace JSON] → `QClipboard.setText(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False))`
-- [Export to File] → `QFileDialog.getSaveFileName` → запись JSON-файла
-- [Compare with Previous] — side-by-side diff двух последних трейсов из `PromptAuditPanel.get_history()` (QDialog с `QTextEdit` × 2)
-- Warning при `batch_size > 200` в Debug mode (spec §14/R4)
-- Тесты: `to_dict()` сериализуется без ошибок; все nullable поля обработаны; datetime → ISO
+- **`EffectivePromptTrace.to_dict() -> dict`** — 39-ключевой JSON-совместимый dict: `datetime` → ISO 8601 str, `ContentKind` (StrEnum) → str, `None` → None, `applied_sampling` и `placeholder_tokens_protected` — shallow copies
+- **`[Copy Trace JSON]`** → `QApplication.clipboard().setText(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False))`. Если нет выделенного трейса — `QMessageBox.information`
+- **`[Export to File]`** → `QFileDialog.getSaveFileName` с default name `trace_{policy_id}_{ts}.json` → запись UTF-8 JSON. Если диалог отменён — no-op. Ошибки записи → `QMessageBox.critical`
+- **`[Compare with Previous]`** — берёт `history[-2]` и `history[-1]` из `PromptAuditPanel.get_history()`; открывает `_CompareTracesDialog` с двумя `QTextEdit` (read-only, monospace, pretty JSON). Если < 2 трейсов — `QMessageBox.information`
+- **`_CompareTracesDialog`** — `QDialog` с `QSplitter(Horizontal)` и двумя read-only `QTextEdit` panels (left = previous, right = current). `_serialise()` → graceful fallback если `to_dict` отсутствует
+- **`_get_selected_trace()`** — helper возвращает `trace` из `currentItem().data(UserRole)` или `None`
+- 18 новых тестов: 5 расширений `test_effective_prompt_trace.py` + 13 в `test_prompt_audit_actions.py` (to_dict completeness, JSON round-trip, nullable None, clipboard write, file write, compare dialog, cancellation)
 
 **PATCH-04 архитектурные детали:**
 - `_WORKER_SAMPLING_PROFILES` (3 профиля) в `worker_process.py` — локальная копия, без cross-layer импорта

@@ -39,26 +39,34 @@ Layer colour legend:
 from __future__ import annotations
 
 import html
+import json
+import logging
 from collections import deque
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QClipboard
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
-    QGroupBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSplitter,
     QTabWidget,
     QTextBrowser,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+_logger = logging.getLogger(__name__)
 
 # EffectivePromptTrace is imported lazily inside methods to avoid hard UI dep
 # on the prompt_policy module at class definition time.
@@ -317,6 +325,24 @@ class PromptAuditPanel(QWidget):
         clear_btn.setToolTip("Remove all stored traces")
         clear_btn.clicked.connect(self._clear)
         header.addWidget(clear_btn)
+
+        self._copy_btn = QPushButton("Copy Trace JSON")
+        self._copy_btn.setToolTip("Copy selected trace as JSON to clipboard")
+        self._copy_btn.clicked.connect(self._on_copy_trace_json)
+        header.addWidget(self._copy_btn)
+
+        self._export_btn = QPushButton("Export to File")
+        self._export_btn.setToolTip("Save selected trace JSON to a file")
+        self._export_btn.clicked.connect(self._on_export_to_file)
+        header.addWidget(self._export_btn)
+
+        self._compare_btn = QPushButton("Compare with Previous")
+        self._compare_btn.setToolTip(
+            "Side-by-side diff of the two most recent traces (requires ≥ 2 traces)"
+        )
+        self._compare_btn.clicked.connect(self._on_compare_with_previous)
+        header.addWidget(self._compare_btn)
+
         layout.addLayout(header)
 
         # Help text
@@ -402,6 +428,144 @@ class PromptAuditPanel(QWidget):
         self._layers_view.setHtml(_build_layers_html(trace))
         self._meta_view.setHtml(_build_meta_html(trace))
         self._output_view.setHtml(_build_output_html(trace))
+
+    # ------------------------------------------------------------------
+    # Action slots — Copy / Export / Compare
+    # ------------------------------------------------------------------
+
+    def _get_selected_trace(self) -> Any | None:
+        """Return the trace object for the currently selected list row, or None."""
+        item = self._list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _on_copy_trace_json(self) -> None:
+        """Copy selected trace to clipboard as pretty-printed JSON."""
+        trace = self._get_selected_trace()
+        if trace is None:
+            QMessageBox.information(self, "No Selection", "Select a trace entry first.")
+            return
+        if not hasattr(trace, "to_dict"):
+            QMessageBox.warning(self, "Unsupported", "This trace cannot be serialised.")
+            return
+        try:
+            payload = json.dumps(trace.to_dict(), indent=2, ensure_ascii=False)
+        except Exception as exc:
+            _logger.error("trace_to_dict_failed: %s", exc)
+            QMessageBox.critical(self, "Serialisation Error", str(exc))
+            return
+        clipboard: QClipboard = QApplication.clipboard()
+        clipboard.setText(payload)
+
+    def _on_export_to_file(self) -> None:
+        """Export selected trace JSON to a user-chosen file."""
+        trace = self._get_selected_trace()
+        if trace is None:
+            QMessageBox.information(self, "No Selection", "Select a trace entry first.")
+            return
+        if not hasattr(trace, "to_dict"):
+            QMessageBox.warning(self, "Unsupported", "This trace cannot be serialised.")
+            return
+        try:
+            payload = json.dumps(trace.to_dict(), indent=2, ensure_ascii=False)
+        except Exception as exc:
+            _logger.error("trace_export_serialise_failed: %s", exc)
+            QMessageBox.critical(self, "Serialisation Error", str(exc))
+            return
+        ts = getattr(trace, "created_at", None)
+        ts_str = ts.strftime("%Y%m%d_%H%M%S") if isinstance(ts, datetime) else "trace"
+        policy_id = getattr(trace, "policy_id", "unknown")
+        default_name = f"trace_{policy_id}_{ts_str}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Trace JSON",
+            default_name,
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+        except OSError as exc:
+            _logger.error("trace_export_write_failed path=%s: %s", path, exc)
+            QMessageBox.critical(self, "Write Error", str(exc))
+
+    def _on_compare_with_previous(self) -> None:
+        """Open a side-by-side compare dialog for the two most recent traces."""
+        history = self.get_history()
+        if len(history) < 2:
+            QMessageBox.information(
+                self,
+                "Not Enough Traces",
+                "At least 2 traces are required for comparison.\n"
+                "Run two translations with trace_id set.",
+            )
+            return
+        prev, current = history[-2], history[-1]
+        dlg = _CompareTracesDialog(prev, current, parent=self)
+        dlg.exec()
+
+
+# ---------------------------------------------------------------------------
+# _CompareTracesDialog — side-by-side JSON diff of two traces
+# ---------------------------------------------------------------------------
+
+
+class _CompareTracesDialog(QDialog):
+    """Side-by-side display of two EffectivePromptTrace records.
+
+    Shows pretty-printed JSON of ``prev`` (left) and ``current`` (right)
+    in two read-only QTextEdit panels.  Used internally by PromptAuditPanel.
+    """
+
+    def __init__(
+        self,
+        prev: Any,
+        current: Any,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Compare Traces — Previous vs Current")
+        self.setMinimumSize(1000, 600)
+        self.resize(1200, 700)
+
+        layout = QVBoxLayout(self)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        self._left = QTextEdit()
+        self._left.setReadOnly(True)
+        self._left.setFontFamily("Courier New")
+        self._left.setFontPointSize(10)
+
+        self._right = QTextEdit()
+        self._right.setReadOnly(True)
+        self._right.setFontFamily("Courier New")
+        self._right.setFontPointSize(10)
+
+        splitter.addWidget(self._left)
+        splitter.addWidget(self._right)
+        splitter.setSizes([500, 500])
+        layout.addWidget(splitter)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self._left.setPlainText(self._serialise(prev, "Previous"))
+        self._right.setPlainText(self._serialise(current, "Current"))
+
+    @staticmethod
+    def _serialise(trace: Any, label: str) -> str:
+        """Return pretty JSON for a trace, or an error message."""
+        if not hasattr(trace, "to_dict"):
+            return f"# {label}\n# (trace cannot be serialised — missing to_dict)"
+        try:
+            return json.dumps(trace.to_dict(), indent=2, ensure_ascii=False)
+        except Exception as exc:
+            return f"# {label}\n# Serialisation error: {exc}"
 
 
 # ---------------------------------------------------------------------------

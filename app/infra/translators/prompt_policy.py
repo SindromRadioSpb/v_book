@@ -1392,3 +1392,57 @@ class EffectivePromptTrace:
     fallback_reason: str | None
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def to_dict(self) -> dict:
+        """Serialize this trace to a JSON-compatible dict.
+
+        All values are JSON-serialisable primitives:
+        - ``datetime`` → ISO 8601 string
+        - ``ContentKind`` (StrEnum) → str  (already str-compatible)
+        - ``None`` → None (preserved)
+        - ``dict``, ``list``, ``int``, ``bool``, ``str`` → unchanged
+
+        Returns:
+            dict with all 37 fields; safe to pass to ``json.dumps()``.
+        """
+        return {
+            "trace_id": self.trace_id,
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
+            "policy_hash": self.policy_hash,
+            "template_profile_id": self.template_profile_id,
+            "sampling_profile_id": self.sampling_profile_id,
+            "content_kind": str(self.content_kind),
+            "source_lang": self.source_lang,
+            "target_lang": self.target_lang,
+            "model_id": self.model_id,
+            "model_quant_id": self.model_quant_id,
+            "provider_id": self.provider_id,
+            "source_text": self.source_text,
+            "source_text_hash": self.source_text_hash,
+            "source_length_chars": self.source_length_chars,
+            "rendered_role_instruction": self.rendered_role_instruction,
+            "rendered_task_instruction": self.rendered_task_instruction,
+            "rendered_output_policy": self.rendered_output_policy,
+            "rendered_glossary_block": self.rendered_glossary_block,
+            "rendered_context_block": self.rendered_context_block,
+            "rendered_formatting_note": self.rendered_formatting_note,
+            "rendered_user_payload": self.rendered_user_payload,
+            "effective_prompt_preview": self.effective_prompt_preview,
+            "glossary_hash": self.glossary_hash,
+            "context_hash": self.context_hash,
+            "applied_sampling": dict(self.applied_sampling),
+            "placeholder_tokens_protected": list(self.placeholder_tokens_protected),
+            "placeholder_tokens_restored": self.placeholder_tokens_restored,
+            "raw_model_output": self.raw_model_output,
+            "translated_text": self.translated_text,
+            "output_length_chars": self.output_length_chars,
+            "output_tokens_generated": self.output_tokens_generated,
+            "latency_ms": self.latency_ms,
+            "worker_latency_ms": self.worker_latency_ms,
+            "glossary_applied": self.glossary_applied,
+            "context_applied": self.context_applied,
+            "fallback_triggered": self.fallback_triggered,
+            "fallback_reason": self.fallback_reason,
+            "created_at": self.created_at.isoformat(),
+        }
