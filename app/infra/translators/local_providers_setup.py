@@ -15,6 +15,7 @@ import threading
 
 from sqlalchemy.orm import Session
 
+from app.infra.local_mt import get_local_mt_provider_manager
 from app.infra.settings import SettingsService
 from app.infra.translators.provider_config_manager import ProviderConfigManager
 from app.infra.translators.providers.google_cloud_translate_provider import (
@@ -226,6 +227,11 @@ def unregister_local_providers() -> int:
             if registry.unregister(provider_id):
                 unregistered_count += 1
                 logger.info(f"Unregistered local provider: {provider_id}")
+
+    try:
+        get_local_mt_provider_manager().shutdown_all()
+    except Exception as exc:
+        logger.debug("Local MT manager shutdown skipped: %s", exc)
 
     return unregistered_count
 

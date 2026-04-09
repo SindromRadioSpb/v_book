@@ -18,7 +18,6 @@ from app.infra.translators.providers.local_hymt_7b_gptq_provider import (
 )
 from app.infra.translators.providers.local_hymt_provider import LocalHYMTProvider
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -49,11 +48,7 @@ def provider(mock_model_manager, mock_worker):
         "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
         return_value=mock_model_manager,
     ):
-        with patch(
-            "app.infra.translators.providers.local_hymt_provider.start_worker",
-            return_value=mock_worker,
-        ):
-            return LocalHYMT7BGPTQProvider()
+        return LocalHYMT7BGPTQProvider()
 
 
 # ============================================================================
@@ -104,8 +99,8 @@ def test_supports_glossary(provider):
 
 
 def test_supports_batch(provider):
-    """Inherits supports_batch=False from parent."""
-    assert provider.supports_batch is False
+    """7B provider exposes batch translation support."""
+    assert provider.supports_batch is True
 
 
 def test_timeout_default(mock_model_manager, mock_worker):
@@ -114,12 +109,8 @@ def test_timeout_default(mock_model_manager, mock_worker):
         "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
         return_value=mock_model_manager,
     ):
-        with patch(
-            "app.infra.translators.providers.local_hymt_provider.start_worker",
-            return_value=mock_worker,
-        ):
-            p = LocalHYMT7BGPTQProvider()
-            assert p.timeout == 120.0
+        p = LocalHYMT7BGPTQProvider()
+        assert p.timeout == 120.0
 
 
 # ============================================================================
@@ -139,12 +130,8 @@ def test_model_version_differs_from_1b8(provider, mock_model_manager, mock_worke
         "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
         return_value=mock_model_manager,
     ):
-        with patch(
-            "app.infra.translators.providers.local_hymt_provider.start_worker",
-            return_value=mock_worker,
-        ):
-            p_1b8 = LocalHYMTProvider()
-            assert provider.get_model_version() != p_1b8.get_model_version()
+        p_1b8 = LocalHYMTProvider()
+        assert provider.get_model_version() != p_1b8.get_model_version()
 
 
 # ============================================================================
@@ -224,12 +211,11 @@ def test_7b_template_token_values():
 
 
 def test_translate_causal_uses_gptq_template_when_is_gptq():
-    """_translate_transformers_causal must select 7B template when is_gptq=True."""
+    """Helper must build the GPTQ-specific 7B template."""
     import inspect
     from app.infra.local_mt import worker_process
 
-    source = inspect.getsource(worker_process._translate_transformers_causal)
-    # 7B path must use the new template constants, not the 1.8B ones in the GPTQ branch
+    source = inspect.getsource(worker_process._build_hymt_chat_text)
     assert "_HYMT7B_BOS" in source
     assert "_HYMT7B_SEP" in source
     assert "_HYMT7B_USER_END" in source
@@ -268,7 +254,7 @@ def test_translate_causal_gptq_boundary_truncation():
     import inspect
     from app.infra.local_mt import worker_process
 
-    source = inspect.getsource(worker_process._translate_transformers_causal)
+    source = inspect.getsource(worker_process._strip_hymt_generation_result)
 
     # The 7B-GPTQ path must check for boundary markers and truncate
     assert "_HYMT7B_USER_END" in source
@@ -289,7 +275,7 @@ def test_translate_causal_1b8_unaffected_by_gptq_changes():
     import inspect
     from app.infra.local_mt import worker_process
 
-    source = inspect.getsource(worker_process._translate_transformers_causal)
+    source = inspect.getsource(worker_process._build_hymt_chat_text)
     # 1.8B template tokens must still be present
     assert "_HYMT_BOS" in source
     assert "_HYMT_ASSISTANT" in source

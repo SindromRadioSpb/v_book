@@ -27,10 +27,10 @@ from sqlalchemy.orm import Session
 
 from app.infra.local_mt import (
     _HYMT_SYSTEM_PROMPT_HASH,
-    LocalMTWorker,
+    ProviderLifecycleState,
     WorkerError,
     WorkerRequest,
-    start_worker,
+    get_local_mt_provider_manager,
 )
 from app.infra.translators.base_provider import (
     BaseProvider,
@@ -294,6 +294,9 @@ class LocalHYMTProvider(BaseProvider):
     _FORCE_GREEDY: bool = False
     _MAX_N_PREDICT_CAP: int = 512
     _MODEL_QUANT_ID: str | None = None  # "gptq-int4" for 7B subclass
+    _IDLE_TIMEOUT_S: float = 60.0
+    _MAX_PENDING_REQUESTS: int = 2
+    _MAX_BATCH_SIZE: int = 2
 
     # PPS PATCH-07: provider family — determines which TemplateProfile family is valid.
     # "observed" → hy_mt_*_observed (1.8B); "7b_gptq" → hy_mt_7b_* (7B-GPTQ).
@@ -322,13 +325,14 @@ class LocalHYMTProvider(BaseProvider):
         self.project_id = project_id
         self.timeout = timeout
 
-        self.worker: LocalMTWorker | None = None
         self._model_manager = ModelResourceManager()
+        self._provider_manager = get_local_mt_provider_manager()
+        self.worker = None
 
-        self._init_worker()
+        self._ensure_model_available()
 
-    def _init_worker(self) -> None:
-        """Start worker subprocess for HY-MT inference."""
+    def _ensure_model_available(self) -> None:
+        """Validate model installation without eager worker startup."""
         is_installed, reason = self._model_manager.is_installed(self.model_id, self.backend)
         if not is_installed:
             logger.error(f"HY-MT model not installed: {reason}")
@@ -337,18 +341,6 @@ class LocalHYMTProvider(BaseProvider):
                 f"Install with: python scripts/install_local_mt_model.py "
                 f"--model HY-MT1.5-1.8B --backend transformers_causal"
             )
-
-        model_path = self._model_manager.model_dir(self.model_id, self.backend)
-        try:
-            self.worker = start_worker(
-                model_path=model_path,
-                backend=self.backend,
-                model_id=self.model_id,
-                timeout=self.timeout,
-            )
-            logger.info(f"LocalHYMTProvider initialized: {self.model_id}")
-        except WorkerError as e:
-            raise RuntimeError(f"Failed to start HY-MT worker: {e}") from e
 
     # ------------------------------------------------------------------
     # BaseProvider interface
@@ -368,7 +360,7 @@ class LocalHYMTProvider(BaseProvider):
 
     @property
     def supports_batch(self) -> bool:
-        return False
+        return True
 
     def get_model_version(self) -> str:
         """Return version string for MT cache key isolation.
@@ -380,14 +372,40 @@ class LocalHYMTProvider(BaseProvider):
         return f"{safe_id}_{self.backend}_{_HYMT_SYSTEM_PROMPT_HASH}"
 
     def healthcheck(self) -> bool:
-        """Ping worker subprocess."""
-        if not self.worker:
-            return False
-        try:
-            return self.worker.ping(timeout=5.0)
-        except Exception as e:
-            logger.warning(f"HY-MT healthcheck failed: {e}")
-            return False
+        """Report lifecycle health from canonical provider manager."""
+        snapshot = self._provider_manager.get_state_snapshot(self.backend, self.model_id)
+        return snapshot["state"] in {
+            ProviderLifecycleState.READY.value,
+            ProviderLifecycleState.IDLE.value,
+            ProviderLifecycleState.BUSY.value,
+        }
+
+    def _request_db_session(self, request: TranslationRequest) -> Session | None:
+        return request.options.get("_db_session") or self.db_session
+
+    def _run_worker_request(self, worker_request: WorkerRequest):
+        model_path = self._model_manager.model_dir(self.model_id, self.backend)
+        return self._provider_manager.run_request(
+            model_path=model_path,
+            backend=self.backend,
+            model_id=self.model_id,
+            timeout=self.timeout,
+            worker_request=worker_request,
+            idle_timeout_s=self._IDLE_TIMEOUT_S,
+            max_pending_requests=self._MAX_PENDING_REQUESTS,
+        )
+
+    def _run_worker_batch_requests(self, worker_requests: list[WorkerRequest]):
+        model_path = self._model_manager.model_dir(self.model_id, self.backend)
+        return self._provider_manager.run_batch_requests(
+            model_path=model_path,
+            backend=self.backend,
+            model_id=self.model_id,
+            timeout=self.timeout,
+            worker_requests=worker_requests,
+            idle_timeout_s=self._IDLE_TIMEOUT_S,
+            max_pending_requests=self._MAX_PENDING_REQUESTS,
+        )
 
     def translate(self, request: TranslationRequest) -> TranslationResult:
         """Translate text using local HY-MT model.
@@ -410,14 +428,6 @@ class LocalHYMTProvider(BaseProvider):
             TranslationResult — success or error, never raises.
         """
         start_time = time.time()
-
-        if not self.worker:
-            return TranslationResult(
-                provider_id=self.provider_id,
-                error_kind=TranslationErrorKind.SERVER,
-                error_message="Worker not initialized",
-                latency_ms=0,
-            )
 
         # Validate language pair
         src = request.source_lang.lower()
@@ -469,9 +479,10 @@ class LocalHYMTProvider(BaseProvider):
 
         # Step 2: Fetch glossary terms — only when policy allows glossary AND enabled
         glossary_terms: list[tuple[str, str]] = []
-        if _use_glossary and self.db_session and policy.terminology_mode != TerminologyMode.OFF:
+        request_db_session = self._request_db_session(request)
+        if _use_glossary and request_db_session and policy.terminology_mode != TerminologyMode.OFF:
             glossary_terms = _fetch_glossary_terms_for_prompt(
-                self.db_session, src, tgt, self.project_id
+                request_db_session, src, tgt, self.project_id
             )
 
         injected_term_count = len(glossary_terms)
@@ -501,7 +512,7 @@ class LocalHYMTProvider(BaseProvider):
                 request_id=request.trace_id,
                 sampling_profile_id=_sampling_id,
             )
-            worker_result = self.worker.translate(worker_request)
+            worker_result = self._run_worker_request(worker_request)
         except WorkerError as e:
             logger.error(f"HY-MT worker error: {e}")
             return TranslationResult(
@@ -539,13 +550,13 @@ class LocalHYMTProvider(BaseProvider):
         used_glossary = False
         final_translation = restored
 
-        if _use_glossary and self.db_session and policy.terminology_mode != TerminologyMode.OFF:
+        if _use_glossary and request_db_session and policy.terminology_mode != TerminologyMode.OFF:
             src_nllb = _ISO_TO_NLLB.get(src)
             tgt_nllb = _ISO_TO_NLLB.get(tgt)
             if src_nllb and tgt_nllb:
                 try:
                     postprocess_result = apply_glossary(
-                        self.db_session,
+                        request_db_session,
                         source_segments=[request.source_text],
                         target_segments=[restored],
                         src_lang=src_nllb,
@@ -596,6 +607,7 @@ class LocalHYMTProvider(BaseProvider):
                 "missing_placeholders": missing,
                 "model_id": self.model_id,
                 "backend": self.backend,
+                "lifecycle": self._provider_manager.get_state_snapshot(self.backend, self.model_id),
                 # PPS structured meta (spec §11.1)
                 "prompt_policy": {
                     "policy_id": policy.policy_id,
@@ -615,6 +627,243 @@ class LocalHYMTProvider(BaseProvider):
                 },
             },
         )
+
+    def translate_batch(self, requests: list[TranslationRequest]) -> list[TranslationResult]:
+        """Translate a micro-batch of requests with one worker round-trip.
+
+        This path preserves per-request preprocessing/postprocessing while batching
+        the GPU inference stage for better throughput on the 7B GPTQ model.
+        """
+        if not requests:
+            return []
+
+        results: list[TranslationResult | None] = [None] * len(requests)
+        prepared_requests: list[
+            tuple[
+                int,
+                TranslationRequest,
+                _ProtectedText,
+                list[tuple[str, str]],
+                list[str],
+                WorkerRequest,
+                Session | None,
+                PromptPolicy,
+                RouterResult,
+                str,
+                list[str] | None,
+            ]
+        ] = []
+
+        for idx, request in enumerate(requests):
+            start_time = time.time()
+            src = request.source_lang.lower()
+            tgt = request.target_lang.lower()
+            if src not in SUPPORTED_LANGS or tgt not in SUPPORTED_LANGS:
+                unsupported = src if src not in SUPPORTED_LANGS else tgt
+                results[idx] = TranslationResult(
+                    provider_id=self.provider_id,
+                    error_kind=TranslationErrorKind.UNSUPPORTED,
+                    error_message=f"Unsupported language: {unsupported}",
+                    latency_ms=int((time.time() - start_time) * 1000),
+                )
+                continue
+            if not request.source_text or not request.source_text.strip():
+                results[idx] = TranslationResult(
+                    translated_text="",
+                    provider_id=self.provider_id,
+                    latency_ms=int((time.time() - start_time) * 1000),
+                    meta={"segment_count": 0},
+                )
+                continue
+
+            allow_experimental = bool(request.trace_id) or bool(
+                request.options.get("allow_experimental")
+            )
+            router_result = _ROUTER.route(request.options, allow_experimental=allow_experimental)
+            policy = router_result.policy
+            resolved_template_id, template_warning = resolve_template_profile(
+                policy, self._PROVIDER_FAMILY
+            )
+            if template_warning:
+                router_result.warnings.append(template_warning)
+
+            protected = _protect_placeholders(request.source_text)
+            request_db_session = self._request_db_session(request)
+            use_glossary = request.options.get("use_glossary", True)
+            glossary_terms: list[tuple[str, str]] = []
+            if (
+                use_glossary
+                and request_db_session
+                and policy.terminology_mode != TerminologyMode.OFF
+            ):
+                glossary_terms = _fetch_glossary_terms_for_prompt(
+                    request_db_session, src, tgt, self.project_id
+                )
+            context_items = request.options.get("context_items") or None
+            user_content = _RENDERER.render_sentinel_payload(
+                policy=policy,
+                source_text=protected.text,
+                glossary_terms=glossary_terms if glossary_terms else None,
+                context_items=context_items,
+            )
+            sampling_id = request.options.get("sampling_profile_id") or policy.sampling_profile_id
+            prepared_requests.append(
+                (
+                    idx,
+                    request,
+                    protected,
+                    glossary_terms,
+                    [],
+                    WorkerRequest(
+                        text=user_content,
+                        source_lang=src,
+                        target_lang=tgt,
+                        request_id=request.trace_id,
+                        sampling_profile_id=sampling_id,
+                    ),
+                    request_db_session,
+                    policy,
+                    router_result,
+                    resolved_template_id,
+                    context_items,
+                )
+            )
+
+        pending = list(prepared_requests)
+        while pending:
+            batch = pending[: self._MAX_BATCH_SIZE]
+            pending = pending[self._MAX_BATCH_SIZE :]
+            worker_requests = [item[5] for item in batch]
+            try:
+                worker_results = self._run_worker_batch_requests(worker_requests)
+            except WorkerError as e:
+                worker_results = [
+                    type(
+                        "FailedWorkerResult",
+                        (),
+                        {"error": str(e), "text": "", "inference_time_ms": 0},
+                    )()
+                    for _ in worker_requests
+                ]
+
+            for packed, worker_result in zip(batch, worker_results, strict=False):
+                (
+                    idx,
+                    request,
+                    protected,
+                    glossary_terms,
+                    _missing,
+                    _worker_req,
+                    request_db_session,
+                    policy,
+                    router_result,
+                    resolved_template_id,
+                    context_items,
+                ) = packed
+                start_time = time.time()
+                if getattr(worker_result, "error", None):
+                    results[idx] = TranslationResult(
+                        provider_id=self.provider_id,
+                        error_kind=TranslationErrorKind.SERVER,
+                        error_message=f"Inference failed: {worker_result.error}",
+                        latency_ms=int((time.time() - start_time) * 1000),
+                    )
+                    continue
+
+                raw_translation = worker_result.text
+                restored, missing = _restore_placeholders(raw_translation, protected.mapping)
+                if missing:
+                    logger.warning(
+                        "HY-MT batch: %d placeholder(s) lost in translation: %s",
+                        len(missing),
+                        missing,
+                    )
+
+                use_glossary = request.options.get("use_glossary", True)
+                applied_terms_count = 0
+                used_glossary = False
+                final_translation = restored
+                if (
+                    use_glossary
+                    and request_db_session
+                    and policy.terminology_mode != TerminologyMode.OFF
+                ):
+                    src_nllb = _ISO_TO_NLLB.get(request.source_lang.lower())
+                    tgt_nllb = _ISO_TO_NLLB.get(request.target_lang.lower())
+                    if src_nllb and tgt_nllb:
+                        try:
+                            postprocess_result = apply_glossary(
+                                request_db_session,
+                                source_segments=[request.source_text],
+                                target_segments=[restored],
+                                src_lang=src_nllb,
+                                tgt_lang=tgt_nllb,
+                                project_id=self.project_id,
+                            )
+                            final_translation = postprocess_result.translations[0]
+                            applied_terms_count = postprocess_result.match_count
+                            used_glossary = applied_terms_count > 0
+                        except Exception as e:
+                            logger.warning(
+                                f"HY-MT batch glossary postprocess failed: {e} (using MT output)"
+                            )
+
+                latency_ms = int((time.time() - start_time) * 1000)
+                trace = None
+                if request.trace_id:
+                    trace = self._build_trace(
+                        request=request,
+                        policy=policy,
+                        router_result=router_result,
+                        resolved_template_profile_id=resolved_template_id,
+                        context_items=context_items,
+                        protected=protected,
+                        glossary_terms=glossary_terms,
+                        raw_model_output=raw_translation,
+                        final_translation=final_translation,
+                        missing=missing,
+                        used_glossary=used_glossary,
+                        applied_terms_count=applied_terms_count,
+                        latency_ms=latency_ms,
+                        worker_latency_ms=int(worker_result.inference_time_ms),
+                    )
+
+                results[idx] = TranslationResult(
+                    translated_text=final_translation,
+                    provider_id=self.provider_id,
+                    used_glossary=used_glossary,
+                    cache_hit=False,
+                    latency_ms=latency_ms,
+                    meta={
+                        "inference_time_ms": worker_result.inference_time_ms,
+                        "applied_terms_count": applied_terms_count,
+                        "placeholder_count": len(protected.mapping),
+                        "missing_placeholders": missing,
+                        "model_id": self.model_id,
+                        "backend": self.backend,
+                        "lifecycle": self._provider_manager.get_state_snapshot(
+                            self.backend, self.model_id
+                        ),
+                        "prompt_policy": {
+                            "policy_id": policy.policy_id,
+                            "policy_hash": policy.policy_hash,
+                            "sampling_profile_id": policy.sampling_profile_id,
+                            "template_profile_id": resolved_template_id,
+                            "content_kind": str(policy.content_kind),
+                            "terminology_mode": str(policy.terminology_mode),
+                            "injected_term_count": len(glossary_terms),
+                            "applied_term_count": applied_terms_count,
+                            "placeholder_count": len(protected.mapping),
+                            "missing_placeholders": missing,
+                            "fallback_triggered": router_result.fallback_triggered,
+                            "fallback_reason": router_result.fallback_reason,
+                            "warnings": router_result.warnings,
+                            "trace": trace,
+                        },
+                    },
+                )
+
+        return [result for result in results if result is not None]
 
     def _build_trace(
         self,
@@ -734,15 +983,19 @@ class LocalHYMTProvider(BaseProvider):
         )
 
     def shutdown(self) -> None:
-        """Shutdown worker subprocess."""
-        if self.worker:
-            try:
-                self.worker.shutdown()
-                logger.info("LocalHYMTProvider worker shut down")
-            except Exception as e:
-                logger.warning(f"Error shutting down HY-MT worker: {e}")
-            finally:
-                self.worker = None
+        """Explicitly unload managed worker subprocess."""
+        try:
+            self._provider_manager.unload_model(
+                backend=self.backend,
+                model_id=self.model_id,
+                reason="provider_shutdown",
+                force=True,
+            )
+            logger.info("LocalHYMTProvider worker shut down")
+        except Exception as e:
+            logger.warning(f"Error shutting down HY-MT worker: {e}")
+        finally:
+            self.worker = None
 
     def __del__(self) -> None:
         """Cleanup on deletion."""

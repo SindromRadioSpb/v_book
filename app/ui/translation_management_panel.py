@@ -1836,7 +1836,7 @@ class TranslationManagementPanel(QWidget):
                 provider_mode=provider_mode,
                 write_mode=write_mode,
                 id_fetch_chunk=200,
-                translation_chunk=1,
+                translation_chunk=8 if provider_mode == "force:local_hymt_7b_gptq" else 1,
             )
 
             worker.progress.connect(progress_dialog.update_progress)

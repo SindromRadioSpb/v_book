@@ -98,6 +98,14 @@ class BaseProvider(ABC):
         """Whether this provider supports batch translation (default: False)."""
         return False
 
+    def translate_batch(self, requests: list[TranslationRequest]) -> list[TranslationResult]:
+        """Optional batch translation API.
+
+        Default implementation preserves existing behaviour by delegating to
+        ``translate()`` one request at a time.
+        """
+        return [self.translate(request) for request in requests]
+
     @abstractmethod
     def translate(self, request: TranslationRequest) -> TranslationResult:
         """

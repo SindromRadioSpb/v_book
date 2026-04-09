@@ -23,7 +23,6 @@ from app.infra.local_mt.worker_process import (
     start_worker,
 )
 
-
 # ============================================================================
 # Test 1: Worker Request/Result dataclasses
 # ============================================================================
@@ -188,6 +187,15 @@ def test_worker_translate_without_connection():
 
     with pytest.raises(WorkerError, match="Worker not started"):
         worker.translate(request)
+
+
+def test_worker_translate_batch_without_connection():
+    """Worker batch translate raises WorkerError without connection."""
+    worker = LocalMTWorker.__new__(LocalMTWorker)
+    worker.conn = None
+
+    with pytest.raises(WorkerError, match="Worker not started"):
+        worker.translate_batch([])
 
 
 def test_worker_shutdown_without_process():

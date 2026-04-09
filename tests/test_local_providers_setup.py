@@ -19,7 +19,6 @@ from app.infra.translators.local_providers_setup import (
     get_installed_local_providers,
 )
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -70,20 +69,16 @@ def test_initialize_local_providers_success(registry, mock_model_manager, mock_w
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        count = initialize_local_providers()
+                    count = initialize_local_providers()
 
-                        # Should register local_nllb + local_hymt providers
-                        assert count == 2
-                        assert len(registry) == 2
-                        assert registry.get("local_nllb") is not None
-                        assert registry.get("local_hymt") is not None
+                    # Should register local_nllb + local_hymt providers
+                    assert count == 2
+                    assert len(registry) == 2
+                    assert registry.get("local_nllb") is not None
+                    assert registry.get("local_hymt") is not None
 
 
 def test_initialize_local_providers_with_db_session(registry, mock_model_manager, mock_worker):
@@ -103,26 +98,22 @@ def test_initialize_local_providers_with_db_session(registry, mock_model_manager
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        count = initialize_local_providers(db_session=mock_session, project_id=100)
+                    count = initialize_local_providers(db_session=mock_session, project_id=100)
 
-                        assert count == 2
+                    assert count == 2
 
-                        provider = registry.get("local_nllb")
-                        assert provider is not None
-                        assert provider.db_session == mock_session
-                        assert provider.project_id == 100
+                    provider = registry.get("local_nllb")
+                    assert provider is not None
+                    assert provider.db_session == mock_session
+                    assert provider.project_id == 100
 
-                        hymt_provider = registry.get("local_hymt")
-                        assert hymt_provider is not None
-                        assert hymt_provider.db_session == mock_session
-                        assert hymt_provider.project_id == 100
+                    hymt_provider = registry.get("local_hymt")
+                    assert hymt_provider is not None
+                    assert hymt_provider.db_session == mock_session
+                    assert hymt_provider.project_id == 100
 
 
 # ============================================================================
@@ -222,25 +213,18 @@ def test_unregister_local_providers(registry, mock_model_manager, mock_worker):
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        initialize_local_providers()
+                    initialize_local_providers()
 
-                        assert len(registry) == 2
+                    assert len(registry) == 2
 
-                        # Unregister
-                        count = unregister_local_providers()
+                    # Unregister
+                    count = unregister_local_providers()
 
-                        assert count == 2
-                        assert len(registry) == 0
-
-                        # Shutdown should be called for each provider
-                        assert mock_worker.shutdown.call_count == 2
+                    assert count == 2
+                    assert len(registry) == 0
 
 
 def test_unregister_local_providers_when_none_registered(registry):
@@ -334,21 +318,17 @@ def test_initialize_local_providers_duplicate_registration(
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        # First registration
-                        count1 = initialize_local_providers()
-                        assert count1 == 2
+                    # First registration
+                    count1 = initialize_local_providers()
+                    assert count1 == 2
 
-                        # Second registration should log error but not raise (without force_register)
-                        count2 = initialize_local_providers()
-                        assert count2 == 0  # No new providers registered
-                        assert len(registry) == 2  # Still only two providers
+                    # Second registration should log error but not raise (without force_register)
+                    count2 = initialize_local_providers()
+                    assert count2 == 0  # No new providers registered
+                    assert len(registry) == 2  # Still only two providers
 
 
 def test_initialize_local_providers_duplicate_registration_force(
@@ -368,20 +348,16 @@ def test_initialize_local_providers_duplicate_registration_force(
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        # First registration
-                        count1 = initialize_local_providers()
-                        assert count1 == 2
+                    # First registration
+                    count1 = initialize_local_providers()
+                    assert count1 == 2
 
-                        # Second registration with force_register should raise
-                        with pytest.raises(ValueError, match="already registered"):
-                            initialize_local_providers(force_register=True)
+                    # Second registration with force_register should raise
+                    with pytest.raises(ValueError, match="already registered"):
+                        initialize_local_providers(force_register=True)
 
 
 # ============================================================================
@@ -449,18 +425,14 @@ def test_7b_gptq_not_registered_by_default(registry, mock_model_manager, mock_wo
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        count = initialize_local_providers()
+                    count = initialize_local_providers()
 
-                        # Only nllb + hymt-1.8B registered; 7B is disabled by default
-                        assert count == 2
-                        assert registry.get("local_hymt_7b_gptq") is None
+                    # Only nllb + hymt-1.8B registered; 7B is disabled by default
+                    assert count == 2
+                    assert registry.get("local_hymt_7b_gptq") is None
 
 
 def test_7b_gptq_present_in_availability_check(mock_model_manager):
@@ -493,15 +465,11 @@ def test_7b_gptq_registered_with_force_register(registry, mock_model_manager, mo
                 return_value=mock_model_manager,
             ):
                 with patch(
-                    "app.infra.translators.providers.local_hymt_provider.start_worker",
-                    return_value=mock_worker,
+                    "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
+                    return_value=mock_model_manager,
                 ):
-                    with patch(
-                        "app.infra.translators.providers.local_hymt_provider.ModelResourceManager",
-                        return_value=mock_model_manager,
-                    ):
-                        count = initialize_local_providers(force_register=True)
+                    count = initialize_local_providers(force_register=True)
 
-                        # All 3 providers registered with force_register
-                        assert count == 3
-                        assert registry.get("local_hymt_7b_gptq") is not None
+                    # All 3 providers registered with force_register
+                    assert count == 3
+                    assert registry.get("local_hymt_7b_gptq") is not None

@@ -1,5 +1,10 @@
 """Local MT infrastructure (worker processes, IPC)."""
 
+from .provider_manager import (
+    LocalMTProviderManager,
+    ProviderLifecycleState,
+    get_local_mt_provider_manager,
+)
 from .worker_process import (
     _HYMT_SYSTEM_PROMPT_HASH,
     LocalMTWorker,
@@ -16,4 +21,7 @@ __all__ = [
     "WorkerRequest",
     "WorkerResult",
     "_HYMT_SYSTEM_PROMPT_HASH",
+    "LocalMTProviderManager",
+    "ProviderLifecycleState",
+    "get_local_mt_provider_manager",
 ]

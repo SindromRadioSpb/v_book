@@ -13,6 +13,7 @@ Safety:
 """
 
 import contextlib
+import gc
 import hashlib
 import logging
 import multiprocessing
@@ -64,6 +65,45 @@ class WorkerResult:
     error: str | None = None
 
 
+def _cleanup_loaded_model(model_obj: object, backend: str) -> None:
+    """Best-effort resource cleanup before worker exit.
+
+    Important for GPU-backed HY-MT models on 8 GB VRAM:
+    - drop strong references in the worker process
+    - synchronize outstanding CUDA kernels
+    - release allocator caches before the process fully exits
+    """
+    if model_obj is None:
+        return
+
+    try:
+        import torch
+    except Exception:
+        torch = None
+
+    try:
+        if isinstance(model_obj, dict):
+            raw_model = model_obj.get("model")
+            tokenizer = model_obj.get("tokenizer")
+            model_obj.clear()
+            del raw_model
+            del tokenizer
+        else:
+            del model_obj
+    except Exception:
+        pass
+
+    gc.collect()
+
+    if torch is not None and torch.cuda.is_available():
+        with contextlib.suppress(Exception):
+            torch.cuda.synchronize()
+        with contextlib.suppress(Exception):
+            torch.cuda.empty_cache()
+        with contextlib.suppress(Exception):
+            torch.cuda.ipc_collect()
+
+
 # ============================================================================
 # Worker Process Function
 # ============================================================================
@@ -103,6 +143,7 @@ def _worker_main(
     worker_logger.info("=== WORKER PROCESS STARTED ===")
     worker_logger.info(f"PID: {multiprocessing.current_process().pid}")
 
+    model = None
     try:
         # Load model
         worker_logger.info(f"Loading model: {model_id} ({backend})")
@@ -199,6 +240,46 @@ def _worker_main(
                         )
                         conn.send({"ok": False, "result": result.__dict__, "error": str(e)})
 
+                elif request["type"] == "translate_batch":
+                    req_items = [WorkerRequest(**item) for item in request["data"]]
+                    start_time = time.perf_counter()
+                    try:
+                        if backend == "transformers_causal":
+                            translated_items = _translate_transformers_causal_batch(
+                                model, req_items
+                            )
+                        else:
+                            translated_items = []
+                            for req in req_items:
+                                if backend == "ctranslate2":
+                                    translated_items.append(
+                                        _translate_ctranslate2(
+                                            model, req.text, req.source_lang, req.target_lang
+                                        )
+                                    )
+                                else:
+                                    translated_items.append(
+                                        _translate_transformers(
+                                            model, req.text, req.source_lang, req.target_lang
+                                        )
+                                    )
+
+                        inference_time_ms = (time.perf_counter() - start_time) * 1000
+                        results = [
+                            WorkerResult(
+                                text=text,
+                                source_lang=req.source_lang,
+                                target_lang=req.target_lang,
+                                inference_time_ms=inference_time_ms / max(len(req_items), 1),
+                                request_id=req.request_id,
+                            ).__dict__
+                            for req, text in zip(req_items, translated_items, strict=False)
+                        ]
+                        conn.send({"ok": True, "results": results})
+                    except Exception as e:
+                        worker_logger.error(f"Batch translation error: {e}")
+                        conn.send({"ok": False, "error": str(e)})
+
                 elif request["type"] == "shutdown":
                     worker_logger.info("Shutdown requested")
                     conn.send({"ok": True, "status": "shutdown"})
@@ -224,6 +305,8 @@ def _worker_main(
         with contextlib.suppress(Exception):
             conn.send({"ok": False, "error": f"Worker init failed: {e}"})
     finally:
+        with contextlib.suppress(Exception):
+            _cleanup_loaded_model(model, backend)
         conn.close()
         worker_logger.info("Worker process exiting")
 
@@ -686,6 +769,49 @@ def _hymt_stop_token_ids(tokenizer) -> list[int]:
     return list(dict.fromkeys(ids))  # deduplicate, preserve order
 
 
+def _build_hymt_chat_text(prompt: str, is_gptq: bool) -> str:
+    """Build final chat text for HY-MT prompt payload."""
+    if prompt.startswith(_HYMT_PPS_SENTINEL_START):
+        payload = prompt[len(_HYMT_PPS_SENTINEL_START) :]
+        sep_idx = payload.find(_HYMT_PPS_ROLE_SEP)
+        if sep_idx == -1:
+            role_instruction = ""
+            user_content = payload
+        else:
+            role_instruction = payload[:sep_idx]
+            user_content = payload[sep_idx + len(_HYMT_PPS_ROLE_SEP) :]
+        role_suffix = ("\n" + role_instruction.strip()) if role_instruction.strip() else ""
+        effective_system = _HYMT_SYSTEM_PROMPT + role_suffix
+    else:
+        effective_system = _HYMT_SYSTEM_PROMPT
+        user_content = (
+            "Translate the following segment into Russian, "
+            f"without additional explanation.\n\n{prompt}"
+        )
+
+    if is_gptq:
+        return f"{_HYMT7B_BOS}{effective_system}{_HYMT7B_SEP}{user_content}{_HYMT7B_USER_END}"
+    return f"{_HYMT_BOS}{effective_system}{_HYMT_SEP}{_HYMT_USER}{user_content}{_HYMT_ASSISTANT}"
+
+
+def _strip_hymt_generation_result(result: str, is_gptq: bool) -> str:
+    result = (result or "").strip()
+    if is_gptq:
+        if result.endswith(_HYMT7B_EOS):
+            result = result[: -len(_HYMT7B_EOS)].strip()
+        for boundary in (_HYMT7B_USER_END, _HYMT7B_BOS, "</User>"):
+            idx = result.find(boundary)
+            if idx != -1:
+                result = result[:idx].strip()
+                break
+        return result
+
+    for stop_str in (_HYMT_EOS, _HYMT_STOP2):
+        if result.endswith(stop_str):
+            result = result[: -len(stop_str)].strip()
+    return result
+
+
 def _translate_transformers_causal(
     model_dict: dict, prompt: str, sampling_profile_id: str = ""
 ) -> str:
@@ -721,47 +847,7 @@ def _translate_transformers_causal(
     stop_ids = model_dict.get("stop_token_ids") or _hymt_stop_token_ids(tokenizer)
     is_gptq = model_dict.get("is_gptq", False)
 
-    # ------------------------------------------------------------------
-    # PPS sentinel parsing (backwards compatible)
-    # ------------------------------------------------------------------
-    # If prompt carries a PPS sentinel, extract role_instruction and
-    # user_content (which already contains task instruction + source text).
-    # If no sentinel, fall back to legacy behaviour: hardcoded task instruction.
-    if prompt.startswith(_HYMT_PPS_SENTINEL_START):
-        payload = prompt[len(_HYMT_PPS_SENTINEL_START) :]
-        sep_idx = payload.find(_HYMT_PPS_ROLE_SEP)
-        if sep_idx == -1:
-            # Malformed sentinel — treat entire payload as user_content (safe fallback)
-            role_instruction = ""
-            user_content = payload
-        else:
-            role_instruction = payload[:sep_idx]
-            user_content = payload[sep_idx + len(_HYMT_PPS_ROLE_SEP) :]
-        role_suffix = ("\n" + role_instruction.strip()) if role_instruction.strip() else ""
-        effective_system = _HYMT_SYSTEM_PROMPT + role_suffix
-    else:
-        # Legacy path: no sentinel — prepend hardcoded task instruction as before
-        effective_system = _HYMT_SYSTEM_PROMPT
-        user_content = (
-            "Translate the following segment into Russian, "
-            f"without additional explanation.\n\n{prompt}"
-        )
-
-    if is_gptq:
-        # 7B-GPTQ uses a completely different token vocabulary from the 1.8B model.
-        # The <｜hy_*｜> tokens used by 1.8B do NOT exist in the 7B-GPTQ vocabulary;
-        # feeding them produces garbled input and no EOS signal.
-        # Correct format from chat_template.jinja (shipped with the 7B-GPTQ model):
-        #   <|startoftext|>{system}<|extra_4|>{user}<|extra_0|> → {translation}<|eos|>
-        chat_text = (
-            f"{_HYMT7B_BOS}{effective_system}{_HYMT7B_SEP}" f"{user_content}{_HYMT7B_USER_END}"
-        )
-    else:
-        # 1.8B template: uses <｜hy_*｜> special tokens
-        chat_text = (
-            f"{_HYMT_BOS}{effective_system}{_HYMT_SEP}"
-            f"{_HYMT_USER}{user_content}{_HYMT_ASSISTANT}"
-        )
+    chat_text = _build_hymt_chat_text(prompt, is_gptq)
 
     # model.device may not exist on all GPTQ wrappers — fall back to parameters()
     try:
@@ -789,26 +875,74 @@ def _translate_transformers_causal(
         outputs = model.generate(**generate_inputs, **gen_kwargs)
 
     new_tokens = outputs[0][prompt_len:]
-    result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    result = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    return _strip_hymt_generation_result(result, is_gptq)
 
+
+def _translate_transformers_causal_batch(
+    model_dict: dict, requests: list[WorkerRequest]
+) -> list[str]:
+    """Run batched HY-MT inference for a micro-batch of prompts."""
+    import torch
+
+    if not requests:
+        return []
+
+    if len(requests) == 1:
+        return [
+            _translate_transformers_causal(
+                model_dict,
+                requests[0].text,
+                requests[0].sampling_profile_id,
+            )
+        ]
+
+    model = model_dict["model"]
+    tokenizer = model_dict["tokenizer"]
+    stop_ids = model_dict.get("stop_token_ids") or _hymt_stop_token_ids(tokenizer)
+    is_gptq = model_dict.get("is_gptq", False)
+
+    sampling_ids = {req.sampling_profile_id or "" for req in requests}
+    if len(sampling_ids) > 1:
+        return [
+            _translate_transformers_causal(model_dict, req.text, req.sampling_profile_id)
+            for req in requests
+        ]
+
+    chat_texts = [_build_hymt_chat_text(req.text, is_gptq) for req in requests]
+
+    try:
+        infer_device = model.device
+    except AttributeError:
+        infer_device = next(model.parameters()).device
+
+    original_padding_side = getattr(tokenizer, "padding_side", "right")
     if is_gptq:
-        # Strip 7B-GPTQ EOS string if it survived skip_special_tokens
-        if result.endswith(_HYMT7B_EOS):
-            result = result[: -len(_HYMT7B_EOS)].strip()
-        # Safety net: truncate at dialog continuation boundary in case EOS was not
-        # emitted and model rolled into the next turn.
-        for boundary in (_HYMT7B_USER_END, _HYMT7B_BOS, "</User>"):
-            idx = result.find(boundary)
-            if idx != -1:
-                result = result[:idx].strip()
-                break
-    else:
-        # Strip any trailing 1.8B stop strings that survived skip_special_tokens
-        for stop_str in (_HYMT_EOS, _HYMT_STOP2):
-            if result.endswith(stop_str):
-                result = result[: -len(stop_str)].strip()
+        tokenizer.padding_side = "left"
+    if getattr(tokenizer, "pad_token_id", None) is None and getattr(tokenizer, "eos_token", None):
+        tokenizer.pad_token = tokenizer.eos_token
 
-    return result
+    try:
+        inputs = tokenizer(chat_texts, return_tensors="pt", padding=True).to(infer_device)
+        prompt_lens = inputs["attention_mask"].sum(dim=1).tolist()
+        generate_inputs = {k: v for k, v in inputs.items() if k in ("input_ids", "attention_mask")}
+        gen_kwargs: dict = _resolve_gen_kwargs(
+            sampling_profile_id=next(iter(sampling_ids)),
+            force_greedy=is_gptq,
+            max_n_predict_cap=128 if is_gptq else 512,
+            stop_ids=stop_ids,
+        )
+        with torch.no_grad():
+            outputs = model.generate(**generate_inputs, **gen_kwargs)
+
+        results: list[str] = []
+        for idx, prompt_len in enumerate(prompt_lens):
+            new_tokens = outputs[idx][prompt_len:]
+            text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+            results.append(_strip_hymt_generation_result(text, is_gptq))
+        return results
+    finally:
+        tokenizer.padding_side = original_padding_side
 
 
 def _translate_transformers(
@@ -990,6 +1124,7 @@ class LocalMTWorker:
                         "source_lang": request.source_lang,
                         "target_lang": request.target_lang,
                         "request_id": request.request_id,
+                        "sampling_profile_id": request.sampling_profile_id,
                     },
                 }
             )
@@ -1012,12 +1147,46 @@ class LocalMTWorker:
         except Exception as e:
             raise WorkerError(f"Worker communication error: {e}") from e
 
-    def shutdown(self):
+    def translate_batch(self, requests: list[WorkerRequest]) -> list[WorkerResult]:
+        """Translate a micro-batch of requests in a single worker round-trip."""
+        if not self.conn:
+            raise WorkerError("Worker not started")
+
+        try:
+            self.conn.send(
+                {
+                    "type": "translate_batch",
+                    "data": [
+                        {
+                            "text": req.text,
+                            "source_lang": req.source_lang,
+                            "target_lang": req.target_lang,
+                            "request_id": req.request_id,
+                            "sampling_profile_id": req.sampling_profile_id,
+                        }
+                        for req in requests
+                    ],
+                }
+            )
+
+            if self.conn.poll(timeout=self.timeout):
+                response = self.conn.recv()
+                if response.get("ok"):
+                    return [WorkerResult(**item) for item in response.get("results", [])]
+                error_msg = response.get("error", "Unknown error")
+                raise WorkerError(f"Batch translation failed: {error_msg}")
+            raise WorkerError(f"Batch translation timeout ({self.timeout}s)")
+        except WorkerError:
+            raise
+        except Exception as e:
+            raise WorkerError(f"Worker batch communication error: {e}") from e
+
+    def shutdown(self, graceful_timeout: float = 15.0):
         """Shutdown worker process."""
         if self.conn:
             try:
                 self.conn.send({"type": "shutdown"})
-                if self.conn.poll(timeout=5):
+                if self.conn.poll(timeout=min(graceful_timeout, 5.0)):
                     self.conn.recv()
             except Exception:
                 pass
@@ -1028,7 +1197,7 @@ class LocalMTWorker:
             self.conn = None
 
         if self.process and self.process.is_alive():
-            self.process.join(timeout=5)
+            self.process.join(timeout=graceful_timeout)
             if self.process.is_alive():
                 logger.warning(f"Force terminating worker: {self.model_id}")
                 self.process.terminate()

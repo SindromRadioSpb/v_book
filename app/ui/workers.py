@@ -3196,6 +3196,8 @@ class UserDictTranslateWorker(QThread):
                 from app.ui.provider_settings_dialog import load_pps_request_options
 
                 _pps_opts = load_pps_request_options()
+            _pps_opts = dict(_pps_opts)
+            _pps_opts["_db_session"] = session
 
             mt_request = TranslationRequest(
                 source_text=item.src_text,
@@ -4939,4 +4941,3 @@ class RecalculateKeynessWorker(QThread):
         except Exception as exc:
             logger.exception("RecalculateKeynessWorker error")
             self.error.emit(str(exc))
-

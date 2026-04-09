@@ -221,6 +221,13 @@ class BatchMTTranslateService:
         cancel_check: Callable[[], bool] | None,
     ) -> list[BatchTranslateRowResult]:
         """Process a single chunk of items."""
+        if options.provider_mode.startswith("force:"):
+            force_provider_id = options.provider_mode.split(":", 1)[1]
+            if force_provider_id.startswith("local_hymt"):
+                return self._process_hymt_force_chunk(
+                    session, chunk, options, trace_id, cancel_check
+                )
+
         results = []
 
         for item in chunk:
@@ -263,6 +270,168 @@ class BatchMTTranslateService:
             result = self._translate_and_write(session, item, options, trace_id)
             results.append(result)
 
+        return results
+
+    def _process_hymt_force_chunk(
+        self,
+        session: Session,
+        chunk: list[BatchTranslateItem],
+        options: BatchTranslateOptions,
+        trace_id: str,
+        cancel_check: Callable[[], bool] | None,
+    ) -> list[BatchTranslateRowResult]:
+        """Process a chunk via HY-MT batch path when provider supports it."""
+        from app.infra.translators.base_provider import TranslationRequest
+        from app.infra.translators.providers_registry import ProvidersRegistry
+
+        force_provider_id = options.provider_mode.split(":", 1)[1]
+        registry = ProvidersRegistry()
+        provider = registry.get(force_provider_id)
+        if not provider and force_provider_id.startswith("local_"):
+            from app.infra.translators.local_providers_setup import initialize_provider_lazy
+
+            if initialize_provider_lazy(force_provider_id, session):
+                provider = registry.get(force_provider_id)
+
+        if not provider or not getattr(provider, "supports_batch", False):
+            return [
+                (
+                    self._translate_and_write(session, item, options, trace_id)
+                    if not (cancel_check and cancel_check())
+                    else BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message="Cancelled",
+                        skipped=True,
+                    )
+                )
+                for item in chunk
+            ]
+
+        try:
+            from app.ui.provider_settings_dialog import load_pps_request_options
+
+            pps_opts = load_pps_request_options()
+        except Exception:
+            pps_opts = {}
+        pps_opts = dict(pps_opts)
+        pps_opts["_db_session"] = session
+
+        results: list[BatchTranslateRowResult] = []
+        pending_items: list[BatchTranslateItem] = []
+        pending_requests: list[TranslationRequest] = []
+
+        def flush_pending() -> None:
+            nonlocal results, pending_items, pending_requests
+            if not pending_items:
+                return
+            mt_results = provider.translate_batch(pending_requests)
+            for item, mt_result in zip(pending_items, mt_results, strict=False):
+                if mt_result.error_kind:
+                    results.append(
+                        BatchTranslateRowResult(
+                            entity_id=item.entity_id,
+                            source_text=item.source_text,
+                            old_translation=item.current_translation,
+                            new_translation=None,
+                            provider_id=force_provider_id,
+                            cache_hit=False,
+                            latency_ms=mt_result.latency_ms,
+                            error_message=mt_result.error_message,
+                            skipped=False,
+                        )
+                    )
+                    continue
+
+                self._write_to_db(
+                    session,
+                    item,
+                    mt_result.translated_text,
+                    write_mode=options.write_mode,
+                )
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=mt_result.translated_text,
+                        provider_id=force_provider_id,
+                        cache_hit=False,
+                        latency_ms=mt_result.latency_ms,
+                        error_message=None,
+                        skipped=False,
+                    )
+                )
+            pending_items = []
+            pending_requests = []
+
+        for item in chunk:
+            if cancel_check and cancel_check():
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message="Cancelled",
+                        skipped=True,
+                    )
+                )
+                continue
+
+            if self._should_skip(item, options.write_mode):
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message=None,
+                        skipped=True,
+                    )
+                )
+                continue
+
+            if not item.source_text or not item.source_text.strip():
+                results.append(
+                    BatchTranslateRowResult(
+                        entity_id=item.entity_id,
+                        source_text=item.source_text,
+                        old_translation=item.current_translation,
+                        new_translation=None,
+                        provider_id=None,
+                        cache_hit=False,
+                        latency_ms=None,
+                        error_message="Empty source text",
+                        skipped=False,
+                    )
+                )
+                continue
+
+            pending_items.append(item)
+            pending_requests.append(
+                TranslationRequest(
+                    source_text=item.source_text,
+                    source_lang=item.src_lang,
+                    target_lang=item.tgt_lang,
+                    glossary=None,
+                    options=pps_opts,
+                    trace_id=trace_id,
+                )
+            )
+
+        flush_pending()
         return results
 
     def _should_skip(self, item: BatchTranslateItem, write_mode: str) -> bool:
@@ -350,6 +519,8 @@ class BatchMTTranslateService:
                         _pps_opts = load_pps_request_options()
                     except Exception:
                         pass  # QSettings not available (e.g., headless test env)
+                _pps_opts = dict(_pps_opts)
+                _pps_opts["_db_session"] = session
 
                 mt_request = TranslationRequest(
                     source_text=item.source_text,

@@ -820,7 +820,7 @@ class TranslationService:
             glossary_hash=glossary_hash,
             trace_id=trace_id,
             allow_fallback=allow_fallback,
-            options=_pps_opts,
+            options={**_pps_opts, "_db_session": session},
         )
 
         # Get registry
