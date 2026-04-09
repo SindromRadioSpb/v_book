@@ -286,6 +286,10 @@ class BatchMTTranslateService:
         from app.infra.translators.providers_registry import ProvidersRegistry
 
         force_provider_id = options.provider_mode.split(":", 1)[1]
+        if force_provider_id != "chain":
+            from app.infra.translators.local_providers_setup import prepare_local_provider_switch
+
+            prepare_local_provider_switch(force_provider_id)
         registry = ProvidersRegistry()
         provider = registry.get(force_provider_id)
         if not provider and force_provider_id.startswith("local_"):
@@ -499,8 +503,12 @@ class BatchMTTranslateService:
                 logger.info(f"Using force provider: {force_provider_id}")
 
                 from app.infra.translators.base_provider import TranslationRequest
+                from app.infra.translators.local_providers_setup import (
+                    prepare_local_provider_switch,
+                )
                 from app.infra.translators.providers_registry import ProvidersRegistry
 
+                prepare_local_provider_switch(force_provider_id)
                 registry = ProvidersRegistry()
                 provider = registry.get(force_provider_id)
 

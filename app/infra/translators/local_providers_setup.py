@@ -236,6 +236,77 @@ def unregister_local_providers() -> int:
     return unregistered_count
 
 
+def _get_provider_config_by_id(provider_id: str) -> dict | None:
+    for config in LOCAL_PROVIDERS_CONFIG:
+        provider_class = config["provider_class"]
+        try:
+            config_provider_id = provider_class.provider_id.fget(None)
+        except Exception:
+            config_provider_id = provider_class.__name__.lower().replace("provider", "")
+        if config_provider_id == provider_id:
+            return config
+    return None
+
+
+def _is_gpu_heavy_local_provider(config: dict) -> bool:
+    backend = str(config.get("backend", ""))
+    model_id = str(config.get("model_id", ""))
+    return backend == "transformers_causal" or "gptq" in model_id.lower()
+
+
+def prepare_local_provider_switch(target_provider_id: str) -> dict[str, list[str]]:
+    """Unload idle GPU-heavy local providers before an explicit provider switch.
+
+    This is used only for explicit/forced provider selection paths.
+    It never unloads the target provider itself and never unloads busy workers.
+    """
+    manager = get_local_mt_provider_manager()
+    target_config = _get_provider_config_by_id(target_provider_id)
+    target_is_gpu_heavy = bool(target_config and _is_gpu_heavy_local_provider(target_config))
+
+    unloaded: list[str] = []
+    skipped_busy: list[str] = []
+
+    for config in LOCAL_PROVIDERS_CONFIG:
+        if not _is_gpu_heavy_local_provider(config):
+            continue
+
+        provider_class = config["provider_class"]
+        try:
+            provider_id = provider_class.provider_id.fget(None)
+        except Exception:
+            provider_id = provider_class.__name__.lower().replace("provider", "")
+
+        if target_is_gpu_heavy and provider_id == target_provider_id:
+            continue
+
+        snapshot = manager.get_state_snapshot(config["backend"], config["model_id"])
+        if snapshot.get("active_requests") or snapshot.get("pending_requests"):
+            skipped_busy.append(provider_id)
+            continue
+
+        if manager.unload_model(
+            backend=config["backend"],
+            model_id=config["model_id"],
+            reason=f"provider_switch->{target_provider_id}",
+            force=False,
+        ):
+            unloaded.append(provider_id)
+
+    if unloaded or skipped_busy:
+        logger.info(
+            "Prepared provider switch to %s: unloaded=%s skipped_busy=%s",
+            target_provider_id,
+            unloaded,
+            skipped_busy,
+        )
+
+    return {
+        "unloaded": unloaded,
+        "skipped_busy": skipped_busy,
+    }
+
+
 # ============================================================================
 # Convenience Functions
 # ============================================================================
@@ -386,19 +457,7 @@ def initialize_provider_lazy(
 
     try:
         # Find provider config
-        provider_config = None
-        for config in LOCAL_PROVIDERS_CONFIG:
-            provider_class = config["provider_class"]
-            # Get provider_id from class
-            try:
-                config_provider_id = provider_class.provider_id.fget(None)
-            except Exception:
-                config_provider_id = provider_class.__name__.lower().replace("provider", "")
-
-            if config_provider_id == provider_id:
-                provider_config = config
-                break
-
+        provider_config = _get_provider_config_by_id(provider_id)
         if not provider_config:
             logger.warning(f"Unknown local provider: {provider_id}")
             return False
@@ -412,6 +471,8 @@ def initialize_provider_lazy(
         if not is_installed:
             logger.info(f"Cannot initialize {provider_id}: {reason}")
             return False
+
+        prepare_local_provider_switch(provider_id)
 
         # Initialize provider
         provider_class = provider_config["provider_class"]

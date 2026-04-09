@@ -13,10 +13,12 @@ from unittest.mock import Mock, patch, MagicMock
 from app.infra.translators.providers_registry import ProvidersRegistry
 from app.infra.translators.local_providers_setup import (
     initialize_local_providers,
+    initialize_provider_lazy,
     check_local_providers_available,
     unregister_local_providers,
     is_local_provider_available,
     get_installed_local_providers,
+    prepare_local_provider_switch,
 )
 
 # ============================================================================
@@ -231,6 +233,129 @@ def test_unregister_local_providers_when_none_registered(registry):
     """Unregister when no providers registered."""
     count = unregister_local_providers()
     assert count == 0
+
+
+def test_prepare_local_provider_switch_unloads_other_gpu_heavy_slots():
+    mock_manager = Mock()
+    mock_manager.get_state_snapshot.return_value = {
+        "active_requests": 0,
+        "pending_requests": 0,
+    }
+    mock_manager.unload_model.side_effect = lambda **kwargs: kwargs["model_id"] != "target-model"
+
+    with patch(
+        "app.infra.translators.local_providers_setup.LOCAL_PROVIDERS_CONFIG",
+        [
+            {
+                "provider_class": type(
+                    "TargetProvider",
+                    (),
+                    {"provider_id": property(lambda _: "local_hymt_7b_gptq")},
+                ),
+                "model_id": "target-model",
+                "backend": "transformers_causal",
+            },
+            {
+                "provider_class": type(
+                    "OtherProvider",
+                    (),
+                    {"provider_id": property(lambda _: "local_hymt")},
+                ),
+                "model_id": "other-model",
+                "backend": "transformers_causal",
+            },
+            {
+                "provider_class": type(
+                    "CpuProvider",
+                    (),
+                    {"provider_id": property(lambda _: "local_nllb")},
+                ),
+                "model_id": "cpu-model",
+                "backend": "ctranslate2",
+            },
+        ],
+    ):
+        with patch(
+            "app.infra.translators.local_providers_setup.get_local_mt_provider_manager",
+            return_value=mock_manager,
+        ):
+            result = prepare_local_provider_switch("local_hymt_7b_gptq")
+
+    assert result["unloaded"] == ["local_hymt"]
+    assert result["skipped_busy"] == []
+    mock_manager.unload_model.assert_called_once()
+
+
+def test_prepare_local_provider_switch_skips_busy_gpu_slots():
+    mock_manager = Mock()
+    mock_manager.get_state_snapshot.return_value = {
+        "active_requests": 1,
+        "pending_requests": 0,
+    }
+
+    with patch(
+        "app.infra.translators.local_providers_setup.LOCAL_PROVIDERS_CONFIG",
+        [
+            {
+                "provider_class": type(
+                    "OtherProvider",
+                    (),
+                    {"provider_id": property(lambda _: "local_hymt")},
+                ),
+                "model_id": "other-model",
+                "backend": "transformers_causal",
+            },
+        ],
+    ):
+        with patch(
+            "app.infra.translators.local_providers_setup.get_local_mt_provider_manager",
+            return_value=mock_manager,
+        ):
+            result = prepare_local_provider_switch("google_translate")
+
+    assert result["unloaded"] == []
+    assert result["skipped_busy"] == ["local_hymt"]
+    mock_manager.unload_model.assert_not_called()
+
+
+def test_initialize_provider_lazy_prepares_provider_switch(mock_model_manager):
+    ProvidersRegistry.reset()
+    registry = ProvidersRegistry()
+
+    provider_instance = Mock()
+    provider_instance.provider_id = "local_hymt_7b_gptq"
+
+    class FakeProvider:
+        @property
+        def provider_id(self):
+            return "local_hymt_7b_gptq"
+
+        def __new__(cls, *args, **kwargs):
+            return provider_instance
+
+    fake_provider_class = FakeProvider
+
+    with patch(
+        "app.infra.translators.local_providers_setup.LOCAL_PROVIDERS_CONFIG",
+        [
+            {
+                "provider_class": fake_provider_class,
+                "model_id": "target-model",
+                "backend": "transformers_causal",
+            }
+        ],
+    ):
+        with patch(
+            "app.infra.translators.local_providers_setup.ModelResourceManager",
+            return_value=mock_model_manager,
+        ):
+            with patch(
+                "app.infra.translators.local_providers_setup.prepare_local_provider_switch"
+            ) as mock_prepare:
+                assert initialize_provider_lazy("local_hymt_7b_gptq") is True
+
+    mock_prepare.assert_called_once_with("local_hymt_7b_gptq")
+    assert registry.get("local_hymt_7b_gptq") is provider_instance
 
 
 # ============================================================================

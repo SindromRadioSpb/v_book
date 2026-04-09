@@ -215,6 +215,33 @@ Observed result:
 - throughput improved by about `21.6%`
 - average per-item latency increased, which is acceptable for bulk TM-style throughput mode
 
+## PATCH-06A Forced Unload On Provider Switch
+
+PATCH-06A adds an explicit provider-switch preparation step for force-provider
+paths and local lazy init.
+
+Current behavior:
+
+- before explicit switch to another provider, idle GPU-heavy local providers are
+  asked to unload via the canonical manager
+- the target provider is never unloaded during its own switch
+- busy providers are never force-killed by this path; they are reported as
+  `skipped_busy`
+- chain fallback is intentionally unchanged in this patch to avoid adding reload
+  churn to fallback latency
+
+Current switch entrypoints covered:
+
+- force-provider path in batch MT service
+- force-provider path in user-dictionary/global translation worker
+- local provider lazy initialization
+
+Current contract:
+
+- explicit provider switch may proactively free VRAM
+- active or queued HY-MT work is preserved
+- provider objects can remain registered; only worker residency is reduced
+
 ## Remaining Risks
 
 Still open after PATCH-04:
@@ -231,13 +258,18 @@ Still open after PATCH-05:
 - no direct VRAM allocator telemetry from inside the worker process yet
 - planner is currently tuned for 7B short-burst translation, not mixed-provider fairness
 
+Still open after PATCH-06A:
+
+- unload on switch is event-driven, not memory-pressure-driven
+- cloud/chain paths still rely on idle timeout rather than global GPU arbitration
+- provider switch fairness across all GPU-heavy subsystems still requires PATCH-09
+
 ## Approved Next Patch Order
 
-1. `PATCH-06A` forced unload on provider switch
-2. `PATCH-06B` memory-pressure-triggered unload
-3. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
-4. `PATCH-08` explicit lifecycle contract + cancel/shutdown/idle-unload reliability hardening
-5. `PATCH-09` long-term global GPU arbiter
+1. `PATCH-06B` memory-pressure-triggered unload
+2. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
+3. `PATCH-08` explicit lifecycle contract + cancel/shutdown/idle-unload reliability hardening
+4. `PATCH-09` long-term global GPU arbiter
 
 ## Test Matrix
 
@@ -248,12 +280,12 @@ Current mandatory checks for this runtime:
 - cold/warm benchmark
 - sequential vs batched benchmark
 - fixed `2` vs adaptive `<=4` benchmark
+- provider switch unload regression tests
 
 Missing but approved next:
 
 - repeated load/unload soak test
 - request-vs-idle-unload race
-- provider switch with forced unload
 - cancel/shutdown while queue non-empty
 - pressure-triggered unload smoke
 

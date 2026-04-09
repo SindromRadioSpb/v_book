@@ -3183,8 +3183,10 @@ class UserDictTranslateWorker(QThread):
         if self.provider_mode.startswith("force:"):
             force_provider_id = self.provider_mode.split(":", 1)[1]
             from app.infra.translators.base_provider import TranslationRequest
+            from app.infra.translators.local_providers_setup import prepare_local_provider_switch
             from app.infra.translators.providers_registry import ProvidersRegistry
 
+            prepare_local_provider_switch(force_provider_id)
             provider = ProvidersRegistry().get(force_provider_id)
             if not provider:
                 raise ValueError(f"Provider '{force_provider_id}' not available")
