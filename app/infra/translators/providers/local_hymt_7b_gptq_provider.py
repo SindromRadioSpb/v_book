@@ -43,7 +43,8 @@ class LocalHYMT7BGPTQProvider(LocalHYMTProvider):
     _MODEL_QUANT_ID: str | None = "gptq-int4"
     _IDLE_TIMEOUT_S: float = 45.0
     _MAX_PENDING_REQUESTS: int = 2
-    _MAX_BATCH_SIZE: int = 2
+    _MAX_BATCH_SIZE: int = 4
+    _ADAPTIVE_BATCHING_ENABLED: bool = True
 
     # PPS PATCH-07: override provider family — selects hy_mt_7b_* templates
     _PROVIDER_FAMILY: str = _TEMPLATE_FAMILY_7B

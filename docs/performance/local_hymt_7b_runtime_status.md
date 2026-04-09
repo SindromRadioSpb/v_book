@@ -1,7 +1,8 @@
 # local_hymt_7b_gptq Runtime Status
 
-Last updated: 2026-04-09
-Current baseline commit before this document patch: `107d959`
+Last updated: 2026-04-10
+Current lifecycle baseline commit: `107d959`
+Current telemetry baseline commit: `460cd08`
 Scope: `local_hymt_7b_gptq` runtime only. No global translation-stack redesign.
 
 ## Purpose
@@ -47,7 +48,7 @@ Key components:
   - 7B-specific policy
   - idle timeout: `45s`
   - max pending requests: `2`
-  - micro-batch ceiling: `2`
+  - adaptive micro-batch ceiling: `4`
 - `worker_process.py`
   - subprocess model hosting
   - batched causal inference path
@@ -177,26 +178,66 @@ Batch MT row results for the HY-MT force path may now carry:
 - `meta["runtime"]["persist_ms"]`
 - `meta["runtime"]["provider_runtime"]`
 
+## PATCH-05 Adaptive Micro-Batching
+
+PATCH-05 keeps the existing lifecycle owner and changes only batch planning in
+`LocalHYMTProvider.translate_batch()`.
+
+Current planner inputs:
+
+- candidate batch size up to provider ceiling
+- prompt payload length
+- latest GPU headroom snapshot from manager telemetry
+- historical average inference time per segment
+- queue depth
+
+Current 7B policy:
+
+- `max batch size = 4`
+- short prompts may batch at `4`
+- large prompt budgets collapse to `1`
+- low GPU headroom collapses to `1` or `2`
+- active queue depth caps fairness at `2`
+
+### PATCH-05 measured result
+
+Warm model, same 8 short segments on the target machine:
+
+| Mode | Time | Throughput |
+|---|---:|---:|
+| Fixed batch `2` | `46.654s` | `0.171 seg/s` |
+| Adaptive batch `<=4` | `38.490s` | `0.208 seg/s` |
+
+Observed result:
+
+- adaptive planner selected `4` for all 8 short segments
+- wall-clock improved by about `17.5%`
+- throughput improved by about `21.6%`
+- average per-item latency increased, which is acceptable for bulk TM-style throughput mode
+
 ## Remaining Risks
 
 Still open after PATCH-04:
 
-- micro-batching is fixed-size, not adaptive
 - there is no cross-provider GPU arbiter yet
 - unload is not yet pressure-triggered
 - cancel/shutdown while queue non-empty still needs explicit contract hardening
 - idle-timeout unload reliability still needs dedicated race/soak tests
 - persist path is still inline; telemetry must confirm whether it is a real bottleneck before PATCH-07
 
+Still open after PATCH-05:
+
+- adaptive planner is heuristic, not pressure-event-driven
+- no direct VRAM allocator telemetry from inside the worker process yet
+- planner is currently tuned for 7B short-burst translation, not mixed-provider fairness
+
 ## Approved Next Patch Order
 
-1. `PATCH-04` telemetry + this document
-2. `PATCH-05` adaptive micro-batching
-3. `PATCH-06A` forced unload on provider switch
-4. `PATCH-06B` memory-pressure-triggered unload
-5. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
-6. `PATCH-08` explicit lifecycle contract + cancel/shutdown/idle-unload reliability hardening
-7. `PATCH-09` long-term global GPU arbiter
+1. `PATCH-06A` forced unload on provider switch
+2. `PATCH-06B` memory-pressure-triggered unload
+3. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
+4. `PATCH-08` explicit lifecycle contract + cancel/shutdown/idle-unload reliability hardening
+5. `PATCH-09` long-term global GPU arbiter
 
 ## Test Matrix
 
@@ -206,6 +247,7 @@ Current mandatory checks for this runtime:
 - import smoke
 - cold/warm benchmark
 - sequential vs batched benchmark
+- fixed `2` vs adaptive `<=4` benchmark
 
 Missing but approved next:
 

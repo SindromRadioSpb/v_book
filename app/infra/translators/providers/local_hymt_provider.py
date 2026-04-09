@@ -302,6 +302,7 @@ class LocalHYMTProvider(BaseProvider):
     # PPS PATCH-07: provider family — determines which TemplateProfile family is valid.
     # "observed" → hy_mt_*_observed (1.8B); "7b_gptq" → hy_mt_7b_* (7B-GPTQ).
     _PROVIDER_FAMILY: str = _TEMPLATE_FAMILY_OBSERVED
+    _ADAPTIVE_BATCHING_ENABLED: bool = False
 
     def __init__(
         self,
@@ -415,8 +416,18 @@ class LocalHYMTProvider(BaseProvider):
         worker_result: WorkerResult,
         postprocess_ms: int,
         total_ms: int,
+        batch_plan: dict[str, object] | None = None,
     ) -> dict[str, object]:
         runtime_metrics = getattr(worker_result, "runtime_metrics", {}) or {}
+        batch_meta = {
+            "size": int(runtime_metrics.get("batch_size", 1)),
+            "manager_wall_ms": int(runtime_metrics.get("manager_wall_ms", 0)),
+            "batch_inference_total_ms": int(
+                runtime_metrics.get("batch_inference_total_ms", worker_result.inference_time_ms)
+            ),
+        }
+        if batch_plan:
+            batch_meta["adaptive_plan"] = batch_plan
         return {
             "stage_timings_ms": {
                 "preprocess": preprocess_ms,
@@ -427,13 +438,128 @@ class LocalHYMTProvider(BaseProvider):
                 "postprocess": postprocess_ms,
                 "total": total_ms,
             },
-            "batch": {
-                "size": int(runtime_metrics.get("batch_size", 1)),
-                "manager_wall_ms": int(runtime_metrics.get("manager_wall_ms", 0)),
-                "batch_inference_total_ms": int(
-                    runtime_metrics.get("batch_inference_total_ms", worker_result.inference_time_ms)
-                ),
-            },
+            "batch": batch_meta,
+        }
+
+    def _select_adaptive_batch(
+        self,
+        pending: list[
+            tuple[
+                int,
+                TranslationRequest,
+                _ProtectedText,
+                list[tuple[str, str]],
+                list[str],
+                WorkerRequest,
+                Session | None,
+                PromptPolicy,
+                RouterResult,
+                str,
+                list[str] | None,
+                float,
+                int,
+            ]
+        ],
+    ) -> tuple[
+        list[
+            tuple[
+                int,
+                TranslationRequest,
+                _ProtectedText,
+                list[tuple[str, str]],
+                list[str],
+                WorkerRequest,
+                Session | None,
+                PromptPolicy,
+                RouterResult,
+                str,
+                list[str] | None,
+                float,
+                int,
+            ]
+        ],
+        dict[str, object],
+    ]:
+        candidate_limit = min(len(pending), self._MAX_BATCH_SIZE)
+        if candidate_limit <= 1:
+            return pending[:1], {
+                "enabled": self._ADAPTIVE_BATCHING_ENABLED,
+                "selected_size": 1,
+                "max_size": self._MAX_BATCH_SIZE,
+                "reason": "single_item",
+            }
+
+        prompt_chars = [len(item[5].text) for item in pending[:candidate_limit]]
+        headroom_mb: int | None = None
+        avg_inference_ms: float | None = None
+        queue_depth: int | None = None
+        lifecycle_snapshot = self._provider_manager.get_state_snapshot(self.backend, self.model_id)
+        gpu_memory = (lifecycle_snapshot.get("last_resource_snapshot") or {}).get("gpu_memory")
+        if isinstance(gpu_memory, dict):
+            used_mb = gpu_memory.get("used_mb")
+            total_mb = gpu_memory.get("total_mb")
+            if isinstance(used_mb, int) and isinstance(total_mb, int):
+                headroom_mb = max(total_mb - used_mb, 0)
+        avg_value = lifecycle_snapshot.get("avg_inference_ms_per_segment")
+        if isinstance(avg_value, int | float):
+            avg_inference_ms = float(avg_value)
+        pending_value = lifecycle_snapshot.get("pending_requests")
+        if isinstance(pending_value, int):
+            queue_depth = pending_value
+
+        selected_size = candidate_limit
+        decision_reasons: list[str] = []
+        max_prompt_chars = max(prompt_chars, default=0)
+        total_prompt_chars = sum(prompt_chars)
+
+        if not self._ADAPTIVE_BATCHING_ENABLED:
+            decision_reasons.append("adaptive_disabled")
+        else:
+            if headroom_mb is not None:
+                if headroom_mb < 1100:
+                    selected_size = min(selected_size, 1)
+                    decision_reasons.append("gpu_headroom_lt_1100")
+                elif headroom_mb < 1200:
+                    selected_size = min(selected_size, 2)
+                    decision_reasons.append("gpu_headroom_lt_1200")
+                elif headroom_mb < 1350:
+                    selected_size = min(selected_size, 3)
+                    decision_reasons.append("gpu_headroom_lt_1350")
+
+            if max_prompt_chars > 2200 or total_prompt_chars > 5000:
+                selected_size = min(selected_size, 1)
+                decision_reasons.append("prompt_budget_large")
+            elif max_prompt_chars > 1400 or total_prompt_chars > 3200:
+                selected_size = min(selected_size, 2)
+                decision_reasons.append("prompt_budget_medium")
+            elif max_prompt_chars > 800 or total_prompt_chars > 1800:
+                selected_size = min(selected_size, 3)
+                decision_reasons.append("prompt_budget_small")
+
+            if avg_inference_ms is not None:
+                if avg_inference_ms > 14000:
+                    selected_size = min(selected_size, 1)
+                    decision_reasons.append("historical_inference_gt_14s")
+                elif avg_inference_ms > 8000:
+                    selected_size = min(selected_size, 2)
+                    decision_reasons.append("historical_inference_gt_8s")
+
+            if queue_depth is not None and queue_depth > 0:
+                selected_size = min(selected_size, 2)
+                decision_reasons.append("queue_depth_active")
+
+        selected_size = max(1, selected_size)
+        return pending[:selected_size], {
+            "enabled": self._ADAPTIVE_BATCHING_ENABLED,
+            "selected_size": selected_size,
+            "max_size": self._MAX_BATCH_SIZE,
+            "candidate_size": candidate_limit,
+            "max_prompt_chars": max_prompt_chars,
+            "total_prompt_chars": total_prompt_chars,
+            "gpu_headroom_mb": headroom_mb,
+            "avg_inference_ms_per_segment": avg_inference_ms,
+            "queue_depth": queue_depth,
+            "reasons": decision_reasons or ["max_size"],
         }
 
     def translate(self, request: TranslationRequest) -> TranslationResult:
@@ -775,8 +901,8 @@ class LocalHYMTProvider(BaseProvider):
 
         pending = list(prepared_requests)
         while pending:
-            batch = pending[: self._MAX_BATCH_SIZE]
-            pending = pending[self._MAX_BATCH_SIZE :]
+            batch, batch_plan = self._select_adaptive_batch(pending)
+            pending = pending[len(batch) :]
             worker_requests = [item[5] for item in batch]
             try:
                 worker_results = self._run_worker_batch_requests(worker_requests)
@@ -861,6 +987,7 @@ class LocalHYMTProvider(BaseProvider):
                     worker_result=worker_result,
                     postprocess_ms=postprocess_ms,
                     total_ms=latency_ms,
+                    batch_plan=batch_plan,
                 )
                 trace = None
                 if request.trace_id:
