@@ -132,3 +132,12 @@ AGENTS.md
 /lemma_check_result.txt
 /test1_verification.txt
 /nul
+
+# Local task/info scratch files
+*-info files/
+Tasks/
+
+# Node (not part of this project)
+node_modules/
+package.json
+pnpm-lock.yaml
