@@ -262,12 +262,18 @@ Current contract:
 - healthy headroom keeps the normal idle-timeout policy unchanged
 - provider-switch unload from PATCH-06A remains a separate event-driven path
 
+Current limitation:
+
+- this policy is product-useful but still heuristic: it relies on manager-side `nvidia-smi` snapshots rather than direct allocator-level VRAM telemetry from inside the worker process
+- this is acceptable for the current single-runtime contour on `8 GB VRAM`, but it is not the final architecture for cross-provider fairness
+
 ## Remaining Risks
 
 Still open after PATCH-06B:
 
 - there is no cross-provider GPU arbiter yet
 - persist path is still inline; telemetry must confirm whether it is a real bottleneck before PATCH-07
+- pressure policy is still snapshot-driven and heuristic, not allocator-signal-driven from inside the worker
 
 Still open after PATCH-05:
 
@@ -283,8 +289,8 @@ Still open after PATCH-06A:
 
 ## Approved Next Patch Order
 
-1. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
-2. `PATCH-09` long-term global GPU arbiter
+1. `PATCH-07` background persist queue — deferred by default; do only if PATCH-04 telemetry proves persist is a real bottleneck
+2. `PATCH-09` long-term global GPU arbiter — deferred architecture item, not a must-have for the current single-runtime contour
 
 ## Test Matrix
 
@@ -308,5 +314,8 @@ For the next engineer or model:
 - do not revisit lifecycle ownership; it is already solved at the correct layer
 - do not build a second worker owner path inside the provider or UI
 - use PATCH-04 telemetry before proposing PATCH-07
+- treat PATCH-07 as deferred unless `persist_ms` is confirmed as a real bottleneck
+- treat PATCH-09 as deferred architecture work, not as an immediate correctness patch
+- remember that PATCH-06B is intentionally heuristic until allocator-level worker telemetry exists
 - keep all GPU-heavy decisions realistic for `8 GB VRAM`
 - avoid architecture that keeps the 7B model loaded indefinitely "just in case"
