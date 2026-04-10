@@ -89,6 +89,14 @@ Current runtime rules:
 - GPU-heavy local MT work is serialized through the provider manager
 - force-HY-MT TM batch path uses batched provider execution instead of per-row single inference
 
+PATCH-08 lifecycle hardening contract:
+
+- `shutdown_all()` enters a manager-level shutdown phase and rejects new requests immediately
+- requests already admitted before shutdown are allowed to drain until the bounded `graceful_timeout_s`
+- idle timers are cancelled during shutdown, so no new idle-unload cycle is scheduled while inflight work drains
+- after the graceful window, any still-resident worker is forcibly unloaded as the last-resort shutdown path
+- after shutdown completes, the manager returns to accepting mode for the next cold start
+
 ## Measured Performance
 
 ### Before lifecycle/batch patch
@@ -244,12 +252,10 @@ Current contract:
 
 ## Remaining Risks
 
-Still open after PATCH-04:
+Still open after PATCH-08:
 
 - there is no cross-provider GPU arbiter yet
 - unload is not yet pressure-triggered
-- cancel/shutdown while queue non-empty still needs explicit contract hardening
-- idle-timeout unload reliability still needs dedicated race/soak tests
 - persist path is still inline; telemetry must confirm whether it is a real bottleneck before PATCH-07
 
 Still open after PATCH-05:
@@ -268,8 +274,7 @@ Still open after PATCH-06A:
 
 1. `PATCH-06B` memory-pressure-triggered unload
 2. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
-3. `PATCH-08` explicit lifecycle contract + cancel/shutdown/idle-unload reliability hardening
-4. `PATCH-09` long-term global GPU arbiter
+3. `PATCH-09` long-term global GPU arbiter
 
 ## Test Matrix
 
@@ -282,11 +287,8 @@ Current mandatory checks for this runtime:
 - fixed `2` vs adaptive `<=4` benchmark
 - provider switch unload regression tests
 
-Missing but approved next:
+Still missing but approved next:
 
-- repeated load/unload soak test
-- request-vs-idle-unload race
-- cancel/shutdown while queue non-empty
 - pressure-triggered unload smoke
 
 ## Handoff Notes

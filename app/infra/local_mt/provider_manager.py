@@ -98,6 +98,7 @@ class LocalMTProviderManager:
         self._slots: dict[tuple[str, str], WorkerSlot] = {}
         self._slots_lock = threading.RLock()
         self._gpu_execution_lock = threading.Lock()
+        self._shutdown_event = threading.Event()
         atexit.register(self.shutdown_all)
 
     @staticmethod
@@ -145,6 +146,7 @@ class LocalMTProviderManager:
                     "state": ProviderLifecycleState.UNLOADED.value,
                     "active_requests": 0,
                     "pending_requests": 0,
+                    "shutdown_requested": self.is_shutdown_requested(),
                     "load_count": 0,
                     "unload_count": 0,
                     "total_requests": 0,
@@ -165,6 +167,7 @@ class LocalMTProviderManager:
                 "state": slot.state.value,
                 "active_requests": slot.active_requests,
                 "pending_requests": slot.pending_requests,
+                "shutdown_requested": self.is_shutdown_requested(),
                 "load_count": slot.load_count,
                 "unload_count": slot.unload_count,
                 "total_requests": slot.total_requests,
@@ -199,6 +202,7 @@ class LocalMTProviderManager:
         idle_timeout_s: float,
         max_pending_requests: int = 2,
     ) -> WorkerResult:
+        self._ensure_accepting_requests()
         slot = self.get_slot(
             model_path=model_path,
             backend=backend,
@@ -251,6 +255,7 @@ class LocalMTProviderManager:
     ) -> list[WorkerResult]:
         if not worker_requests:
             return []
+        self._ensure_accepting_requests()
         slot = self.get_slot(
             model_path=model_path,
             backend=backend,
@@ -310,19 +315,36 @@ class LocalMTProviderManager:
             return False
         return self._unload_slot(slot, reason=reason, force=force)
 
-    def shutdown_all(self) -> None:
+    def shutdown_all(self, graceful_timeout_s: float = 15.0) -> None:
+        self._shutdown_event.set()
         with self._slots_lock:
             slots = list(self._slots.values())
         for slot in slots:
-            try:
-                self._unload_slot(slot, reason="shutdown_all", force=True)
-            except Exception as exc:
-                logger.debug("LocalMTProviderManager shutdown skipped for %s: %s", slot.key, exc)
+            with slot.lock:
+                self._cancel_idle_timer(slot)
+                slot.condition.notify_all()
+        deadline = time.monotonic() + max(0.0, graceful_timeout_s)
+        try:
+            for slot in slots:
+                self._wait_for_slot_drain(slot, deadline=deadline)
+            for slot in slots:
+                try:
+                    force = self._slot_has_inflight_work(slot)
+                    self._unload_slot(slot, reason="shutdown_all", force=force)
+                except Exception as exc:
+                    logger.debug(
+                        "LocalMTProviderManager shutdown skipped for %s: %s", slot.key, exc
+                    )
+        finally:
+            self._shutdown_event.clear()
 
     def _acquire_queue_slot(self, slot: WorkerSlot) -> float:
         wait_started = time.perf_counter()
         with slot.lock:
-            while slot.pending_requests >= slot.max_pending_requests:
+            while True:
+                self._raise_if_shutdown_requested()
+                if slot.pending_requests < slot.max_pending_requests:
+                    break
                 logger.info("Local MT queue saturated for %s; waiting for free slot", slot.model_id)
                 slot.condition.wait(timeout=1.0)
             slot.pending_requests += 1
@@ -339,7 +361,8 @@ class LocalMTProviderManager:
             slot.last_used_monotonic = time.monotonic()
             if slot.worker is not None:
                 slot.state = ProviderLifecycleState.IDLE
-                self._schedule_idle_unload(slot)
+                if not self.is_shutdown_requested():
+                    self._schedule_idle_unload(slot)
             else:
                 slot.state = ProviderLifecycleState.UNLOADED
             slot.condition.notify_all()
@@ -507,6 +530,31 @@ class LocalMTProviderManager:
             slot.total_gpu_wait_ms += gpu_wait_ms
             slot.total_wall_ms += wall_ms
             slot.total_inference_ms += inference_ms
+
+    def is_shutdown_requested(self) -> bool:
+        return self._shutdown_event.is_set()
+
+    def _ensure_accepting_requests(self) -> None:
+        self._raise_if_shutdown_requested()
+
+    def _raise_if_shutdown_requested(self) -> None:
+        if self.is_shutdown_requested():
+            raise RuntimeError("Local MT provider manager is shutting down")
+
+    @staticmethod
+    def _slot_has_inflight_work(slot: WorkerSlot) -> bool:
+        with slot.lock:
+            return slot.active_requests > 0 or slot.pending_requests > 0
+
+    def _wait_for_slot_drain(self, slot: WorkerSlot, *, deadline: float) -> None:
+        with slot.lock:
+            while slot.worker is not None and (
+                slot.active_requests > 0 or slot.pending_requests > 0
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                slot.condition.wait(timeout=min(0.25, remaining))
 
     @staticmethod
     def _capture_resource_snapshot(slot: WorkerSlot) -> dict[str, object]:
