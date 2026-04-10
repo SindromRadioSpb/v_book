@@ -86,6 +86,8 @@ class LocalMTProviderManager:
 
     _instance: LocalMTProviderManager | None = None
     _instance_lock = threading.Lock()
+    _PRESSURE_MIN_HEADROOM_MB = 1400
+    _PRESSURE_MAX_USED_RATIO = 0.84
 
     def __new__(cls) -> LocalMTProviderManager:
         with cls._instance_lock:
@@ -355,6 +357,8 @@ class LocalMTProviderManager:
             return (time.perf_counter() - wait_started) * 1000
 
     def _release_queue_slot(self, slot: WorkerSlot) -> None:
+        pressure_snapshot: dict[str, int] | None = None
+        should_pressure_unload = False
         with slot.lock:
             slot.pending_requests = max(0, slot.pending_requests - 1)
             slot.active_requests = max(0, slot.active_requests - 1)
@@ -362,10 +366,25 @@ class LocalMTProviderManager:
             if slot.worker is not None:
                 slot.state = ProviderLifecycleState.IDLE
                 if not self.is_shutdown_requested():
+                    if slot.is_gpu_heavy:
+                        pressure_snapshot = self._sample_gpu_memory_mb()
+                        should_pressure_unload = self._is_memory_pressure_snapshot(
+                            pressure_snapshot
+                        )
                     self._schedule_idle_unload(slot)
             else:
                 slot.state = ProviderLifecycleState.UNLOADED
             slot.condition.notify_all()
+        if should_pressure_unload and self._unload_slot(
+            slot,
+            reason="memory_pressure",
+            force=False,
+        ):
+            logger.info(
+                "Memory-pressure unload complete for %s with snapshot=%s",
+                slot.model_id,
+                pressure_snapshot,
+            )
 
     def _ensure_worker_loaded(self, slot: WorkerSlot) -> tuple[LocalMTWorker, float]:
         with slot.lock:
@@ -555,6 +574,21 @@ class LocalMTProviderManager:
                 if remaining <= 0:
                     return
                 slot.condition.wait(timeout=min(0.25, remaining))
+
+    @classmethod
+    def _is_memory_pressure_snapshot(cls, snapshot: dict[str, int] | None) -> bool:
+        if not snapshot:
+            return False
+        total_mb = int(snapshot.get("total_mb", 0) or 0)
+        used_mb = int(snapshot.get("used_mb", 0) or 0)
+        if total_mb <= 0 or used_mb < 0:
+            return False
+        headroom_mb = max(total_mb - used_mb, 0)
+        used_ratio = used_mb / total_mb if total_mb else 0.0
+        return (
+            headroom_mb <= cls._PRESSURE_MIN_HEADROOM_MB
+            or used_ratio >= cls._PRESSURE_MAX_USED_RATIO
+        )
 
     @staticmethod
     def _capture_resource_snapshot(slot: WorkerSlot) -> dict[str, object]:

@@ -282,3 +282,97 @@ def test_repeated_load_unload_cycles_leave_clean_unloaded_state(tmp_path):
     assert snapshot["load_count"] == 4
     assert snapshot["unload_count"] == 4
     assert snapshot["total_requests"] == 4
+
+
+def test_idle_gpu_heavy_slot_unloads_immediately_under_memory_pressure(tmp_path):
+    manager = get_local_mt_provider_manager()
+    fake_worker = Mock()
+    fake_worker.translate.return_value = WorkerResult(
+        text="ok",
+        source_lang="he",
+        target_lang="ru",
+        inference_time_ms=12.0,
+    )
+
+    gpu_snapshots = [
+        {"used_mb": 2200, "total_mb": 8192},
+        {"used_mb": 2200, "total_mb": 8192},
+        {"used_mb": 7200, "total_mb": 8192},
+        {"used_mb": 7200, "total_mb": 8192},
+        {"used_mb": 1500, "total_mb": 8192},
+    ]
+
+    with (
+        patch(
+            "app.infra.local_mt.provider_manager.start_worker",
+            return_value=fake_worker,
+        ),
+        patch(
+            "app.infra.local_mt.provider_manager.LocalMTProviderManager._sample_gpu_memory_mb",
+            side_effect=gpu_snapshots,
+        ),
+    ):
+        result = manager.run_request(
+            model_path=tmp_path / "model",
+            backend="transformers_causal",
+            model_id="test/model",
+            timeout=30.0,
+            worker_request=WorkerRequest(text="a", source_lang="he", target_lang="ru"),
+            idle_timeout_s=999.0,
+        )
+
+    assert result.text == "ok"
+    snapshot = manager.get_state_snapshot("transformers_causal", "test/model")
+    assert snapshot["state"] == ProviderLifecycleState.UNLOADED.value
+    assert snapshot["last_unload_reason"] == "memory_pressure"
+    assert snapshot["unload_reasons"]["memory_pressure"] == 1
+    fake_worker.shutdown.assert_called_once()
+
+
+def test_idle_gpu_heavy_slot_keeps_idle_timer_when_headroom_is_healthy(tmp_path):
+    manager = get_local_mt_provider_manager()
+    fake_worker = Mock()
+    fake_worker.translate.return_value = WorkerResult(
+        text="ok",
+        source_lang="he",
+        target_lang="ru",
+        inference_time_ms=12.0,
+    )
+
+    gpu_snapshots = [
+        {"used_mb": 2200, "total_mb": 8192},
+        {"used_mb": 2200, "total_mb": 8192},
+        {"used_mb": 4100, "total_mb": 8192},
+        {"used_mb": 4100, "total_mb": 8192},
+        {"used_mb": 1600, "total_mb": 8192},
+    ]
+
+    with (
+        patch(
+            "app.infra.local_mt.provider_manager.start_worker",
+            return_value=fake_worker,
+        ),
+        patch(
+            "app.infra.local_mt.provider_manager.LocalMTProviderManager._sample_gpu_memory_mb",
+            side_effect=gpu_snapshots,
+        ),
+    ):
+        result = manager.run_request(
+            model_path=tmp_path / "model",
+            backend="transformers_causal",
+            model_id="test/model",
+            timeout=30.0,
+            worker_request=WorkerRequest(text="a", source_lang="he", target_lang="ru"),
+            idle_timeout_s=999.0,
+        )
+
+    assert result.text == "ok"
+    snapshot = manager.get_state_snapshot("transformers_causal", "test/model")
+    assert snapshot["state"] == ProviderLifecycleState.IDLE.value
+    assert snapshot["unload_count"] == 0
+    assert manager.unload_model(
+        backend="transformers_causal",
+        model_id="test/model",
+        reason="cleanup",
+        force=False,
+    )

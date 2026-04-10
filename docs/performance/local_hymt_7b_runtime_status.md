@@ -250,12 +250,23 @@ Current contract:
 - active or queued HY-MT work is preserved
 - provider objects can remain registered; only worker residency is reduced
 
+## PATCH-06B Memory-Pressure-Triggered Unload
+
+PATCH-06B keeps ownership in `LocalMTProviderManager` and adds no new scheduler layer.
+
+Current contract:
+
+- after a GPU-heavy request completes and the slot becomes idle, the manager samples current GPU memory
+- if headroom falls to `<= 1400 MB` or usage reaches `>= 84%`, the idle worker is unloaded immediately
+- no memory-pressure unload is allowed while `active_requests > 0` or `pending_requests > 0`
+- healthy headroom keeps the normal idle-timeout policy unchanged
+- provider-switch unload from PATCH-06A remains a separate event-driven path
+
 ## Remaining Risks
 
-Still open after PATCH-08:
+Still open after PATCH-06B:
 
 - there is no cross-provider GPU arbiter yet
-- unload is not yet pressure-triggered
 - persist path is still inline; telemetry must confirm whether it is a real bottleneck before PATCH-07
 
 Still open after PATCH-05:
@@ -272,9 +283,8 @@ Still open after PATCH-06A:
 
 ## Approved Next Patch Order
 
-1. `PATCH-06B` memory-pressure-triggered unload
-2. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
-3. `PATCH-09` long-term global GPU arbiter
+1. `PATCH-07` background persist queue, only if PATCH-04 telemetry proves persist is a bottleneck
+2. `PATCH-09` long-term global GPU arbiter
 
 ## Test Matrix
 
