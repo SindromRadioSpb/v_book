@@ -57,7 +57,7 @@ cd /d J:\Project_Vibe\V_book
   --term-limit 30 `
   --sentence-limit 30 `
   --temp-root "J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work" `
-  --gct-key-path "J:\Project_Vibe\V_book -info files\api_key_Google_translait"
+  --gct-key-path "/path/to/gct-key-dir"
 ```
 
 ## Results Table

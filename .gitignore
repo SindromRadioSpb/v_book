@@ -61,6 +61,7 @@ test_m4*.db-*
 
 
 # runtime/test databases
+test_stanza.db  # committed accidentally before *.db rule existed; keep excluded
 *.db
 *.db-*
 /backups/

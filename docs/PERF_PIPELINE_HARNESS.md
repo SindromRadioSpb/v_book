@@ -33,9 +33,9 @@
 - Niqqud model:
   - `M:\V_book\HDLE_Processing\models\phonikud-1.0.int8.onnx`
 - Google Cloud Translate key path:
-  - `J:\Project_Vibe\V_book -info files\api_key_Google_translait`
+  - `/path/to/gct-key-dir`
 - Google Cloud TTS key path:
-  - `J:\Project_Vibe\V_book -info files\api_key_Google_tts`
+  - `/path/to/gctts-key-dir`
 
 ## Canonical Commands (PowerShell)
 ```powershell
@@ -65,8 +65,8 @@ cd /d J:\Project_Vibe\V_book
   --overwrite 1 `
   --temp-root "J:\Project_Vibe\V_book\build\tmp\pipeline_bench_work" `
   --phonikud-model-path "M:\V_book\HDLE_Processing\models\phonikud-1.0.int8.onnx" `
-  --gct-key-path "J:\Project_Vibe\V_book -info files\api_key_Google_translait" `
-  --gctts-key-path "J:\Project_Vibe\V_book -info files\api_key_Google_tts"
+  --gct-key-path "/path/to/gct-key-dir" `
+  --gctts-key-path "/path/to/gctts-key-dir"
 ```
 
 ## Runtime-Bound Knobs (Deterministic, Optional)

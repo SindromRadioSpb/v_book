@@ -7,6 +7,7 @@ Tests:
 4. Display result
 """
 
+import os
 import sys
 import json
 from pathlib import Path
@@ -35,10 +36,15 @@ def test_live_translation():
     print("Testing Google Cloud Translate Provider (Live API)")
     print("=" * 60)
 
-    # SA JSON path
-    sa_json_path = (
-        r"J:\Project_Vibe\V_book -info files\api_key_Google_translait\hdle-translate-sa.json"
-    )
+    # SA JSON path — read from environment variable (never hardcode credentials)
+    sa_json_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if not sa_json_path:
+        print(
+            "[ERROR] GOOGLE_APPLICATION_CREDENTIALS is not set.\n"
+            "  Set it to the path of your service account JSON key file:\n"
+            "  $env:GOOGLE_APPLICATION_CREDENTIALS = 'C:\\keys\\hdle-translate-sa.json'"
+        )
+        return False
 
     print(f"\n1. Loading Service Account JSON from file...")
     print(f"   Path: {sa_json_path}")

@@ -24,8 +24,8 @@ if str(REPO_ROOT) not in sys.path:
 LOG = logging.getLogger("pipeline_bench")
 
 DEFAULT_PHONIKUD_MODEL_PATH = r"M:\V_book\HDLE_Processing\models\phonikud-1.0.int8.onnx"
-DEFAULT_GCT_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_translait"
-DEFAULT_GCTTS_KEY_PATH = r"J:\Project_Vibe\V_book -info files\api_key_Google_tts"
+DEFAULT_GCT_KEY_PATH = ""   # set via --gct-key-path or GCT_KEY_PATH env var
+DEFAULT_GCTTS_KEY_PATH = ""  # set via --gctts-key-path or GCTTS_KEY_PATH env var
 DEFAULT_SOURCE_DB = r"J:\Project_Vibe\V_book\ref_corpora\HDLE_Processing_hewiki_gpu_processing.db\hewiki_gpu_processing.db"
 DEFAULT_SANDBOX_DB = r"J:\Project_Vibe\V_book\build\bench\hewiki_pipeline_sandbox.db"
 DEFAULT_PROJECT_NAME = "BENCH_PIPELINE"

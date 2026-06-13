@@ -482,7 +482,7 @@ This release is fully backward compatible.
 - `scripts/test_gcp_provider_live.py` - Live API calls ✅
   - Tested: en→ru, en→he translations
   - Verified: 200-300ms latency
-  - Project ID: gen-lang-client-0212091660
+  - Project ID: &lt;your-gcp-project-id&gt;
 
 **Manual Testing:**
 - ✅ Service Account JSON upload/clear
